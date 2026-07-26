@@ -1,0 +1,14 @@
+{% extends 'layouts/base.html' %}
+
+{% block content %}
+<div class="row g-3">
+  {% for key, title in reports.items() %}
+    <div class="col-md-4">
+      <a href="{{ url_for('reports.show', report_key=key) }}" class="jtcs-report-card">
+        <i class="bi bi-file-earmark-bar-graph"></i>
+        <span>{{ title }}</span>
+      </a>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

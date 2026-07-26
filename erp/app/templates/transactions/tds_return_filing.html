@@ -1,0 +1,85 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block page_heading %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/tds_return_filing.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="tds-rf-page">
+  <div class="tds-rf-topbar">
+    <div class="tds-rf-title-wrap">
+      <h1 class="tds-rf-title">Deductor Master</h1>
+      <button type="button" class="tds-rf-icon-btn" id="tdsRfExportBtn" title="Export">
+        <i class="bi bi-download"></i>
+      </button>
+    </div>
+    <div class="tds-rf-top-actions">
+      <a href="{{ customer_master_url }}" class="tds-rf-pill tds-rf-pill-primary">
+        <i class="bi bi-person-plus"></i> New Deductor
+      </a>
+      <a href="{{ return_register_url }}" class="tds-rf-pill tds-rf-pill-ghost">
+        <i class="bi bi-clipboard-check"></i> Check Status
+      </a>
+    </div>
+  </div>
+
+  <div class="tds-rf-card">
+    <div class="tds-rf-toolbar">
+      <div class="tds-rf-tabs" role="tablist">
+        <button type="button" class="tds-rf-tab is-active" data-tab="recent" role="tab">
+          Recent <span class="tds-rf-tab-count" id="tdsRfRecentCount">{{ deductors.recent_count }}</span>
+        </button>
+        <button type="button" class="tds-rf-tab" data-tab="all" role="tab">
+          All <span class="tds-rf-tab-count" id="tdsRfAllCount">{{ deductors.all_count }}</span>
+        </button>
+      </div>
+      <div class="tds-rf-toolbar-actions">
+        <a href="{{ return_register_url }}" class="tds-rf-pill tds-rf-pill-primary">
+          <i class="bi bi-journal-text"></i> Return Register
+        </a>
+        <button type="button" class="tds-rf-pill tds-rf-pill-danger" id="tdsRfDeleteBtn">
+          <i class="bi bi-trash"></i> Delete Client
+        </button>
+      </div>
+    </div>
+
+    <div class="tds-rf-table-wrap">
+      <table class="tds-rf-table" id="tdsRfTable">
+        <thead>
+          <tr>
+            <th class="tds-rf-check-col">
+              <input type="checkbox" id="tdsRfSelectAll" aria-label="Select all">
+            </th>
+            <th>Deductor Name</th>
+            <th>TAN</th>
+            <th>Location</th>
+            <th>Deductor Type</th>
+            <th>Mobile No.</th>
+            <th>Email Address</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tdsRfTableBody"></tbody>
+      </table>
+      <div class="tds-rf-empty d-none" id="tdsRfEmpty">No deductors found.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.TDS_RF = {
+    recent: {{ deductors.recent | tojson }},
+    all: {{ deductors.all | tojson }},
+    customerMasterUrl: {{ customer_master_url | tojson }},
+    deleteUrlTemplate: {{ delete_url_template | tojson }},
+    csrfToken: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/tds_return_filing.js') }}"></script>
+{% endblock %}

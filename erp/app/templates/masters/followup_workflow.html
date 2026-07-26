@@ -1,0 +1,122 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="fuMasterAddBtn" title="Add">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="fuMasterEditBtn" disabled title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="fuMasterDeleteBtn" disabled title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <a href="{{ url_for('masters_followup.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_master.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card fu-master-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="fuMasterSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="fuMasterSearch"
+             placeholder="Stage name or code...">
+    </div>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="fuMasterRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="fuMasterCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <p class="small text-muted mb-3">
+    Manage workflow stages for <strong>{{ module_meta.title }} Followup</strong>.
+    Stages appear as checkboxes on the followup entry screen.
+  </p>
+  <div id="fuMasterStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+  <div class="table-responsive fu-master-grid-wrap">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="fuMasterGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Stage Code</th>
+          <th>Stage Name</th>
+          <th>Order</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="fuMasterGridBody"></tbody>
+    </table>
+  </div>
+  <div id="fuMasterEmpty" class="small text-muted py-3 d-none">No workflow stages found.</div>
+</div>
+
+<div class="modal fade" id="fuMasterModal" tabindex="-1" aria-labelledby="fuMasterModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fuMasterModalTitle">Workflow Stage</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="fuMasterForm">
+          <input type="hidden" id="fuMasterStageId" value="">
+          <div class="mb-3">
+            <label class="form-label" for="fuMasterStageName">Stage Name</label>
+            <input type="text" class="form-control" id="fuMasterStageName" required maxlength="100">
+          </div>
+          <div class="mb-3" id="fuMasterStageCodeWrap">
+            <label class="form-label" for="fuMasterStageCode">Stage Code</label>
+            <input type="text" class="form-control" id="fuMasterStageCode" maxlength="50"
+                   placeholder="e.g. documents_received">
+            <div class="form-text">Lowercase with underscores. Auto-generated from name if left blank.</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="fuMasterDisplayOrder">Display Order</label>
+            <input type="number" class="form-control" id="fuMasterDisplayOrder" min="1" value="1">
+          </div>
+          <div class="mb-3 d-none" id="fuMasterStatusWrap">
+            <label class="form-label" for="fuMasterActiveStatus">Status</label>
+            <select class="form-select" id="fuMasterActiveStatus">
+              <option value="1">Active</option>
+              <option value="0">Inactive</option>
+            </select>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="fuMasterSaveBtn">Save</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.FU_MASTER_API = {
+    list: "{{ url_for('masters_followup.list_records', slug=module_slug) }}",
+    get: "{{ url_for('masters_followup.get_record', slug=module_slug, stage_id=0) }}",
+    create: "{{ url_for('masters_followup.create_record', slug=module_slug) }}",
+    update: "{{ url_for('masters_followup.update_record', slug=module_slug, stage_id=0) }}",
+    delete: "{{ url_for('masters_followup.delete_record', slug=module_slug, stage_id=0) }}"
+  };
+  window.FU_MASTER_CSRF = {{ csrf_token()|tojson }};
+  window.FU_MASTER_INITIAL_ROWS = {{ initial_rows|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/followup_master.js') }}"></script>
+{% endblock %}

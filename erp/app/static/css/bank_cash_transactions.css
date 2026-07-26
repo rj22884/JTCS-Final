@@ -1,0 +1,92 @@
+.obc-page .obc-section-head {
+  font-weight: 600;
+  color: #0d47a1;
+}
+
+.obc-grid-wrap {
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+}
+
+#obcDataGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #eef4fb;
+  white-space: nowrap;
+}
+
+#obcDataGrid thead tr.obc-filter-row th {
+  top: 2.1rem;
+  z-index: 2;
+  background: #fff;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+#obcDataGrid th.obc-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+#obcDataGrid th.obc-sortable:hover,
+#obcDataGrid th.obc-sorted {
+  color: #0d47a1;
+}
+
+.obc-sort-icon {
+  font-size: 0.7rem;
+  opacity: 0.55;
+  margin-left: 0.15rem;
+}
+
+.obc-col-filter {
+  min-width: 72px;
+  font-size: 0.75rem;
+}
+
+.obc-col-actions {
+  width: 96px;
+}
+
+.obc-required::after {
+  content: " *";
+  color: #c62828;
+}
+
+.obc-entry-modal .modal-header {
+  background: linear-gradient(90deg, #0d47a1, #1565c0);
+  color: #fff;
+}
+
+.obc-entry-modal .btn-close {
+  filter: invert(1);
+}
+
+.obc-subsection {
+  border: 1px solid #d6e4f5;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: #f7fbff;
+}
+
+.obc-subsection-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #1565c0;
+  margin-bottom: 0.65rem;
+}
+
+.obc-amt-credit {
+  color: #c9a227;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.obc-amt-debit {
+  color: #198754;
+  font-weight: 700;
+  white-space: nowrap;
+}

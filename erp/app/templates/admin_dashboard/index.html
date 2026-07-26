@@ -1,0 +1,200 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dashboard.css') }}?v=20260722metricentries">
+{% endblock %}
+
+{% block content %}
+<div class="adash-page">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+      <div class="adash-section-head mb-0">Admin Dashboard</div>
+      <div class="small text-muted">Closing balances as of {{ date_to | display_date }} · Period {{ date_from | display_date }} — {{ date_to | display_date }}</div>
+    </div>
+    <form method="get" action="{{ url_for('admin_dashboard.index') }}" class="adash-period-bar" id="adashPeriodForm">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <input type="date" class="form-control form-control-sm" name="from" value="{{ input_date_from }}" aria-label="Period from">
+        <span class="small text-muted">to</span>
+        <input type="date" class="form-control form-control-sm" name="to" value="{{ input_date_to }}" aria-label="Period to">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-funnel"></i> Apply</button>
+        <a href="{{ url_for('admin_dashboard.index', period='today') }}" class="btn btn-sm btn-outline-primary {% if period_preset == 'today' %}active{% endif %}">Today</a>
+        <a href="{{ url_for('admin_dashboard.index', period='month') }}" class="btn btn-sm btn-outline-primary {% if period_preset == 'month' %}active{% endif %}">This Month</a>
+        <a href="{{ url_for('admin_dashboard.index', period='fy') }}" class="btn btn-sm btn-outline-primary {% if period_preset == 'fy' %}active{% endif %}">This FY</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="adash-layout">
+    <section class="adash-banks-card jtcs-metric-card" aria-labelledby="adashBanksTitle">
+      <div class="adash-banks-head">
+        <div>
+          <span class="jtcs-metric-label mb-0" id="adashBanksTitle">All Banks Closing Balance</span>
+          <div class="small text-muted">Click any bank balance to see source ledger</div>
+        </div>
+        <strong class="jtcs-metric-value adash-banks-total mb-0">₹ {{ '%.2f'|format(banks_total) }}</strong>
+      </div>
+      <div class="adash-banks-list" id="adashBanksList">
+        {% if banks %}
+          {% for bank in banks %}
+          <button type="button"
+                  class="adash-bank-row"
+                  data-account-id="{{ bank.account_id }}"
+                  data-label="{{ bank.label }}"
+                  title="View source for {{ bank.label }}">
+            <span class="adash-bank-label">
+              <span class="adash-bank-name">{{ bank.bank_name }}</span>
+              {% if bank.masked_account %}
+              <span class="adash-bank-mask">{{ bank.masked_account }}</span>
+              {% endif %}
+              {% if bank.account_type %}
+              <span class="adash-bank-type">[{{ bank.account_type }}]</span>
+              {% endif %}
+            </span>
+            <strong class="adash-bank-amount{% if bank.closing_balance < 0 %} is-negative{% endif %}">
+              ₹ {{ '%.2f'|format(bank.closing_balance) }}
+            </strong>
+          </button>
+          {% endfor %}
+        {% else %}
+          <div class="small text-muted py-3 px-2">No active bank accounts found.</div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="adash-side-cards" aria-label="Summary cards">
+      <div class="small text-muted mb-1 adash-cards-hint">Click a card to see entry-level source</div>
+      {% for card in cards %}
+      <button type="button"
+              class="jtcs-metric-card adash-mini-card"
+              data-metric="{{ card.key }}"
+              data-label="{{ card.label }}"
+              title="View entries for {{ card.label }}">
+        <span class="jtcs-metric-label">{{ card.label }}</span>
+        <strong class="jtcs-metric-value">₹ {{ '%.2f'|format(card.value) }}</strong>
+      </button>
+      {% endfor %}
+    </section>
+  </div>
+</div>
+
+<div class="modal fade" id="adashBankSourceModal" tabindex="-1" aria-labelledby="adashBankSourceTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content adash-source-modal">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="adashBankSourceTitle">Bank Source Ledger</h5>
+          <div class="small text-white-50" id="adashBankSourceSub"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div class="small text-muted" id="adashBankSourceMeta"></div>
+          <strong id="adashBankSourceClosing"></strong>
+        </div>
+        <div class="table-responsive adash-source-grid-wrap">
+          <table class="table table-sm table-hover table-striped align-middle mb-0" id="adashSourceGrid">
+            <thead>
+              <tr>
+                <th class="adash-sortable" data-sort-key="entry_date" role="button" tabindex="0">Date <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="description" role="button" tabindex="0">Description <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="source_module" role="button" tabindex="0">Source Module <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="source_type" role="button" tabindex="0">Source Type <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="reference" role="button" tabindex="0">Reference <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable text-end" data-sort-key="debit" role="button" tabindex="0">Debit (In) <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable text-end" data-sort-key="credit" role="button" tabindex="0">Credit (Out) <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable text-end" data-sort-key="running_balance" role="button" tabindex="0">Running <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="entered_by" role="button" tabindex="0">Entered By <span class="adash-sort-icon"></span></th>
+              </tr>
+              <tr class="adash-filter-row">
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="entry_date" placeholder="Filter…" aria-label="Filter date"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="description" placeholder="Filter…" aria-label="Filter description"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="source_module" placeholder="Filter…" aria-label="Filter source module"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="source_type" placeholder="Filter…" aria-label="Filter source type"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="reference" placeholder="Filter…" aria-label="Filter reference"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="debit" placeholder="Filter…" aria-label="Filter debit"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="credit" placeholder="Filter…" aria-label="Filter credit"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="running_balance" placeholder="Filter…" aria-label="Filter running"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="entered_by" placeholder="Filter…" aria-label="Filter entered by"></th>
+              </tr>
+            </thead>
+            <tbody id="adashSourceGridBody"></tbody>
+          </table>
+        </div>
+        <div id="adashSourceEmpty" class="small text-muted py-3 d-none">No ledger rows for this account.</div>
+      </div>
+      <div class="modal-footer py-2">
+        <span class="small text-muted me-auto" id="adashSourceCount"></span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="adashMetricModal" tabindex="-1" aria-labelledby="adashMetricTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content adash-source-modal">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="adashMetricTitle">Metric Entries</h5>
+          <div class="small text-white-50" id="adashMetricSub"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div class="small text-muted" id="adashMetricFormula"></div>
+          <strong id="adashMetricTotal"></strong>
+        </div>
+        <div class="table-responsive adash-source-grid-wrap">
+          <table class="table table-sm table-hover table-striped align-middle mb-0" id="adashMetricGrid">
+            <thead>
+              <tr>
+                <th class="adash-sortable" data-sort-key="entry_date" data-grid="metric" role="button" tabindex="0">Date <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="source" data-grid="metric" role="button" tabindex="0">Source <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="reference" data-grid="metric" role="button" tabindex="0">Reference <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="work" data-grid="metric" role="button" tabindex="0">Work / Module <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="customer" data-grid="metric" role="button" tabindex="0">Customer / Account <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable" data-sort-key="description" data-grid="metric" role="button" tabindex="0">Description <span class="adash-sort-icon"></span></th>
+                <th class="adash-sortable text-end" data-sort-key="amount" data-grid="metric" role="button" tabindex="0">Amount <span class="adash-sort-icon"></span></th>
+                <th>Open</th>
+              </tr>
+              <tr class="adash-filter-row">
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="entry_date" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="source" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="reference" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="work" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="customer" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="description" data-grid="metric" placeholder="Filter…"></th>
+                <th><input type="text" class="form-control form-control-sm adash-col-filter" data-filter-key="amount" data-grid="metric" placeholder="Filter…"></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="adashMetricGridBody"></tbody>
+          </table>
+        </div>
+        <div id="adashMetricEmpty" class="small text-muted py-3 d-none">No contributing entries for this period.</div>
+      </div>
+      <div class="modal-footer py-2">
+        <span class="small text-muted me-auto" id="adashMetricCount"></span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ADMIN_DASHBOARD = {
+    bankSourceUrl: {{ url_for('admin_dashboard.bank_source', account_id=0) | tojson }},
+    metricDetailsUrl: {{ url_for('admin_dashboard.metric_details') | tojson }},
+    asOf: {{ date_to.isoformat() | tojson }},
+    dateFrom: {{ date_from.isoformat() | tojson }},
+    dateTo: {{ date_to.isoformat() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}?v=20260722metricentries"></script>
+{% endblock %}

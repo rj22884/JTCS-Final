@@ -1,0 +1,314 @@
+{% extends 'layouts/base.html' %}
+
+
+
+{% block ribbon_toolbar %}
+
+<div class="jtcs-ribbon-group">
+
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="gmAddBtn" title="Add New">
+
+    <i class="bi bi-plus-lg"></i>
+
+    <span>Add New</span>
+
+  </button>
+
+  <button type="button" class="jtcs-ribbon-btn" id="gmEditBtn" disabled title="Edit">
+
+    <i class="bi bi-pencil-square"></i>
+
+    <span>Edit</span>
+
+  </button>
+
+  <button type="button" class="jtcs-ribbon-btn" id="gmActiveBtn" disabled title="Activate">
+
+    <i class="bi bi-check-circle"></i>
+
+    <span>Active</span>
+
+  </button>
+
+  <button type="button" class="jtcs-ribbon-btn" id="gmDeleteBtn" disabled title="Delete">
+
+    <i class="bi bi-trash"></i>
+
+    <span>Delete</span>
+
+  </button>
+
+  <a href="{{ url_for('masters_group.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+
+    <i class="bi bi-box-arrow-right"></i>
+
+    <span>Exit</span>
+
+  </a>
+
+</div>
+
+{% endblock %}
+
+
+
+{% block extra_css %}
+
+<link rel="stylesheet" href="{{ url_for('static', filename='css/group_master.css') }}">
+
+{% endblock %}
+
+
+
+{% block content %}
+
+<div class="jtcs-card gm-card mb-3">
+
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+
+      <label class="form-label" for="gmSearch">Search</label>
+
+      <input type="search" class="form-control form-control-sm" id="gmSearch"
+
+             placeholder="Group code or name...">
+
+    </div>
+
+    <div class="d-flex flex-wrap align-items-end gap-2">
+
+      <button type="button" class="btn btn-primary btn-sm" id="gmAddNewBtn">
+
+        <i class="bi bi-plus-lg"></i> Add New
+
+      </button>
+
+      <button type="button" class="btn btn-outline-primary btn-sm" id="gmEditTopBtn" disabled>
+
+        <i class="bi bi-pencil-square"></i> Edit
+
+      </button>
+
+      <button type="button" class="btn btn-outline-success btn-sm" id="gmActiveTopBtn" disabled>
+
+        <i class="bi bi-check-circle"></i> Active
+
+      </button>
+
+      <button type="button" class="btn btn-outline-danger btn-sm" id="gmDeleteTopBtn" disabled>
+
+        <i class="bi bi-trash"></i> Delete
+
+      </button>
+
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="gmRefreshBtn">
+
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+
+      </button>
+
+    </div>
+
+    <span class="small text-muted ms-auto" id="gmCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+
+  </div>
+
+
+
+  <p class="small text-muted mb-3">
+
+    Manage customer groups used in <strong>Customer Master</strong>. Each group controls which tabs appear on the entry form.
+
+  </p>
+
+  <div id="gmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+
+
+  <div class="table-responsive gm-grid-wrap">
+
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="gmGrid">
+
+      <thead>
+
+        <tr>
+
+          <th>ID</th>
+
+          <th>Code</th>
+
+          <th>Group Name</th>
+
+          <th>Tabs</th>
+
+          <th>Order</th>
+
+          <th>Status</th>
+
+        </tr>
+
+      </thead>
+
+      <tbody id="gmGridBody"></tbody>
+
+    </table>
+
+  </div>
+
+  <div id="gmEmpty" class="small text-muted py-3 d-none">
+    No groups found.
+    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="gmAddNewEmptyBtn">Add New</button>
+  </div>
+
+</div>
+
+
+
+<div class="modal fade" id="gmModal" tabindex="-1" aria-labelledby="gmModalTitle" aria-hidden="true"
+
+     data-bs-backdrop="static">
+
+  <div class="modal-dialog modal-dialog-scrollable modal-lg">
+
+    <div class="modal-content">
+
+      <div class="modal-header">
+
+        <h5 class="modal-title" id="gmModalTitle">Customer Group</h5>
+
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+
+      </div>
+
+      <div class="modal-body">
+
+        <form id="gmForm">
+
+          <input type="hidden" id="gmGroupId" value="">
+
+          <div class="row g-3">
+
+            <div class="col-md-4" id="gmCodeWrap">
+
+              <label class="form-label" for="gmGroupCode">Group Code</label>
+
+              <input type="text" class="form-control text-uppercase" id="gmGroupCode" maxlength="20"
+
+                     placeholder="e.g. ITR" required>
+
+            </div>
+
+            <div class="col-md-8">
+
+              <label class="form-label" for="gmGroupName">Group Name</label>
+
+              <input type="text" class="form-control" id="gmGroupName" maxlength="100" required>
+
+            </div>
+
+            <div class="col-md-4">
+
+              <label class="form-label" for="gmDisplayOrder">Display Order</label>
+
+              <input type="number" class="form-control" id="gmDisplayOrder" min="1" value="1">
+
+            </div>
+
+            <div class="col-md-4 d-none" id="gmStatusWrap">
+
+              <label class="form-label" for="gmActiveStatus">Status</label>
+
+              <select class="form-select" id="gmActiveStatus">
+
+                <option value="1">Active</option>
+
+                <option value="0">Inactive</option>
+
+              </select>
+
+            </div>
+
+          </div>
+
+          <div class="mt-3">
+
+            <label class="form-label">Tabs for this group</label>
+
+            <div class="gm-tab-checks row g-2" id="gmTabChecks">
+
+              {% for tab in ui_config.available_tabs %}
+
+              <div class="col-md-4 col-lg-3">
+
+                <div class="form-check">
+
+                  <input class="form-check-input gm-tab-check" type="checkbox"
+
+                         value="{{ tab.code }}" id="gm_tab_{{ tab.code }}">
+
+                  <label class="form-check-label" for="gm_tab_{{ tab.code }}">{{ tab.label }}</label>
+
+                </div>
+
+              </div>
+
+              {% endfor %}
+
+            </div>
+
+            <div class="form-text">Select tabs shown when this group is chosen in Customer Master.</div>
+
+          </div>
+
+        </form>
+
+      </div>
+
+      <div class="modal-footer">
+
+        <button type="button" class="btn btn-primary" id="gmSaveBtn">Save</button>
+
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+{% endblock %}
+
+
+
+{% block extra_js %}
+
+<script>
+
+  window.GM_API = {
+
+    list: "{{ url_for('masters_group.list_records') }}",
+
+    get: "{{ url_for('masters_group.get_record', group_id=0) }}",
+
+    create: "{{ url_for('masters_group.create_record') }}",
+
+    update: "{{ url_for('masters_group.update_record', group_id=0) }}",
+
+    delete: "{{ url_for('masters_group.delete_record', group_id=0) }}",
+    activate: "{{ url_for('masters_group.activate_record', group_id=0) }}"
+
+  };
+
+  window.GM_CSRF = {{ csrf_token()|tojson }};
+
+  window.GM_INITIAL_ROWS = {{ initial_rows|tojson }};
+
+</script>
+
+<script src="{{ url_for('static', filename='js/group_master.js') }}"></script>
+
+{% endblock %}
+

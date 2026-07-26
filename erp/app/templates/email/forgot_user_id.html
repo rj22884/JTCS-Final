@@ -1,0 +1,9 @@
+{% extends 'email/base_email.html' %}
+{% block body %}
+<p style="margin:0 0 16px;font-size:15px;">Dear User,</p>
+<p style="margin:0 0 16px;font-size:15px;line-height:1.6;">Your registered JTCS ERP User ID (email) is:</p>
+{% for uid in user_ids %}
+<p style="margin:0 0 12px;font-size:18px;font-weight:700;color:#243B7B;">{{ uid }}</p>
+{% endfor %}
+<p style="margin:0;font-size:13px;color:#888;">Use this email address to sign in. If you did not request this, ignore this email.</p>
+{% endblock %}

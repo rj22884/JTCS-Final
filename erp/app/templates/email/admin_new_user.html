@@ -1,0 +1,6 @@
+{% extends 'email/base_email.html' %}
+{% block body %}
+<p style="margin:0 0 12px;"><strong>{{ user_name }}</strong> ({{ user_email }}) has verified their email.</p>
+<p style="margin:0 0 24px;">Please review and approve or reject this registration.</p>
+<a href="{{ pending_url }}" style="display:inline-block;background:#243B7B;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;">Review Pending Users</a>
+{% endblock %}

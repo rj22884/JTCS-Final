@@ -1,0 +1,48 @@
+.work-master-card {
+  background: #fff;
+  border: 1px solid #e9e4f5;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.work-master-grid-wrap {
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+}
+
+#workMasterGrid tbody tr {
+  cursor: pointer;
+}
+
+#workMasterGrid tbody tr.table-active {
+  --bs-table-bg: rgba(111, 66, 193, 0.12);
+}
+
+#workMasterModal .modal-header {
+  background: linear-gradient(90deg, #5b2c8e, #7c4dbd);
+  color: #fff;
+}
+
+#workMasterModal .btn-close {
+  filter: invert(1);
+}
+
+.work-master-yes {
+  color: #198754;
+  font-weight: 600;
+}
+
+.work-master-no {
+  color: #adb5bd;
+}
+
+.work-master-grid-actions .btn {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+#workMasterForm.work-master-readonly .form-control,
+#workMasterForm.work-master-readonly .form-check-input {
+  pointer-events: none;
+  background-color: #f8f9fa;
+}

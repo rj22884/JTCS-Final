@@ -1,0 +1,273 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260723ifui">
+{% endblock %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="invNewBtn" title="Add New Invoice">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add New Invoice</span>
+  </button>
+  <a href="{{ url_for('accounting_invoice.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="inv-page">
+  <div class="inv-card">
+    <div class="inv-card-head">
+      <img src="{{ url_for('static', filename='img/jtcs_invoice_logo.png') }}" alt="JTCS Logo">
+      <div class="flex-grow-1">
+        <div class="inv-company-name">{{ company.name }}</div>
+        <div class="inv-company-meta">GSTIN: {{ company.gstin }} · {{ company.state }} ({{ company.state_code }})</div>
+      </div>
+      <div class="text-end">
+        <span class="badge inv-badge-mode" id="invModeBadge">New</span>
+      </div>
+    </div>
+
+    <div id="invStatus" class="alert py-2 small d-none mb-2" role="alert"></div>
+
+    <form id="invForm" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" id="invId" value="">
+
+      <div class="inv-section-title">Invoice Type</div>
+      <div class="inv-kind-bar" id="invKindGroup">
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="invKind" id="invKindGst" value="GST">
+          <label class="form-check-label" for="invKindGst">GST Invoice</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="invKind" id="invKindNonGst" value="NON_GST" checked>
+          <label class="form-check-label" for="invKindNonGst">Non GST Invoice</label>
+        </div>
+        <div class="form-text mb-0 ms-md-auto">
+          Non GST series JTCS/2027/… · GST series JTCS/2026-27/…
+        </div>
+      </div>
+
+      <div class="inv-section-title">Header</div>
+      <div class="row g-compact mb-2">
+        <div class="col-auto">
+          <label class="form-label" for="invNo">Invoice No</label>
+          <input type="text" class="form-control form-control-sm inv-fw-md" id="invNo" value="{{ next_invoice_no }}" readonly>
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invDate">Date *</label>
+          <input type="date" class="form-control form-control-sm inv-fw-sm" id="invDate" value="{{ today }}" required>
+        </div>
+        <div class="col-auto position-relative">
+          <label class="form-label" for="invCustomerSearch">Customer *</label>
+          <input type="search" class="form-control form-control-sm inv-fw-xl" id="invCustomerSearch"
+                 placeholder="Name / mobile / GSTIN" autocomplete="off">
+          <input type="hidden" id="invCustomerId" value="">
+          <div id="invCustomerSuggest" class="list-group position-absolute shadow-sm d-none"
+               style="z-index: 20; max-height: 220px; overflow: auto; min-width: 280px;"></div>
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invRcm">RCM</label>
+          <select class="form-select form-select-sm inv-fw-xs" id="invRcm">
+            <option value="0" selected>No</option>
+            <option value="1">Yes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="inv-section-title">Party Details</div>
+      <div class="row g-compact mb-2">
+        <div class="col-auto">
+          <label class="form-label" for="invCustomerName">Customer Name *</label>
+          <input type="text" class="form-control form-control-sm inv-fw-xl" id="invCustomerName" required>
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invContactPerson">Contact Person</label>
+          <input type="text" class="form-control form-control-sm inv-fw-lg" id="invContactPerson">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invGstin">GSTIN</label>
+          <input type="text" class="form-control form-control-sm inv-fw-md" id="invGstin" maxlength="20">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invMobile">Mobile</label>
+          <input type="text" class="form-control form-control-sm inv-fw-sm" id="invMobile" maxlength="20">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invEmail">Email</label>
+          <input type="email" class="form-control form-control-sm inv-fw-lg" id="invEmail" maxlength="150">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invPlace">Place of Supply</label>
+          <input type="text" class="form-control form-control-sm inv-fw-md" id="invPlace" placeholder="Uttarakhand">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invPlaceCode">State</label>
+          <input type="text" class="form-control form-control-sm inv-fw-xxs" id="invPlaceCode" maxlength="5" placeholder="05">
+        </div>
+        <div class="col-12 col-lg-8">
+          <label class="form-label" for="invAddress">Billing Address</label>
+          <textarea class="form-control form-control-sm" id="invAddress" rows="2" style="max-width: 640px;"></textarea>
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invNotes">Notes</label>
+          <input type="text" class="form-control form-control-sm inv-fw-xl" id="invNotes" maxlength="500">
+        </div>
+        <div class="col-auto">
+          <label class="form-label" for="invPayBank">Payment Bank *</label>
+          <select class="form-select form-select-sm inv-fw-xl" id="invPayBank" required>
+            <option value="">— Select —</option>
+            {% for b in payment_banks %}
+            <option value="{{ b.account_id }}"
+                    data-upi="{{ b.upi_id or '' }}"
+                    data-label="{{ b.label }}">
+              {{ b.label }}{% if b.upi_id %} · UPI: {{ b.upi_id }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="inv-lines-toolbar">
+        <h6>Line Items</h6>
+        <button type="button" class="btn btn-sm btn-inv-outline" id="invAddLine">
+          <i class="bi bi-plus-lg"></i> Add Line
+        </button>
+      </div>
+      <div class="inv-lines-wrap mb-2">
+        <table class="table table-sm align-middle" id="invLinesTable">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Tax Year</th>
+              <th>Quarter</th>
+              <th>Month</th>
+              <th>Particulars</th>
+              <th>HSN/SAC</th>
+              <th>Unit</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>Disc</th>
+              <th>GST%</th>
+              <th class="text-end">Taxable</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="invLinesBody"></tbody>
+        </table>
+      </div>
+
+      <div class="row align-items-end g-compact">
+        <div class="col-md-6">
+          <div class="small text-muted mb-1">Tax rule</div>
+          <div id="invTaxHint" class="small">
+            Same state as company → CGST + SGST; else IGST.
+          </div>
+          <div class="mt-2 small" id="invWords"></div>
+        </div>
+        <div class="col-md-6">
+          <div class="inv-totals-box">
+            <table class="table table-sm mb-0">
+              <tbody>
+                <tr><td>List Price</td><td class="text-end" id="totList">0.00</td></tr>
+                <tr><td>Discount</td><td class="text-end" id="totDisc">0.00</td></tr>
+                <tr><td>Taxable Value</td><td class="text-end" id="totTaxable">0.00</td></tr>
+                <tr id="rowCgst" class="d-none"><td id="lblCgst">CGST</td><td class="text-end" id="totCgst">0.00</td></tr>
+                <tr id="rowSgst" class="d-none"><td id="lblSgst">SGST</td><td class="text-end" id="totSgst">0.00</td></tr>
+                <tr id="rowIgst"><td id="lblIgst">IGST</td><td class="text-end" id="totIgst">0.00</td></tr>
+                <tr><td>Invoice Value</td><td class="text-end" id="totValue">0.00</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="inv-footer-actions">
+            <button type="button" class="btn btn-inv-orange btn-sm" id="invSaveBtn">
+              <i class="bi bi-save"></i> Save Invoice
+            </button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="inv-card">
+    <div class="d-flex flex-wrap align-items-end gap-2 inv-saved-head">
+      <h6 class="mb-0 me-auto">Saved Invoices</h6>
+      <div>
+        <input type="search" class="form-control form-control-sm inv-fw-lg" id="invGridSearch"
+               placeholder="Search invoice / customer...">
+      </div>
+      <button type="button" class="btn btn-inv-outline btn-sm" id="invGridRefresh">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted" id="invGridCount">0 invoices</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover table-striped align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Invoice No</th>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Mobile</th>
+            <th>Tax</th>
+            <th class="text-end">Invoice Value</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="invGridBody"></tbody>
+      </table>
+    </div>
+    <div id="invGridEmpty" class="small text-muted py-3">No saved invoices yet.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="invPreviewModal" tabindex="-1" aria-labelledby="invPreviewModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="invPreviewModalTitle">Invoice Preview</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="invPreviewBody">
+        <div class="text-muted small">Loading preview…</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.INVOICE_API = {
+    customers: {{ url_for('accounting_invoice.api_customers') | tojson }},
+    customer: {{ url_for('accounting_invoice.api_customer_detail', customer_id=0) | tojson }},
+    preview: {{ url_for('accounting_invoice.api_preview_invoice') | tojson }},
+    create: {{ url_for('accounting_invoice.api_create_invoice') | tojson }},
+    update: {{ url_for('accounting_invoice.api_update_invoice', invoice_id=0) | tojson }},
+    get: {{ url_for('accounting_invoice.api_get_invoice', invoice_id=0) | tojson }},
+    delete: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0) | tojson }},
+    list: {{ url_for('accounting_invoice.api_list_invoices') | tojson }},
+    nextNo: {{ url_for('accounting_invoice.api_next_invoice_no') | tojson }},
+    pdf: {{ url_for('accounting_invoice.download_pdf', invoice_id=0) | tojson }},
+    previewHtml: {{ url_for('accounting_invoice.preview_html', invoice_id=0) | tojson }},
+    items: {{ items | tojson }},
+    paymentBanks: {{ payment_banks | tojson }},
+    taxPeriods: {{ tax_periods | tojson }},
+    serviceQuarters: {{ service_quarters | tojson }},
+    quarterMonths: {{ quarter_months | tojson }},
+    companyStateCode: {{ company.state_code | tojson }},
+    companyName: {{ company.name | tojson }},
+    today: {{ today | tojson }},
+    nextInvoiceNo: {{ next_invoice_no | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260723ifui"></script>
+{% endblock %}

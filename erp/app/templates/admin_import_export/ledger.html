@@ -1,0 +1,161 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_ledger_export.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card ledger-export-card mb-3">
+  <div class="mb-3">
+    <div class="small text-muted mb-1">Admin Role → Import/Export → Export</div>
+    <h3 class="h5 mb-1">A) Ledger Export</h3>
+    <p class="text-muted small mb-0">
+      Export <strong>transaction ledgers</strong> to Excel — Bank Account (with running balance)
+      or Customer (bills / receipts with running balance).
+    </p>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3">
+      <label class="form-label" for="ledgerDateFrom">From Date</label>
+      <input type="date" class="form-control form-control-sm" id="ledgerDateFrom" value="{{ fy_start }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="ledgerDateTo">To Date</label>
+      <input type="date" class="form-control form-control-sm" id="ledgerDateTo" value="{{ today }}">
+    </div>
+  </div>
+
+  <ul class="nav nav-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tabBankBtn" data-bs-toggle="tab" data-bs-target="#tabBank"
+              type="button" role="tab">Bank Accounts</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tabCustomerBtn" data-bs-toggle="tab" data-bs-target="#tabCustomer"
+              type="button" role="tab">Customers</button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 rounded-bottom p-3">
+    <div class="tab-pane fade show active" id="tabBank" role="tabpanel">
+      <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+        <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+          <label class="form-label" for="bankSearch">Search bank account</label>
+          <input type="search" class="form-control form-control-sm" id="bankSearch"
+                 placeholder="Bank name, account, type...">
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="bankRefreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <span class="small text-muted ms-auto" id="bankCount">{{ bank_accounts|length }} accounts</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Type</th>
+              <th>Holder</th>
+              <th class="text-end">Txns</th>
+              <th class="text-end">Export</th>
+            </tr>
+          </thead>
+          <tbody id="bankGridBody">
+            {% for row in bank_accounts %}
+            <tr>
+              <td>
+                <strong>{{ row.label }}</strong>
+                {% if not row.active %}<span class="badge text-bg-secondary ms-1">Inactive</span>{% endif %}
+              </td>
+              <td>{{ row.account_type or '—' }}</td>
+              <td>{{ row.account_holder or '—' }}</td>
+              <td class="text-end">{{ row.txn_count }}</td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm" role="group">
+                  <button type="button" class="btn btn-outline-info ledger-preview-btn"
+                          data-kind="bank" data-id="{{ row.account_id }}" title="Preview">
+                    <i class="bi bi-eye"></i> Preview
+                  </button>
+                  <button type="button" class="btn btn-outline-success ledger-dl-btn"
+                          data-kind="bank" data-id="{{ row.account_id }}" data-ledger-fmt="xlsx" title="Excel">
+                    <i class="bi bi-file-earmark-excel"></i> Excel
+                  </button>
+                  <button type="button" class="btn btn-outline-danger ledger-dl-btn"
+                          data-kind="bank" data-id="{{ row.account_id }}" data-ledger-fmt="pdf" title="PDF">
+                    <i class="bi bi-file-earmark-pdf"></i> PDF
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" class="text-center text-muted py-4">No bank accounts found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="tab-pane fade" id="tabCustomer" role="tabpanel">
+      <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+        <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+          <label class="form-label" for="customerSearch">Search customer</label>
+          <input type="search" class="form-control form-control-sm" id="customerSearch"
+                 placeholder="Name, mobile, or PAN (min 2 chars)">
+        </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="customerRefreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <span class="small text-muted ms-auto" id="customerCount">Type to search</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Mobile</th>
+              <th>PAN</th>
+              <th class="text-end">Bills / Txns</th>
+              <th class="text-end">Export</th>
+            </tr>
+          </thead>
+          <tbody id="customerGridBody">
+            <tr><td colspan="5" class="text-center text-muted py-4">Search a customer to export their ledger.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="ledgerPreviewModal" tabindex="-1" aria-labelledby="ledgerPreviewModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ledgerPreviewModalTitle">Ledger Preview</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="ledgerPreviewBody">
+        <div class="text-muted small text-center py-4">Loading preview…</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.LEDGER_EXPORT = {
+    banksUrl: {{ url_for('admin_import_export.list_banks') | tojson }},
+    customersUrl: {{ url_for('admin_import_export.list_customers') | tojson }},
+    bankDownload: {{ url_for('admin_import_export.download_bank_ledger', account_id=0) | tojson }},
+    customerDownload: {{ url_for('admin_import_export.download_customer_ledger', customer_id=0) | tojson }},
+    bankPreview: {{ url_for('admin_import_export.preview_bank_ledger', account_id=0) | tojson }},
+    customerPreview: {{ url_for('admin_import_export.preview_customer_ledger', customer_id=0) | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/admin_ledger_export.js') }}?v=20260719preview1"></script>
+{% endblock %}

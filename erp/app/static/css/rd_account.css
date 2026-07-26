@@ -1,0 +1,28 @@
+.rd-account-card {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.rd-account-grid-wrap {
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+}
+
+#rdAccountGrid tbody tr {
+  cursor: pointer;
+}
+
+#rdAccountGrid tbody tr.table-active {
+  --bs-table-bg: rgba(13, 110, 253, 0.12);
+}
+
+#rdAccountModal .modal-header {
+  background: linear-gradient(90deg, #0d47a1, #1976d2);
+  color: #fff;
+}
+
+#rdAccountModal .btn-close {
+  filter: invert(1);
+}

@@ -1,0 +1,220 @@
+.adash-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.adash-section-head {
+  font-weight: 700;
+  color: #0d47a1;
+  font-size: 1.05rem;
+}
+
+.adash-period-bar .form-control {
+  width: auto;
+  min-width: 9.5rem;
+}
+
+.adash-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 991.98px) {
+  .adash-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.adash-banks-card {
+  min-height: 22rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem 1rem;
+}
+
+.adash-banks-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #d6e4f5;
+}
+
+.adash-banks-total {
+  color: #0d47a1;
+}
+
+.adash-banks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+}
+
+.adash-bank-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.adash-bank-row:hover,
+.adash-bank-row:focus {
+  border-color: #243b7b;
+  box-shadow: 0 2px 8px rgba(36, 59, 123, 0.12);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.adash-bank-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.adash-bank-name {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.adash-bank-mask,
+.adash-bank-type {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.adash-bank-amount {
+  white-space: nowrap;
+  color: #0f172a;
+}
+
+.adash-bank-amount.is-negative {
+  color: #c62828;
+}
+
+.adash-side-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+@media (max-width: 575.98px) {
+  .adash-side-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.adash-cards-hint {
+  grid-column: 1 / -1;
+}
+
+.adash-mini-card {
+  padding: 0.75rem 0.85rem;
+  width: 100%;
+  text-align: left;
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.adash-mini-card:hover,
+.adash-mini-card:focus {
+  border-color: #243b7b;
+  box-shadow: 0 2px 8px rgba(36, 59, 123, 0.12);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.adash-amount-neg {
+  color: #c62828;
+}
+
+.adash-source-modal .modal-header {
+  background: linear-gradient(90deg, #0d47a1, #1565c0);
+  color: #fff;
+}
+
+.adash-source-modal .btn-close {
+  filter: invert(1);
+}
+
+.adash-source-grid-wrap {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+#adashSourceGrid thead th,
+#adashMetricGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #eef4fb;
+  white-space: nowrap;
+}
+
+#adashSourceGrid thead tr.adash-filter-row th,
+#adashMetricGrid thead tr.adash-filter-row th {
+  top: 2.1rem;
+  z-index: 2;
+  background: #fff;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+#adashSourceGrid th.adash-sortable,
+#adashMetricGrid th.adash-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+#adashSourceGrid th.adash-sortable:hover,
+#adashSourceGrid th.adash-sorted,
+#adashMetricGrid th.adash-sortable:hover,
+#adashMetricGrid th.adash-sorted {
+  color: #0d47a1;
+}
+
+.adash-sort-icon {
+  font-size: 0.7rem;
+  opacity: 0.55;
+  margin-left: 0.15rem;
+}
+
+.adash-col-filter {
+  min-width: 72px;
+  font-size: 0.75rem;
+}
+
+.adash-opening-row {
+  background: #f8fafc;
+  font-weight: 600;
+}
+
+/* Source ledger: Debit (In) > 0 green, Credit (Out) > 0 red */
+#adashSourceGrid td.adash-debit-in {
+  color: #15803d;
+  font-weight: 600;
+}
+
+#adashSourceGrid td.adash-credit-out {
+  color: #dc2626;
+  font-weight: 600;
+}

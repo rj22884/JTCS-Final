@@ -1,0 +1,11 @@
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+app/static/uploads/
+backups/
+*.bak
+*.partial.zip

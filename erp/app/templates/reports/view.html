@@ -1,0 +1,75 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="print">
+    <i class="bi bi-printer"></i><span>Print</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="export-excel">
+    <i class="bi bi-file-earmark-spreadsheet"></i><span>Excel</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="export-pdf">
+    <i class="bi bi-file-earmark-pdf"></i><span>PDF</span>
+  </button>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-4">
+  <form method="get" class="row g-3 align-items-end">
+    <div class="col-md-3">
+      <label class="form-label">Start Date</label>
+      <input type="date" class="form-control" name="start_date" value="{{ filters.start_date }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">End Date</label>
+      <input type="date" class="form-control" name="end_date" value="{{ filters.end_date }}">
+    </div>
+    <div class="col-md-3">
+      <button type="submit" class="btn btn-primary">Apply Filter</button>
+      <a href="{{ url_for('reports.index') }}" class="btn btn-outline-secondary">All Reports</a>
+    </div>
+  </form>
+</div>
+
+<div class="jtcs-card">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h5 mb-0">{{ result.title }}</h2>
+    {% if result.total is defined %}
+      <span class="badge text-bg-primary">Total: ₹ {{ '%.2f'|format(result.total) }}</span>
+    {% endif %}
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle mb-0" id="jtcsReportTable">
+      <thead>
+        <tr>
+          {% if result.rows %}
+            {% for key in result.rows[0].keys() %}
+              <th>{{ key }}</th>
+            {% endfor %}
+          {% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.rows %}
+          <tr>
+            {% for value in row.values() %}
+              <td>{{ value | display_value }}</td>
+            {% endfor %}
+          </tr>
+        {% else %}
+          <tr><td class="text-muted">No data for selected period.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/report_export.js') }}"></script>
+<script>
+  window.JTCS_REPORT_TITLE = {{ result.title | tojson }};
+</script>
+{% endblock %}

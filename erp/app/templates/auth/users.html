@@ -1,0 +1,366 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<style>
+  .au-status-pending { background: #fff3cd; color: #856404; }
+  .au-status-active { background: #d1e7dd; color: #0f5132; }
+  .au-status-inactive { background: #e2e3e5; color: #41464b; }
+  .au-row-pending { cursor: pointer; }
+  .au-row-pending:hover { background: #e8f1ff; }
+  .au-row-focus { outline: 2px solid #1565c0; outline-offset: -2px; }
+  .au-pending-banner {
+    border: 1px solid #ffe08a;
+    background: #fffbeb;
+    border-radius: 8px;
+    padding: 0.65rem 0.85rem;
+  }
+  .au-role-cell {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+  <div>
+    <p class="text-muted mb-0">All registered users. Click a pending user to review, select role, then approve or reject.</p>
+  </div>
+  {% if pending_count %}
+  <div class="au-pending-banner small">
+    <i class="bi bi-bell-fill text-warning"></i>
+    <strong>{{ pending_count }}</strong> pending approval{{ 's' if pending_count != 1 else '' }}
+  </div>
+  {% endif %}
+</div>
+
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0" id="auUsersGrid">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Mobile</th>
+          <th>Role</th>
+          <th>Email Verified</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        {% set is_pending = user.UserStatus == 'Pending' %}
+        {% set role_parts = (user.Role or '').split(',') | map('trim') | list %}
+        {% set is_admin_account = 'Administrator' in role_parts or 'Admin' in role_parts %}
+        {% set is_approved_active = (not is_pending) and user.UserStatus == 'Active' and user.IsActive %}
+        {% set status_label = 'Pending Approval' if is_pending else ('Active' if is_approved_active else (user.UserStatus or 'Inactive')) %}
+        <tr class="{% if is_pending %}au-row-pending{% endif %}"
+            data-user-id="{{ user.UserID }}"
+            data-pending="{{ '1' if is_pending else '0' }}"
+            data-approved="{{ '1' if is_approved_active and not is_admin_account else '0' }}"
+            data-name="{{ user.FullName }}"
+            data-email="{{ user.EmailID }}"
+            data-mobile="{{ user.MobileNumber }}"
+            data-department="{{ user.Department or '' }}"
+            data-role="{{ user.Role or 'Operator' }}"
+            data-verified="{{ '1' if user.EmailVerified else '0' }}"
+            data-status="{{ status_label }}">
+          <td>{{ user.FullName }}</td>
+          <td>{{ user.EmailID }}</td>
+          <td>{{ user.MobileNumber }}</td>
+          <td>
+            <div class="au-role-cell">
+              <span>{{ user.Role.replace(',', ', ') if user.Role else '—' }}</span>
+              {% if is_approved_active and not is_admin_account %}
+              <button type="button" class="btn btn-sm btn-outline-primary au-change-role-btn" data-user-id="{{ user.UserID }}">
+                Change Role
+              </button>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            {% if user.EmailVerified %}
+              <span class="badge text-bg-success">Yes</span>
+            {% else %}
+              <span class="badge text-bg-warning">Pending</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {% if is_pending %}au-status-pending{% elif is_approved_active %}au-status-active{% else %}au-status-inactive{% endif %}">
+              {{ status_label }}
+            </span>
+          </td>
+          <td class="text-end text-nowrap">
+            {% if is_pending %}
+              <button type="button" class="btn btn-sm btn-primary au-review-btn" data-user-id="{{ user.UserID }}">
+                Review
+              </button>
+            {% elif is_approved_active and not is_admin_account %}
+              <form method="post" action="{{ url_for('auth.deactivate_user', user_id=user.UserID) }}" class="d-inline"
+                    onsubmit="return confirm('Deactivate this user? They will not be able to sign in.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger">Deactivate</button>
+              </form>
+            {% endif %}
+            {% if can_delete_users and not is_admin_account %}
+              <form method="post" action="{{ url_for('auth.delete_user', user_id=user.UserID) }}" class="d-inline jtcs-delete-reauth-form"
+                    data-delete-message="Delete this user permanently? This cannot be undone.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+              </form>
+            {% elif not is_pending and (is_admin_account or not is_approved_active) and not can_delete_users %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="text-center text-muted py-4">No users found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal fade" id="auPendingModal" tabindex="-1" aria-labelledby="auPendingModalTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="auPendingModalTitle">Pending User Approval</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <dl class="row mb-3 small">
+          <dt class="col-4">Name</dt>
+          <dd class="col-8" id="auModalName">—</dd>
+          <dt class="col-4">Email</dt>
+          <dd class="col-8" id="auModalEmail">—</dd>
+          <dt class="col-4">Mobile</dt>
+          <dd class="col-8" id="auModalMobile">—</dd>
+          <dt class="col-4">Department</dt>
+          <dd class="col-8" id="auModalDepartment">—</dd>
+          <dt class="col-4">Email Verified</dt>
+          <dd class="col-8" id="auModalVerified">—</dd>
+          <dt class="col-4">Status</dt>
+          <dd class="col-8" id="auModalStatus">—</dd>
+        </dl>
+
+        <div class="alert alert-warning py-2 small mt-3 mb-0 d-none" id="auModalVerifyWarn">
+          Email is not verified yet. Approve is disabled until the user verifies email.
+        </div>
+        <div class="alert alert-danger py-2 small mt-3 mb-0 d-none" id="auModalRoleWarn">
+          Please select at least one user role before approving.
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <form method="post" id="auRejectForm" class="me-auto">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-outline-danger btn-sm">Reject</button>
+        </form>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <form method="post" id="auApproveForm" class="d-flex flex-column align-items-stretch gap-2" style="min-width: 14rem;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="border rounded p-2 text-start bg-light" id="auRoleBox">
+            <div class="small fw-semibold mb-1">User Role <span class="text-danger">*</span></div>
+            {% for role in assignable_roles %}
+            <div class="form-check">
+              <input class="form-check-input au-role-check" type="checkbox" name="role" value="{{ role }}" id="auRole_{{ loop.index }}">
+              <label class="form-check-label" for="auRole_{{ loop.index }}">{{ role }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="submit" class="btn btn-success btn-sm" id="auApproveBtn">Approve</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="auChangeRoleModal" tabindex="-1" aria-labelledby="auChangeRoleModalTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="auChangeRoleModalTitle">Change Role</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="post" id="auChangeRoleForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <dl class="row mb-3 small">
+            <dt class="col-4">Name</dt>
+            <dd class="col-8" id="auChangeName">—</dd>
+            <dt class="col-4">Email</dt>
+            <dd class="col-8" id="auChangeEmail">—</dd>
+            <dt class="col-4">Current Role</dt>
+            <dd class="col-8" id="auChangeCurrentRole">—</dd>
+          </dl>
+          <div class="border rounded p-2 text-start bg-light">
+            <div class="small fw-semibold mb-1">User Role <span class="text-danger">*</span></div>
+            <div class="small text-muted mb-2">Select one or more roles.</div>
+            {% for role in assignable_roles %}
+            <div class="form-check">
+              <input class="form-check-input au-change-role-check" type="checkbox" name="role" value="{{ role }}" id="auChangeRole_{{ loop.index }}">
+              <label class="form-check-label" for="auChangeRole_{{ loop.index }}">{{ role }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="alert alert-danger py-2 small mt-3 mb-0 d-none" id="auChangeRoleWarn">
+            Please select at least one user role.
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="auChangeRoleSaveBtn">Save Role</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const focusId = {{ (focus_user_id if focus_user_id is defined else none) | tojson }};
+  const approveUrlTpl = {{ url_for('auth.approve_user', user_id=0) | tojson }};
+  const rejectUrlTpl = {{ url_for('auth.reject_user', user_id=0) | tojson }};
+  const changeRoleUrlTpl = {{ url_for('auth.change_user_role', user_id=0) | tojson }};
+  const modalEl = document.getElementById("auPendingModal");
+  const modal = modalEl && window.bootstrap ? new bootstrap.Modal(modalEl) : null;
+  const changeModalEl = document.getElementById("auChangeRoleModal");
+  const changeModal = changeModalEl && window.bootstrap ? new bootstrap.Modal(changeModalEl) : null;
+  const roleWarn = document.getElementById("auModalRoleWarn");
+  const changeRoleWarn = document.getElementById("auChangeRoleWarn");
+  const approveForm = document.getElementById("auApproveForm");
+  const approveBtn = document.getElementById("auApproveBtn");
+  const changeRoleForm = document.getElementById("auChangeRoleForm");
+
+  function apiUrl(tpl, id) {
+    return String(tpl || "").replace("/0", "/" + String(id));
+  }
+
+  function selectedRoles(selector) {
+    return Array.prototype.slice
+      .call(document.querySelectorAll(selector + ":checked"))
+      .map(function (el) {
+        return el.value;
+      });
+  }
+
+  function applyRoleChecks(selector, roleCsv) {
+    const current = String(roleCsv || "Operator")
+      .split(",")
+      .map(function (r) {
+        return r.trim();
+      })
+      .filter(Boolean);
+    document.querySelectorAll(selector).forEach(function (box) {
+      box.checked = current.indexOf(box.value) !== -1;
+    });
+    if (!selectedRoles(selector).length) {
+      const op = document.querySelector(selector + '[value="Operator"]');
+      if (op) op.checked = true;
+    }
+  }
+
+  function openPendingModal(tr) {
+    if (!tr || tr.getAttribute("data-pending") !== "1") return;
+    const id = tr.getAttribute("data-user-id");
+    const verified = tr.getAttribute("data-verified") === "1";
+    document.getElementById("auModalName").textContent = tr.getAttribute("data-name") || "—";
+    document.getElementById("auModalEmail").textContent = tr.getAttribute("data-email") || "—";
+    document.getElementById("auModalMobile").textContent = tr.getAttribute("data-mobile") || "—";
+    document.getElementById("auModalDepartment").textContent = tr.getAttribute("data-department") || "—";
+    document.getElementById("auModalVerified").textContent = verified ? "Yes" : "Pending";
+    document.getElementById("auModalStatus").textContent = tr.getAttribute("data-status") || "Pending Approval";
+    document.getElementById("auModalVerifyWarn").classList.toggle("d-none", verified);
+    if (roleWarn) roleWarn.classList.add("d-none");
+    applyRoleChecks(".au-role-check", tr.getAttribute("data-role"));
+    document.getElementById("auApproveForm").action = apiUrl(approveUrlTpl, id);
+    document.getElementById("auRejectForm").action = apiUrl(rejectUrlTpl, id);
+    if (approveBtn) approveBtn.disabled = !verified;
+    document.querySelectorAll("#auUsersGrid tr.au-row-focus").forEach(function (row) {
+      row.classList.remove("au-row-focus");
+    });
+    tr.classList.add("au-row-focus");
+    if (modal) modal.show();
+  }
+
+  function openChangeRoleModal(tr) {
+    if (!tr || tr.getAttribute("data-approved") !== "1") return;
+    const id = tr.getAttribute("data-user-id");
+    const roleCsv = tr.getAttribute("data-role") || "Operator";
+    document.getElementById("auChangeName").textContent = tr.getAttribute("data-name") || "—";
+    document.getElementById("auChangeEmail").textContent = tr.getAttribute("data-email") || "—";
+    document.getElementById("auChangeCurrentRole").textContent = roleCsv.replace(/,/g, ", ");
+    if (changeRoleWarn) changeRoleWarn.classList.add("d-none");
+    applyRoleChecks(".au-change-role-check", roleCsv);
+    changeRoleForm.action = apiUrl(changeRoleUrlTpl, id);
+    document.querySelectorAll("#auUsersGrid tr.au-row-focus").forEach(function (row) {
+      row.classList.remove("au-row-focus");
+    });
+    tr.classList.add("au-row-focus");
+    if (changeModal) changeModal.show();
+  }
+
+  if (approveForm) {
+    approveForm.addEventListener("submit", function (ev) {
+      if (!selectedRoles(".au-role-check").length) {
+        ev.preventDefault();
+        if (roleWarn) roleWarn.classList.remove("d-none");
+        return false;
+      }
+    });
+  }
+
+  if (changeRoleForm) {
+    changeRoleForm.addEventListener("submit", function (ev) {
+      if (!selectedRoles(".au-change-role-check").length) {
+        ev.preventDefault();
+        if (changeRoleWarn) changeRoleWarn.classList.remove("d-none");
+        return false;
+      }
+    });
+  }
+
+  const grid = document.getElementById("auUsersGrid");
+  if (grid) {
+    grid.addEventListener("click", function (ev) {
+      const changeBtn = ev.target.closest(".au-change-role-btn");
+      const btn = ev.target.closest(".au-review-btn");
+      const tr = ev.target.closest("tr[data-user-id]");
+      if (changeBtn && tr) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        openChangeRoleModal(tr);
+        return;
+      }
+      if (btn && tr) {
+        ev.preventDefault();
+        openPendingModal(tr);
+        return;
+      }
+      if (tr && tr.getAttribute("data-pending") === "1" && !ev.target.closest("form, button, a")) {
+        openPendingModal(tr);
+      }
+    });
+  }
+
+  if (focusId) {
+    const tr = document.querySelector('#auUsersGrid tr[data-user-id="' + focusId + '"]');
+    if (tr) {
+      tr.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (tr.getAttribute("data-pending") === "1") {
+        openPendingModal(tr);
+      } else {
+        tr.classList.add("au-row-focus");
+      }
+    }
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,179 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<style>
+  .menu-drag-handle {
+    cursor: grab;
+    color: #6c757d;
+    user-select: none;
+  }
+  .menu-drag-handle:active {
+    cursor: grabbing;
+  }
+  .menu-row-ghost {
+    opacity: 0.55;
+    background: #e9f2ff;
+  }
+  .menu-row-chosen > .menu-row-grid {
+    background: #f8fafc;
+  }
+  .menu-list-head,
+  .menu-row-grid {
+    display: grid;
+    grid-template-columns: 170px minmax(180px, 2fr) minmax(120px, 1.2fr) minmax(110px, 1fr) 90px minmax(200px, 1.5fr);
+    gap: 0.75rem;
+    align-items: center;
+  }
+  .menu-order-input {
+    width: 3.25rem;
+    text-align: center;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.85rem;
+  }
+  .menu-order-save-btn {
+    white-space: nowrap;
+  }
+  .menu-row-dirty > .menu-row-grid {
+    background: #fffbeb;
+  }
+  .menu-list-head {
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: #495057;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #dee2e6;
+    background: #f8f9fa;
+  }
+  .menu-row-grid {
+    padding: 0.7rem 1rem;
+    border-bottom: 1px solid #eef1f4;
+  }
+  .menu-sort-unit {
+    list-style: none;
+  }
+  .menu-sortable-group {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    min-height: 0.5rem;
+  }
+  .menu-children {
+    margin-left: 1.25rem;
+    border-left: 2px solid #e9ecef;
+    min-height: 0.75rem;
+    padding-bottom: 0.15rem;
+  }
+  .menu-children > .menu-sortable-group {
+    min-height: 1.5rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <p class="text-muted mb-0">Manage navigation items stored in SQL Server.</p>
+  <a href="{{ url_for('menu_admin.create') }}" class="btn btn-primary">
+    <i class="bi bi-plus-lg"></i> Add Menu
+  </a>
+</div>
+
+<div class="alert alert-light border mb-3">
+  <div class="fw-semibold mb-1">Order / move kya hai?</div>
+  <div class="small text-muted mb-0">
+    <strong>Display Order / SR No</strong> same parent ke items ka sequence hai (chhota number pehle).
+    Grip se drag karke move karo, ya SR No box edit karo — phir usi row ka <strong>Save</strong> dabao
+    (Save tabhi dikhega jab drag / SR change hua ho). Parent ke saath sub-menus bhi move hote hain.
+  </div>
+</div>
+
+<div id="menuOrderStatus" class="alert d-none py-2 px-3 mb-3" role="status"></div>
+
+{% macro render_menu_nodes(nodes, parent_id) %}
+<ul class="menu-sortable-group" data-parent-id="{{ parent_id if parent_id is not none else '' }}">
+  {% for node in nodes %}
+    {% set menu = node.menu %}
+    <li class="menu-sort-unit"
+        data-menu-id="{{ menu.MenuID }}"
+        data-parent-id="{{ menu.ParentMenuID if menu.ParentMenuID is not none else '' }}">
+      <div class="menu-row-grid">
+        <div class="d-flex align-items-center gap-1 flex-wrap">
+          <span class="menu-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">
+            <i class="bi bi-grip-vertical fs-5"></i>
+          </span>
+          <input type="number" class="form-control form-control-sm menu-order-input"
+                 min="0" step="1" value="{{ menu.DisplayOrder }}"
+                 title="Serial / display order" aria-label="Serial number"
+                 data-menu-id="{{ menu.MenuID }}">
+          <button type="button" class="btn btn-sm btn-success menu-order-save-btn d-none"
+                  title="Save order for this row">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+        <div>
+          <div class="fw-semibold">
+            {% if menu.ParentMenuID %}<span class="text-muted">↳</span>{% endif %}
+            <i class="bi {{ menu.MenuIcon or 'bi-circle' }} me-1"></i>{{ menu.MenuName }}
+          </div>
+          {% if menu.Description %}
+            <div class="small text-muted">{{ menu.Description }}</div>
+          {% endif %}
+        </div>
+        <div><code>{{ menu.MenuURL or '—' }}</code></div>
+        <div>{{ (menu.RoleName.replace(',', ', ') if menu.RoleName else 'All roles') }}</div>
+        <div>
+          {% if menu.IsActive %}
+            <span class="badge text-bg-success">Active</span>
+          {% else %}
+            <span class="badge text-bg-secondary">Inactive</span>
+          {% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-1 justify-content-end">
+          <a href="{{ url_for('menu_admin.edit', menu_id=menu.MenuID) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+          <form method="post" action="{{ url_for('menu_admin.toggle', menu_id=menu.MenuID) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-warning">
+              {{ 'Deactivate' if menu.IsActive else 'Activate' }}
+            </button>
+          </form>
+          <form method="post" action="{{ url_for('menu_admin.delete', menu_id=menu.MenuID) }}" class="d-inline jtcs-delete-reauth-form"
+                data-delete-message="Delete this menu and any sub-menus?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+          </form>
+        </div>
+      </div>
+      <div class="menu-children" title="Drop here to nest under {{ menu.MenuName }}">
+        {{ render_menu_nodes(node.children, menu.MenuID) }}
+      </div>
+    </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+<div class="jtcs-card">
+  <div class="menu-list-head">
+    <div>Order</div>
+    <div>Menu</div>
+    <div>URL</div>
+    <div>Role</div>
+    <div>Status</div>
+    <div class="text-end">Actions</div>
+  </div>
+  {% if menu_tree %}
+    {{ render_menu_nodes(menu_tree, none) }}
+  {% else %}
+    <div class="text-muted text-center py-4">No menus found.</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script>
+  window.MENU_ADMIN = {
+    reorderUrl: {{ url_for('menu_admin.reorder') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/menu_admin.js') }}?v=20260722srnsave"></script>
+{% endblock %}

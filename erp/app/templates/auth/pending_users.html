@@ -1,0 +1,56 @@
+{% extends 'layouts/base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <p class="text-muted mb-0">Approve or reject pending registrations.</p>
+  <a href="{{ url_for('auth.active_users') }}" class="btn btn-outline-secondary btn-sm">Active Users</a>
+</div>
+
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Mobile</th>
+          <th>Department</th>
+          <th>Email Verified</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user in users %}
+        <tr>
+          <td>{{ user.FullName }}</td>
+          <td>{{ user.EmailID }}</td>
+          <td>{{ user.MobileNumber }}</td>
+          <td>{{ user.Department or '—' }}</td>
+          <td>
+            {% if user.EmailVerified %}
+              <span class="badge text-bg-success">Yes</span>
+            {% else %}
+              <span class="badge text-bg-warning">Pending</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('auth.approve_user', user_id=user.UserID) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-success" {% if not user.EmailVerified %}disabled{% endif %}>Approve</button>
+            </form>
+            <form method="post" action="{{ url_for('auth.reject_user', user_id=user.UserID) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="text-center text-muted py-4">No pending registrations.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

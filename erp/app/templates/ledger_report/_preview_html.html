@@ -1,0 +1,62 @@
+{# Invoice-style ledger preview — Date / Description / Debit / Credit / Closing Balance #}
+{% set dash = '—' %}
+{% macro money(v) -%}
+  {%- if v is none -%}{{ dash }}{%- else -%}{{ '%.2f'|format(v|float) }}{%- endif -%}
+{%- endmacro %}
+
+<div class="ledger-html-preview">
+  <div class="ledger-html-top">
+    <div class="ledger-html-company">
+      {% if logo_url %}
+      <img class="ledger-html-logo" src="{{ logo_url }}" alt="JTCS">
+      {% endif %}
+      <div class="ledger-html-brand">Joshi Tax Consultancy &amp; Services</div>
+      <div class="ledger-html-sub">Ledger Statement Preview</div>
+    </div>
+    <div class="ledger-html-right">
+      <div class="ledger-html-badge">{{ ledger.title }}</div>
+      <div>Closing Balance: <strong>Rs. {{ money(ledger.closing) }}</strong></div>
+    </div>
+  </div>
+
+  <h2 class="ledger-html-title">{{ ledger.entity_name }}</h2>
+
+  <div class="ledger-html-meta-box">
+    {% for label, value in ledger.meta %}
+    <div><strong>{{ label }}:</strong> {{ value or dash }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="table-responsive">
+    <table class="ledger-html-items">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Description</th>
+          <th class="text-end">Debit</th>
+          <th class="text-end">Credit</th>
+          <th class="text-end">Closing Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in ledger.lines or [] %}
+        <tr class="ledger-row-{{ line.kind or 'txn' }}">
+          <td>{{ line.date or dash }}</td>
+          <td>{{ line.description or dash }}</td>
+          <td class="text-end">{{ money(line.debit) }}</td>
+          <td class="text-end">{{ money(line.credit) }}</td>
+          <td class="text-end">{{ money(line.balance) }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="text-center text-muted">No ledger rows for this period.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ledger-html-foot">
+    Generated for preview · Joshi Tax Consultancy &amp; Services (JTCS)
+  </div>
+</div>

@@ -1,0 +1,183 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="itmAddBtn" title="Add New">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add New</span>
+  </button>
+  <a href="{{ url_for('masters_item.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  .itm-hsn-suggest {
+    position: absolute;
+    z-index: 1080;
+    max-height: 220px;
+    overflow-y: auto;
+    width: 100%;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="itmSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="itmSearch"
+             placeholder="Code, name, HSN/SAC...">
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="itmAddNewBtn">
+      <i class="bi bi-plus-lg"></i> Add New
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="itmRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="itmCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <p class="small text-muted mb-3">
+    GST Item Master — HSN/SAC, unit rate, and GST %. Used in <strong>Accounting → Generate Invoice</strong>.
+  </p>
+  <div id="itmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="itmGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Code</th>
+          <th>Item Name</th>
+          <th>HSN/SAC</th>
+          <th>Type</th>
+          <th>Unit</th>
+          <th class="text-end">Rate</th>
+          <th class="text-end">GST %</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="itmGridBody"></tbody>
+    </table>
+  </div>
+  <div id="itmEmpty" class="small text-muted py-3 d-none">No items found.</div>
+</div>
+
+<div class="modal fade" id="itmModal" tabindex="-1" aria-labelledby="itmModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="itmModalTitle">Add Item</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="itmForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" id="itmId" value="">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="itmCode">Item Code *</label>
+              <input type="text" class="form-control" id="itmCode" maxlength="40" required>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="itmName">Item Name *</label>
+              <input type="text" class="form-control" id="itmName" maxlength="200" required>
+            </div>
+            <div class="col-md-4 position-relative">
+              <label class="form-label" for="itmHsn">HSN / SAC *</label>
+              <input type="text" class="form-control" id="itmHsn" maxlength="20"
+                     placeholder="Type code or description (min 2 chars)" required autocomplete="off">
+              <div id="itmHsnSuggest" class="list-group itm-hsn-suggest d-none"></div>
+              <div class="form-text">Search public HSN/SAC master (open data).</div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="itmHsnType">HSN / SAC Type</label>
+              <select class="form-select" id="itmHsnType">
+                <option value="SAC">SAC (Service)</option>
+                <option value="HSN">HSN (Goods)</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="itmUnit">Unit</label>
+              <input type="text" class="form-control" id="itmUnit" maxlength="30" value="NOS">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="itmRate">Default Rate</label>
+              <input type="number" class="form-control" id="itmRate" step="0.01" min="0" value="0">
+            </div>
+            <div class="col-md-4">
+              <div class="form-check mt-4 pt-1">
+                <input class="form-check-input" type="checkbox" id="itmGstApplicable" checked>
+                <label class="form-check-label" for="itmGstApplicable">GST Applicable</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="itmGst">GST Rate %</label>
+              <input type="number" class="form-control" id="itmGst" step="0.01" min="0" max="100" value="18">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="itmOpeningQty">Qty</label>
+              <input type="number" class="form-control" id="itmOpeningQty" step="0.001" min="0" value="0">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="itmOpeningRate">Rate</label>
+              <input type="number" class="form-control" id="itmOpeningRate" step="0.01" min="0" value="0">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="itmOpeningBalance">Opening Balance</label>
+              <input type="number" class="form-control" id="itmOpeningBalance" step="0.01" min="0" value="0" readonly>
+              <div class="form-text">Qty × Rate</div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="itmOpeningDate">Date</label>
+              <input type="date" class="form-control" id="itmOpeningDate">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="itmOrderNo">Order No.</label>
+              <input type="number" class="form-control" id="itmOrderNo" value="100" step="1">
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="itmDescription">Description</label>
+              <textarea class="form-control" id="itmDescription" rows="2" maxlength="500"></textarea>
+            </div>
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="itmIsActive" checked>
+                <label class="form-check-label" for="itmIsActive">Active</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="itmSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ITEM_MASTER_API = {
+    list: {{ url_for('masters_item.list_records') | tojson }},
+    record: {{ url_for('masters_item.get_record', item_id=0) | tojson }},
+    create: {{ url_for('masters_item.create_record') | tojson }},
+    update: {{ url_for('masters_item.update_record', item_id=0) | tojson }},
+    delete: {{ url_for('masters_item.delete_record', item_id=0) | tojson }},
+    hsnSearch: {{ url_for('masters_item.hsn_search') | tojson }}
+  };
+  window.ITEM_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
+  window.ITEM_MASTER_CSRF = {{ csrf_token() | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260723gstob"></script>
+{% endblock %}

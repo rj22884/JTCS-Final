@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ subject | default('JTCS ERP') }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f6fb;font-family:Segoe UI,Arial,sans-serif;color:#1a1a2e;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f6fb;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);">
+          <tr>
+            <td style="background:#243B7B;padding:24px 32px;color:#ffffff;text-align:center;">
+              {% if logo_url %}
+              <img src="{{ logo_url }}" alt="{{ company_name }}" style="max-height:48px;margin-bottom:12px;">
+              {% endif %}
+              <h1 style="margin:0;font-size:20px;font-weight:600;">{{ company_name }}</h1>
+              <p style="margin:8px 0 0;font-size:13px;opacity:.9;">{{ app_name }}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              {% block body %}{% endblock %}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px;background:#f8f9fc;border-top:1px solid #e8ebf2;font-size:12px;color:#666;text-align:center;">
+              <div>Support: <a href="mailto:{{ support_email }}" style="color:#243B7B;">{{ support_email }}</a></div>
+              <div style="margin-top:8px;">&copy; {{ current_year }} {{ company_name }}. All rights reserved.</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

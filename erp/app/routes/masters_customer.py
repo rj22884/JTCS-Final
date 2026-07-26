@@ -1,0 +1,192 @@
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+
+from app.customer_master.constants import (
+    CUSTOMER_STATUSES,
+    CUSTOMER_TYPES,
+    GENDERS,
+    GST_FILING_FREQUENCIES,
+    TAB_LABELS,
+)
+from app.decorators import login_required, require_delete_reauth
+from app.services.customer_group_service import CustomerGroupService
+from app.services.customer_master_service import (
+    CustomerMasterService,
+    DuplicateFieldError,
+    DuplicateMobileWarning,
+)
+from app.services.menu_service import MenuService
+
+bp = Blueprint("masters_customer", __name__, url_prefix="/masters/customer")
+MENU_PATH = "/masters/customer"
+
+
+@bp.route("", strict_slashes=False)
+@bp.route("/", strict_slashes=False)
+@login_required
+def index():
+    service = CustomerMasterService()
+    group_service = CustomerGroupService()
+    menu_service = MenuService()
+    ui = service.ui_config()
+    cm_api = {
+        "list": url_for("masters_customer.list_records"),
+        "get": url_for("masters_customer.get_record", customer_id=0),
+        "save": url_for("masters_customer.save_record"),
+        "delete": url_for("masters_customer.delete_record", customer_id=0),
+        "checkDuplicates": url_for("masters_customer.check_duplicates"),
+        "incomeTaxPortalLogin": url_for("masters_customer.income_tax_portal_login"),
+        "incomeTaxPortalStatus": url_for("masters_customer.income_tax_portal_status"),
+    }
+    return render_template(
+        "masters/customer_master.html",
+        page_title="Customer Master",
+        breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
+        initial_rows=service.list_records(),
+        customer_groups=ui["groups"],
+        customer_types=CUSTOMER_TYPES,
+        customer_statuses=CUSTOMER_STATUSES,
+        genders=GENDERS,
+        gst_filing_frequencies=GST_FILING_FREQUENCIES,
+        group_tabs=ui["group_tabs"],
+        tab_labels=TAB_LABELS,
+        ui_config=ui,
+        cm_api=cm_api,
+    )
+
+
+@bp.route("/api/records", strict_slashes=False)
+@login_required
+def list_records():
+    search = (request.args.get("search") or "").strip() or None
+    customer_group = (request.args.get("customer_group") or "").strip() or None
+    status = (request.args.get("status") or "").strip() or None
+    rows = CustomerMasterService().list_records(
+        search=search,
+        customer_group=customer_group,
+        status=status,
+    )
+    return jsonify({"ok": True, "rows": rows, "count": len(rows)})
+
+
+@bp.route("/api/records/<int:customer_id>", strict_slashes=False)
+@login_required
+def get_record(customer_id: int):
+    try:
+        record = CustomerMasterService().get_record(customer_id)
+        return jsonify({"ok": True, "record": record})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/api/check-duplicates", strict_slashes=False)
+@login_required
+def check_duplicates():
+    customer_id = None
+    raw_id = request.args.get("customer_id")
+    if raw_id not in (None, "", "0"):
+        try:
+            customer_id = int(raw_id)
+        except (TypeError, ValueError):
+            customer_id = None
+    result = CustomerMasterService().check_duplicates(
+        pan=(request.args.get("pan") or "").strip() or None,
+        aadhaar=(request.args.get("aadhaar") or "").strip() or None,
+        mobile=(request.args.get("mobile") or "").strip() or None,
+        customer_id=customer_id,
+    )
+    return jsonify({"ok": True, **result})
+
+
+@bp.route("/api/records", methods=["POST"], strict_slashes=False)
+@login_required
+def save_record():
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    customer_id = None
+    raw_id = payload.get("customer_id")
+    if raw_id not in (None, "", "0"):
+        try:
+            customer_id = int(raw_id)
+        except (TypeError, ValueError):
+            customer_id = None
+    allow_duplicate_mobile = str(
+        payload.get("allow_duplicate_mobile") or payload.get("confirm_duplicate_mobile") or ""
+    ).lower() in {"1", "true", "yes", "on"}
+    try:
+        record = CustomerMasterService().save_record(
+            payload,
+            customer_id=customer_id,
+            allow_duplicate_mobile=allow_duplicate_mobile,
+        )
+        message = "Customer updated successfully." if customer_id else "Customer added successfully."
+        return jsonify({"ok": True, "record": record, "message": message})
+    except DuplicateFieldError as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+                "duplicate_type": exc.field,
+                "duplicate": exc.duplicate,
+                "can_edit": True,
+            }
+        ), 409
+    except DuplicateMobileWarning as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "error": str(exc),
+                "duplicate_type": "mobile_number",
+                "mobile_duplicates": exc.duplicates,
+                "can_confirm": True,
+            }
+        ), 409
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/api/records/<int:customer_id>/delete", methods=["POST"], strict_slashes=False)
+@login_required
+@require_delete_reauth
+def delete_record(customer_id: int):
+    try:
+        message = CustomerMasterService().delete_record(customer_id)
+        return jsonify({"ok": True, "message": message})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/api/portal/income-tax-login", methods=["POST"], strict_slashes=False)
+@login_required
+def income_tax_portal_login():
+    """Open Income Tax e-Filing login, fill credentials, then sync profile into job result."""
+    from app.services.customer_portal_sync_service import CustomerPortalSyncService
+
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    user_id = (payload.get("user_id") or payload.get("pan") or "").strip()
+    password = payload.get("password") or payload.get("income_tax_password") or ""
+    try:
+        result = CustomerPortalSyncService().launch_income_tax_login(user_id, password)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Unable to open Income Tax portal: {exc}"}), 500
+
+
+@bp.route("/api/portal/income-tax-status", strict_slashes=False)
+@login_required
+def income_tax_portal_status():
+    from app.services.customer_portal_sync_service import CustomerPortalSyncService
+
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "job_id is required."}), 400
+    job = CustomerPortalSyncService().get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Sync job not found."}), 404
+    return jsonify({"ok": True, "job": job})
+
+
+@bp.route("/exit", strict_slashes=False)
+@login_required
+def exit_module():
+    return redirect(url_for("dashboard.index"))

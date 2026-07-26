@@ -1,0 +1,141 @@
+{# HTML invoice preview (same-page modal) — mirrors PDF layout #}
+{% set dash = '—' %}
+{% macro money(v) -%}
+  {{ '%.2f'|format((v if v is not none else 0)|float) }}
+{%- endmacro %}
+{% macro dmy(iso) -%}
+  {%- if iso and iso|length >= 10 -%}
+    {{ iso[8:10] }}-{{ iso[5:7] }}-{{ iso[0:4] }}
+  {%- else -%}
+    {{ iso or dash }}
+  {%- endif -%}
+{%- endmacro %}
+{% set pos = invoice.place_of_supply or dash %}
+{% if invoice.place_of_supply_code %}
+  {% set pos = pos ~ ' (' ~ invoice.place_of_supply_code ~ ')' %}
+{% endif %}
+
+<div class="inv-html-preview">
+  <div class="inv-html-meta">Original for Recipient</div>
+
+  <div class="inv-html-top">
+    <div class="inv-html-company">
+      {% if logo_url %}
+      <img class="inv-html-logo" src="{{ logo_url }}" alt="JTCS">
+      {% endif %}
+      <div class="inv-html-brand">{{ company.name }}</div>
+      <div>GSTIN / UIN: <strong>{{ company.gstin }}</strong> ({{ company.state|upper }})</div>
+      {% if company.cin %}<div>CIN: {{ company.cin }}</div>{% endif %}
+      <div>PAN: {{ company.pan }}</div>
+      <div>{{ company.address }}</div>
+    </div>
+    <div class="inv-html-right">
+      <div>Invoice Value: <strong>Rs. {{ money(invoice.invoice_value) }}</strong></div>
+      <div>Invoice No: <strong>{{ invoice.invoice_no }}</strong></div>
+      <div>Invoice Date: <strong>{{ dmy(invoice.invoice_date) }}</strong></div>
+    </div>
+  </div>
+
+  <h2 class="inv-html-title">Tax Invoice</h2>
+
+  <div class="inv-html-cust">
+    <div>
+      <div><strong>Customer Name:</strong> {{ invoice.customer_name }}</div>
+      <div><strong>Billing / Shipping Address:</strong> {{ invoice.billing_address or dash }}</div>
+      <div><strong>Contact Mobile No.:</strong> {{ invoice.contact_mobile or dash }}</div>
+      <div><strong>Customer GSTIN:</strong> {{ invoice.customer_gstin or dash }}</div>
+      <div><strong>Place of Supply:</strong> {{ pos }}</div>
+    </div>
+    <div>
+      <div><strong>Contact Person:</strong> {{ invoice.contact_person or dash }}</div>
+      <div><strong>Contact Email:</strong> {{ invoice.contact_email or dash }}</div>
+      <div><strong>Customer ID:</strong> {{ invoice.customer_id or dash }}</div>
+      <div><strong>Reverse Charge:</strong> {{ 'Yes' if invoice.reverse_charge else 'No' }}</div>
+    </div>
+  </div>
+
+  <table class="inv-html-items">
+    <thead>
+      <tr>
+        <th>Sr.</th>
+        <th>Particulars</th>
+        <th>HSN / SAC</th>
+        <th>Unit(s)</th>
+        <th class="text-end">Rate</th>
+        <th class="text-end">Discount</th>
+        <th class="text-end">Taxable Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in invoice.lines or [] %}
+      <tr>
+        <td>{{ line.sr_no }}</td>
+        <td>{{ line.particulars or dash }}</td>
+        <td>{{ line.hsn_sac or '' }}</td>
+        <td>{{ money(line.qty) }} {{ line.unit or '' }}</td>
+        <td class="text-end">{{ money(line.rate) }}</td>
+        <td class="text-end">{{ money(line.discount_amount) }}</td>
+        <td class="text-end">{{ money(line.taxable_value) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="text-muted">No lines</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="inv-html-words"><strong>Amount (In Words):</strong> {{ invoice.amount_in_words or dash }}</div>
+
+  <table class="inv-html-totals">
+    <tr><td>List Price:</td><td class="text-end">{{ money(invoice.list_price) }}</td></tr>
+    <tr><td>Discount:</td><td class="text-end">{{ money(invoice.discount_amount) }}</td></tr>
+    <tr><td>Taxable Value:</td><td class="text-end">{{ money(invoice.taxable_value) }}</td></tr>
+    {% if invoice.tax_type == 'CGST_SGST' %}
+    <tr><td>CGST @ {{ money(invoice.cgst_rate) }}%:</td><td class="text-end">{{ money(invoice.cgst_amount) }}</td></tr>
+    <tr><td>SGST @ {{ money(invoice.sgst_rate) }}%:</td><td class="text-end">{{ money(invoice.sgst_amount) }}</td></tr>
+    {% else %}
+    <tr><td>IGST @ {{ money(invoice.igst_rate) }}%:</td><td class="text-end">{{ money(invoice.igst_amount) }}</td></tr>
+    {% endif %}
+    <tr class="inv-html-total-row"><td>Invoice Value:</td><td class="text-end">{{ money(invoice.invoice_value) }}</td></tr>
+  </table>
+
+  {% if invoice.pay_account_number or invoice.pay_bank_name or invoice.pay_upi_id %}
+  <div class="inv-html-pay">
+    <div class="inv-html-pay-left">
+      <div class="fw-semibold mb-1">Payment / Bank Details</div>
+      <div><strong>Bank Name:</strong> {{ invoice.pay_bank_name or dash }}</div>
+      <div><strong>Account Holder:</strong> {{ invoice.pay_account_holder or dash }}</div>
+      <div><strong>Account Number:</strong> {{ invoice.pay_account_number or dash }}</div>
+      <div><strong>IFSC Code:</strong> {{ invoice.pay_ifsc or dash }}</div>
+      <div><strong>Branch:</strong> {{ invoice.pay_branch or dash }}</div>
+      <div><strong>Account Type:</strong> {{ invoice.pay_account_type or dash }}</div>
+      <div><strong>UPI ID:</strong> {{ invoice.pay_upi_id or dash }}</div>
+    </div>
+    <div class="inv-html-pay-qr">
+      {% if qr_data_uri %}
+      <img src="{{ qr_data_uri }}" alt="UPI QR">
+      <div class="small">Scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
+      {% else %}
+      <div class="text-muted small">UPI QR not available<br>(set UPI ID on bank master).</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="inv-html-sign">
+    <div>for {{ company.name }}</div>
+    <div class="inv-html-sign-space"></div>
+    <div><strong>Authorised Signatory</strong></div>
+  </div>
+
+  <div class="inv-html-terms">
+    <div><strong>Terms &amp; Conditions:</strong></div>
+    <div>All disputes are subject to Haldwani / Nainital jurisdiction only.</div>
+  </div>
+
+  <div class="inv-html-foot">
+    {{ company.name }}, {{ company.address }}<br>
+    {{ company.website or '' }}{% if company.website and company.email %} | {% endif %}{{ company.email or '' }}{% if company.phone %} | {{ company.phone }}{% endif %}
+    <br>
+    This is a computer-generated invoice and does not require a physical signature.
+  </div>
+</div>

@@ -1,0 +1,17 @@
+.fu-master-card .table {
+  font-size: 13px;
+}
+
+.fu-master-grid-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.fu-master-actions .btn {
+  padding: 0.15rem 0.4rem;
+  font-size: 12px;
+}
+
+.fu-master-actions .btn + .btn {
+  margin-left: 0.15rem;
+}

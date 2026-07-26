@@ -1,0 +1,503 @@
+.stamp-erp-page { font-size: 13px; display: flex; flex-direction: column; min-height: calc(100vh - 220px); }
+.jtcs-workspace:has(.stamp-erp-page) .jtcs-content { overflow: auto; }
+.stamp-page-topbar { flex-shrink: 0; }
+.stamp-mobile-gate { padding: 0.85rem 1rem !important; }
+.stamp-mobile-gate-top { max-width: none; padding: 0.65rem 0.85rem !important; }
+.stamp-filter-bar { padding: 0.65rem 0.85rem !important; }
+.stamp-filter-bar .form-label { font-size: 11px; font-weight: 600; margin-bottom: 0.15rem; }
+.stamp-period-panel,
+.stamp-data-grid-panel { padding: 0.65rem 0.85rem !important; flex-shrink: 0; }
+.stamp-period-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+@media (max-width: 1200px) {
+  .stamp-period-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 992px) {
+  .stamp-period-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 576px) {
+  .stamp-period-grid { grid-template-columns: 1fr; }
+}
+.stamp-period-card {
+  border: 1px solid #d4dbe8;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  background: linear-gradient(180deg, #fff 0%, #f8faff 100%);
+  min-height: 88px;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+  text-align: left;
+  width: 100%;
+  display: block;
+  font: inherit;
+  color: inherit;
+}
+.stamp-period-card:hover {
+  border-color: #9aa8c7;
+  box-shadow: 0 2px 8px rgba(36, 59, 123, 0.12);
+}
+.stamp-period-card.is-active {
+  border-color: #243b7b;
+  box-shadow: 0 0 0 2px rgba(36, 59, 123, 0.18);
+  transform: translateY(-1px);
+}
+.stamp-period-card:focus-visible {
+  outline: 2px solid #243b7b;
+  outline-offset: 2px;
+}
+.stamp-period-card .period-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5c667a;
+  line-height: 1.3;
+  margin-bottom: 0.35rem;
+}
+.stamp-period-card .period-card-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #243b7b;
+  line-height: 1.2;
+}
+.stamp-period-card.is-sale { border-left: 4px solid #4361ee; }
+.stamp-period-card.is-payment { border-left: 4px solid #7209b7; }
+.stamp-period-card.is-cash { border-left: 4px solid #2a9d8f; }
+.stamp-period-card.is-noncash { border-left: 4px solid #e76f51; }
+.stamp-period-card.is-shcil { border-left: 4px solid #2d6a4f; }
+.stamp-data-grid-panel { flex: 1 1 auto; min-height: 180px; display: flex; flex-direction: column; }
+.stamp-data-grid-wrap {
+  flex: 1 1 auto;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+}
+#stampDataGrid {
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+  font-size: 13.5px;
+}
+#stampDataGrid th,
+#stampDataGrid td {
+  padding: 0.28rem 0.4rem;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: 1%;
+}
+#stampDataGrid .stamp-col-grow {
+  width: auto;
+  max-width: 14rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#stampDataGrid .stamp-col-cert {
+  width: auto;
+  max-width: 16rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#stampDataGrid .stamp-col-num,
+#stampDataGrid .stamp-col-date,
+#stampDataGrid .stamp-col-mobile,
+#stampDataGrid .stamp-col-daily {
+  width: 1%;
+  white-space: nowrap;
+}
+#stampDataGrid .stamp-col-num .stamp-col-filter,
+#stampDataGrid .stamp-col-date .stamp-col-filter,
+#stampDataGrid .stamp-col-daily .stamp-col-filter {
+  min-width: 3.25rem;
+  max-width: 4.5rem;
+  width: 100%;
+}
+#stampDataGrid .stamp-col-mobile .stamp-col-filter {
+  min-width: 5.5rem;
+  max-width: 6.5rem;
+  width: 100%;
+}
+.stamp-data-grid-wrap thead th {
+  position: sticky;
+  top: 0;
+  background: #f8f9fc;
+  z-index: 2;
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.stamp-data-grid-wrap thead tr.stamp-filter-row th {
+  top: 2.15rem;
+  z-index: 1;
+  background: #f8faff !important;
+  vertical-align: middle;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+}
+.stamp-data-grid-wrap tbody tr { cursor: pointer; }
+.stamp-data-grid-wrap tbody tr.table-active { background: #eef2ff; }
+.stamp-data-grid-wrap tbody tr.stamp-row-ocr,
+.stamp-data-grid-wrap tbody tr.stamp-row-ocr td {
+  color: #5a9e5a !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-ocr.table-active {
+  background: #edf7ed !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-ocr.table-active td {
+  color: #4caf50 !important;
+}
+.stamp-data-grid-wrap th.stamp-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.stamp-data-grid-wrap th.stamp-sortable:hover,
+.stamp-data-grid-wrap th.stamp-sorted {
+  color: #243b7b;
+}
+.stamp-sort-icon {
+  font-size: 0.72rem;
+  opacity: 0.55;
+  margin-left: 0.12rem;
+}
+.stamp-col-filter {
+  min-width: 4.5rem;
+  max-width: 9rem;
+  width: 100%;
+  font-size: 12px;
+  padding: 0.15rem 0.3rem;
+}
+.stamp-card-detail-wrap {
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+}
+.stamp-grid-actions-col {
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 0.35rem !important;
+  padding-right: 0.35rem !important;
+}
+.stamp-grid-action-btn {
+  padding: 0.12rem 0.32rem;
+  font-size: 12px;
+  line-height: 1.2;
+}
+@media (max-width: 991px) {
+  .stamp-page-topbar .order-1 { margin-bottom: 0.25rem; }
+}
+.jtcs-ribbon-toolbar:empty { display: none; }
+.jtcs-workspace:has(.stamp-erp-page) .jtcs-quick-toolbar { display: none; }
+.stamp-mobile-gate .form-label { font-size: 13px; font-weight: 700; color: #1a1f36; }
+.stamp-mobile-gate-top { max-width: none; }
+
+/* Entry popup — purple theme (Stationery Entry style) */
+.stamp-entry-modal {
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  box-shadow: none;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.stamp-entry-modal-dialog {
+  margin: 0;
+  max-width: 100%;
+  width: 100%;
+  height: 100vh;
+}
+.stamp-entry-modal-header {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #fff;
+  padding: 0.45rem 0.85rem;
+  border-bottom: 0;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+.stamp-entry-modal-header .modal-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+}
+.stamp-entry-mobile-info { color: rgba(255, 255, 255, 0.92) !important; text-align: right; }
+.stamp-entry-mobile-info .stamp-mobile-count { color: #fecaca !important; }
+.stamp-entry-mobile-info .stamp-mobile-label { color: rgba(255, 255, 255, 0.95) !important; }
+.stamp-entry-mobile-info .stamp-mobile-customer-list { color: #fde047 !important; }
+.stamp-entry-expand-btn {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.12);
+}
+.stamp-entry-modal-body {
+  background: #f8f7fc;
+  padding: 0.35rem 0.55rem 0.4rem !important;
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#stampMainWorkspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#stampActivityForm {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#stampFormLayout {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0 !important;
+}
+#stampFormContent {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.stamp-entry-section {
+  background: #fff;
+  border: 1px solid #e9e4f5;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.3rem;
+  flex-shrink: 0;
+}
+.stamp-entry-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1e1b4b;
+  margin-bottom: 0.3rem;
+}
+.stamp-entry-section-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: 50%;
+  background: #4361ee;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stamp-entry-field-row {
+  --bs-gutter-x: 0.35rem;
+  --bs-gutter-y: 0.2rem;
+}
+.stamp-section-locked {
+  background: #f3f0fa;
+  border-color: #ddd6fe;
+}
+.stamp-section-locked .form-label { color: #6b7280; }
+.stamp-field-manual-disabled,
+.stamp-section-manual-locked .form-control:disabled {
+  background: #f3f4f6 !important;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+.stamp-field-readonly,
+.stamp-section-locked .form-control[readonly] {
+  background: #ede9fe !important;
+  color: #374151;
+  cursor: default;
+}
+.stamp-entry-save-btn {
+  background: #7c3aed !important;
+  border-color: #7c3aed !important;
+  color: #fff !important;
+  font-weight: 600;
+  min-width: 5rem;
+}
+.stamp-entry-save-btn:hover,
+.stamp-entry-save-btn:focus {
+  background: #6d28d9 !important;
+  border-color: #6d28d9 !important;
+  color: #fff !important;
+}
+.stamp-entry-add-payment {
+  color: #7c3aed;
+  border-color: #7c3aed;
+  background: #fff;
+  font-weight: 600;
+}
+.stamp-entry-add-payment:hover {
+  background: #7c3aed;
+  color: #fff;
+  border-color: #7c3aed;
+}
+
+.stamp-mode-bar .form-check-label { font-weight: 600; font-size: 13px; }
+.stamp-mobile-info { text-align: right; font-size: 12px; color: #6c757d; max-width: 320px; }
+.stamp-mobile-count { color: #dc3545; font-weight: 700; margin-right: 0.25rem; }
+.stamp-mobile-label { color: #6c757d; }
+.stamp-mobile-customer-list { color: #ffc107; margin-top: 0.15rem; line-height: 1.35; }
+.stamp-mobile-customer-item { display: inline; }
+.stamp-mobile-customer-item:not(:last-child)::after { content: ", "; }
+.stamp-payment-lines { display: flex; flex-direction: column; gap: 0.45rem; }
+.stamp-payment-line {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+.stamp-payment-line .form-label { font-size: 11px; margin-bottom: 0.1rem; }
+@media (max-width: 768px) {
+  .stamp-payment-line { grid-template-columns: 1fr; }
+}
+.stamp-page-toolbar { flex-shrink: 0; background: #fff; border-radius: 6px; border: 1px solid #e9e4f5; }
+.stamp-page-toolbar .btn { min-width: 3.5rem; font-size: 12px; padding: 0.2rem 0.45rem; }
+.stamp-form-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  padding: 0.35rem 0 0;
+  border-top: 1px solid #e9e4f5;
+  margin-top: 0.35rem;
+}
+.stamp-toolbar-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  align-items: center;
+}
+.stamp-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  padding-right: 0.55rem;
+  border-right: 1px solid #d4dbe8;
+}
+.stamp-toolbar-group:last-child { border-right: 0; padding-right: 0; }
+#stampFormLayout.stamp-layout-manual #stampFormContent { flex: 0 0 100%; max-width: 100%; }
+#stampMainWorkspace.stamp-mode-manual #stampOcrEngineAlert { display: none !important; }
+#stampSearchPanel { flex-shrink: 0; max-height: 160px; overflow: hidden; }
+#stampPartialOcrAlert { padding: 0.25rem 0.5rem !important; margin-bottom: 0.25rem !important; font-size: 11px; }
+.stamp-mode-bar { flex-shrink: 0; background: #fff; border: 1px solid #e9e4f5 !important; border-radius: 6px; }
+.stamp-section-card { padding: 0.65rem 0.85rem !important; margin-bottom: 0.5rem !important; }
+.stamp-section-head {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f4e79;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid #d4dbe8;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.55rem;
+}
+.stamp-erp-form .form-label {
+  font-size: 10px;
+  font-weight: 600;
+  margin-bottom: 0.05rem;
+  color: #1a1f36;
+}
+.stamp-search-grid-wrap { max-height: 120px; overflow: auto; flex-shrink: 0; }
+.stamp-search-grid-wrap tbody tr { cursor: pointer; }
+.stamp-search-grid-wrap tbody tr.table-active { background: #ede9fe; }
+.stamp-erp-form .form-control,
+.stamp-erp-form .form-select {
+  min-height: 1.65rem;
+  font-size: 12px;
+  padding: 0.15rem 0.35rem;
+  border-color: #d8d2e9;
+}
+.stamp-erp-form .form-control:focus,
+.stamp-erp-form .form-select:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 0.15rem rgba(124, 58, 237, 0.15);
+}
+.stamp-image-panel { width: 140px; flex-shrink: 0; }
+.stamp-photo-box {
+  width: 140px;
+  height: 160px;
+  border: 2px dashed #7c3aed;
+  background: #fafafa;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+}
+.stamp-photo-box.has-image { cursor: zoom-in; }
+.stamp-photo-box.dragover { border-color: #7c3aed; background: #f5f3ff; }
+.stamp-photo-placeholder {
+  text-align: center;
+  font-size: 10px;
+  color: #5c667a;
+  pointer-events: none;
+}
+.stamp-photo-placeholder i { font-size: 28px; color: #7c3aed; display: block; margin-bottom: 4px; }
+.stamp-photo-preview { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.stamp-photo-pdf { text-align: center; color: #7c3aed; font-size: 10px; }
+.stamp-photo-pdf i { font-size: 40px; display: block; }
+.stamp-photo-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.9);
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #7c3aed;
+  font-weight: 600;
+}
+.stamp-image-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 6px;
+}
+.stamp-image-actions .btn { font-size: 11px; padding: 4px 6px; }
+.stamp-ocr-panel {
+  border: 1px solid #e9e4f5;
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #fff;
+}
+.stamp-ocr-label { font-size: 10px; font-weight: 700; color: #7c3aed; text-transform: uppercase; }
+.stamp-ocr-status-text { font-size: 11px; color: #5c667a; margin-top: 2px; }
+.stamp-ocr-status-text.is-reading { color: #7c3aed; font-weight: 600; }
+.stamp-ocr-status-text.is-completed { color: #198754; font-weight: 600; }
+.stamp-ocr-status-text.is-failed { color: #dc3545; font-weight: 600; }
+.stamp-ocr-confidence { font-size: 10px; color: #5c667a; margin-top: 4px; }
+#stampZoomModal .modal-body {
+  background: #2b2b2b;
+  height: 70vh;
+  overflow: hidden;
+}
+#stampZoomViewport {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#stampZoomImage {
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+}

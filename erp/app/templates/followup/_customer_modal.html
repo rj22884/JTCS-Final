@@ -1,0 +1,62 @@
+<div class="modal fade" id="fuCustomerModal" tabindex="-1" aria-labelledby="fuCustomerModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="fuCustomerModalTitle">Add Customer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="fuCustomerForm" novalidate>
+          <div class="mb-2">
+            <label class="form-label fu-required" for="fuCustName">Name</label>
+            <input type="text" class="form-control" id="fuCustName" name="customer_name" maxlength="255" required>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuCustMobile">Mobile</label>
+              <input type="text" class="form-control" id="fuCustMobile" name="mobile_number" maxlength="15" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuCustPan">PAN</label>
+              <input type="text" class="form-control text-uppercase" id="fuCustPan" name="pan_number" maxlength="10" required>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuCustAadhaar">Aadhaar</label>
+              <input type="text" class="form-control" id="fuCustAadhaar" name="aadhaar_number" maxlength="12" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuCustPincode">Pincode</label>
+              <input type="text" class="form-control" id="fuCustPincode" name="pincode" maxlength="10" required>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label fu-required" for="fuCustAddr1">Address Line 1</label>
+            <input type="text" class="form-control" id="fuCustAddr1" name="address_line1" maxlength="300" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="fuCustAddr2">Address Line 2</label>
+            <input type="text" class="form-control" id="fuCustAddr2" name="address_line2" maxlength="300">
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="fuCustState">State</label>
+              <input type="text" class="form-control" id="fuCustState" name="state" maxlength="100">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="fuCustCountry">Country</label>
+              <input type="text" class="form-control" id="fuCustCountry" name="country" maxlength="100" value="India">
+            </div>
+          </div>
+          <div id="fuCustomerFormError" class="alert alert-danger py-2 small d-none"></div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="fuCustomerSaveBtn">Save Customer</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>

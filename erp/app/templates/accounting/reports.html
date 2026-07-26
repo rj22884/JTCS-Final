@@ -1,0 +1,69 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('accounting_invoice.invoice_index') }}" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" title="Generate Invoice">
+    <i class="bi bi-receipt"></i>
+    <span>Generate Invoice</span>
+  </a>
+  <a href="{{ url_for('accounting_invoice.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div style="min-width: 200px;">
+      <label class="form-label" for="rptSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="rptSearch" placeholder="Invoice no / customer...">
+    </div>
+    <div>
+      <label class="form-label" for="rptFrom">From</label>
+      <input type="date" class="form-control form-control-sm" id="rptFrom">
+    </div>
+    <div>
+      <label class="form-label" for="rptTo">To</label>
+      <input type="date" class="form-control form-control-sm" id="rptTo">
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="rptRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="rptCount">0 invoices</span>
+  </div>
+  <div id="rptStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Invoice No</th>
+          <th>Date</th>
+          <th>Customer</th>
+          <th>GSTIN</th>
+          <th>Tax</th>
+          <th class="text-end">Taxable</th>
+          <th class="text-end">Tax Amt</th>
+          <th class="text-end">Invoice Value</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rptBody"></tbody>
+    </table>
+  </div>
+  <div id="rptEmpty" class="small text-muted py-3">No invoices yet. Create one from Generate Invoice.</div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.INVOICE_REPORT_API = {
+    list: {{ url_for('accounting_invoice.api_list_invoices') | tojson }},
+    pdf: {{ url_for('accounting_invoice.download_pdf', invoice_id=0) | tojson }},
+    delete: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0) | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/gst_invoice_reports.js') }}?v=20260718rpt"></script>
+{% endblock %}

@@ -1,0 +1,120 @@
+.gm-card {
+  background: var(--jtcs-card-bg);
+  border: 1px solid var(--jtcs-border);
+  border-radius: 8px;
+}
+
+.gm-card .table {
+  font-size: 13px;
+  margin-bottom: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.gm-grid-wrap {
+  max-height: 520px;
+  overflow: auto;
+  border: 1px solid #d8e0ec;
+  border-radius: 6px;
+  background: #fff;
+}
+
+#gmGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #2e4a87 0%, var(--jtcs-primary) 100%);
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border-bottom: 2px solid #1a2f63;
+  padding: 0.65rem 0.75rem;
+  white-space: nowrap;
+}
+
+#gmGrid tbody td {
+  padding: 0.55rem 0.75rem;
+  vertical-align: middle;
+  border-bottom: 1px solid #e8edf4;
+  color: var(--jtcs-text);
+}
+
+#gmGrid tbody tr {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+#gmGrid tbody tr:nth-child(even) {
+  --bs-table-bg-type: #f7f9fc;
+  background-color: #f7f9fc;
+}
+
+#gmGrid tbody tr:nth-child(odd) {
+  background-color: #fff;
+}
+
+#gmGrid tbody tr:hover {
+  background-color: #eef3fa !important;
+}
+
+#gmGrid tbody tr.table-active,
+#gmGrid tbody tr.table-active > * {
+  --bs-table-bg-state: #fff9db;
+  --bs-table-bg-type: #fff9db;
+  --bs-table-bg: #fff9db;
+  --bs-table-accent-bg: #fff9db;
+  background-color: #fff9db !important;
+  color: var(--jtcs-text);
+}
+
+#gmGrid tbody tr.table-active:hover {
+  background-color: #fff3bf !important;
+}
+
+#gmGrid tbody tr.table-active td {
+  border-bottom-color: #f0e6a8;
+}
+
+#gmGrid tbody td strong {
+  color: #1e3a5f;
+  font-weight: 600;
+}
+
+.gm-tabs-cell code {
+  font-size: 11px;
+  color: #334155;
+  background: #e8eef6;
+  border: 1px solid #d4deeb;
+  border-radius: 3px;
+  padding: 0.05rem 0.3rem;
+}
+
+#gmGrid .badge.bg-success {
+  background-color: #198754 !important;
+  font-weight: 500;
+  font-size: 11px;
+  padding: 0.35em 0.65em;
+}
+
+#gmGrid .badge.bg-secondary {
+  background-color: #6c757d !important;
+  font-weight: 500;
+  font-size: 11px;
+  padding: 0.35em 0.65em;
+}
+
+.gm-tab-checks .form-check-label {
+  font-size: 13px;
+}
+
+.gm-toolbar .btn {
+  white-space: nowrap;
+}
+
+#gmStatus.alert-success {
+  background-color: #e8f5e9;
+  border-color: #c8e6c9;
+  color: #2e7d32;
+}

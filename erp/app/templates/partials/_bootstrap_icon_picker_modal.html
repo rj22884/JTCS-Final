@@ -1,0 +1,39 @@
+<div class="modal fade" id="biPickerModal" tabindex="-1" aria-labelledby="biPickerModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="biPickerModalTitle">
+          <i class="bi bi-grid-3x3-gap me-2"></i>Browse Bootstrap Icons
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label" for="biPickerSearch">Search icons</label>
+          <input type="search" class="form-control" id="biPickerSearch"
+                 placeholder="Search by class name — person, gear, house, folder, cash..."
+                 autocomplete="off">
+        </div>
+
+        <div class="bi-picker-section">
+          <div class="bi-picker-section-title"><i class="bi bi-star-fill me-1"></i>Favorites</div>
+          <div class="bi-picker-quick-grid" id="biPickerFavorites"></div>
+        </div>
+
+        <div class="bi-picker-section">
+          <div class="bi-picker-section-title"><i class="bi bi-clock-history me-1"></i>Recently Used</div>
+          <div class="bi-picker-quick-grid" id="biPickerRecent"></div>
+        </div>
+
+        <div class="bi-picker-section">
+          <div class="bi-picker-section-title"><i class="bi bi-grid me-1"></i>All Icons</div>
+          <div id="biPickerEmpty" class="d-none">No icons match your search.</div>
+          <div class="row g-2" id="biPickerGrid"></div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>

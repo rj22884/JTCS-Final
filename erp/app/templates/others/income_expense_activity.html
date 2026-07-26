@@ -1,0 +1,335 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260722oiecashbank">
+{% endblock %}
+
+{% block content %}
+<div class="oie-activity-page">
+  <div class="jtcs-card mb-2 py-2 px-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <button type="button" class="btn btn-primary btn-sm" id="oieNewEntryBtn">
+        <i class="bi bi-plus-lg"></i> New Entry
+      </button>
+      <button type="button" class="btn btn-outline-primary btn-sm ms-auto" id="oieRefreshGridBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="oie-stats-row mb-2" id="oieStatsRow">
+    <button type="button" class="oie-stat-card oie-stat-income" data-kind-filter="Income" title="Filter Income">
+      <div class="oie-stat-label">Income</div>
+      <div class="oie-stat-value" id="oieStatIncomeAmount">0.00</div>
+      <div class="oie-stat-meta"><span id="oieStatIncomeCount">0</span> record(s)</div>
+      <div class="oie-stat-split">
+        <span class="oie-stat-split-item">Cash <strong id="oieStatIncomeCash">0.00</strong></span>
+        <span class="oie-stat-split-item">Bank <strong id="oieStatIncomeBank">0.00</strong></span>
+      </div>
+    </button>
+    <button type="button" class="oie-stat-card oie-stat-expense" data-kind-filter="Expense" title="Filter Expense">
+      <div class="oie-stat-label">Expense</div>
+      <div class="oie-stat-value" id="oieStatExpenseAmount">0.00</div>
+      <div class="oie-stat-meta"><span id="oieStatExpenseCount">0</span> record(s)</div>
+      <div class="oie-stat-split">
+        <span class="oie-stat-split-item">Cash <strong id="oieStatExpenseCash">0.00</strong></span>
+        <span class="oie-stat-split-item">Bank <strong id="oieStatExpenseBank">0.00</strong></span>
+      </div>
+    </button>
+    <button type="button" class="oie-stat-card oie-stat-misc" data-kind-filter="Misc." title="Filter Misc.">
+      <div class="oie-stat-label">Misc.</div>
+      <div class="oie-stat-value" id="oieStatMiscAmount">0.00</div>
+      <div class="oie-stat-meta"><span id="oieStatMiscCount">0</span> record(s)</div>
+      <div class="oie-stat-split">
+        <span class="oie-stat-split-item">Cash <strong id="oieStatMiscCash">0.00</strong></span>
+        <span class="oie-stat-split-item">Bank <strong id="oieStatMiscBank">0.00</strong></span>
+      </div>
+    </button>
+  </div>
+
+  <div class="jtcs-card oie-filter-card mb-2 p-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label mb-1" for="oieGridSearch">Search</label>
+        <input type="search" class="form-control form-control-sm" id="oieGridSearch"
+               placeholder="Bill no, name, mobile, category...">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="oieGridFilterKind">Type</label>
+        <select class="form-select form-select-sm" id="oieGridFilterKind">
+          <option value="">All</option>
+          <option value="Income">Income</option>
+          <option value="Expense">Expense</option>
+          <option value="Misc.">Misc.</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="oieGridDateFrom">Date From</label>
+        <input type="date" class="form-control form-control-sm" id="oieGridDateFrom">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="oieGridDateTo">Date To</label>
+        <input type="date" class="form-control form-control-sm" id="oieGridDateTo">
+      </div>
+      <div class="col-md-3">
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-primary btn-sm" id="oieApplyFilterBtn">Apply</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="oieClearFilterBtn">Clear</button>
+          <span class="small text-muted align-self-center ms-auto" id="oieGridCount"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="jtcs-card oie-grid-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="oie-section-head mb-0">Income / Expense Records</div>
+    </div>
+    <div class="table-responsive oie-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="oieDataGrid">
+        <thead>
+          <tr>
+            <th class="oie-sortable" data-sort-key="bill_no">Bill No. <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="ledger_kind">Type <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="work_date">Work Date <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable oie-col-category" data-sort-key="work_name">Category <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable oie-col-account" data-sort-key="account_label">Account <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable text-end" data-sort-key="amount">Amount <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="customer_name">Name <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="mobile_number">Mobile <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="remarks">Remarks <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable" data-sort-key="created_date">Created <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="oieDataGridBody"></tbody>
+      </table>
+    </div>
+    <div id="oieGridEmpty" class="small text-muted py-3 d-none">No income / expense records yet.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="oieEntryModal" tabindex="-1" aria-labelledby="oieEntryModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content oie-entry-modal">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="oieEntryModalTitle">New Entry</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="oieEntryForm" class="oie-entry-form" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="EntryID" id="EntryID" value="">
+
+          <div class="row g-3 mb-2">
+            <div class="col-md-4">
+              <label class="form-label oie-required" for="WorkDate">Work Date</label>
+              <input type="date" class="form-control" id="WorkDate" name="WorkDate" value="{{ default_date }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label oie-required" for="BillNo">Bill Number</label>
+              <input type="text" class="form-control" id="BillNo" name="BillNo" maxlength="50"
+                     placeholder="Auto-generated" autocomplete="off">
+            </div>
+            <div class="col-md-4">
+              <fieldset class="oie-entry-type-fieldset">
+                <legend class="oie-required">Income / Expense / Misc.</legend>
+                <div class="d-flex flex-wrap gap-4">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindIncome"
+                           value="Income" checked>
+                    <label class="form-check-label" for="LedgerKindIncome">Income</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindExpense"
+                           value="Expense">
+                    <label class="form-check-label" for="LedgerKindExpense">Expense</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindMisc"
+                           value="Misc.">
+                    <label class="form-check-label" for="LedgerKindMisc">Misc.</label>
+                  </div>
+                </div>
+              </fieldset>
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">2</span>
+              <span id="oieCategoryLabel">Income Categories</span>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <label class="form-label oie-required mb-0">Categories</label>
+              <button type="button" class="btn btn-sm oie-entry-add-payment" id="oieAddCategoryBtn">
+                <i class="bi bi-plus-lg"></i> Add Category
+              </button>
+              <span class="small ms-auto" id="oieCategorySummary"></span>
+            </div>
+            <div id="oieCategoryLines" class="oie-category-lines"></div>
+          </div>
+
+          <div class="row g-3 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="CustomerName">Name</label>
+              <div class="position-relative">
+                <div class="input-group">
+                  <input type="text" class="form-control" id="CustomerName" name="CustomerName" maxlength="255"
+                         placeholder="Search name, mobile, or PAN (min 2 chars)" autocomplete="off">
+                  <button type="button" class="btn btn-outline-success" id="oieAddCustomerBtn" title="Add Customer">
+                    <i class="bi bi-plus-lg"></i>
+                  </button>
+                </div>
+                <div id="oieCustomerResults" class="list-group oie-customer-results d-none"></div>
+                <div id="oieCustomerSelected" class="small text-muted mt-1 d-none"></div>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="MobileNumber">Mobile</label>
+              <input type="tel" class="form-control" id="MobileNumber" name="MobileNumber" maxlength="15"
+                     inputmode="numeric" placeholder="Mobile number">
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">3</span> Payment Details
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <label class="form-label oie-required mb-0">Payment Modes</label>
+              <button type="button" class="btn btn-sm oie-entry-add-payment" id="oieAddPaymentBtn">
+                <i class="bi bi-plus-lg"></i> Add Payment Mode
+              </button>
+              <span class="small ms-auto" id="oiePaymentSummary"></span>
+            </div>
+            <div id="oiePaymentLines" class="oie-payment-lines"></div>
+            {% if not payment_modes %}
+            <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+            {% endif %}
+          </div>
+
+          <div class="oie-entry-section mb-3">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">4</span> Remarks
+            </div>
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label" for="Remarks">Remarks</label>
+                <textarea class="form-control" id="Remarks" name="Remarks" rows="2" maxlength="500"
+                          placeholder="Optional remarks"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 oie-form-actions">
+            <button type="submit" class="btn btn-primary" id="oieSaveBtn">Save</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="oieCustomerModal" tabindex="-1" aria-labelledby="oieCustomerModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="oieCustomerModalTitle">Add Customer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="oieCustomerForm" novalidate>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustGroup">Customer Group</label>
+              <select class="form-select" id="oieCustGroup" name="customer_group" required>
+                <option value="">-- Select --</option>
+                {% for g in customer_groups %}
+                <option value="{{ g.code }}">{{ g.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustType">Customer Type</label>
+              <select class="form-select" id="oieCustType" name="customer_type" required>
+                <option value="">-- Select --</option>
+                {% for t in customer_types %}
+                <option value="{{ t }}">{{ t }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label oie-required" for="oieCustName">Customer Name</label>
+            <input type="text" class="form-control" id="oieCustName" name="customer_name" maxlength="255" required>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustPan">PAN</label>
+              <input type="text" class="form-control text-uppercase" id="oieCustPan" name="pan_number"
+                     maxlength="10" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustAadhaar">Aadhaar</label>
+              <input type="text" class="form-control" id="oieCustAadhaar" name="aadhaar_number"
+                     maxlength="12" inputmode="numeric" required>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustDob">Date of Birth</label>
+              <input type="date" class="form-control" id="oieCustDob" name="date_of_birth" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label oie-required" for="oieCustMobile">Mobile Number</label>
+              <input type="text" class="form-control" id="oieCustMobile" name="mobile_number"
+                     maxlength="15" inputmode="numeric" required>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label oie-required" for="oieCustEmail">Email ID</label>
+            <input type="email" class="form-control" id="oieCustEmail" name="email_id" maxlength="200" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="oieCustRemarks">Remarks</label>
+            <textarea class="form-control" id="oieCustRemarks" name="remarks" rows="2" maxlength="1000"
+                      placeholder="Optional"></textarea>
+          </div>
+          <div id="oieCustomerFormError" class="alert alert-danger py-2 small d-none"></div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="oieCustomerSaveBtn">Save Customer</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.OIE_INCOME_WORK_TYPES = {{ income_work_types | tojson }};
+  window.OIE_EXPENSE_WORK_TYPES = {{ expense_work_types | tojson }};
+  window.OIE_MISC_WORK_TYPES = {{ misc_work_types | tojson }};
+  window.OIE_BANK_ACCOUNTS = {{ payment_modes | tojson }};
+  window.OIE_GRID_URL = {{ url_for('others_income_expense.grid') | tojson }};
+  window.OIE_SAVE_URL = {{ url_for('others_income_expense.save_record') | tojson }};
+  window.OIE_NEXT_BILL_URL = {{ url_for('others_income_expense.next_bill_no') | tojson }};
+  window.OIE_SUB_WORKS_URL = {{ url_for('others_income_expense.sub_works') | tojson }};
+  window.OIE_RECORD_URL = {{ url_for('others_income_expense.record', entry_id=0) | tojson }};
+  window.OIE_DELETE_URL = {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }};
+  window.OIE_CUSTOMER_SEARCH_URL = {{ url_for('others_income_expense.customer_search') | tojson }};
+  window.OIE_CUSTOMER_CREATE_URL = {{ url_for('others_income_expense.customer_create') | tojson }};
+  window.OIE_CSRF = {{ csrf_token() | tojson }};
+  window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
+  window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260722oiecashbank"></script>
+{% endblock %}

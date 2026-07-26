@@ -1,0 +1,133 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="swAddBtn" title="Add New">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add New</span>
+  </button>
+  <a href="{{ url_for('masters_sub_work.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div style="min-width: 160px;">
+      <label class="form-label" for="swFilterKind">Ledger Kind</label>
+      <select class="form-select form-select-sm" id="swFilterKind">
+        <option value="">All</option>
+        {% for kind in ledger_kinds %}
+        <option value="{{ kind }}">{{ kind }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="swSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="swSearch"
+             placeholder="Work name or sub work...">
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="swAddNewBtn">
+      <i class="bi bi-plus-lg"></i> Add New
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="swRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="swCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <p class="small text-muted mb-3">
+    Sub Work Master is grouped from <strong>Work Master</strong> (<code>WorkMaster.LedgerKind</code>):
+    <strong>Income</strong> → <strong>Expense</strong> → <strong>Misc.</strong>
+    First choose Ledger Kind, then Work, then enter Sub Work.
+  </p>
+  <div id="swStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="swGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Ledger Kind</th>
+          <th>Work Name</th>
+          <th>Sub Work Type</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="swGridBody"></tbody>
+    </table>
+  </div>
+  <div id="swEmpty" class="small text-muted py-3 d-none">No sub works found.</div>
+</div>
+
+<div class="modal fade" id="swModal" tabindex="-1" aria-labelledby="swModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="swModalTitle">Add Sub Work</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="swForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" id="swId" value="">
+
+          <div class="mb-3">
+            <label class="form-label">Ledger Kind *</label>
+            <div class="d-flex flex-wrap gap-3">
+              {% for kind in ledger_kinds %}
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="swLedgerKind" id="swKind{{ loop.index }}"
+                       value="{{ kind }}" {% if kind == 'Misc.' %}checked{% endif %}>
+                <label class="form-check-label" for="swKind{{ loop.index }}">{{ kind }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="swWorkId">Work Name *</label>
+            <select class="form-select" id="swWorkId" required>
+              <option value="">-- Select Work --</option>
+            </select>
+            <div class="form-text">Works come from Masters → Income/Expense for the selected Ledger Kind.</div>
+          </div>
+
+          <div class="mb-0">
+            <label class="form-label" for="swSubWorkType">Sub Work Type *</label>
+            <input type="text" class="form-control" id="swSubWorkType" maxlength="100" required
+                   placeholder="e.g. New-Pan">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="swSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.SUB_WORK_API = {
+    list: {{ url_for('masters_sub_work.list_records') | tojson }},
+    works: {{ url_for('masters_sub_work.list_works') | tojson }},
+    record: {{ url_for('masters_sub_work.get_record', work_type_id=0) | tojson }},
+    create: {{ url_for('masters_sub_work.create_record') | tojson }},
+    update: {{ url_for('masters_sub_work.update_record', work_type_id=0) | tojson }},
+    delete: {{ url_for('masters_sub_work.delete_record', work_type_id=0) | tojson }}
+  };
+  window.SUB_WORK_INITIAL_ROWS = {{ initial_rows | tojson }};
+  window.SUB_WORK_GROUPS = {{ work_groups | tojson }};
+  window.SUB_WORK_CSRF = {{ csrf_token() | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260718sw3"></script>
+{% endblock %}

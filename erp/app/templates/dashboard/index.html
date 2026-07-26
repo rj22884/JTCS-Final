@@ -1,0 +1,443 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260721whatsnew">
+{% endblock %}
+
+{% block content %}
+<div class="dash-page">
+  <div class="dash-top-row">
+    <div class="dash-today-wrap">
+      <div class="jtcs-metric-card dash-today-card">
+        <div class="dash-today-header">
+          <div class="dash-today-title-wrap">
+            <span class="jtcs-metric-label dash-today-title mb-0">Today's Activity Summary</span>
+            <div class="small text-muted dash-today-subtitle">
+              System date · Recent Daily Transactions · {{ today_activity.system_date | display_date }}
+            </div>
+          </div>
+          <strong class="jtcs-metric-value dash-today-txn mb-0">{{ today_activity.transaction_count }} txn</strong>
+        </div>
+        <div class="dash-today-metrics">
+          <button type="button" class="dash-today-metric dash-today-metric-btn"
+                  data-today-metric="cash" data-label="Cash" title="View Cash details">
+            <div class="small text-muted">Cash</div>
+            <strong>₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
+          </button>
+          {% if today_activity.bank_lines %}
+            {% for bank in today_activity.bank_lines %}
+            <button type="button" class="dash-today-metric dash-today-metric-btn"
+                    data-today-metric="bank"
+                    data-account-id="{{ bank.account_id or '' }}"
+                    data-label="{{ bank.label }}"
+                    title="View {{ bank.label }} details">
+              <div class="small text-muted">{{ bank.label }}</div>
+              <strong>₹ {{ '%.2f'|format(bank.amount) }}</strong>
+            </button>
+            {% endfor %}
+          {% else %}
+            <button type="button" class="dash-today-metric dash-today-metric-btn"
+                    data-today-metric="bank" data-label="Bank" title="View Bank details">
+              <div class="small text-muted">Bank</div>
+              <strong>₹ {{ '%.2f'|format(today_activity.bank_total) }}</strong>
+            </button>
+          {% endif %}
+          <button type="button" class="dash-today-metric dash-today-metric-btn"
+                  data-today-metric="income" data-label="Income" title="View Income details">
+            <div class="small text-muted">Income</div>
+            <strong>₹ {{ '%.2f'|format(today_activity.income_amount) }}</strong>
+          </button>
+          <button type="button" class="dash-today-metric dash-today-metric-btn"
+                  data-today-metric="expense" data-label="Expense" title="View Expense details">
+            <div class="small text-muted">Expense</div>
+            <strong>₹ {{ '%.2f'|format(today_activity.expense_amount) }}</strong>
+          </button>
+          <button type="button" class="dash-today-metric dash-today-metric-btn"
+                  data-today-metric="sales" data-label="Sales" title="View Sales details">
+            <div class="small text-muted">Sales</div>
+            <strong>₹ {{ '%.2f'|format(today_activity.sale_amount) }}</strong>
+          </button>
+          <button type="button" class="dash-today-metric dash-today-metric-btn"
+                  data-today-metric="total" data-label="Total Amount" title="View Total Amount details">
+            <div class="small text-muted">Total Amount</div>
+            <strong>₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-period-bar-wrap">
+      <form method="get" action="{{ url_for('dashboard.index') }}" class="dash-period-bar" id="dashPeriodForm">
+        <div class="dash-period-row dash-period-row-dates">
+          <span class="dash-period-label">Period from</span>
+          <input type="date" class="form-control form-control-sm dash-period-input" id="dashDateFrom" name="from"
+                 value="{{ input_date_from }}" aria-label="Period from">
+          <span class="dash-period-label">to</span>
+          <input type="date" class="form-control form-control-sm dash-period-input" id="dashDateTo" name="to"
+                 value="{{ input_date_to }}" aria-label="Period to">
+          <button type="submit" class="btn btn-sm btn-primary dash-period-apply" id="dashPeriodApplyBtn" title="Apply custom dates">
+            <i class="bi bi-funnel"></i> Apply
+          </button>
+        </div>
+        <div class="dash-period-row dash-period-row-presets" role="group" aria-label="Period presets">
+          <a href="{{ url_for('dashboard.index', period='today') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'today' %}active{% endif %}">Today</a>
+          <a href="{{ url_for('dashboard.index', period='month') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'month' %}active{% endif %}">This Month</a>
+          <a href="{{ url_for('dashboard.index', period='fy') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'fy' %}active{% endif %}">This FY</a>
+          <a href="{{ url_for('dashboard.index', period='prev_fy') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'prev_fy' %}active{% endif %}">Previous FY</a>
+          <button type="button" class="btn btn-sm btn-outline-primary {% if period_preset == 'custom' %}active{% endif %}"
+                  id="dashCustomDatesBtn">Custom Dates</button>
+        </div>
+        <div class="dash-period-showing small text-muted">
+          Showing {{ date_from | display_date }} — {{ date_to | display_date }}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="row g-2 mb-3" id="dashMetricCards">
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="total_income" data-label="Total Income">
+        <span class="jtcs-metric-label">Total Income</span>
+        <strong class="jtcs-metric-value" data-metric-value="total_income">₹ {{ '%.2f'|format(metrics.total_income) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="total_expenses" data-label="Total Expenses">
+        <span class="jtcs-metric-label">Total Expenses</span>
+        <strong class="jtcs-metric-value" data-metric-value="total_expenses">₹ {{ '%.2f'|format(metrics.total_expenses) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="total_sales" data-label="Total Sales">
+        <span class="jtcs-metric-label">Total Sales</span>
+        <strong class="jtcs-metric-value" data-metric-value="total_sales">₹ {{ '%.2f'|format(metrics.total_sales) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="cash_closing_balance" data-label="Cash Closing Balance">
+        <span class="jtcs-metric-label">Cash Closing Balance</span>
+        <strong class="jtcs-metric-value" data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="bank_closing_balance" data-label="Bank Closing Balance">
+        <span class="jtcs-metric-label">Bank Closing Balance</span>
+        <strong class="jtcs-metric-value" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="cash_received" data-label="Cash Received">
+        <span class="jtcs-metric-label">Cash Received</span>
+        <strong class="jtcs-metric-value" data-metric-value="cash_received">₹ {{ '%.2f'|format(metrics.cash_received) }}</strong>
+      </button>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+              data-metric="bank_received" data-label="Bank Received">
+        <span class="jtcs-metric-label">Bank Received</span>
+        <strong class="jtcs-metric-value" data-metric-value="bank_received">₹ {{ '%.2f'|format(metrics.bank_received) }}</strong>
+      </button>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <div class="jtcs-card dash-recent-card">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Recent Daily Transactions</h2>
+        </div>
+        <div class="table-responsive dash-recent-wrap">
+          <table class="table table-sm align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Work</th>
+                <th>Customer</th>
+                <th class="text-end">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="dashRecentBody">
+              {% for row in recent %}
+                <tr class="dash-recent-row{% if row.can_open %} is-openable{% endif %}"
+                    data-row-key="{{ row.row_key }}"
+                    data-can-open="{{ '1' if row.can_open else '0' }}"
+                    data-source-url="{{ row.source_url or '' }}"
+                    data-source-module="{{ row.source_module or '' }}"
+                    data-source-module-id="{{ row.source_module_id or '' }}"
+                    data-work="{{ row.work or '' }}"
+                    data-reference="{{ row.reference or '' }}"
+                    data-customer="{{ row.customer or '' }}"
+                    data-amount="{{ row.amount or '' }}"
+                    data-is-expense="{{ '1' if row.is_expense else '0' }}"
+                    {% if row.can_open %}role="button" tabindex="0" title="Open source entry form"{% endif %}>
+                  <td>{{ row.entry_date | display_date }}</td>
+                  <td>{{ row.work }}</td>
+                  <td>{{ row.customer or '—' }}</td>
+                  <td class="text-end{% if row.is_expense %} dash-recent-amt-expense{% endif %}">
+                    {% if row.is_expense %}-{% endif %}₹ {{ '%.2f'|format(row.amount|float|abs) }}
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="4" class="text-muted">No transactions yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="jtcs-card mb-0 dash-arch-card">
+        <h2 class="h6 text-muted text-uppercase mb-2">Architecture</h2>
+        <ul class="small mb-0">
+          <li><code>JTCSDailyTransaction</code> — business work</li>
+          <li><code>JtcsBankTransaction</code> — money movement</li>
+          <li class="mt-2 text-muted"><i class="bi bi-database-check"></i> Database connected to: <code>{{ db_connection_display }}</code></li>
+        </ul>
+
+        <div class="dash-whats-new">
+          <h3 class="dash-whats-new-title">
+            <i class="bi bi-stars"></i> What’s New
+          </h3>
+          {% if whats_new %}
+          <ul class="dash-whats-new-list">
+            {% for item in whats_new %}
+            <li class="dash-whats-new-item">
+              <div class="dash-whats-new-meta">
+                <span class="dash-whats-new-date">{{ item.date_display }}</span>
+                {% if item.badge %}
+                <span class="dash-whats-new-badge dash-whats-new-badge--{{ item.badge|lower }}">{{ item.badge }}</span>
+                {% endif %}
+              </div>
+              {% if item.href %}
+              <a class="dash-whats-new-link" href="{{ item.href }}">{{ item.title }}</a>
+              {% else %}
+              <span class="dash-whats-new-heading">{{ item.title }}</span>
+              {% endif %}
+              <p class="dash-whats-new-detail">{{ item.detail }}</p>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="dash-whats-new-empty text-muted small mb-0">No recent updates.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="dashMetricModal" tabindex="-1" aria-labelledby="dashMetricModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="dashMetricModalTitle">Metric Details</h5>
+          <div class="small text-muted" id="dashMetricModalSub"></div>
+        </div>
+        <div class="dash-modal-header-actions">
+          <button type="button" class="btn btn-sm btn-outline-secondary dash-modal-size-btn" id="dashMetricMaximizeBtn"
+                  title="Maximize" aria-label="Maximize">
+            <i class="bi bi-fullscreen" id="dashMetricMaximizeIcon"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body dash-metric-modal-body">
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="dashMetricActions">
+          <button type="button" class="btn btn-sm btn-primary" id="dashAddEntryBtn">
+            <i class="bi bi-plus-lg"></i> Add
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="dashEditEntryBtn" disabled>
+            <i class="bi bi-pencil"></i> Edit
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-danger" id="dashDeleteEntryBtn" disabled>
+            <i class="bi bi-trash"></i> Delete
+          </button>
+          <span class="small text-muted ms-auto" id="dashMetricTotalLabel"></span>
+        </div>
+        <div class="table-responsive dash-metric-grid-wrap">
+          <table class="table table-sm table-hover align-middle mb-0" id="dashMetricGrid">
+            <thead>
+              <tr>
+                <th style="width: 2rem;"></th>
+                <th data-col="entry_date">
+                  <span class="dash-th-label" data-sort="entry_date">Date <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="entry_date" placeholder="Filter">
+                </th>
+                <th data-col="source">
+                  <span class="dash-th-label" data-sort="source">Source <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="source" placeholder="Filter">
+                </th>
+                <th data-col="reference">
+                  <span class="dash-th-label" data-sort="reference">Reference <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="reference" placeholder="Filter">
+                </th>
+                <th data-col="work">
+                  <span class="dash-th-label" data-sort="work">Work / Bank <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="work" placeholder="Filter">
+                </th>
+                <th data-col="customer">
+                  <span class="dash-th-label" data-sort="customer">Customer / Account <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="customer" placeholder="Filter">
+                </th>
+                <th data-col="description">
+                  <span class="dash-th-label" data-sort="description">Description <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="description" placeholder="Filter">
+                </th>
+                <th class="text-end" data-col="amount">
+                  <span class="dash-th-label" data-sort="amount">Amount <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="amount" placeholder="Filter">
+                </th>
+                <th class="text-end dash-running-col" data-col="running_balance">
+                  <span class="dash-th-label" data-sort="running_balance">Running Closing <i class="bi bi-arrow-down-up dash-sort-icon"></i></span>
+                  <input type="search" class="form-control form-control-sm dash-col-filter" data-filter="running_balance" placeholder="Filter">
+                </th>
+                <th data-col="more" style="min-width: 8.5rem;">
+                  <span class="dash-th-label">More</span>
+                </th>
+                <th data-col="actions" style="min-width: 6.5rem;">
+                  <span class="dash-th-label">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="dashMetricGridBody"></tbody>
+          </table>
+        </div>
+        <div class="small text-muted mt-2 d-none" id="dashMetricEmpty">No contributing records for this period.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="dashActivityPickModal" tabindex="-1" aria-labelledby="dashActivityPickModalTitle"
+     aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="dashActivityPickModalTitle">Select Activity</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">Choose the activity to add. The same entry screen will open.</p>
+        <div class="list-group dash-activity-list" id="dashActivityList"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="dashSourceEntryModal" tabindex="-1" aria-labelledby="dashSourceEntryModalTitle"
+     aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="dashSourceEntryModalTitle">Entry</h5>
+          <div class="small text-muted" id="dashSourceEntryModalSub"></div>
+        </div>
+        <div class="dash-modal-header-actions">
+          <button type="button" class="btn btn-sm btn-outline-secondary dash-modal-size-btn" id="dashSourceMaximizeBtn"
+                  title="Maximize" aria-label="Maximize">
+            <i class="bi bi-fullscreen" id="dashSourceMaximizeIcon"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body p-0 dash-source-entry-body">
+        <iframe id="dashSourceEntryFrame" title="Source entry" class="dash-source-entry-frame"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="dashEntryModal" tabindex="-1" aria-labelledby="dashEntryModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="dashEntryModalTitle">Add Entry</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="dashEntryForm" novalidate>
+          <input type="hidden" id="dashEntryId" value="">
+          <div class="mb-2">
+            <label class="form-label" for="dashEntryDate">Date</label>
+            <input type="date" class="form-control" id="dashEntryDate" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="dashEntryAmount">Amount</label>
+            <input type="number" step="0.01" class="form-control" id="dashEntryAmount" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="dashEntryDescription">Description</label>
+            <input type="text" class="form-control" id="dashEntryDescription" maxlength="500"
+                   placeholder="Optional">
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="dashEntryError"></div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="dashEntrySaveBtn">Save</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.DASHBOARD = {
+    dateFrom: {{ date_from.isoformat() | tojson }},
+    dateTo: {{ date_to.isoformat() | tojson }},
+    systemDate: {{ system_date.isoformat() | tojson }},
+    csrfToken: {{ csrf_token() | tojson }},
+    detailsUrl: {{ url_for('dashboard.metric_details') | tojson }},
+    todayDetailsUrl: {{ url_for('dashboard.today_activity_details') | tojson }},
+    createUrl: {{ url_for('dashboard.manual_entry_create') | tojson }},
+    updateUrlTemplate: {{ url_for('dashboard.manual_entry_update', entry_id=0) | tojson }},
+    deleteUrlTemplate: {{ url_for('dashboard.manual_entry_delete', entry_id=0) | tojson }},
+    activities: [
+      { key: "stamp", label: "Stamp Activity", url: {{ url_for('stamp.stamp_activity') | tojson }}, module: "stamp" },
+      { key: "ecourt", label: "E-Court Activity", url: {{ url_for('ecourt.ecourt_activity') | tojson }}, module: "ecourt" },
+      { key: "income_expense", label: "Income / Expense", url: {{ url_for('others_income_expense.index') | tojson }}, module: "income_expense" },
+      { key: "bank_cash", label: "Other Bank / Cash Transaction", url: {{ url_for('others_bank_cash.index') | tojson }}, module: "bank_cash" },
+      { key: "printing_income", label: "Printing & Scanning (Income)", url: {{ url_for('printing_scanning.printing_scanning') | tojson }}, module: "printing_scanning" },
+      { key: "printing_expense", label: "Printing & Scanning (Expense)", url: {{ url_for('printing_scan_expense.printing_scanning') | tojson }}, module: "printing_scanning" },
+      { key: "itr", label: "ITR Follow-up", url: {{ url_for('itr_followup.index') | tojson }}, module: "followup" },
+      { key: "dsc", label: "DSC Follow-up", url: {{ url_for('dsc_followup.index') | tojson }}, module: "followup" },
+      { key: "tds", label: "TDS Follow-up", url: {{ url_for('tds_followup.index') | tojson }}, module: "followup" },
+      { key: "gst", label: "GST Follow-up", url: {{ url_for('gst_followup.index') | tojson }}, module: "followup" },
+      { key: "manual", label: "Manual Adjustment (this popup)", url: null, module: "dashboard_manual" }
+    ],
+    deleteUrls: {
+      stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
+      ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
+      income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
+      printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      itr: {{ url_for('itr_followup.delete_record', entry_id=0) | tojson }},
+      dsc: {{ url_for('dsc_followup.delete_record', entry_id=0) | tojson }},
+      tds: {{ url_for('tds_followup.delete_record', entry_id=0) | tojson }},
+      gst: {{ url_for('gst_followup.delete_record', entry_id=0) | tojson }}
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260719obc-more"></script>
+{% endblock %}

@@ -1,0 +1,21 @@
+.masters-work-card {
+  padding: 1rem 1.25rem;
+}
+
+.masters-work-head {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.masters-work-grid-wrap {
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+}
+
+.masters-work-grid-wrap tbody tr {
+  cursor: pointer;
+}
+
+.masters-work-grid-wrap tbody tr.selected {
+  background-color: rgba(13, 110, 253, 0.12) !important;
+}

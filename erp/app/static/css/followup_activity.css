@@ -1,0 +1,335 @@
+.fu-activity-page {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+.fu-required::after {
+  content: " *";
+  color: #dc3545;
+}
+
+.fu-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.fu-stat-card {
+  flex: 1 1 120px;
+  min-width: 110px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left-width: 4px;
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+button.fu-stat-card {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+}
+
+.fu-stat-card:hover {
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  background: #f8fafc;
+}
+
+.fu-stat-card.is-active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  box-shadow: inset 0 0 0 1px #93c5fd;
+}
+
+.fu-stat-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fu-stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+/* ITR only: Documents Received card shown as yellow "Pending" */
+.fu-stat-card.fu-stat-pending .fu-stat-label,
+.fu-stat-card.fu-stat-pending .fu-stat-value {
+  color: #ca8a04;
+}
+  line-height: 1.2;
+}
+
+.fu-filter-card {
+  height: 100%;
+}
+
+.fu-grid-wrap {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.fu-grid-panel .table {
+  font-size: 13px;
+}
+
+.fu-activity-page[data-module="ITR"] .fu-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.fu-activity-page[data-module="ITR"] .fu-sortable:hover {
+  background-color: rgba(13, 110, 253, 0.08);
+}
+
+.fu-activity-page[data-module="ITR"] .fu-sortable.fu-sorted {
+  color: #0d6efd;
+}
+
+.fu-activity-page[data-module="ITR"] .fu-sort-icon {
+  font-size: 0.72em;
+  opacity: 0.9;
+}
+
+.fu-entry-modal .modal-header {
+  background: #f8fafc;
+}
+
+.fu-entry-modal .btn-primary {
+  background: #6f42c1;
+  border-color: #6f42c1;
+}
+
+.fu-entry-modal .btn-primary:hover {
+  background: #5a32a3;
+  border-color: #5a32a3;
+}
+
+.fu-panel-title {
+  font-weight: 700;
+  color: #1e3a5f;
+  font-size: 14px;
+}
+
+.fu-payment-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.fu-payment-line {
+  display: grid;
+  grid-template-columns: 1fr 180px 40px;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.fu-payment-line--itr {
+  grid-template-columns: minmax(110px, 0.9fr) 148px 120px 36px;
+}
+
+.fu-payment-line--itr .fu-payment-bank-wrap {
+  min-width: 0;
+}
+
+.fu-payment-line--itr .fu-payment-bank {
+  font-size: 12px;
+  padding-left: 0.45rem;
+  padding-right: 0.45rem;
+}
+
+.fu-payment-line--itr .fu-payment-date-wrap,
+.fu-payment-line--itr .fu-payment-amount-wrap {
+  min-width: 0;
+}
+
+.fu-payment-line--itr .fu-payment-action-wrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 0.15rem;
+}
+
+@media (max-width: 767.98px) {
+  .fu-payment-line,
+  .fu-payment-line--itr {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fu-workflow-panel {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+}
+
+.fu-stage-item {
+  margin-bottom: 0.35rem;
+}
+
+.fu-auto-bill-btn {
+  vertical-align: middle;
+  font-size: 12px;
+  padding: 0.15rem 0.5rem;
+}
+
+.fu-thank-btn {
+  font-size: 12px;
+  padding: 0.15rem 0.4rem;
+}
+
+.fu-pay-remind-btn {
+  font-size: 14px;
+  padding: 0.2rem 0.45rem;
+  line-height: 1;
+}
+
+.fu-row-sync-cell .fu-kdk-row-sync {
+  font-size: 12px;
+  padding: 0.15rem 0.45rem;
+  white-space: nowrap;
+}
+
+.fu-kdk-preview-box {
+  position: relative;
+  height: 220px;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+.fu-kdk-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: top center;
+  background: #0f172a;
+  display: block;
+}
+
+.fu-kdk-preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.fu-workflow-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+}
+
+.fu-workflow-checks .form-check-label {
+  font-size: 13px;
+}
+
+.fu-customer-results {
+  position: absolute;
+  z-index: 1060;
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.12);
+}
+
+.fu-customer-results .list-group-item {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.fu-customer-results .list-group-item:hover {
+  background: #f1f5f9;
+}
+
+.fu-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.fu-status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.fu-status-done {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.fu-status-unverified {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.fu-grid-actions .btn {
+  padding: 0.15rem 0.4rem;
+  font-size: 12px;
+}
+
+/* ITR only: Payment Received rows — light navy + locked controls (Edit / Thank You stay active) */
+.fu-activity-page[data-module="ITR"] #fuDataGrid tbody tr.fu-payment-received-row > td {
+  background-color: #c5d0e6 !important;
+  --bs-table-bg: #c5d0e6;
+  --bs-table-bg-type: #c5d0e6;
+  --bs-table-bg-state: #c5d0e6;
+  --bs-table-accent-bg: transparent;
+  --bs-table-hover-bg: #b8c4de;
+}
+
+.fu-activity-page[data-module="ITR"] #fuDataGrid tbody tr.fu-payment-received-row:hover > td {
+  background-color: #b8c4de !important;
+}
+
+.fu-activity-page[data-module="ITR"] tr.fu-payment-received-row .fu-kdk-row-sync:disabled,
+.fu-activity-page[data-module="ITR"] tr.fu-payment-received-row .fu-delete-btn:disabled,
+.fu-activity-page[data-module="ITR"] tr.fu-payment-received-row .fu-pay-remind-btn.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.fu-check-status-cell {
+  white-space: nowrap;
+}
+
+.fu-check-status-cell .btn {
+  padding: 0.15rem 0.4rem;
+  font-size: 12px;
+}
+
+.fu-appno-hint {
+  color: #8b4513;
+  font-weight: 600;
+  animation: fu-appno-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes fu-appno-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}

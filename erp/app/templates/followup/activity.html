@@ -1,0 +1,540 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260726pending">
+{% endblock %}
+
+{% block content %}
+<div class="fu-activity-page" id="fuActivityPage"
+     data-module="{{ module_code }}"
+     data-has-return-type="{{ '1' if module_meta.has_return_type else '0' }}"
+     data-has-tds-period-split="{{ '1' if module_meta.get('has_tds_period_split') else '0' }}"
+     data-has-gst-fields="{{ '1' if module_meta.get('has_gst_fields') else '0' }}">
+  <div class="jtcs-card mb-2 py-2 px-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <h5 class="mb-0 me-2">{{ module_meta.title }}</h5>
+      <button type="button" class="btn btn-primary btn-sm" id="fuNewEntryBtn">
+        <i class="bi bi-plus-lg"></i> New Entry
+      </button>
+      <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+        {% if module_code == 'DSC' %}
+        <a class="btn btn-success btn-sm" href="http://applydsc.idsign.app" target="_blank" rel="noopener noreferrer"
+           title="http://applydsc.idsign.app">
+          <i class="bi bi-box-arrow-up-right"></i> Apply Dsc with ID Sign
+        </a>
+        <a class="btn btn-outline-success btn-sm"
+           href="https://partner.idsign.app/loginpage?email=admin@jtcsxpert.com&amp;mobile=8477005566"
+           target="_blank" rel="noopener noreferrer"
+           title="Partner Login in IDSign">
+          <i class="bi bi-person-badge"></i> Partner Login in IDSign
+        </a>
+        {% endif %}
+        {% if module_code == 'ITR' %}
+        <button type="button" class="btn btn-success btn-sm" id="fuSyncBtn" title="Sync all clients from KDK (slow). Prefer row Sync for one client.">
+          <i class="bi bi-arrow-repeat"></i> Sync All
+        </button>
+        <button type="button" class="btn btn-outline-success btn-sm" id="fuExportExcelBtn"
+                title="Export current filtered list to Excel">
+          <i class="bi bi-file-earmark-excel"></i> Export Excel
+        </button>
+        {% endif %}
+        <button type="button" class="btn btn-outline-primary btn-sm" id="fuRefreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+      </div>
+    </div>
+    <p class="small text-muted mb-0 mt-1">{{ module_meta.subtitle }}</p>
+  </div>
+
+  <div class="fu-stats-row mb-2" id="fuStatsRow">
+    <button type="button" class="fu-stat-card border-primary" data-status-filter="" title="Show all cases">
+      <div class="fu-stat-label">Total Cases</div>
+      <div class="fu-stat-value" id="fuStatTotal">0</div>
+    </button>
+    {% if module_code == 'ITR' %}
+    {# Excel order: Pending (docs received) → ITR Filed → Bill Generated → Payment Pending → Payment Received #}
+    {% for stage in workflow_stages if stage.stage_code in ['documents_received', 'itr_filed', 'tally_bill_generated'] %}
+    <button type="button" class="fu-stat-card {% if stage.stage_code == 'documents_received' %}border-warning fu-stat-pending is-active{% else %}border-success{% endif %}"
+            data-stage-code="{{ stage.stage_code }}"
+            data-status-filter="{{ stage.stage_code }}"
+            title="{% if stage.stage_code == 'documents_received' %}Pending — documents received, no later stage ticked{% else %}Cases currently at {{ stage.stage_name }} (no later stage ticked){% endif %}">
+      <div class="fu-stat-label">{% if stage.stage_code == 'documents_received' %}Pending{% else %}{{ stage.stage_name }}{% endif %}</div>
+      <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
+    </button>
+    {% endfor %}
+    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending"
+            title="Bill generated, payment not received">
+      <div class="fu-stat-label">Payment Pending</div>
+      <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
+    </button>
+    {% for stage in workflow_stages if stage.stage_code == 'payment_received' %}
+    <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
+            data-status-filter="{{ stage.stage_code }}"
+            title="All progress ticks complete (Payment Received)">
+      <div class="fu-stat-label">{{ stage.stage_name }}</div>
+      <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
+    </button>
+    {% endfor %}
+    {% for stage in workflow_stages if stage.stage_code not in ['documents_received', 'itr_filed', 'tally_bill_generated', 'payment_received'] %}
+    <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
+            data-status-filter="{{ stage.stage_code }}"
+            title="Filter {{ stage.stage_name }}">
+      <div class="fu-stat-label">{{ stage.stage_name }}</div>
+      <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
+    </button>
+    {% endfor %}
+    {% else %}
+    <button type="button" class="fu-stat-card border-warning" data-status-filter="pending" title="Filter Pending">
+      <div class="fu-stat-label">Pending</div>
+      <div class="fu-stat-value" id="fuStatPending">0</div>
+    </button>
+    {% for stage in workflow_stages %}
+    <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
+            data-status-filter="{{ stage.stage_code }}"
+            title="Filter {{ stage.stage_name }}">
+      <div class="fu-stat-label">{{ stage.stage_name }}</div>
+      <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
+    </button>
+    {% endfor %}
+    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending" title="Filter Payment Pending">
+      <div class="fu-stat-label">Payment Pending</div>
+      <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
+    </button>
+    {% endif %}
+  </div>
+
+  <div class="row g-2 mb-2">
+    <div class="col-lg-3">
+      <div class="jtcs-card fu-filter-card p-3">
+        <div class="fw-semibold mb-2">Filters</div>
+        <label class="form-label" for="fuSearchInput">Search</label>
+        <input type="search" class="form-control form-control-sm mb-2" id="fuSearchInput"
+               placeholder="Type name, mobile or PAN">
+        {% if module_code == 'ITR' %}
+        <label class="form-label" for="fuPeriodFilter">Period</label>
+        <select class="form-select form-select-sm mb-2" id="fuPeriodFilter">
+          <option value="" selected>All Periods</option>
+          {% for period in tax_periods %}
+          <option value="{{ period }}">{{ period }}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
+        {% if module_meta.has_return_type %}
+        <label class="form-label" for="fuReturnTypeFilter">Return Type</label>
+        <select class="form-select form-select-sm mb-2" id="fuReturnTypeFilter">
+          <option value="">All</option>
+          <option value="Original">Original</option>
+          <option value="Revised1">Revised 1</option>
+          <option value="Revised2">Revised 2</option>
+          <option value="Revised3">Revised 3</option>
+          <option value="Revised4">Revised 4</option>
+          <option value="Revised5">Revised 5</option>
+        </select>
+        {% endif %}
+        <label class="form-label" for="fuStatusFilter">Workflow Status</label>
+        <select class="form-select form-select-sm mb-2" id="fuStatusFilter">
+          <option value="">All</option>
+          {% if module_code != 'ITR' %}
+          <option value="pending">Pending</option>
+          {% endif %}
+          <option value="payment_pending">Payment Pending</option>
+          {% for stage in workflow_stages %}
+          <option value="{{ stage.stage_code }}"{% if module_code == 'ITR' and stage.stage_code == 'documents_received' %} selected{% endif %}>{{ stage.stage_name }}</option>
+          {% endfor %}
+        </select>
+        <div class="row g-2 mb-2">
+          <div class="col-6">
+            <label class="form-label" for="fuDateFromFilter">Date From</label>
+            <input type="date" class="form-control form-control-sm" id="fuDateFromFilter">
+          </div>
+          <div class="col-6">
+            <label class="form-label" for="fuDateToFilter">Date To</label>
+            <input type="date" class="form-control form-control-sm" id="fuDateToFilter">
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-primary btn-sm flex-grow-1" id="fuSearchBtn">Search</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="fuClearFilterBtn" title="Clear filters">Clear</button>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-9">
+      <div class="jtcs-card fu-grid-panel p-2">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div class="small text-muted" id="fuGridMeta">Total: 0 | Pending: 0</div>
+          <span class="small text-muted" id="fuGridCount"></span>
+        </div>
+        <div class="table-responsive fu-grid-wrap">
+          <table class="table table-sm table-hover table-striped align-middle mb-0" id="fuDataGrid">
+            <thead>
+              <tr>
+                <th>Date</th>
+                {% if module_code == 'ITR' or module_meta.get('has_tds_period_split') or module_meta.get('has_gst_fields') %}
+                <th>Period</th>
+                {% endif %}
+                {% if module_meta.get('has_tds_period_split') %}
+                <th>Form Type</th>
+                <th>Quarter</th>
+                {% endif %}
+                {% if module_meta.get('has_gst_fields') %}
+                <th>Filing Frequency</th>
+                <th>Return Type</th>
+                {% endif %}
+                <th>Customer</th>
+                <th>Mobile</th>
+                <th>PAN</th>
+                <th>{% if module_code == 'DSC' %}Application No.{% else %}Bill No.{% endif %}</th>
+                <th>Bill Date</th>
+                {% if module_code == 'DSC' %}
+                <th>Check Status</th>
+                {% else %}
+                <th>Work Type</th>
+                {% endif %}
+                {% if module_meta.has_return_type %}
+                <th>Return Type</th>
+                {% endif %}
+                {% if module_code == 'ITR' %}
+                <th>Return Filing Status</th>
+                <th>Filing Date</th>
+                {% endif %}
+                <th>Workflow Status</th>
+                <th>Remarks</th>
+                {% if module_code == 'ITR' %}
+                <th class="text-center" title="Payment Reminder"><i class="bi bi-bell"></i></th>
+                <th>Sync</th>
+                {% endif %}
+                <th>Thank You</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="fuDataGridBody"></tbody>
+          </table>
+        </div>
+        <div id="fuGridEmpty" class="small text-muted py-3 d-none">No followup records yet.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="fuEntryModal" tabindex="-1" aria-labelledby="fuEntryModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content fu-entry-modal">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="fuEntryModalTitle">{{ module_meta.title }} — Entry</h5>
+          <div class="small text-muted">{{ module_meta.subtitle }}</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="fuEntryForm" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" id="fuEntryId" name="entry_id" value="">
+          <input type="hidden" id="fuCustomerId" name="customer_id" value="">
+
+          <div class="row g-3 mb-2">
+            <div class="col-md-4">
+              <label class="form-label fu-required" for="fuWorkDate">Work Date</label>
+              <input type="date" class="form-control" id="fuWorkDate" name="work_date"
+                     value="{{ default_date }}" required>
+            </div>
+            <div class="{% if module_meta.get('has_tds_period_split') %}col-md-2{% else %}col-md-4{% endif %}">
+              <label class="form-label fu-required" for="fuTaxPeriod">Period</label>
+              <select class="form-select" id="fuTaxPeriod" name="tax_period" required>
+                {% for period in tax_periods %}
+                <option value="{{ period }}" {% if period == default_tax_period %}selected{% endif %}>{{ period }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% if module_meta.get('has_tds_period_split') %}
+            <div class="col-md-3">
+              <label class="form-label fu-required" for="fuFormType">Form Type</label>
+              <select class="form-select" id="fuFormType" name="form_type" required>
+                <option value="">-- Select --</option>
+                {% for ft in tds_form_types %}
+                <option value="{{ ft }}">{{ ft }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fu-required" for="fuQuarter">Quarter</label>
+              <select class="form-select" id="fuQuarter" name="quarter" required>
+                <option value="">-- Select --</option>
+                {% for q in tds_quarters %}
+                <option value="{{ q }}">{{ q }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
+            {% if module_code == 'DSC' %}
+            <div class="col-md-4">
+              <label class="form-label" for="fuApplicationNumber">Application Number</label>
+              <input type="text" class="form-control" id="fuApplicationNumber" name="application_number"
+                     maxlength="50" placeholder="DSC application number">
+              <div class="form-text fu-appno-hint">Required when Application No. is checked (unless Documents Received is also checked). Once saved, it cannot be changed.</div>
+            </div>
+            {% endif %}
+          </div>
+
+          {% if module_code == 'DSC' %}
+          <div class="row g-3 mb-2">
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuLocation">Location</label>
+              <input type="text" class="form-control" id="fuLocation" name="location"
+                     maxlength="200" placeholder="Location" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuIntroducedBy">Introduced by</label>
+              <input type="text" class="form-control" id="fuIntroducedBy" name="introduced_by"
+                     maxlength="200" placeholder="Introduced by" required>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="mb-3 position-relative">
+            <label class="form-label fu-required" for="fuCustomerSearch">Customer</label>
+            {% if allow_customer_add %}
+            <div class="input-group">
+              <input type="text" class="form-control" id="fuCustomerSearch"
+                     placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+              <button type="button" class="btn btn-outline-success" id="fuAddCustomerBtn" title="Add Customer">
+                <i class="bi bi-person-plus"></i>
+              </button>
+            </div>
+            {% else %}
+            <input type="text" class="form-control" id="fuCustomerSearch"
+                   placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+            {% endif %}
+            <div id="fuCustomerResults" class="list-group fu-customer-results d-none"></div>
+            <div id="fuCustomerSelected" class="small text-muted mt-1 d-none"></div>
+          </div>
+
+          {% if module_meta.has_return_type %}
+          <div class="mb-3">
+            <label class="form-label" for="fuReturnType">Return Type</label>
+            <select class="form-select form-select-sm" id="fuReturnType" name="return_type">
+              <option value="Original">Original</option>
+              <option value="Revised1">Revised 1</option>
+              <option value="Revised2">Revised 2</option>
+              <option value="Revised3">Revised 3</option>
+              <option value="Revised4">Revised 4</option>
+              <option value="Revised5">Revised 5</option>
+            </select>
+            <div class="form-text">Original is unique per PAN + Period. Each Revised number is also unique.</div>
+          </div>
+          {% endif %}
+
+          {% if module_meta.get('has_gst_fields') %}
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label" for="fuFilingFrequency">Filing Frequency</label>
+              <input type="text" class="form-control" id="fuFilingFrequency" name="filing_frequency"
+                     readonly placeholder="Auto from Customer Master">
+              <div class="form-text">Filled automatically from Customer Master (GST Details).</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fu-required" for="fuGstReturnType">Return Type</label>
+              <select class="form-select" id="fuGstReturnType" name="return_type" required>
+                <option value="">-- Select --</option>
+                {% for rt in gst_return_types %}
+                <option value="{{ rt }}">{{ rt }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="mb-3">
+            <label class="form-label">Workflow</label>
+            <div class="fu-workflow-checks" id="fuWorkflowChecks">
+              {% for stage in workflow_stages %}
+              <div class="form-check form-check-inline fu-stage-item" data-stage-code="{{ stage.stage_code }}">
+                <input class="form-check-input fu-stage-check" type="checkbox"
+                       name="stage_ids" value="{{ stage.stage_id }}" id="fuStage{{ stage.stage_id }}"
+                       data-stage-code="{{ stage.stage_code }}">
+                <label class="form-check-label" for="fuStage{{ stage.stage_id }}">{{ stage.stage_name }}</label>
+                {% if stage.stage_code == 'tally_bill_generated' %}
+                <button type="button" class="btn btn-outline-primary btn-sm ms-1 fu-auto-bill-btn d-none" id="fuAutoBillBtn">
+                  Generate Automated Bill
+                </button>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="fu-workflow-panel d-none mb-3" id="fuItrFiledWrap" data-stage-panel="itr_filed">
+            <label class="form-label" for="fuItrFiledDate">ITR Filed Date</label>
+            <input type="date" class="form-control" id="fuItrFiledDate" name="itr_filed_date"
+                   value="{{ default_date }}">
+          </div>
+
+          <div class="fu-workflow-panel d-none mb-3" id="fuTallyBillWrap" data-stage-panel="tally_bill_generated">
+            <div class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label" for="fuBillNo">Tally Bill Number</label>
+                <input type="text" class="form-control" id="fuBillNo" name="bill_no" maxlength="50"
+                       placeholder="Bill / invoice number">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="fuBillDate">Bill Date</label>
+                <input type="date" class="form-control" id="fuBillDate" name="bill_date" value="{{ default_date }}">
+              </div>
+              <div class="col-md-4">
+                <label class="form-label" for="fuBillAmount">Bill Amount (₹)</label>
+                <input type="number" class="form-control" id="fuBillAmount" name="bill_amount"
+                       min="0" step="0.01" placeholder="0.00">
+              </div>
+            </div>
+          </div>
+
+          <div class="fu-workflow-panel d-none mb-3" id="fuPaymentWrap" data-stage-panel="payment_received">
+            <div class="fu-panel-title mb-2">Payment Received — Bank / QR Details</div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <label class="form-label mb-0">Payment Modes</label>
+              <button type="button" class="btn btn-sm btn-outline-primary" id="fuAddPaymentBtn">
+                <i class="bi bi-plus-lg"></i> Add Payment Mode
+              </button>
+              <span class="small text-muted ms-auto" id="fuPaymentSummary"></span>
+            </div>
+            <div id="fuPaymentLines" class="fu-payment-lines"></div>
+            {% if not payment_modes %}
+            <div class="small text-danger mt-1">No active bank accounts found in Bank Master.</div>
+            {% endif %}
+          </div>
+
+          <div class="mb-3 d-none" id="fuUnverifiedWrap">
+            <label class="form-label" for="fuReasonUnverified">Reason for Unverified</label>
+            <textarea class="form-control" id="fuReasonUnverified" name="reason_for_unverified" rows="2"></textarea>
+          </div>
+
+          <div class="mb-2">
+            <label class="form-label" for="fuRemarks">Remarks</label>
+            <textarea class="form-control" id="fuRemarks" name="remarks" rows="3"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="fuSaveBtn">Save</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if allow_customer_add %}
+{% include 'followup/_customer_modal.html' %}
+{% endif %}
+
+{% if module_code == 'ITR' %}
+<div class="modal fade" id="fuKdkLoginModal" tabindex="-1" aria-labelledby="fuKdkLoginModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="fuKdkLoginModalTitle">KDK Portal Login</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="fuKdkLoginForm" autocomplete="off">
+          <div class="mb-3">
+            <label class="form-label" for="fuKdkUserId">KDK Mobile Number</label>
+            <input type="text" class="form-control" id="fuKdkUserId" name="user_id" required
+                   autocomplete="username" placeholder="Enter mobile number (without +91)">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="fuKdkPassword">Password</label>
+            <input type="password" class="form-control" id="fuKdkPassword" name="password" required
+                   autocomplete="current-password" placeholder="Enter password">
+          </div>
+          <div class="form-check mb-1">
+            <input class="form-check-input" type="checkbox" id="fuKdkRememberMe" value="1" checked>
+            <label class="form-check-label" for="fuKdkRememberMe">Save Mobile &amp; Password for next time</label>
+          </div>
+          <div class="small text-muted">KDK login Mobile Number + Password use karein. Pehli baar save, agli baar autofill.</div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-success" id="fuKdkLoginSyncBtn">
+          <i class="bi bi-arrow-repeat"></i> Login &amp; Sync
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="fuKdkProgressModal" tabindex="-1" aria-labelledby="fuKdkProgressModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="fuKdkProgressModalTitle">Sync Started...</h5>
+      </div>
+      <div class="modal-body">
+        <div id="fuKdkLoginStatus" class="alert py-2 px-3 mb-3 d-none" role="status"></div>
+        <div class="fu-kdk-preview-wrap mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="small fw-semibold text-muted">KDK live view</span>
+            <span class="small text-muted" id="fuKdkPreviewCaption">Waiting…</span>
+          </div>
+          <div class="fu-kdk-preview-box" id="fuKdkPreviewBox">
+            <img id="fuKdkPreviewImg" alt="KDK page preview" class="fu-kdk-preview-img d-none">
+            <div id="fuKdkPreviewPlaceholder" class="fu-kdk-preview-placeholder">
+              Sync start hone par yahan KDK page dikhega…
+            </div>
+          </div>
+        </div>
+        <div class="mb-2"><strong>Current Client:</strong> <span id="fuKdkProgressClient">—</span></div>
+        <div class="mb-2"><strong>Current PAN:</strong> <span id="fuKdkProgressPan">—</span></div>
+        <div class="mb-3"><strong>Current Period:</strong> <span id="fuKdkProgressPeriod">—</span></div>
+        <div class="progress mb-2" style="height: 1.1rem;">
+          <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+               id="fuKdkProgressBar" role="progressbar" style="width: 0%;" aria-valuenow="0"
+               aria-valuemin="0" aria-valuemax="100">0%</div>
+        </div>
+        <div class="small text-muted" id="fuKdkProgressCount">0 / 0 Clients</div>
+        <div class="small text-danger mt-2 d-none" id="fuKdkProgressError"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary" id="fuKdkProgressCloseBtn"
+                data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.FU_MODULE = {{ module_code|tojson }};
+  window.FU_API = {{ api_urls|tojson }};
+  window.FU_CSRF = {{ csrf_token()|tojson }};
+  window.FU_ALLOW_CUSTOMER_ADD = {{ allow_customer_add|tojson }};
+  window.FU_DEFAULT_TAX_PERIOD = {{ default_tax_period|tojson }};
+  window.FU_DEFAULT_DATE = {{ default_date|tojson }};
+  window.FU_BANK_ACCOUNTS = {{ payment_modes|tojson }};
+  window.FU_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+  {% if module_code == 'DSC' %}
+  window.FU_API = window.FU_API || {};
+  if (!window.FU_API.sync_status) {
+    window.FU_API.sync_status = "/dsc/followup/records/0/sync-idsign-status";
+  }
+  window.FU_DSC_STATUS_BASE = "https://dsc.idsignca.com/ekycadmin/signup/webstatus?ReferenceNo=";
+  {% endif %}
+  {% if module_code == 'ITR' %}
+  window.FU_API = window.FU_API || {};
+  if (!window.FU_API.itr_sync_start) {
+    window.FU_API.itr_sync_start = "/api/itr/sync-status";
+  }
+  if (!window.FU_API.itr_sync_job) {
+    window.FU_API.itr_sync_job = "/api/itr/sync-status/__JOB__";
+  }
+  {% endif %}
+</script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260726export"></script>
+{% endblock %}

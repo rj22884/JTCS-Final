@@ -1,0 +1,209 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/exceptional_stamp_report.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="ex-report-page">
+  <div class="jtcs-card ex-report-panel mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-0">
+      <div>
+        <h5 class="mb-1">Stamp Exception</h5>
+        <p class="small text-muted mb-0">
+          Upload the E-STAMPING CSV from Stock Holding. Review &amp; edit rows, then Final Import to save.
+          Already-imported certificates are skipped forever on re-upload.
+        </p>
+      </div>
+      <form id="exStampUploadForm" class="d-flex flex-wrap align-items-end gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div>
+          <label class="form-label mb-1" for="exStampFile">SHCIL CSV File</label>
+          <input type="file" class="form-control form-control-sm" id="exStampFile" name="stamp_file" accept=".csv,.txt" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" id="exStampUploadBtn">
+          <i class="bi bi-upload"></i> Upload &amp; Compare
+        </button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="exRefreshStateBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+      </form>
+    </div>
+    <div id="exStampError" class="alert alert-danger d-none mt-3 mb-0" role="alert"></div>
+    <div id="exStampSuccess" class="alert alert-success d-none mt-3 mb-0" role="alert"></div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-lg-6">
+      <div class="jtcs-card ex-report-panel h-100">
+        <div class="ex-report-section-head text-danger">
+          In CSV, not in JTCS <span class="badge text-bg-danger" id="exCsvOnlyCount">0</span>
+        </div>
+        <div class="table-responsive ex-report-grid-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Certificate Number</th>
+                <th>Date</th>
+                <th class="text-end">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="exCsvOnlyBody"></tbody>
+          </table>
+        </div>
+        <div id="exCsvOnlyEmpty" class="small text-muted py-3">No mismatches in this section.</div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="jtcs-card ex-report-panel h-100">
+        <div class="ex-report-section-head text-primary">
+          In JTCS, not in CSV <span class="badge text-bg-primary" id="exDbOnlyCount">0</span>
+        </div>
+        <div class="table-responsive ex-report-grid-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Certificate Number</th>
+                <th>Date</th>
+                <th class="text-end">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="exDbOnlyBody"></tbody>
+          </table>
+        </div>
+        <div id="exDbOnlyEmpty" class="small text-muted py-3">No mismatches in this section.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <div class="jtcs-card ex-report-panel">
+        <div class="ex-report-section-head text-success">
+          Matched Certificates <span class="badge text-bg-success" id="exMatchedCount">0</span>
+        </div>
+        <div class="table-responsive ex-report-grid-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Certificate Number</th>
+                <th class="text-end">CSV Amount</th>
+                <th class="text-end">JTCS Amount</th>
+                <th>Transaction Date</th>
+                <th>Customer</th>
+              </tr>
+            </thead>
+            <tbody id="exMatchedBody"></tbody>
+          </table>
+        </div>
+        <div id="exMatchedEmpty" class="small text-muted py-3">No permanent matches yet (imported ∩ JTCS).</div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="jtcs-card ex-report-panel ex-report-side-panel mb-3">
+        <div class="ex-report-section-head text-secondary">
+          Imported Certificates
+          <span class="badge text-bg-secondary" id="exImportedCount">0</span>
+        </div>
+        <div class="table-responsive ex-imported-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>CertificateNo</th>
+                <th class="text-end">Amount</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="exImportedBody"></tbody>
+          </table>
+        </div>
+        <div id="exImportedEmpty" class="small text-muted py-3">
+          No certificates imported yet.
+        </div>
+      </div>
+
+      <div class="jtcs-card ex-report-panel ex-report-side-panel">
+        <div class="ex-report-section-head text-warning">
+          Skipped (Already Uploaded)
+          <span class="badge text-bg-warning" id="exPreviouslyUploadedCount">0</span>
+        </div>
+        <div id="exPreviouslyUploadedMessage" class="alert alert-warning py-2 px-3 small d-none mb-2"></div>
+        <div class="table-responsive ex-skipped-wrap">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Certificate</th>
+                <th class="text-end">Duty</th>
+                <th>Previous File</th>
+              </tr>
+            </thead>
+            <tbody id="exPreviouslyUploadedBody"></tbody>
+          </table>
+        </div>
+        <div id="exPreviouslyUploadedEmpty" class="small text-muted py-3">
+          No duplicate certificate numbers in the latest upload.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Review & Final Import modal #}
+<div class="modal fade" id="exStampReviewModal" tabindex="-1" aria-labelledby="exStampReviewModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title" id="exStampReviewModalTitle">Review before Final Import</h5>
+          <div class="small text-muted" id="exStampReviewMeta"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2">
+          Click any field to edit. Certificate Number cannot be changed.
+          Certificates already present in the import table are excluded and listed under Skipped.
+        </p>
+        <div id="exStampReviewError" class="alert alert-danger d-none py-2" role="alert"></div>
+        <div class="table-responsive ex-review-grid-wrap">
+          <table class="table table-sm table-bordered align-middle mb-0 ex-review-table" id="exStampReviewGrid">
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                <th>Certificate Number</th>
+                <th class="text-end" style="width: 110px;">Stamp Duty</th>
+                <th>Stamp Duty Type</th>
+                <th>Paid By</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="exStampReviewBody"></tbody>
+          </table>
+        </div>
+        <div class="small text-muted mt-2" id="exStampReviewCount">0 rows</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success btn-sm" id="exStampFinalImportBtn">
+          <i class="bi bi-check2-circle"></i> Final Import
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.EX_STAMP_API = {
+    compare: {{ url_for('exceptional_report.stamp_certificate_compare') | tojson }},
+    import: {{ url_for('exceptional_report.stamp_certificate_import') | tojson }},
+    state: {{ url_for('exceptional_report.stamp_certificate_state') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/exceptional_stamp_report.js') }}"></script>
+{% endblock %}

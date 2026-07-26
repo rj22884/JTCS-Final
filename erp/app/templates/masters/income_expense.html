@@ -1,0 +1,143 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="workMasterAddBtn" title="Add">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="workMasterEditBtn" disabled title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="workMasterDeleteBtn" disabled title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <a href="{{ url_for('masters_work.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/work_master.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card work-master-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="workMasterSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="workMasterSearch" placeholder="Work name, income, expense...">
+    </div>
+    <div style="min-width: 160px; max-width: 200px;">
+      <label class="form-label" for="workMasterFilterKind">Filter</label>
+      <select class="form-select form-select-sm" id="workMasterFilterKind">
+        <option value="">All</option>
+        <option value="Income">Income only</option>
+        <option value="Expense">Expense only</option>
+        <option value="Misc.">Misc. only</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="workMasterRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <button type="button" class="btn btn-primary btn-sm" id="workMasterAddCategoryBtn">
+      <i class="bi bi-plus-lg"></i> Add Work / Category
+    </button>
+    <span class="small text-muted ms-auto" id="workMasterCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <p class="small text-muted mb-3">
+    Work/Category Master — manage work heads used in Others activity screens. Each row is marked as <strong>Income</strong>, <strong>Expense</strong>, or <strong>Misc.</strong>.
+  </p>
+  <div id="workMasterStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+  <div class="table-responsive work-master-grid-wrap">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="workMasterGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Work Name</th>
+          <th>Income</th>
+          <th>Expense</th>
+          <th>Misc.</th>
+          <th>Ledger Kind</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="workMasterGridBody"></tbody>
+    </table>
+  </div>
+  <div id="workMasterEmpty" class="small text-muted py-3 d-none">No work types found.</div>
+</div>
+
+<div class="modal fade" id="workMasterModal" tabindex="-1" aria-labelledby="workMasterModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="workMasterModalTitle">Work / Category</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="workMasterForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" id="workMasterId" value="">
+          <div class="mb-3">
+            <label class="form-label" for="workMasterName">Work Name *</label>
+            <input type="text" class="form-control" id="workMasterName" maxlength="100" required placeholder="e.g. Photostat, Print &amp; Scan">
+          </div>
+          <div class="mb-0" id="workMasterTypeEditWrap">
+            <label class="form-label">Type *</label>
+            <div class="d-flex flex-wrap gap-4">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="workMasterKind" id="workMasterIsIncome" value="Income" checked>
+                <label class="form-check-label" for="workMasterIsIncome">Income</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="workMasterKind" id="workMasterIsExpense" value="Expense">
+                <label class="form-check-label" for="workMasterIsExpense">Expense</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="workMasterKind" id="workMasterIsMisc" value="Misc.">
+                <label class="form-check-label" for="workMasterIsMisc">Misc.</label>
+              </div>
+            </div>
+          </div>
+          <div class="mb-0 d-none" id="workMasterTypeViewWrap">
+            <label class="form-label">Type</label>
+            <div><span class="badge text-bg-light border" id="workMasterTypeViewBadge">Income</span></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary d-none" id="workMasterEditModeBtn">
+            <i class="bi bi-pencil-square"></i> Edit
+          </button>
+          <button type="submit" class="btn btn-primary" id="workMasterSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.WORK_MASTER_API = {
+    list: {{ url_for('masters_work.list_records') | tojson }},
+    record: {{ url_for('masters_work.get_record', work_id=0) | tojson }},
+    create: {{ url_for('masters_work.create_record') | tojson }},
+    update: {{ url_for('masters_work.update_record', work_id=0) | tojson }},
+    delete: {{ url_for('masters_work.delete_record', work_id=0) | tojson }}
+  };
+  window.WORK_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
+  window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260722workcat"></script>
+{% endblock %}

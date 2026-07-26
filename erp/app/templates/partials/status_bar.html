@@ -1,0 +1,14 @@
+<footer class="jtcs-status-bar">
+  <div class="d-flex gap-3 flex-wrap">
+    <span><i class="bi bi-database-check"></i> Database connected to: <strong>{{ db_connection_display }}</strong></span>
+    <span><i class="bi bi-person-badge"></i> {{ session.user_name }} ({{ session.role }})</span>
+    <span class="jtcs-status-hotkeys" id="jtcsHotkeyHelpBtn" title="Keyboard shortcuts (Ctrl+/)">
+      <i class="bi bi-keyboard"></i> Hotkeys <kbd class="jtcs-hotkey-badge">Ctrl+/</kbd>
+    </span>
+  </div>
+  <div class="d-flex gap-3 flex-wrap">
+    <span><i class="bi bi-clock-history"></i> {{ server_time }}</span>
+    <span><i class="bi bi-info-circle"></i> v{{ app_version }}</span>
+    <span><i class="bi bi-building"></i> {{ company_display_name }}</span>
+  </div>
+</footer>

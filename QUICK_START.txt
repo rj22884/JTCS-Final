@@ -1,0 +1,47 @@
+JTCS ERP - Quick Start
+======================
+
+Location: E:\Git\JTCS Final
+
+EASIEST WAY
+-----------
+Double-click: JTCS_ERP.bat
+  1 = Install (first time)
+  2 = Start server
+  3 = Stop server
+  6 = Edit .env (set MAIL_PASSWORD)
+
+OR use individual files:
+  install_jtcs_erp.bat  - first-time setup
+  start_jtcs_erp.bat    - run server on port 8000
+  stop_jtcs_erp.bat     - free port 8000
+
+URLS
+----
+Login : http://localhost:8000/login
+Setup : http://localhost:8000/setup  (first admin only)
+
+ADMIN LOGIN
+-----------
+Email: itax.haldwani@gmail.com
+(Use your setup password, or Forgot Password)
+
+EMAIL (Gmail + 2FA)
+-------------------
+Edit erp\.env and set:
+  MAIL_PASSWORD=your-gmail-app-password
+
+Get App Password from:
+  Google Account > Security > 2-Step Verification > App passwords
+
+DATABASE
+--------
+Server  : JTCS\JTCS
+Database: JTCSS
+Uses Windows authentication (Trusted Connection)
+
+TROUBLESHOOTING
+---------------
+Port 8000 busy     -> run stop_jtcs_erp.bat
+Email not sending  -> set MAIL_PASSWORD in .env
+Registration error -> admin email already used at /setup; use Login

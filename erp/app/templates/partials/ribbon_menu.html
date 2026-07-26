@@ -1,0 +1,64 @@
+{% macro render_flyout(items, nested=false) %}
+<ul class="jtcs-flyout{% if nested %} jtcs-flyout-sub{% endif %}">
+  {% for item in items %}
+    {% set is_active = item.url | menu_active if item.url else false %}
+    {% if item.has_children %}
+      <li class="jtcs-menu-item has-children">
+        <a href="#" class="jtcs-menu-link jtcs-flyout-toggle{% if is_active %} active{% endif %}" role="button" aria-expanded="false">
+          <i class="bi {{ item.icon }}"></i>
+          <span>{{ item.name }}</span>
+          <i class="bi bi-chevron-right"></i>
+        </a>
+        {{ render_flyout(item.children, true) }}
+      </li>
+    {% else %}
+      {% if item.url == '/logout' %}
+        {% set href = url_for('auth.logout') %}
+      {% elif item.url and item.url.startswith('/') %}
+        {% set href = item.url %}
+      {% else %}
+        {% set href = '#' %}
+      {% endif %}
+      <li class="jtcs-menu-item">
+        <a href="{{ href }}" class="jtcs-menu-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}>
+          <i class="bi {{ item.icon }}"></i>
+          <span>{{ item.name }}</span>
+        </a>
+      </li>
+    {% endif %}
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro render_top_menu(items) %}
+<nav class="jtcs-menu-bar" aria-label="Main navigation">
+  <button type="button" class="jtcs-mobile-menu-toggle ms-2 my-1" id="jtcsMobileMenuToggle" aria-label="Toggle menu">
+    <i class="bi bi-list"></i> Menu
+  </button>
+  <ul class="jtcs-top-menu" id="jtcsTopMenu">
+    {% for item in items %}
+      {% set is_active = item.url | menu_active if item.url else false %}
+      {% if item.has_children %}
+        <li class="jtcs-top-item has-dropdown">
+          <button type="button" class="jtcs-top-link{% if is_active %} active{% endif %}" aria-expanded="false">
+            <i class="bi {{ item.icon }}"></i>
+            <span>{{ item.name }}</span>
+            <i class="bi bi-chevron-down"></i>
+          </button>
+          <div class="jtcs-dropdown-panel">
+            {{ render_flyout(item.children) }}
+          </div>
+        </li>
+      {% else %}
+        {% set href = url_for('auth.logout') if item.url == '/logout' else (item.url if item.url and item.url.startswith('/') else '#') %}
+        <li class="jtcs-top-item">
+          <a href="{{ href }}" class="jtcs-top-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}>
+            <i class="bi {{ item.icon }}"></i>
+            <span>{{ item.name }}</span>
+          </a>
+        </li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+</nav>
+{% endmacro %}

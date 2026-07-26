@@ -1,0 +1,206 @@
+{% macro cm_field(name, label, type='text', col='col-md-3', maxlength='', options=None, master_required=false) %}
+<div class="{{ col }} cm-field-wrap" data-field="{{ name }}">
+  <label class="form-label{% if master_required %} cm-required{% endif %}" for="cm_{{ name }}">{{ label }}</label>
+  {% if type == 'select' %}
+  <select class="form-control form-select" id="cm_{{ name }}" name="{{ name }}" data-cm-field="{{ name }}"
+          {% if master_required %}data-master-required="1"{% endif %}>
+    {% if options %}
+      {% for opt in options %}
+        {% if opt is mapping %}
+        <option value="{{ opt.value }}">{{ opt.label }}</option>
+        {% else %}
+        <option value="{{ opt }}">{{ opt }}</option>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  </select>
+  {% elif type == 'textarea' %}
+  <textarea class="form-control" id="cm_{{ name }}" name="{{ name }}" rows="2" data-cm-field="{{ name }}"
+            {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+            {% if master_required %}data-master-required="1"{% endif %}></textarea>
+  {% elif type == 'date' %}
+  <input type="date" class="form-control" id="cm_{{ name }}" name="{{ name }}" data-cm-field="{{ name }}"
+         {% if master_required %}data-master-required="1"{% endif %}>
+  {% else %}
+  <input type="{{ type }}" class="form-control{% if name == 'pan_number' %} text-uppercase{% endif %}"
+         id="cm_{{ name }}" name="{{ name }}" data-cm-field="{{ name }}"
+         {% if maxlength %}maxlength="{{ maxlength }}"{% endif %}
+         {% if master_required %}data-master-required="1"{% endif %}>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<div class="cm-tab-panels">
+  <div class="cm-tab-panel" data-tab="basic">
+    <div class="row g-2">
+      <div class="col-md-2">
+        <label class="form-label">Customer ID</label>
+        <input type="text" class="form-control" id="cm_display_customer_id" readonly placeholder="Auto">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="cm_customer_type">Customer Type</label>
+        <select class="form-select" id="cm_customer_type" name="customer_type" data-cm-field="customer_type">
+          <option value="">-- Select --</option>
+          {% for t in customer_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      {{ cm_field('customer_name', 'Customer Name', master_required=true, col='col-md-4', maxlength='200') }}
+      <div class="col-md-3">
+        <label class="form-label" for="cm_customer_status">Status</label>
+        <select class="form-select" id="cm_customer_status" name="customer_status" data-cm-field="customer_status">
+          {% for s in customer_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      {{ cm_field('father_husband_name', 'Father / Husband Name', col='col-md-4', maxlength='200') }}
+      {{ cm_field('company_firm_name', 'Company / Firm Name', col='col-md-4', maxlength='200') }}
+      {{ cm_field('date_of_birth', 'Date of Birth', 'date', col='col-md-2') }}
+      {{ cm_field('date_of_incorporation', 'Date of Incorporation', 'date', col='col-md-2') }}
+      <div class="col-md-2">
+        <label class="form-label" for="cm_gender">Gender</label>
+        <select class="form-select" id="cm_gender" name="gender" data-cm-field="gender">
+          <option value=""></option>
+          {% for g in genders %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+        </select>
+      </div>
+      {{ cm_field('occupation', 'Occupation', col='col-md-3', maxlength='100') }}
+      {{ cm_field('remarks', 'Remarks', 'textarea', col='col-12', maxlength='1000') }}
+      <div class="col-md-3 cm-field-wrap" data-field="opening_balance">
+        <label class="form-label" for="cm_opening_balance">Opening Balance</label>
+        <input type="number" class="form-control" id="cm_opening_balance" name="opening_balance"
+               data-cm-field="opening_balance" step="0.01" min="0" placeholder="0.00">
+      </div>
+      {{ cm_field('opening_balance_date', 'Opening Balance Date', 'date', col='col-md-3') }}
+      <div class="col-md-2 cm-field-wrap" data-field="opening_balance_dr_cr">
+        <label class="form-label" for="cm_opening_balance_dr_cr">Dr / Cr</label>
+        <select class="form-select" id="cm_opening_balance_dr_cr" name="opening_balance_dr_cr"
+                data-cm-field="opening_balance_dr_cr">
+          <option value="">-- Select --</option>
+          <option value="Dr">Dr</option>
+          <option value="Cr">Cr</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="contact">
+    <div class="row g-2">
+      {{ cm_field('mobile_number', 'Mobile Number', master_required=true, col='col-md-3', maxlength='20') }}
+      {{ cm_field('alternate_mobile', 'Alternate Mobile', col='col-md-3', maxlength='20') }}
+      {{ cm_field('whatsapp_number', 'WhatsApp Number', col='col-md-3', maxlength='20') }}
+      {{ cm_field('email_id', 'Email ID', 'email', master_required=true, col='col-md-3', maxlength='200') }}
+      {{ cm_field('website', 'Website', col='col-md-6', maxlength='300') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="address">
+    <div class="row g-2">
+      {{ cm_field('pincode', 'Pincode', master_required=true, col='col-md-3', maxlength='10') }}
+      {{ cm_field('country', 'Country', col='col-md-3', maxlength='100') }}
+      {{ cm_field('state', 'State', col='col-md-3', maxlength='100') }}
+      {{ cm_field('district', 'District', col='col-md-3', maxlength='100') }}
+      {{ cm_field('city', 'City', col='col-md-3', maxlength='100') }}
+      {{ cm_field('address_line1', 'Address Line 1', master_required=true, col='col-md-6', maxlength='300') }}
+      {{ cm_field('address_line2', 'Address Line 2', col='col-md-6', maxlength='300') }}
+      {{ cm_field('village', 'Village', col='col-md-3', maxlength='100') }}
+      {{ cm_field('area', 'Area', col='col-md-3', maxlength='100') }}
+      {{ cm_field('pan_number', 'PAN Number', master_required=true, col='col-md-4', maxlength='10') }}
+      {{ cm_field('aadhaar_number', 'Aadhaar Number', master_required=true, col='col-md-4', maxlength='12') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="itr">
+    <div class="row g-2">
+      {{ cm_field('income_tax_password', 'Income Tax Password', col='col-md-4', maxlength='20') }}
+      {{ cm_field('passport_number', 'Passport Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('voter_id_number', 'Voter ID Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('ration_card_number', 'Ration Card Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('pran_number', 'PRAN Number', col='col-md-4', maxlength='30') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="tds">
+    <div class="row g-2">
+      {{ cm_field('tan_number', 'TAN Number', col='col-md-4', maxlength='20') }}
+      {{ cm_field('gst_number', 'GST Number', col='col-md-4', maxlength='20') }}
+      <div class="col-md-4 cm-field-wrap d-none" data-field="filing_frequency" id="cmFilingFrequencyWrapTds">
+        <label class="form-label" for="cm_filing_frequency_tds">Filing Frequency</label>
+        <select class="form-control form-select" id="cm_filing_frequency_tds" name="filing_frequency"
+                data-cm-field="filing_frequency">
+          <option value="">-- Select --</option>
+          {% for freq in (gst_filing_frequencies or ['Monthly', 'Quarterly', 'Yearly']) %}
+          <option value="{{ freq }}">{{ freq }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Shown when GST Number is entered.</div>
+      </div>
+      {{ cm_field('driving_license_number', 'Driving License Number', col='col-md-4', maxlength='30') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="gst">
+    <div class="row g-2">
+      {{ cm_field('gst_number', 'GST Number', col='col-md-4', maxlength='20') }}
+      <div class="col-md-4 cm-field-wrap d-none" data-field="filing_frequency" id="cmFilingFrequencyWrap">
+        <label class="form-label" for="cm_filing_frequency">Filing Frequency</label>
+        <select class="form-control form-select" id="cm_filing_frequency" name="filing_frequency"
+                data-cm-field="filing_frequency">
+          <option value="">-- Select --</option>
+          {% for freq in (gst_filing_frequencies or ['Monthly', 'Quarterly', 'Yearly']) %}
+          <option value="{{ freq }}">{{ freq }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Shown when GST Number is entered.</div>
+      </div>
+      {{ cm_field('tan_number', 'TAN Number', col='col-md-4', maxlength='20') }}
+      {{ cm_field('cin_number', 'CIN Number', col='col-md-4', maxlength='30') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="dsc">
+    <div class="row g-2">
+      {{ cm_field('driving_license_number', 'Driving License Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('passport_number', 'Passport Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('voter_id_number', 'Voter ID Number', col='col-md-4', maxlength='30') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="business">
+    <div class="row g-2">
+      {{ cm_field('msme_registration_number', 'MSME Registration Number', col='col-md-4', maxlength='50') }}
+      {{ cm_field('udyam_registration_number', 'UDYAM Registration Number', col='col-md-4', maxlength='50') }}
+      {{ cm_field('llpin_number', 'LLPIN Number', col='col-md-4', maxlength='30') }}
+      {{ cm_field('shop_act_license_number', 'Shop Act License Number', col='col-md-4', maxlength='50') }}
+      {{ cm_field('trade_license_number', 'Trade License Number', col='col-md-4', maxlength='50') }}
+      {{ cm_field('labour_license_number', 'Labour License Number', col='col-md-4', maxlength='50') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="compliance">
+    <div class="row g-2">
+      {{ cm_field('pf_establishment_number', 'PF Establishment Number', col='col-md-3', maxlength='50') }}
+      {{ cm_field('esic_registration_number', 'ESIC Registration Number', col='col-md-3', maxlength='50') }}
+      {{ cm_field('professional_tax_number', 'Professional Tax Number', col='col-md-3', maxlength='50') }}
+      {{ cm_field('epfo_code', 'EPFO Code', col='col-md-3', maxlength='50') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="bank">
+    <div class="row g-2">
+      {{ cm_field('bank_name', 'Bank Name', col='col-md-3', maxlength='150') }}
+      {{ cm_field('branch_name', 'Branch Name', col='col-md-3', maxlength='150') }}
+      {{ cm_field('account_holder_name', 'Account Holder Name', col='col-md-3', maxlength='200') }}
+      {{ cm_field('account_number', 'Account Number', col='col-md-3', maxlength='50') }}
+      {{ cm_field('ifsc_code', 'IFSC Code', col='col-md-3', maxlength='20') }}
+    </div>
+  </div>
+
+  <div class="cm-tab-panel d-none" data-tab="social">
+    <div class="row g-2">
+      {{ cm_field('facebook', 'Facebook', col='col-md-4', maxlength='300') }}
+      {{ cm_field('instagram', 'Instagram', col='col-md-4', maxlength='300') }}
+      {{ cm_field('twitter_x', 'Twitter / X', col='col-md-4', maxlength='300') }}
+      {{ cm_field('linkedin', 'LinkedIn', col='col-md-4', maxlength='300') }}
+      {{ cm_field('youtube', 'YouTube', col='col-md-4', maxlength='300') }}
+    </div>
+  </div>
+</div>

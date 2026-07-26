@@ -1,0 +1,44 @@
+{% extends 'layouts/auth_base.html' %}
+
+
+
+{% block title %}Forgot User ID{% endblock %}
+
+{% block subtitle %}Recover your registered email (User ID){% endblock %}
+
+
+
+{% block content %}
+
+<form method="post" class="vstack gap-3">
+
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <p class="text-muted small mb-0">Enter your registered mobile number or email. If a matching account exists, your User ID will be sent to the registered email address.</p>
+
+  <div>
+
+    <label class="form-label" for="email">Registered Email</label>
+
+    <input type="email" class="form-control" id="email" name="email" placeholder="you@example.com">
+
+  </div>
+
+  <div class="text-center text-muted small">— OR —</div>
+
+  <div>
+
+    <label class="form-label" for="mobile">Registered Mobile</label>
+
+    <input type="tel" class="form-control" id="mobile" name="mobile" maxlength="10" placeholder="10-digit mobile">
+
+  </div>
+
+  <button type="submit" class="btn btn-primary w-100">Send User ID</button>
+
+  <a href="{{ url_for('auth.login') }}" class="text-center small">Back to Login</a>
+
+</form>
+
+{% endblock %}
+

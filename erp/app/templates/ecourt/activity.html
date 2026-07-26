@@ -1,0 +1,349 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="ecourt-page">
+  <div class="jtcs-card ecourt-period-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="ecourt-section-head mb-0">Activity Summary</div>
+      <span class="small text-muted" id="ecourtPeriodLabel">Loading...</span>
+    </div>
+    <div class="ecourt-period-grid" id="ecourtPeriodGrid"></div>
+  </div>
+
+  <div class="jtcs-card ecourt-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="ecourt-section-head mb-0">Imported Receipts (Stationery Tree)</div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="ecourtBackBtn" data-hotkey="alt+b" data-hotkey-action="Back">
+          <i class="bi bi-arrow-left"></i> Back
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" id="ecourtOpenImportBtn" data-hotkey="alt+i" data-hotkey-action="Import PDF">
+          <i class="bi bi-file-earmark-arrow-up"></i> Import PDF
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="ecourtOpenManualBtn" data-hotkey="alt+m" data-hotkey-action="Manual Entry">
+          <i class="bi bi-pencil-square"></i> Manual Entry
+        </button>
+        <button type="button" class="btn btn-success btn-sm d-none" id="ecourtSellSelectedBtn" data-hotkey="alt+s" data-hotkey-action="Sell Selected">
+          <i class="bi bi-cart-check"></i> Sell Selected
+        </button>
+        <span class="small text-muted" id="ecourtGridCount">0 records</span>
+      </div>
+    </div>
+
+    <input type="hidden" id="ecourtImportId" value="{{ latest_import_id or '' }}">
+    {% if latest_import_id %}
+    <div class="mb-2 pb-2 border-bottom">
+      <span class="small text-success">
+        Latest import: <strong>#{{ latest_import_id }}</strong>
+        {% if latest_import_name %} — {{ latest_import_name }}{% endif %}
+        ({{ latest_import_count }} rows)
+      </span>
+    </div>
+    {% endif %}
+
+    <div id="ecourtSummaryBanner" class="ecourt-summary-banner mb-2 d-none"></div>
+
+    <div class="table-responsive ecourt-grid-wrap">
+      <table class="table table-sm table-hover align-middle mb-0 ecourt-tree-table" id="ecourtGrid">
+        <thead>
+          <tr>
+            <th class="ecourt-col-select" style="width: 34px;"></th>
+            <th class="ecourt-col-toggle" style="width: 36px;"></th>
+            <th class="ecourt-sortable" data-sort-key="name" role="button" tabindex="0">
+              Stationery / Receipt No. <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable" data-sort-key="date" role="button" tabindex="0">
+              Date <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable" data-sort-key="sold_date" role="button" tabindex="0">
+              Sold Date <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable text-end" data-sort-key="buy" role="button" tabindex="0">
+              Buy Value <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable text-end" data-sort-key="sell" role="button" tabindex="0">
+              Sell Value <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable text-center" data-sort-key="sold_remaining" role="button" tabindex="0">
+              Sold / Remaining <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable" data-sort-key="account" role="button" tabindex="0">
+              Account Number <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-sortable" data-sort-key="sale_status" role="button" tabindex="0">
+              Sale Status <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-col-actions" style="width: 220px;"></th>
+          </tr>
+          <tr class="ecourt-filter-row">
+            <th></th>
+            <th></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="name" placeholder="Filter…" aria-label="Filter stationery / receipt"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="date" placeholder="Filter…" aria-label="Filter date"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_date" placeholder="Filter…" aria-label="Filter sold date"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="buy" placeholder="Filter…" aria-label="Filter buy value"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sell" placeholder="Filter…" aria-label="Filter sell value"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_remaining" placeholder="Filter…" aria-label="Filter sold remaining"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="account" placeholder="Filter…" aria-label="Filter account number"></th>
+            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sale_status" placeholder="Filter…" aria-label="Filter sale status"></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ecourtGridBody"></tbody>
+      </table>
+    </div>
+    <div id="ecourtGridEmpty" class="small text-muted py-3">Click Import PDF to upload receipts. Imported data will appear here.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="ecourtDuplicateModal" tabindex="-1" aria-labelledby="ecourtDuplicateModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2 bg-warning-subtle">
+        <h5 class="modal-title" id="ecourtDuplicateModalTitle">Records Not Imported (Duplicates)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2" id="ecourtDuplicateSummary"></p>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Stationery Number</th>
+                <th>Receipt No.</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="ecourtDuplicateBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="ecourtImportModal" tabindex="-1" aria-labelledby="ecourtImportModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-fullscreen ecourt-import-modal-dialog">
+    <div class="modal-content ecourt-import-modal">
+      <div class="modal-header ecourt-import-modal-header py-2">
+        <h5 class="modal-title" id="ecourtImportModalTitle">Import e-Court Receipt Report (PDF)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body ecourt-import-modal-body">
+        <div id="ecourtUploadPanel" class="ecourt-panel-inner mb-3">
+          <p class="small text-muted mb-2">
+            Page 1 header + data, page 2 onwards data only. Read PDF → review → enter stationery → Confirm Import.
+          </p>
+          <ol class="small text-muted mb-2 ps-3">
+            <li>Select PDF and click <strong>Read PDF</strong></li>
+            <li>Row 1, 21, 41… par stationery → tick <strong>Apply next 20</strong></li>
+            <li><strong>Confirm Import</strong> — sirf stationery wali rows save hongi</li>
+          </ol>
+          <div class="d-flex flex-wrap align-items-end gap-2">
+            <div class="flex-grow-1" style="min-width: 240px;">
+              <input type="file" class="form-control form-control-sm" id="ecourtPdfInput" accept="application/pdf,.pdf">
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" id="ecourtReadPdfBtn">
+              <i class="bi bi-file-earmark-pdf"></i> Read PDF
+            </button>
+          </div>
+          <div id="ecourtUploadStatus" class="small mt-2 text-muted"></div>
+        </div>
+
+        <div id="ecourtPreviewPanel" class="ecourt-panel-inner d-none">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div>
+              <div class="ecourt-section-head mb-0">PDF Preview — Review &amp; Stationery Entry</div>
+              <div class="small text-muted" id="ecourtPreviewMeta"></div>
+              <div class="ecourt-preview-summary small mt-1" id="ecourtPreviewSummary"></div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="button" class="btn btn-outline-primary btn-sm d-none" id="ecourtJumpNextBlockBtn">
+                <i class="bi bi-arrow-down-circle"></i> Next block row
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="ecourtAddRowBtn">
+                <i class="bi bi-plus-lg"></i> Add Row
+              </button>
+              <button type="button" class="btn btn-success btn-sm" id="ecourtConfirmImportBtn">
+                <i class="bi bi-check2-circle"></i> Confirm Import
+              </button>
+            </div>
+          </div>
+          <div class="table-responsive ecourt-preview-wrap">
+            <table class="table table-sm table-bordered align-middle mb-0 ecourt-preview-table" id="ecourtPreviewGrid">
+              <thead>
+                <tr>
+                  <th style="width: 34px;">#</th>
+                  <th>Receipt No.</th>
+                  <th>Date</th>
+                  <th class="text-end">Amount</th>
+                  <th>Payment Mode</th>
+                  <th>Status</th>
+                  <th>Remarks</th>
+                  <th>Stationery Number</th>
+                  <th style="width: 44px;"></th>
+                </tr>
+              </thead>
+              <tbody id="ecourtPreviewBody"></tbody>
+            </table>
+          </div>
+          <div class="small text-muted mt-2" id="ecourtPreviewCount">0 rows</div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="ecourtSaleModal" tabindex="-1" aria-labelledby="ecourtSaleModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ecourtSaleModalTitle">Sell Receipt(s)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="ecourtSaleForm" class="row g-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-md-4">
+            <label class="form-label" for="ecourtSaleDate">Transaction Date *</label>
+            <input type="date" class="form-control form-control-sm" id="ecourtSaleDate" name="TransactionDate" required>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="ecourtSaleCustomer">Customer Name</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtSaleCustomer" name="CustomerName">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="ecourtSaleMobile">Mobile</label>
+            <input type="tel" class="form-control form-control-sm" id="ecourtSaleMobile" name="MobileNumber" maxlength="10">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="ecourtSaleAmount">Sale Amount *</label>
+            <input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" id="ecourtSaleAmount" name="SaleAmount" value="0" required>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label" for="ecourtSaleRemarks">Remarks</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtSaleRemarks" name="Remarks">
+          </div>
+          <div class="col-12">
+            <label class="form-label mb-1">Selected Receipt(s)</label>
+            <div class="table-responsive ecourt-sale-receipts-wrap">
+              <table class="table table-sm table-bordered mb-0">
+                <thead>
+                  <tr>
+                    <th>Receipt No.</th>
+                    <th>Stationery</th>
+                    <th>Date</th>
+                    <th class="text-end">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="ecourtSaleReceiptBody"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+              <label class="form-label mb-0">Payment Modes *</label>
+              <button type="button" class="btn btn-outline-primary btn-sm" id="ecourtAddPaymentBtn">
+                <i class="bi bi-plus-lg"></i> Add Payment Mode
+              </button>
+              <span class="small ms-auto" id="ecourtPaymentSummary"></span>
+            </div>
+            <div id="ecourtPaymentLines" class="ecourt-payment-lines"></div>
+            {% if not payment_modes %}
+            <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+            {% endif %}
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-success btn-sm" id="ecourtConfirmSaleBtn">
+              <i class="bi bi-check2-circle"></i> Confirm Sale
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="ecourtManualModal" tabindex="-1" aria-labelledby="ecourtManualModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ecourtManualModalTitle">Manual Sale Entry</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="ecourtManualForm" class="row g-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="col-md-6">
+            <label class="form-label" for="ecourtReceiptNo">Receipt No. *</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtReceiptNo" name="ReceiptNo" placeholder="UKCT1758885D2654K" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="ecourtManualDate">Receipt Date</label>
+            <input type="date" class="form-control form-control-sm" id="ecourtManualDate" name="ReceiptDate">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="ecourtManualAmount">Amount *</label>
+            <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="ecourtManualAmount" name="Amount" required>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label" for="ecourtStationeryNo">Stationery Number</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtStationeryNo" name="StationeryNumber" placeholder="2654">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label" for="ecourtCustomerName">Customer Name</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtCustomerName" name="CustomerName">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="ecourtMobileNumber">Mobile</label>
+            <input type="tel" class="form-control form-control-sm" id="ecourtMobileNumber" name="MobileNumber" maxlength="10">
+          </div>
+          <div class="col-md-12">
+            <label class="form-label" for="ecourtManualRemarks">Remarks</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtManualRemarks" name="Remarks">
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save Sold Receipt</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ECOURT_URLS = {
+    parsePdf: {{ url_for('ecourt.parse_pdf') | tojson }},
+    importRows: {{ url_for('ecourt.import_rows') | tojson }},
+    importLines: {{ url_for('ecourt.import_lines') | tojson }},
+    summary: {{ url_for('ecourt.ecourt_activity_summary') | tojson }},
+    sell: {{ url_for('ecourt.sell_receipts') | tojson }},
+    unsell: {{ url_for('ecourt.unsell_receipts') | tojson }},
+    deleteStationery: {{ url_for('ecourt.delete_stationery') | tojson }},
+    importPage: {{ url_for('ecourt.ecourt_activity_import') | tojson }},
+    manual: {{ url_for('ecourt.manual_sale') | tojson }},
+    sales: {{ url_for('ecourt.recent_sales') | tojson }},
+    back: {{ url_for('dashboard.index') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+  window.ECOURT_LATEST_IMPORT_ID = {{ latest_import_id | tojson }};
+  window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
+  window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260721-cards"></script>
+{% endblock %}

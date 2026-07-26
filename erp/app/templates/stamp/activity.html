@@ -1,0 +1,502 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="stamp-erp-page">
+  <div class="row g-2 mb-2 align-items-stretch stamp-page-topbar">
+    <div class="col-xl-8 col-lg-7 order-2 order-lg-1">
+      <div class="jtcs-card stamp-filter-bar h-100">
+        <div class="stamp-section-head mb-2">Search &amp; Filter</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterPeriod">Period</label>
+            <select class="form-select form-select-sm" id="stampFilterPeriod">
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month" selected>This Month</option>
+              <option value="year">This Year</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterDateFrom">Date From</label>
+            <input type="date" class="form-control form-control-sm" id="stampFilterDateFrom" value="{{ default_date_from }}">
+          </div>
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterDateTo">Date To</label>
+            <input type="date" class="form-control form-control-sm" id="stampFilterDateTo" value="{{ default_date_to }}">
+          </div>
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterCert">Certificate No.</label>
+            <input type="text" class="form-control form-control-sm" id="stampFilterCert" placeholder="Search certificate">
+          </div>
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterMobile">Mobile</label>
+            <input type="tel" class="form-control form-control-sm" id="stampFilterMobile" maxlength="10" placeholder="10-digit">
+          </div>
+          <div class="col-6 col-md-4 col-lg-2">
+            <label class="form-label" for="stampFilterCustomer">Customer</label>
+            <input type="text" class="form-control form-control-sm" id="stampFilterCustomer" placeholder="Customer name">
+          </div>
+          <div class="col-12 col-lg-auto ms-lg-auto">
+            <div class="d-flex flex-wrap gap-1">
+              <button type="button" class="btn btn-primary btn-sm" id="stampFilterApplyBtn">
+                <i class="bi bi-funnel"></i> Apply
+              </button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" id="stampFilterResetBtn">Reset</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-xl-4 col-lg-5 order-1 order-lg-2">
+      <div id="stampMobileGate" class="jtcs-card stamp-mobile-gate stamp-mobile-gate-top h-100">
+        <div class="stamp-section-head">Start Stamp Activity</div>
+        <p class="small text-muted mb-2">Enter mobile number to begin. The form will clear each new entry.</p>
+        <div class="d-flex flex-wrap gap-2 align-items-end">
+          <div class="flex-grow-1" style="min-width: 140px;">
+            <label class="form-label" for="stampMobileInput">Enter Mobile Number:</label>
+            <input type="tel" class="form-control form-control-sm" id="stampMobileInput" maxlength="10" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile">
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="stampMobileContinueBtn">Continue</button>
+        </div>
+        <div id="stampMobileError" class="small text-danger mt-2 d-none"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="jtcs-card stamp-period-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="stamp-section-head mb-0">Period Summary</div>
+      <span class="small text-muted" id="stampPeriodLabel">Loading...</span>
+    </div>
+    <div class="stamp-period-grid" id="stampPeriodGrid"></div>
+  </div>
+
+  <div class="jtcs-card stamp-data-grid-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="stamp-section-head mb-0">Stamp Activity Records</div>
+      <span class="small text-muted" id="stampDataGridCount"></span>
+    </div>
+    <div class="table-responsive stamp-data-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampDataGrid">
+        <thead>
+          <tr>
+            <th class="stamp-sortable stamp-col-cert" data-sort-key="certificate_number" role="button" tabindex="0">
+              Certificate <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-date" data-sort-key="certificate_date" role="button" tabindex="0">
+              Cert Date <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable text-end stamp-col-num" data-sort-key="stamp_duty_amount" role="button" tabindex="0">
+              Duty ₹ <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable text-end stamp-col-num" data-sort-key="sale_amount" role="button" tabindex="0">
+              Sale ₹ <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-date" data-sort-key="transaction_date" role="button" tabindex="0">
+              Txn Date <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-grow" data-sort-key="customer_name" role="button" tabindex="0">
+              Customer <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-mobile" data-sort-key="mobile_number" role="button" tabindex="0">
+              Mobile <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-grow" data-sort-key="payment_mode" role="button" tabindex="0">
+              Payment <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable text-end stamp-col-daily" data-sort-key="transaction_id" role="button" tabindex="0">
+              Daily # <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="text-end stamp-grid-actions-col">Actions</th>
+          </tr>
+          <tr class="stamp-filter-row">
+            <th class="stamp-col-cert"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_number" placeholder="Filter…" aria-label="Filter certificate"></th>
+            <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_date" placeholder="Filter…" aria-label="Filter cert date"></th>
+            <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="stamp_duty_amount" placeholder="Filter…" aria-label="Filter duty"></th>
+            <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="sale_amount" placeholder="Filter…" aria-label="Filter sale"></th>
+            <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="transaction_date" placeholder="Filter…" aria-label="Filter txn date"></th>
+            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="customer_name" placeholder="Filter…" aria-label="Filter customer"></th>
+            <th class="stamp-col-mobile"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="mobile_number" placeholder="Filter…" aria-label="Filter mobile"></th>
+            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="payment_mode" placeholder="Filter…" aria-label="Filter payment"></th>
+            <th class="stamp-col-daily"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="transaction_id" placeholder="Filter…" aria-label="Filter daily id"></th>
+            <th class="stamp-grid-actions-col"></th>
+          </tr>
+        </thead>
+        <tbody id="stampDataGridBody"></tbody>
+      </table>
+    </div>
+    <div id="stampDataGridEmpty" class="small text-muted py-3 d-none">No stamp records match the current filters.</div>
+  </div>
+
+  <div class="modal fade" id="stampCardDetailModal" tabindex="-1" aria-labelledby="stampCardDetailTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <div>
+            <h5 class="modal-title mb-0" id="stampCardDetailTitle">Card Details</h5>
+            <div class="small text-muted" id="stampCardDetailSub"></div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <span class="small text-muted" id="stampCardDetailCount"></span>
+            <span class="small fw-semibold ms-auto" id="stampCardDetailTotal"></span>
+          </div>
+          <div class="table-responsive stamp-card-detail-wrap">
+            <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampCardDetailGrid">
+              <thead id="stampCardDetailHead"></thead>
+              <tbody id="stampCardDetailBody"></tbody>
+            </table>
+          </div>
+          <div id="stampCardDetailEmpty" class="small text-muted py-3 d-none">No contributing records for this card.</div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="stampEntryModal" tabindex="-1" aria-labelledby="stampEntryModalTitle" aria-hidden="true"
+       data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-fullscreen stamp-entry-modal-dialog">
+      <div class="modal-content stamp-entry-modal">
+        <div class="modal-header stamp-entry-modal-header">
+          <h5 class="modal-title" id="stampEntryModalTitle">Stamp Sale Entry</h5>
+          <div class="stamp-mobile-info stamp-entry-mobile-info" id="stampMobileDisplay"></div>
+          <button type="button" class="btn btn-sm stamp-entry-expand-btn d-none d-lg-inline-flex" title="Expand">
+            <i class="bi bi-arrows-fullscreen"></i>
+          </button>
+          <button type="button" class="btn-close btn-close-white ms-2" id="stampEntryCloseBtn" aria-label="Close"></button>
+        </div>
+        <div class="modal-body stamp-entry-modal-body">
+  <div id="stampMainWorkspace">
+  <div class="jtcs-card stamp-mode-bar mb-1 py-1 px-2">
+    <div class="d-flex flex-wrap align-items-center gap-4">
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="radio" name="EntryMode" id="modeManual" value="manual" checked>
+        <label class="form-check-label" for="modeManual">Manual Entry</label>
+      </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="radio" name="EntryMode" id="modeOcr" value="ocr">
+        <label class="form-check-label" for="modeOcr">Integration from Image</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="jtcs-card stamp-page-toolbar mb-1 py-1 px-2">
+    <div class="stamp-toolbar-groups">
+      <div class="stamp-toolbar-group">
+        <button type="submit" form="stampActivityForm" class="btn btn-sm stamp-entry-save-btn" id="stampSaveBtn" title="Save (Ctrl+S)">
+          <i class="bi bi-save"></i> Save
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="stampEditBtn" disabled title="Edit (F2)">
+          <i class="bi bi-pencil"></i> Edit
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stampPartialOcrAlert" class="alert alert-info py-2 mb-2 d-none"></div>
+
+  {% if duplicate_existing %}
+  <div class="alert alert-danger py-2">
+    Certificate <strong>{{ duplicate_existing.certificate_number }}</strong> is already sold in full.
+    {% if duplicate_existing.transaction_id %}
+    Transaction <strong>#{{ duplicate_existing.transaction_id }}</strong>,
+    {% else %}
+    Stamp Record <strong>#{{ duplicate_existing.stamp_id }}</strong> (no transaction posted),
+    {% endif %}
+    Customer <strong>{{ duplicate_existing.customer_name or '—' }}</strong>,
+    Date <strong>{{ duplicate_existing.transaction_date | display_date }}</strong>.
+    A duplicate sale entry is not allowed. <a href="{{ url_for('stamp.stamp_activity', load_stamp=duplicate_existing.stamp_id) }}" class="alert-link">View Existing Record</a>
+  </div>
+  {% endif %}
+
+  <div id="stampOcrEngineAlert" class="alert {% if ocr_status.ready %}alert-success{% else %}alert-warning{% endif %} py-2 mb-2{% if ocr_status.ready %} d-none{% endif %}">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="flex-grow-1">
+        <strong id="stampOcrEngineTitle">{{ ocr_status.message }}</strong>
+        <div id="stampOcrEngineDetail" class="small mt-1">
+          {% if not ocr_status.ready %}
+          {% for p in ocr_status.providers %}
+          <span class="me-2">{{ p.name }}: {{ p.reason }}{% if p.detail %} ({{ p.detail }}){% endif %}</span>
+          {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+      {% if is_admin and not ocr_status.ready %}
+      <button type="button" class="btn btn-primary btn-sm" id="stampInstallOcrBtn">
+        <i class="bi bi-download"></i> Install OCR Engine
+      </button>
+      {% endif %}
+    </div>
+    <div id="stampOcrInstallGuide" class="small mt-2 {% if ocr_status.ready %}d-none{% endif %}">
+      <strong>Install Guide</strong>
+      <ol class="mb-0 ps-3">
+        {% for step in ocr_status.install_guide %}
+        <li>{{ step }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+  </div>
+
+  <form method="post" id="stampActivityForm" class="stamp-erp-form" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="Narration" id="Narration" value="Stamp Sale">
+    <input type="hidden" name="MobileNumber" id="MobileNumber" value="{{ repost_mobile or '' }}">
+    <input type="hidden" name="OcrImageID" id="OcrImageID" value="">
+    <input type="hidden" name="StampID" id="StampID" value="{{ repost_stamp_id or '' }}">
+    <input type="hidden" name="EditStampID" id="EditStampID" value="{{ repost_stamp_id or '' }}">
+    <input type="hidden" name="EntryMode" id="EntryMode" value="manual">
+
+    <div class="row g-2" id="stampFormLayout">
+      <div class="col-auto d-none" id="stampImageColumn">
+        <div class="stamp-image-panel">
+          <div class="stamp-photo-box" id="stampPhotoBox" tabindex="0">
+            <div class="stamp-photo-placeholder" id="stampPhotoPlaceholder">
+              <i class="bi bi-image"></i>
+              <strong>Paste Screenshot</strong>
+              Ctrl+V
+            </div>
+            <img id="stampPhotoPreview" class="stamp-photo-preview d-none" alt="Certificate">
+            <div class="stamp-photo-pdf d-none" id="stampPdfPreview">
+              <i class="bi bi-file-earmark-pdf"></i>
+              <span id="stampPdfName">PDF</span>
+            </div>
+            <div class="stamp-photo-overlay d-none" id="stampOcrOverlay">
+              <div class="spinner-border spinner-border-sm text-primary"></div>
+              <span>Reading Certificate...</span>
+            </div>
+          </div>
+          <div class="stamp-image-actions">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="stampBrowseBtn">Browse</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="stampPasteBtn">Paste</button>
+            <button type="button" class="btn btn-warning btn-sm d-none" id="stampRetryBtn">Retry OCR</button>
+            <button type="button" class="btn btn-outline-danger btn-sm" id="stampClearImageBtn">Clear</button>
+          </div>
+          <div class="stamp-ocr-panel mt-2">
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="stamp-ocr-label">OCR Provider</span>
+              <span id="stampOcrProviderBadge" class="badge text-bg-secondary">{{ ocr_status.active_provider or 'None' }}</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-1">
+              <span class="stamp-ocr-label">OCR Status</span>
+              <span id="stampOcrIcon"></span>
+            </div>
+            <div id="stampOcrStatusText" class="stamp-ocr-status-text">Waiting</div>
+            <div id="stampOcrReason" class="small text-danger d-none"></div>
+            <div class="stamp-ocr-confidence d-none" id="stampOcrConfidenceWrap">
+              OCR Confidence: <strong id="stampOcrConfidence">—</strong>
+            </div>
+          </div>
+          <input type="file" class="d-none" id="stampFileInput"
+                 accept=".png,.jpg,.jpeg,.webp,.pdf,image/png,image/jpeg,image/webp,application/pdf">
+        </div>
+      </div>
+
+      <div class="col" id="stampFormContent">
+        <div class="stamp-entry-section" id="stampSectionCert">
+          <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">1</span> Certificate Details</div>
+          <div class="row g-1 stamp-entry-field-row">
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="CertificateNumber">Certificate Number *</label>
+              <input type="text" class="form-control stamp-field stamp-field-mandatory" id="CertificateNumber" name="CertificateNumber" required maxlength="100">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="CertificateIssuedDate">Certificate Date *</label>
+              <input type="date" class="form-control stamp-field stamp-field-mandatory" id="CertificateIssuedDate" name="CertificateIssuedDate" required>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="AccountReference">Account Reference</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="AccountReference" name="AccountReference" maxlength="200" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="UniqueDocumentReference">Unique Reference</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="UniqueDocumentReference" name="UniqueDocumentReference" maxlength="200" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="ReferenceNo">Reference Number</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="ReferenceNo" name="ReferenceNo" maxlength="100" tabindex="-1">
+            </div>
+          </div>
+        </div>
+
+        <div class="stamp-entry-section" id="stampSectionParty">
+          <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">2</span> Party &amp; Document Details</div>
+          <div class="row g-1 stamp-entry-field-row">
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="PurchasedBy">Purchased By</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="PurchasedBy" name="PurchasedBy" maxlength="300" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="DescriptionOfDocument">Description</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="DescriptionOfDocument" name="DescriptionOfDocument" maxlength="1000" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="PropertyDescription">Property Description</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="PropertyDescription" name="PropertyDescription" maxlength="1000" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="FirstPartyName">First Party *</label>
+              <input type="text" class="form-control stamp-field stamp-field-mandatory" id="FirstPartyName" name="FirstPartyName" maxlength="300" required>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="SecondPartyName">Second Party</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="SecondPartyName" name="SecondPartyName" maxlength="300" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="StampDutyPaidBy">Stamp Duty Paid By</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="StampDutyPaidBy" name="StampDutyPaidBy" maxlength="300" tabindex="-1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="ConsiderationPrice">Consideration Price</label>
+              <input type="number" step="0.01" min="0" class="form-control stamp-field stamp-field-optional" id="ConsiderationPrice" name="ConsiderationPrice" tabindex="-1">
+            </div>
+          </div>
+        </div>
+
+        <div class="stamp-entry-section" id="stampSectionAmount">
+          <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">3</span> Amount &amp; Payment Details</div>
+          <div class="row g-1 stamp-entry-field-row">
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="TransactionDate">Transaction Date *</label>
+              <input type="date" class="form-control stamp-field stamp-field-mandatory" id="TransactionDate" name="TransactionDate" required>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="StampDutyAmount">Stamp Duty Amount *</label>
+              <input type="number" step="0.01" min="0.01" class="form-control stamp-field stamp-field-mandatory" id="StampDutyAmount" name="StampDutyAmount" required>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="SaleAmount">Sale Amount *</label>
+              <input type="number" step="0.01" min="0" class="form-control stamp-field stamp-field-mandatory" id="SaleAmount" name="SaleAmount" value="0" required>
+            </div>
+            <div class="col-12">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <label class="form-label mb-0">Payment Modes *</label>
+                <button type="button" class="btn btn-sm stamp-entry-add-payment" id="stampAddPaymentBtn">
+                  <i class="bi bi-plus-lg"></i> Add Payment Mode
+                </button>
+                <span class="small ms-auto" id="stampPaymentSummary"></span>
+              </div>
+              <div id="stampPaymentLines"></div>
+              {% if not payment_modes %}
+              <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="stamp-entry-section mb-0" id="stampSectionRemarks">
+          <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">4</span> Remarks</div>
+          <div class="row g-1 stamp-entry-field-row">
+            <div class="col-12">
+              <label class="form-label" for="Remarks">Remarks</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="Remarks" name="Remarks" maxlength="500" placeholder="Optional remarks" tabindex="-1">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <div class="jtcs-card stamp-section-card mb-2 d-none" id="stampSearchPanel">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <div class="stamp-section-head mb-0 flex-grow-1">Search Results</div>
+      <span class="small text-muted" id="stampSearchSummary"></span>
+    </div>
+    <div class="table-responsive stamp-search-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampSearchGrid">
+        <thead>
+          <tr>
+            <th>Certificate Number</th>
+            <th>Cert Date</th>
+            <th>First Party</th>
+            <th class="text-end">Stamp Duty</th>
+            <th class="text-end">Sale Amount</th>
+            <th>Txn Date</th>
+            <th>Payment Mode</th>
+            <th>Customer</th>
+            <th class="text-end">Daily Txn #</th>
+          </tr>
+        </thead>
+        <tbody id="stampSearchGridBody"></tbody>
+      </table>
+    </div>
+    <div id="stampSearchEmpty" class="small text-muted py-2 d-none">No stamp records found for this certificate number.</div>
+  </div>
+  </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="stampZoomModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title fs-6">Certificate Preview</h5>
+        <div class="d-flex gap-1 ms-auto me-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampZoomOutBtn"><i class="bi bi-zoom-out"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampZoomInBtn"><i class="bi bi-zoom-in"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampRotateLeftBtn"><i class="bi bi-arrow-counterclockwise"></i></button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampRotateRightBtn"><i class="bi bi-arrow-clockwise"></i></button>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="stampDownloadBtn"><i class="bi bi-download"></i></button>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="stampZoomBody">
+        <div id="stampZoomViewport"><img id="stampZoomImage" src="" alt="Preview"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="stampDuplicateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2"><h5 class="modal-title fs-6">Duplicate Certificate</h5></div>
+      <div class="modal-body" id="stampDuplicateBody"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <a href="#" class="btn btn-primary btn-sm d-none" id="stampDuplicateViewBtn">View Existing Record</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.STAMP_EXTRACT_URL = {{ url_for('stamp.stamp_extract') | tojson }};
+  window.STAMP_CHECK_URL = {{ url_for('stamp.check_certificate') | tojson }};
+  window.STAMP_OCR_STATUS_URL = {{ url_for('stamp.stamp_ocr_status') | tojson }};
+  window.STAMP_OCR_INSTALL_URL = {{ url_for('stamp.stamp_ocr_install') | tojson }};
+  window.STAMP_CSRF = {{ csrf_token() | tojson }};
+  window.STAMP_DEFAULT_DATE = {{ default_date | tojson }};
+  window.STAMP_OCR_STATUS = {{ ocr_status | tojson }};
+  window.STAMP_IS_ADMIN = {{ is_admin | tojson }};
+  window.STAMP_BANK_ACCOUNTS = {{ payment_modes | tojson }};
+  window.STAMP_SEARCH_URL = {{ url_for('stamp.stamp_search') | tojson }};
+  window.STAMP_CUSTOMERS_BY_MOBILE_URL = {{ url_for('stamp.stamp_customers_by_mobile') | tojson }};
+  window.STAMP_RECORD_URL = {{ url_for('stamp.stamp_record', stamp_id=0) | tojson }};
+  window.STAMP_DELETE_URL = {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }};
+  window.STAMP_GRID_URL = {{ url_for('stamp.stamp_grid_data') | tojson }};
+  window.STAMP_CARD_DETAIL_URL = {{ url_for('stamp.stamp_card_detail') | tojson }};
+  window.STAMP_DEFAULT_DATE_FROM = {{ default_date_from | tojson }};
+  window.STAMP_DEFAULT_DATE_TO = {{ default_date_to | tojson }};
+  {% set auto_load_stamp = load_stamp_id or (duplicate_existing.stamp_id if duplicate_existing else none) %}
+  window.STAMP_AUTO_LOAD_STAMP_ID = {{ auto_load_stamp | tojson }};
+  window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}"></script>
+{% endblock %}

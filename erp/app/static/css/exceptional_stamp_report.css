@@ -1,0 +1,135 @@
+.ex-report-page .ex-report-panel {
+  padding: 1rem 1.1rem;
+}
+
+.ex-report-section-head {
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ex-report-grid-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.ex-report-grid-wrap thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+}
+
+.ex-report-side-panel {
+  position: sticky;
+  top: 1rem;
+}
+
+.ex-upload-groups-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.ex-upload-group {
+  border: 1px solid #dbe4f0;
+  border-radius: 0.5rem;
+  margin-bottom: 0.75rem;
+  overflow: hidden;
+}
+
+.ex-upload-group-head {
+  background: #f8fbff;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #e8eef5;
+}
+
+.ex-upload-group-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #1f3b63;
+}
+
+.ex-upload-group-meta {
+  font-size: 0.75rem;
+  color: #6c757d;
+}
+
+.ex-upload-group-table-wrap {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.ex-upload-group-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+  font-size: 0.75rem;
+}
+
+.ex-upload-group-table-wrap td {
+  font-size: 0.78rem;
+}
+
+.ex-skipped-wrap {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.ex-skipped-wrap thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+  font-size: 0.75rem;
+}
+
+.ex-skipped-wrap td {
+  font-size: 0.78rem;
+}
+
+.ex-imported-wrap {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.ex-imported-wrap thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 1;
+  font-size: 0.75rem;
+}
+
+.ex-imported-wrap td {
+  font-size: 0.78rem;
+}
+
+.ex-review-grid-wrap {
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+.ex-review-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fbff;
+  z-index: 1;
+  font-size: 0.8rem;
+}
+
+.ex-review-table .ex-cert-locked {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  color: #1f3b63;
+  background: #f1f5f9;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.25rem;
+  user-select: all;
+}
+
+.ex-review-table input.form-control-sm {
+  min-width: 0;
+}

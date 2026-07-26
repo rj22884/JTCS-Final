@@ -1,0 +1,118 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="atmAddBtn" title="Add New">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add New</span>
+  </button>
+  <a href="{{ url_for('masters_account_type.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="atmSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="atmSearch"
+             placeholder="Code, name, description...">
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="atmAddNewBtn">
+      <i class="bi bi-plus-lg"></i> Add New
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="atmRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="atmCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <p class="small text-muted mb-3">
+    Manage bank account types used in <strong>Masters → Bank Master</strong>.
+    Codes in use (e.g. SB, CC/OD) cannot be deleted — set them <strong>Inactive</strong> instead.
+  </p>
+  <div id="atmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="atmGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Account Type Code</th>
+          <th>Account Type Name</th>
+          <th>Description</th>
+          <th class="text-end">Order No.</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="atmGridBody"></tbody>
+    </table>
+  </div>
+  <div id="atmEmpty" class="small text-muted py-3 d-none">No account types found.</div>
+</div>
+
+<div class="modal fade" id="atmModal" tabindex="-1" aria-labelledby="atmModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="atmModalTitle">Add Account Type</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="atmForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" id="atmId" value="">
+          <div class="mb-3">
+            <label class="form-label" for="atmCode">Account Type Code *</label>
+            <input type="text" class="form-control" id="atmCode" maxlength="20" required
+                   placeholder="e.g. SB, CC/OD, OTH, RD">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="atmName">Account Type Name *</label>
+            <input type="text" class="form-control" id="atmName" maxlength="100" required
+                   placeholder="e.g. Savings Bank">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="atmDescription">Description</label>
+            <textarea class="form-control" id="atmDescription" rows="2" maxlength="255"
+                      placeholder="Optional"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="atmOrderNo">Order No.</label>
+            <input type="number" class="form-control" id="atmOrderNo" value="100" step="1">
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="atmIsActive" checked>
+            <label class="form-check-label" for="atmIsActive">Active</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="atmSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ACCOUNT_TYPE_API = {
+    list: {{ url_for('masters_account_type.list_records') | tojson }},
+    record: {{ url_for('masters_account_type.get_record', account_type_id=0) | tojson }},
+    create: {{ url_for('masters_account_type.create_record') | tojson }},
+    update: {{ url_for('masters_account_type.update_record', account_type_id=0) | tojson }},
+    delete: {{ url_for('masters_account_type.delete_record', account_type_id=0) | tojson }}
+  };
+  window.ACCOUNT_TYPE_INITIAL_ROWS = {{ initial_rows | tojson }};
+  window.ACCOUNT_TYPE_CSRF = {{ csrf_token() | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/account_type_master.js') }}?v=20260718atm"></script>
+{% endblock %}

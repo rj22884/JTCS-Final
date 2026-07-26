@@ -1,0 +1,149 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap_icon_picker.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card">
+  <form method="post" class="row g-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-6">
+      <label class="form-label" for="MenuName">Menu Name</label>
+      <input type="text" class="form-control" id="MenuName" name="MenuName" required
+             value="{{ menu.MenuName if menu else '' }}">
+    </div>
+    <div class="col-md-6">
+      <label class="form-label" for="MenuIcon">Icon (Bootstrap Icons class)</label>
+      <div class="input-group bi-picker-input-group">
+        <span class="input-group-text" id="biPickerPreviewWrap" title="Icon preview">
+          <i class="bi {{ menu.MenuIcon if menu and menu.MenuIcon else 'bi-circle' }}" id="biPickerPreviewIcon" aria-hidden="true"></i>
+        </span>
+        <input type="text" class="form-control" id="MenuIcon" name="MenuIcon"
+               placeholder="bi-speedometer2"
+               value="{{ menu.MenuIcon if menu else 'bi-circle' }}"
+               aria-describedby="biPickerWarning"
+               autocomplete="off">
+        <button type="button" class="btn btn-outline-primary" id="biPickerBrowseBtn">
+          <i class="bi bi-grid-3x3-gap me-1"></i>Browse Icons
+        </button>
+      </div>
+      <div id="biPickerWarning" class="form-text text-danger d-none"></div>
+      <div class="form-text">Enter a Bootstrap Icons class (e.g. bi-house) or browse the catalog.</div>
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="ParentMenuID">Parent Menu</label>
+      <select class="form-select" id="ParentMenuID" name="ParentMenuID">
+        <option value="">Main Menu (no parent)</option>
+        {% for parent_id, parent_label in parent_options %}
+          <option value="{{ parent_id }}"
+            {% if menu and menu.ParentMenuID == parent_id %}selected{% endif %}>
+            {{ parent_label }}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="col-md-6">
+      <label class="form-label" for="MenuURL">Menu URL</label>
+      <input type="text" class="form-control" id="MenuURL" name="MenuURL"
+             placeholder="/gst/registration"
+             value="{{ menu.MenuURL if menu and menu.MenuURL else '' }}">
+      <div class="form-text">Leave blank for accordion-only parent menus.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label" for="DisplayOrder">Display Order</label>
+      <input type="number" class="form-control" id="DisplayOrder" name="DisplayOrder" min="0"
+             value="{{ menu.DisplayOrder if menu else 0 }}">
+      <div class="form-text">Same-parent sequence (lower first). Prefer drag-and-drop on the menu list.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label">Role Name</label>
+      {% set selected_roles = [] %}
+      {% if menu and menu.RoleName %}
+        {% for part in menu.RoleName.split(',') %}
+          {% if selected_roles.append(part.strip()) %}{% endif %}
+        {% endfor %}
+      {% endif %}
+      {% set all_roles_checked = not menu or not menu.RoleName %}
+      <div class="border rounded p-2 bg-light" id="menuRoleBox">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="RoleNameAll" name="RoleNameAll" value="1"
+                 {% if all_roles_checked %}checked{% endif %}>
+          <label class="form-check-label fw-semibold" for="RoleNameAll">All roles</label>
+        </div>
+        <hr class="my-2">
+        {% for role in roles if role %}
+        <div class="form-check">
+          <input class="form-check-input menu-role-check" type="checkbox" name="RoleName" id="RoleName_{{ loop.index }}"
+                 value="{{ role }}" {% if role in selected_roles and not all_roles_checked %}checked{% endif %}
+                 {% if all_roles_checked %}disabled{% endif %}>
+          <label class="form-check-label" for="RoleName_{{ loop.index }}">{{ role }}</label>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-text">Tick one or more roles, or keep “All roles”.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label" for="IsActive">Status</label>
+      <select class="form-select" id="IsActive" name="IsActive">
+        <option value="1" {% if not menu or menu.IsActive %}selected{% endif %}>Active</option>
+        <option value="0" {% if menu and not menu.IsActive %}selected{% endif %}>Inactive</option>
+      </select>
+    </div>
+
+    <div class="col-12">
+      <label class="form-label" for="Description">Description</label>
+      <textarea class="form-control" id="Description" name="Description" rows="3">{{ menu.Description if menu and menu.Description else '' }}</textarea>
+    </div>
+
+    <div class="col-12 d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Save Menu</button>
+      <a href="{{ url_for('menu_admin.index') }}" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% include 'partials/_bootstrap_icon_picker_modal.html' %}
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/bootstrap_icon_picker.js') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (window.BootstrapIconPicker) {
+      BootstrapIconPicker.init({
+        inputId: "MenuIcon",
+        iconsUrl: "{{ url_for('static', filename='data/bootstrap-icons.json') }}"
+      });
+    }
+
+    var allBox = document.getElementById("RoleNameAll");
+    var roleBoxes = document.querySelectorAll(".menu-role-check");
+    function syncRoleChecks() {
+      var allOn = !!(allBox && allBox.checked);
+      roleBoxes.forEach(function (box) {
+        box.disabled = allOn;
+        if (allOn) box.checked = false;
+      });
+    }
+    if (allBox) {
+      allBox.addEventListener("change", syncRoleChecks);
+      roleBoxes.forEach(function (box) {
+        box.addEventListener("change", function () {
+          if (box.checked && allBox.checked) {
+            allBox.checked = false;
+            syncRoleChecks();
+            box.checked = true;
+          }
+        });
+      });
+      syncRoleChecks();
+    }
+  });
+</script>
+{% endblock %}

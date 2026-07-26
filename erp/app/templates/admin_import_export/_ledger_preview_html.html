@@ -1,0 +1,77 @@
+{# HTML ledger preview (same-page modal) — bank / customer #}
+{% set dash = '—' %}
+{% macro money(v) -%}
+  {%- if v is none -%}{{ dash }}{%- else -%}{{ '%.2f'|format(v|float) }}{%- endif -%}
+{%- endmacro %}
+
+<div class="ledger-html-preview">
+  <div class="ledger-html-top">
+    <div class="ledger-html-company">
+      {% if logo_url %}
+      <img class="ledger-html-logo" src="{{ logo_url }}" alt="JTCS">
+      {% endif %}
+      <div class="ledger-html-brand">Joshi Tax Consultancy &amp; Services</div>
+      <div class="ledger-html-sub">Ledger Statement Preview</div>
+    </div>
+    <div class="ledger-html-right">
+      <div class="ledger-html-badge">{{ ledger.title }}</div>
+      <div>Closing: <strong>Rs. {{ money(ledger.closing) }}</strong></div>
+    </div>
+  </div>
+
+  <h2 class="ledger-html-title">{{ ledger.entity_name }}</h2>
+
+  <div class="ledger-html-meta-box">
+    {% for label, value in ledger.meta %}
+    <div><strong>{{ label }}:</strong> {{ value or dash }}</div>
+    {% endfor %}
+  </div>
+
+  <div class="table-responsive">
+    <table class="ledger-html-items">
+      <thead>
+        <tr>
+          {% for h in ledger.headers %}
+          <th class="{% if h in ['Debit', 'Credit', 'Running Balance', 'Debit (Bill)', 'Credit (Receipt)'] %}text-end{% endif %}">{{ h }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% if ledger.kind == 'bank' %}
+          {% for line in ledger.lines or [] %}
+          <tr class="ledger-row-{{ line.kind or 'txn' }}">
+            <td>{{ line.date or dash }}</td>
+            <td>{{ line.description or dash }}</td>
+            <td>{{ line.reference or '' }}</td>
+            <td>{{ line.source or '' }}</td>
+            <td>{{ line.ledger_kind or '' }}</td>
+            <td class="text-end">{{ money(line.debit) }}</td>
+            <td class="text-end">{{ money(line.credit) }}</td>
+            <td class="text-end">{{ money(line.balance) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="8" class="text-center text-muted">No ledger rows for this period.</td></tr>
+          {% endfor %}
+        {% else %}
+          {% for line in ledger.lines or [] %}
+          <tr class="ledger-row-{{ line.kind or 'txn' }}">
+            <td>{{ line.date or dash }}</td>
+            <td>{{ line.bill or '' }}</td>
+            <td>{{ line.work or '' }}</td>
+            <td>{{ line.description or dash }}</td>
+            <td class="text-end">{{ money(line.debit) }}</td>
+            <td class="text-end">{{ money(line.credit) }}</td>
+            <td class="text-end">{{ money(line.balance) }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7" class="text-center text-muted">No ledger rows for this period.</td></tr>
+          {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ledger-html-foot">
+    Generated for preview · Joshi Tax Consultancy &amp; Services (JTCS)
+  </div>
+</div>

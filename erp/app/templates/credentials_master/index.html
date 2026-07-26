@@ -1,0 +1,137 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="credAddBtn" title="Add New">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add New</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="credEditBtn" disabled title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="credDeleteBtn" disabled title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <a href="{{ url_for('credentials_master.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/credentials_master.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card credentials-master-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+      <label class="form-label" for="credSearch">Search</label>
+      <input type="search" class="form-control form-control-sm" id="credSearch" placeholder="Activity, URL, user, email, mobile...">
+    </div>
+    <button type="button" class="btn btn-primary btn-sm" id="credAddNewBtn">
+      <i class="bi bi-plus-lg"></i> Add New
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm" id="credRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted ms-auto" id="credCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+
+  <div class="table-responsive credentials-master-grid-wrap">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="credGrid">
+      <thead>
+        <tr>
+          <th>Activity</th>
+          <th>URL</th>
+          <th>User ID</th>
+          <th>Password</th>
+          <th>Email ID</th>
+          <th>Mobile Number</th>
+          <th>Status</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="credGridBody"></tbody>
+    </table>
+  </div>
+  <div id="credEmpty" class="small text-muted py-3 d-none">No credentials found.</div>
+</div>
+
+<div class="modal fade" id="credModal" tabindex="-1" aria-labelledby="credModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="credModalTitle">Credential</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="credForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="CredentialID" id="credId" value="">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="credActivity">Activity *</label>
+              <input type="text" class="form-control" id="credActivity" name="Activity" maxlength="200" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="credUrl">URL</label>
+              <input type="url" class="form-control" id="credUrl" name="URL" maxlength="500" placeholder="https://...">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="credUserId">User ID</label>
+              <input type="text" class="form-control" id="credUserId" name="UserID" maxlength="150" autocomplete="off">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="credPassword">Password</label>
+              <div class="input-group">
+                <input type="password" class="form-control" id="credPassword" name="Password" maxlength="200" autocomplete="new-password">
+                <button type="button" class="btn btn-outline-secondary" id="credTogglePassword" title="Show / hide">
+                  <i class="bi bi-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="credEmail">Email ID</label>
+              <input type="email" class="form-control" id="credEmail" name="EmailID" maxlength="200">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="credMobile">Mobile Number</label>
+              <input type="tel" class="form-control" id="credMobile" name="MobileNumber" maxlength="20" inputmode="numeric">
+            </div>
+            <div class="col-12">
+              <div class="form-check mt-1">
+                <input class="form-check-input" type="checkbox" id="credActiveStatus" name="ActiveStatus" value="1" checked>
+                <label class="form-check-label" for="credActiveStatus">Active</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="credSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.CREDENTIALS_MASTER_API = {
+    list: {{ url_for('credentials_master.list_records') | tojson }},
+    record: {{ url_for('credentials_master.get_record', credential_id=0) | tojson }},
+    create: {{ url_for('credentials_master.create_record') | tojson }},
+    update: {{ url_for('credentials_master.update_record', credential_id=0) | tojson }},
+    delete: {{ url_for('credentials_master.delete_record', credential_id=0) | tojson }}
+  };
+  window.CREDENTIALS_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/credentials_master.js') }}"></script>
+{% endblock %}

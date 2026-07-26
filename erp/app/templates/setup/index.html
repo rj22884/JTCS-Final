@@ -1,0 +1,53 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block title %}Initial Setup{% endblock %}
+{% block subtitle %}Create your company and administrator account{% endblock %}
+
+{% block content %}
+<form method="post" enctype="multipart/form-data" class="vstack gap-3">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div>
+    <label class="form-label" for="company_name">Company Name</label>
+    <input type="text" class="form-control" id="company_name" name="company_name" required>
+  </div>
+  <div>
+    <label class="form-label" for="owner_name">Owner Name</label>
+    <input type="text" class="form-control" id="owner_name" name="owner_name" required>
+  </div>
+  <div>
+    <label class="form-label" for="administrator_name">Administrator Name</label>
+    <input type="text" class="form-control" id="administrator_name" name="administrator_name" required>
+  </div>
+  <div>
+    <label class="form-label" for="email">Email</label>
+    <input type="email" class="form-control" id="email" name="email" required>
+  </div>
+  <div>
+    <label class="form-label" for="mobile">Mobile</label>
+    <input type="tel" class="form-control" id="mobile" name="mobile" maxlength="10" required>
+  </div>
+  <div>
+    <label class="form-label" for="password">Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="password" name="password" required>
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+  <div>
+    <label class="form-label" for="confirm_password">Confirm Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#confirm_password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+  <div>
+    <label class="form-label" for="company_logo">Company Logo</label>
+    <input type="file" class="form-control" id="company_logo" name="company_logo" accept=".png,.jpg,.jpeg,.gif,.webp,.svg">
+  </div>
+  <button type="submit" class="btn btn-primary w-100">Complete Setup</button>
+</form>
+{% endblock %}

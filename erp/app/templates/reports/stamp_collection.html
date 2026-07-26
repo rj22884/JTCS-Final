@@ -1,0 +1,312 @@
+{% extends 'layouts/base.html' %}
+
+
+
+{% block ribbon_toolbar %}
+
+<div class="jtcs-ribbon-group">
+
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="print">
+
+    <i class="bi bi-printer"></i><span>Print</span>
+
+  </button>
+
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="export-excel">
+
+    <i class="bi bi-file-earmark-spreadsheet"></i><span>Excel</span>
+
+  </button>
+
+  <button type="button" class="jtcs-ribbon-btn" data-ribbon-action="export-pdf">
+
+    <i class="bi bi-file-earmark-pdf"></i><span>PDF</span>
+
+  </button>
+
+</div>
+
+{% endblock %}
+
+
+
+{% block content %}
+
+<div class="jtcs-card mb-4">
+
+  <form method="post" class="row g-3 align-items-end">
+
+    <input type="hidden" name="action" value="save_opening">
+
+    <div class="col-md-3">
+
+      <label class="form-label">Opening Balance *</label>
+
+      <input type="number" step="0.01" min="0" class="form-control" name="opening_balance"
+
+             value="{{ result.opening_form.opening_balance }}" required>
+
+    </div>
+
+    <div class="col-md-3">
+
+      <label class="form-label">Opening Balance Date *</label>
+
+      <input type="date" class="form-control" name="opening_balance_date"
+
+             value="{{ result.opening_form.opening_balance_date }}" required>
+
+    </div>
+
+    <div class="col-md-3">
+
+      <button type="submit" class="btn btn-success">Save Opening Balance</button>
+
+    </div>
+
+    <div class="col-12">
+
+      <div class="small text-muted">
+
+        Manual opening balance for SHCIL wallet account {{ result.summary.shcil_account }}.
+
+        Example: ₹ 100 on 01/04/2026.
+
+        {% if result.summary.manual_opening_saved and result.summary.updated_by %}
+          Last saved by {{ result.summary.updated_by }}.
+        {% else %}
+
+          Please save opening balance once before using this report.
+
+        {% endif %}
+
+      </div>
+
+    </div>
+
+  </form>
+
+</div>
+
+
+
+<div class="jtcs-card mb-4">
+
+  <form method="get" class="row g-3 align-items-end">
+
+    <div class="col-md-3">
+
+      <label class="form-label">Start Date</label>
+
+      <input type="date" class="form-control" name="start_date" value="{{ filters.start_date }}">
+
+    </div>
+
+    <div class="col-md-3">
+
+      <label class="form-label">End Date</label>
+
+      <input type="date" class="form-control" name="end_date" value="{{ filters.end_date }}">
+
+    </div>
+
+    <div class="col-md-3">
+
+      <button type="submit" class="btn btn-primary">Apply Filter</button>
+
+      <a href="{{ url_for('reports.index') }}" class="btn btn-outline-secondary">All Reports</a>
+
+    </div>
+
+  </form>
+
+</div>
+
+
+
+<div class="jtcs-card">
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+
+    <div>
+
+      <h2 class="h5 mb-0">{{ result.title }}</h2>
+
+      <div class="small text-muted mt-1">
+
+        SHCIL Wallet Account: {{ result.summary.shcil_account }}
+
+        {% if result.summary.bank_name %}({{ result.summary.bank_name }}){% endif %}
+
+      </div>
+
+    </div>
+
+    <span class="badge text-bg-primary">
+
+      Current Balance: ₹ {{ '%.2f'|format(result.total) }}
+
+    </span>
+
+  </div>
+
+
+
+  <div class="row g-3 mb-4">
+
+    <div class="col-md-4">
+
+      <div class="border rounded p-3 h-100 bg-light">
+
+        <div class="small text-muted">Opening Balance (at period start)</div>
+
+        <div class="fs-5 fw-semibold">₹ {{ '%.2f'|format(result.summary.opening_balance) }}</div>
+
+        <div class="small text-muted mt-2">Manual Opening</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.manual_opening_balance) }}</div>
+
+        <div class="small text-muted">on {{ result.summary.manual_opening_balance_date | display_value }}</div>
+
+        <div class="small text-muted mt-2">+ Total Deposit</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.total_deposit) }}</div>
+
+        <hr class="my-2">
+
+        <div class="small text-muted">Available</div>
+
+        <div class="fw-semibold text-primary">₹ {{ '%.2f'|format(result.summary.available_balance) }}</div>
+
+      </div>
+
+    </div>
+
+    <div class="col-md-4">
+
+      <div class="border rounded p-3 h-100 bg-light">
+
+        <div class="small text-muted">Total Stamp Printed</div>
+
+        <div class="fs-5 fw-semibold text-danger">₹ {{ '%.2f'|format(result.summary.total_stamp_printed) }}</div>
+
+        <hr class="my-2">
+
+        <div class="small text-muted">Current Balance</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.current_balance) }}</div>
+
+      </div>
+
+    </div>
+
+    <div class="col-md-4">
+
+      <div class="border rounded p-3 h-100 bg-light">
+
+        <div class="small text-muted">Since {{ result.summary.manual_opening_balance_date | display_value }}</div>
+
+        <div class="small text-muted">Manual Opening</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.manual_opening_balance) }}</div>
+
+        <div class="small text-muted mt-2">Lifetime Deposit</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.lifetime_total_deposit) }}</div>
+
+        <div class="small text-muted mt-2">Lifetime Stamp Printed</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.lifetime_total_stamp_printed) }}</div>
+
+        <hr class="my-2">
+
+        <div class="small text-muted">Lifetime Balance</div>
+
+        <div class="fw-semibold">₹ {{ '%.2f'|format(result.summary.lifetime_current_balance) }}</div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+
+  <div class="table-responsive">
+
+    <table class="table table-sm table-striped align-middle mb-0" id="jtcsReportTable">
+
+      <thead>
+
+        <tr>
+
+          {% if result.rows %}
+
+            {% for key in result.rows[0].keys() %}
+
+              <th>{{ key }}</th>
+
+            {% endfor %}
+
+          {% else %}
+
+            <th>TransactionDate</th>
+
+            <th>Particular</th>
+
+            <th>Deposit</th>
+
+            <th>StampUsed</th>
+
+            <th>WalletBalance</th>
+
+          {% endif %}
+
+        </tr>
+
+      </thead>
+
+      <tbody>
+
+        {% for row in result.rows %}
+
+          <tr>
+
+            {% for value in row.values() %}
+
+              <td>{{ value | display_value }}</td>
+
+            {% endfor %}
+
+          </tr>
+
+        {% else %}
+
+          <tr><td colspan="5" class="text-muted">No data for selected period.</td></tr>
+
+        {% endfor %}
+
+      </tbody>
+
+    </table>
+
+  </div>
+
+</div>
+
+{% endblock %}
+
+
+
+{% block extra_js %}
+
+<script src="{{ url_for('static', filename='js/report_export.js') }}"></script>
+
+<script>
+
+  window.JTCS_REPORT_TITLE = {{ result.title | tojson }};
+
+</script>
+
+{% endblock %}
+

@@ -1,0 +1,76 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_billing.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="fu-billing-page">
+  <div class="jtcs-card p-4">
+    <h4 class="mb-1">{{ module_meta.title }} — Automated Billing</h4>
+    <p class="text-muted small mb-4">Generate bill number and amount, then apply back to the followup entry.</p>
+
+    <form id="fuBillingForm" class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Customer</label>
+        <input type="text" class="form-control" id="fuBillCustomerName" value="{{ customer_name }}" readonly>
+        <input type="hidden" id="fuBillCustomerId" value="{{ customer_id }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Work Date</label>
+        <input type="date" class="form-control" id="fuBillWorkDate" value="{{ default_date }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Period</label>
+        <input type="text" class="form-control" id="fuBillTaxPeriod" value="{{ default_tax_period }}" readonly>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Tally Bill Number</label>
+        <div class="input-group">
+          <input type="text" class="form-control" id="fuBillNo" value="{{ next_bill_no }}">
+          <button type="button" class="btn btn-outline-secondary" id="fuBillRefreshNo" title="Refresh bill number">
+            <i class="bi bi-arrow-clockwise"></i>
+          </button>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Bill Date</label>
+        <input type="date" class="form-control" id="fuBillDate" value="{{ default_date }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Bill Amount (₹)</label>
+        <input type="number" class="form-control" id="fuBillAmount" min="0" step="0.01"
+               value="{{ bill_amount }}" placeholder="Enter bill amount">
+      </div>
+      <div class="col-12">
+        <div class="alert alert-info py-2 small mb-0">
+          After applying, the bill number and amount will fill into the followup entry form.
+          {% if module_code == 'ITR' %}
+          Save the entry and mark <strong>Payment Received</strong> to enable Thank You letter download.
+          {% else %}
+          Save the entry and mark <strong>Tally Bill Generated</strong> to enable Thank You letter download.
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-12 d-flex gap-2 mt-2">
+        <button type="button" class="btn btn-primary" id="fuBillApplyBtn">
+          <i class="bi bi-check2-circle"></i> Apply to Entry
+        </button>
+        <button type="button" class="btn btn-outline-secondary" onclick="window.close()">Close</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.FU_BILLING = {
+    module: {{ module_code|tojson }},
+    nextBillApi: {{ api_next_bill|tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/followup_billing.js') }}"></script>
+{% endblock %}

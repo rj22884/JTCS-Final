@@ -1,0 +1,94 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="workMasterAddBtn" title="Add">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="workMasterEditBtn" disabled title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="workMasterDeleteBtn" disabled title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <a href="{{ url_for(masters_blueprint ~ '.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/masters_work_types.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card masters-work-card mb-3">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <div class="masters-work-head mb-0">{{ section_label }} Work Types</div>
+    <span class="badge text-bg-light border">WorkMaster · {{ ledger_kind }}</span>
+    <button type="button" class="btn btn-outline-secondary btn-sm ms-auto" id="workMasterRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <span class="small text-muted" id="workMasterCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
+  </div>
+  <p class="small text-muted mb-3">
+    Manage <strong>{{ ledger_kind }}</strong> work type heads from <code>WorkMaster</code> used in Others activity screens.
+  </p>
+
+  <div class="table-responsive masters-work-grid-wrap">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="workMasterGrid">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Work Name</th>
+          <th>Ledger Kind</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="workMasterGridBody"></tbody>
+    </table>
+  </div>
+  <div id="workMasterEmpty" class="small text-muted py-3 d-none">No work types found.</div>
+</div>
+
+<div class="modal fade" id="workMasterModal" tabindex="-1" aria-labelledby="workMasterModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="workMasterModalTitle">Work Type</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="workMasterForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" id="workMasterId" value="">
+          <div class="mb-0">
+            <label class="form-label" for="workMasterName">Work Name *</label>
+            <input type="text" class="form-control" id="workMasterName" maxlength="100" required>
+          </div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.WORK_MASTER_LEDGER_KIND = {{ ledger_kind | tojson }};
+  window.WORK_MASTER_LIST_URL = {{ url_for(masters_blueprint ~ '.work_types_list') | tojson }};
+  window.WORK_MASTER_CREATE_URL = {{ url_for(masters_blueprint ~ '.work_types_create') | tojson }};
+  window.WORK_MASTER_UPDATE_URL = {{ url_for(masters_blueprint ~ '.work_types_update', work_id=0) | tojson }};
+  window.WORK_MASTER_DELETE_URL = {{ url_for(masters_blueprint ~ '.work_types_delete', work_id=0) | tojson }};
+  window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
+  window.WORK_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/masters_work_types.js') }}"></script>
+{% endblock %}

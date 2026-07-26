@@ -1,0 +1,78 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/backup.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card backup-card mb-3">
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+    <div>
+      <h3 class="h5 mb-1">Full application backup</h3>
+      <p class="text-muted small mb-0">
+        Creates a ZIP with a fresh database <code>.bak</code> plus application source,
+        SQL scripts, and uploads (excludes <code>.env</code>, venv, caches). Administrator only.
+      </p>
+    </div>
+    <button type="button" class="btn btn-primary" id="backupCreateBtn">
+      <i class="bi bi-archive"></i> Create Full Backup
+    </button>
+  </div>
+
+  <div class="backup-meta small text-muted mb-3">
+    <div><span class="backup-meta-label">Server</span> {{ connection.server }}</div>
+    <div><span class="backup-meta-label">Database</span> {{ connection.database }}</div>
+    <div><span class="backup-meta-label">Save folder</span> <code>{{ connection.full_backup_dir }}</code></div>
+  </div>
+
+  <div id="backupStatus" class="alert d-none mb-3" role="status"></div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0" id="backupGrid">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Created</th>
+          <th class="text-end">Size</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="backupGridBody">
+        {% for row in backups %}
+        <tr data-file="{{ row.file_name }}">
+          <td><code>{{ row.file_name }}</code></td>
+          <td>{{ row.modified_label }}</td>
+          <td class="text-end">{{ row.size_label }}</td>
+          <td class="text-end">
+            <a class="btn btn-outline-primary btn-sm" href="{{ url_for('backup.download_backup', kind='full', file_name=row.file_name) }}">
+              <i class="bi bi-download"></i> Download
+            </a>
+            <button type="button" class="btn btn-outline-danger btn-sm backup-delete-btn" data-file="{{ row.file_name }}">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr class="backup-empty-row">
+          <td colspan="4" class="text-center text-muted py-4">No full backups yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.BACKUP_PAGE = {
+    kind: "full",
+    createUrl: {{ url_for('backup.create_full_backup') | tojson }},
+    listUrl: {{ url_for('backup.list_full_backups') | tojson }},
+    downloadBase: {{ url_for('backup.download_backup', kind='full', file_name='__FILE__') | tojson }},
+    deleteUrl: {{ url_for('backup.delete_backup', kind='full') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/backup.js') }}"></script>
+{% endblock %}

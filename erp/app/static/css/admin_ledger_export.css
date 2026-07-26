@@ -1,0 +1,150 @@
+.ledger-export-card .nav-tabs .nav-link {
+  font-size: 0.9rem;
+}
+
+.ledger-export-card .table td,
+.ledger-export-card .table th {
+  vertical-align: middle;
+}
+
+/* Preview modal — invoice-style ledger statement */
+#ledgerPreviewModal .modal-dialog {
+  max-width: 980px;
+}
+
+#ledgerPreviewBody {
+  min-height: 220px;
+  background: #f4f6f8;
+}
+
+.ledger-html-preview {
+  color: #1c2833;
+  font-size: 12px;
+  line-height: 1.45;
+  max-width: 920px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid #d5d8dc;
+  border-radius: 8px;
+  padding: 18px 20px 16px;
+  box-shadow: 0 8px 24px rgba(21, 67, 117, 0.08);
+}
+
+.ledger-html-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #154375;
+}
+
+.ledger-html-logo {
+  height: 52px;
+  width: auto;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.ledger-html-brand {
+  font-weight: 700;
+  font-size: 15px;
+  color: #154375;
+}
+
+.ledger-html-sub {
+  color: #5d6d7e;
+  font-size: 11px;
+}
+
+.ledger-html-right {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ledger-html-badge {
+  display: inline-block;
+  background: #154375;
+  color: #fff;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  margin-bottom: 6px;
+}
+
+.ledger-html-title {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: #154375;
+  margin: 14px 0 10px;
+}
+
+.ledger-html-meta-box {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 6px 16px;
+  background: #f4f6f7;
+  border: 1px solid #85929e;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: 4px;
+}
+
+.ledger-html-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.ledger-html-items th {
+  background: #154375;
+  color: #fff;
+  font-weight: 600;
+  padding: 7px 6px;
+  border: 1px solid #5d6d7e;
+  white-space: nowrap;
+}
+
+.ledger-html-items td {
+  border: 1px solid #aeb6bf;
+  padding: 5px 6px;
+  vertical-align: middle;
+}
+
+.ledger-html-items tr.ledger-row-opening td {
+  background: #eaf2f8;
+  font-weight: 600;
+}
+
+.ledger-html-items tr.ledger-row-day_total td,
+.ledger-html-items tr.ledger-row-month_total td {
+  background: #fef9e7;
+  font-weight: 600;
+}
+
+.ledger-html-items tr.ledger-row-txn:nth-child(even) td {
+  background: #f8fbfc;
+}
+
+.ledger-html-foot {
+  text-align: center;
+  font-size: 11px;
+  color: #5d6d7e;
+  border-top: 1px solid #d5d8dc;
+  padding-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .ledger-html-top,
+  .ledger-html-meta-box {
+    display: block;
+  }
+
+  .ledger-html-right {
+    text-align: left;
+    margin-top: 10px;
+  }
+}

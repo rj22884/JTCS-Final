@@ -1,0 +1,371 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="cmAddBtn" title="Add">
+    <i class="bi bi-plus-lg"></i>
+    <span>Add</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="cmEditBtn" disabled title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="cmDeleteBtn" disabled title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <a href="{{ url_for('masters_customer.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="cm-page">
+  <div class="jtcs-card cm-grid-card mb-3">
+    <div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+      <div class="flex-grow-1" style="min-width: 220px; max-width: 360px;">
+        <label class="form-label" for="cmSearch">Search</label>
+        <input type="search" class="form-control form-control-sm" id="cmSearch"
+               placeholder="Name, mobile, PAN, email...">
+      </div>
+      <div style="min-width: 140px;">
+        <label class="form-label" for="cmFilterGroup">Group</label>
+        <select class="form-select form-select-sm" id="cmFilterGroup">
+          <option value="">All</option>
+          {% for g in customer_groups %}
+          <option value="{{ g.code }}">{{ g.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="min-width: 130px;">
+        <label class="form-label" for="cmFilterStatus">Status</label>
+        <select class="form-select form-select-sm" id="cmFilterStatus">
+          <option value="">All</option>
+          {% for s in customer_statuses %}
+          <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="button" class="btn btn-primary btn-sm" id="cmNewBtn">
+        <i class="bi bi-plus-lg"></i> New Customer
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="cmRefreshBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted ms-auto" id="cmCount">{{ initial_rows|length }} records</span>
+    </div>
+
+    <div id="cmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
+
+    <div class="table-responsive cm-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="cmGrid">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Customer Name</th>
+            <th>Group</th>
+            <th>Mobile</th>
+            <th>PAN</th>
+            <th>Email</th>
+            <th>City</th>
+            <th>Status</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="cmGridBody"></tbody>
+      </table>
+    </div>
+    <div id="cmEmpty" class="small text-muted py-3 d-none">No customers found.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="cmEntryModal" tabindex="-1" aria-labelledby="cmEntryModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content cm-entry-modal">
+      <div class="modal-header cm-entry-header">
+        <div>
+          <h4 class="modal-title mb-0" id="cmEntryModalTitle">New Customer</h4>
+          <div class="cm-entry-subtitle">Customer master — group-wise professional data entry</div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body cm-entry-body">
+        <div class="cm-entry-layout">
+          <div class="cm-entry-main">
+        <form id="cmEntryForm" novalidate>
+          <input type="hidden" id="cm_customer_id" name="customer_id" value="">
+
+          <div class="cm-group-bar mb-3">
+            <label class="form-label cm-required mb-1" for="cm_customer_group">Customer Group</label>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <select class="form-select cm-group-select" id="cm_customer_group" name="customer_group"
+                      data-cm-field="customer_group" required>
+                <option value="">-- Select Group --</option>
+                {% for g in customer_groups %}
+                <option value="{{ g.code }}">{{ g.label }}</option>
+                {% endfor %}
+              </select>
+              <span class="small text-muted">Groups are managed in <a href="{{ url_for('masters_group.index') }}">Customer Group Master</a> — tabs appear as per group.</span>
+            </div>
+          </div>
+
+          <div class="cm-sync-bar mb-3" id="cmSyncBar">
+            <div class="cm-sync-bar-title">
+              <span>Sync from</span>
+              <small class="text-muted">Import basic details from government portals</small>
+            </div>
+            <div class="cm-sync-actions">
+              <button type="button" class="btn btn-sm cm-sync-btn cm-sync-btn-it" id="cmSyncIncomeTaxBtn">
+                <i class="bi bi-cloud-download"></i> Import Income Tax Portal
+              </button>
+              <button type="button" class="btn btn-sm cm-sync-btn cm-sync-btn-aadhaar" id="cmSyncAadhaarBtn">
+                <i class="bi bi-fingerprint"></i> Import Aadhaar Portal
+              </button>
+              <button type="button" class="btn btn-sm cm-sync-btn cm-sync-btn-gst" id="cmSyncGstBtn"
+                      title="Coming soon" disabled>
+                <i class="bi bi-building"></i> Import GST Portal
+              </button>
+              <button type="button" class="btn btn-sm cm-it-portal-login d-none" id="cmItPortalLoginBtn"
+                      title="Open Income Tax portal login">
+                <i class="bi bi-person-gear"></i>
+              </button>
+            </div>
+            <div class="cm-sync-status small text-muted d-none" id="cmSyncStatus"></div>
+          </div>
+
+          <ul class="nav nav-pills cm-tab-nav flex-nowrap overflow-auto mb-3" id="cmTabNav" role="tablist"></ul>
+
+          <div id="cmFormPanels">
+            {% include 'masters/_customer_master_form_tabs.html' %}
+          </div>
+
+          <div id="cmFormError" class="alert alert-danger py-2 small d-none mt-3"></div>
+        </form>
+          </div>
+
+          <aside id="cmMobileDupPanel" class="cm-mobile-dup-panel d-none" aria-live="polite">
+            <div class="cm-mobile-dup-header">
+              <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+              <span>Duplicate Mobile</span>
+            </div>
+            <p class="cm-mobile-dup-note small text-muted mb-2">
+              This mobile number is already used by other customer(s). You may still save.
+            </p>
+            <ul id="cmMobileDupList" class="cm-mobile-dup-list list-unstyled mb-0"></ul>
+          </aside>
+        </div>
+      </div>
+      <div class="modal-footer cm-entry-footer">
+        <button type="button" class="btn btn-primary" id="cmSaveBtn">
+          <i class="bi bi-check-lg"></i> Save Customer
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Income Tax portal credentials #}
+<div class="modal fade" id="cmItSyncModal" tabindex="-1" aria-labelledby="cmItSyncModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="cmItSyncModalTitle">
+          <i class="bi bi-cloud-download text-primary me-1"></i> Import Income Tax Portal
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">
+          Pehle Income Tax e-Filing User ID aur Password enter karein. Uske baad portal login button se
+          Income Tax portal khulega.
+        </p>
+        <div class="mb-2">
+          <label class="form-label cm-required" for="cmItUserId">Income Tax User ID (PAN)</label>
+          <input type="text" class="form-control text-uppercase" id="cmItUserId" maxlength="10"
+                 placeholder="ABCDE1234F" autocomplete="username">
+        </div>
+        <div class="mb-2">
+          <label class="form-label cm-required" for="cmItPassword">Income Tax Password</label>
+          <input type="password" class="form-control" id="cmItPassword" maxlength="64"
+                 placeholder="Portal password" autocomplete="current-password">
+        </div>
+        <div class="alert alert-danger py-2 small d-none" id="cmItSyncError"></div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="cmItSyncSaveBtn">
+          <i class="bi bi-check-lg"></i> Save &amp; Show Portal Login
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Aadhaar portal #}
+<div class="modal fade" id="cmAadhaarSyncModal" tabindex="-1" aria-labelledby="cmAadhaarSyncModalTitle" aria-hidden="true"
+     data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="cmAadhaarSyncModalTitle">
+          <i class="bi bi-fingerprint text-danger me-1"></i> Import Aadhaar Portal
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="cmAadhaarStepAsk">
+          <p class="small text-muted mb-3">
+            Aadhaar number enter karein. Portal open hoga, number copy/ready rahega. Captcha aap complete karein —
+            phir details yahan paste/sync kar sakte hain.
+          </p>
+          <div class="mb-2">
+            <label class="form-label cm-required" for="cmAadhaarSyncNumber">Aadhaar Number</label>
+            <input type="text" class="form-control" id="cmAadhaarSyncNumber" maxlength="12"
+                   inputmode="numeric" placeholder="12-digit Aadhaar">
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="cmAadhaarSyncError"></div>
+        </div>
+        <div id="cmAadhaarStepPortal" class="d-none">
+          <div class="alert alert-warning py-2 small">
+            <strong>Captcha wait:</strong> Aadhaar portal me captcha complete karein, details dekhein,
+            phir neeche fields me Name / DOB / Address bhar kar <em>Apply to Form</em> dabayein.
+          </div>
+          <div class="d-flex flex-wrap gap-2 mb-3">
+            <button type="button" class="btn btn-sm btn-danger" id="cmAadhaarOpenPortalBtn">
+              <i class="bi bi-box-arrow-up-right"></i> Open Aadhaar Portal
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="cmAadhaarCopyBtn">
+              <i class="bi bi-clipboard"></i> Copy Aadhaar No.
+            </button>
+            <span class="small text-muted align-self-center" id="cmAadhaarReadyHint"></span>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="cmAadhaarSyncName">Full Name (from portal)</label>
+              <input type="text" class="form-control" id="cmAadhaarSyncName" maxlength="200">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="cmAadhaarSyncDob">Date of Birth</label>
+              <input type="date" class="form-control" id="cmAadhaarSyncDob">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label" for="cmAadhaarSyncGender">Gender</label>
+              <select class="form-select" id="cmAadhaarSyncGender">
+                <option value=""></option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="cmAadhaarSyncAddress">Address (from portal)</label>
+              <textarea class="form-control" id="cmAadhaarSyncAddress" rows="2" maxlength="300"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="cmAadhaarContinueBtn">
+          Continue to Portal
+        </button>
+        <button type="button" class="btn btn-success d-none" id="cmAadhaarApplyBtn">
+          <i class="bi bi-check2-circle"></i> Apply to Form
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# IT portal helper (credentials + login button like Spectrum icon flow) #}
+<div class="modal fade" id="cmItPortalHelperModal" tabindex="-1" aria-labelledby="cmItPortalHelperTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="cmItPortalHelperTitle">
+          <i class="bi bi-person-gear text-danger me-1"></i> Income Tax Portal Login
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">
+          Portal me PAN + password + secure tick auto honge.
+          <strong>Continue aap manually dabayein</strong> (auto-Continue se
+          &quot;Request is not authenticated&quot; error aata hai).
+          Login ke baad Name/Address/PAN/Aadhaar etc. form me sync ho jayenge.
+        </p>
+        <div class="cm-portal-cred-row mb-2">
+          <div>
+            <div class="small text-muted">User ID</div>
+            <strong id="cmItHelperUserId">—</strong>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="cmItCopyUserBtn">Copy</button>
+        </div>
+        <div class="cm-portal-cred-row mb-3">
+          <div>
+            <div class="small text-muted">Password</div>
+            <strong id="cmItHelperPassword">••••••••</strong>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="cmItCopyPassBtn">Copy</button>
+        </div>
+        <button type="button" class="btn btn-danger w-100" id="cmItOpenPortalBtn">
+          <i class="bi bi-box-arrow-up-right"></i> Open Income Tax Portal &amp; Login
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="cmDuplicateModal" tabindex="-1" aria-labelledby="cmDuplicateModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content cm-duplicate-modal">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title text-danger" id="cmDuplicateModalTitle">
+          <i class="bi bi-x-octagon-fill me-1"></i> Duplicate Found
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p id="cmDuplicateMessage" class="mb-3"></p>
+        <div class="cm-duplicate-card border rounded p-3 bg-light" id="cmDuplicateDetails"></div>
+        <p class="mt-3 mb-0 fw-semibold">Do you want to edit it?</p>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-primary" id="cmDuplicateEditYes">
+          <i class="bi bi-pencil-square"></i> Yes, Edit
+        </button>
+        <button type="button" class="btn btn-outline-secondary" id="cmDuplicateEditNo">No</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.CM_API = {{ cm_api|tojson }};
+  window.CM_CSRF = {{ csrf_token()|tojson }};
+  window.CM_INITIAL_ROWS = {{ initial_rows|tojson }};
+  window.CM_GROUP_TABS = {{ group_tabs|tojson }};
+  window.CM_TAB_LABELS = {{ tab_labels|tojson }};
+  window.CM_MANDATORY = {{ ui_config.mandatory_fields|tojson }};
+  window.CM_OTHER_MANDATORY = {{ ui_config.other_type_mandatory_fields|tojson }};
+  window.CM_OTHER_TYPE = {{ ui_config.other_customer_type|tojson }};
+  window.CM_PLACEHOLDER_PAN = {{ ui_config.placeholder_pan|tojson }};
+  window.CM_PORTALS = {
+    incomeTaxLogin: "https://eportal.incometax.gov.in/iec/foservices/#/login",
+    aadhaarPortal: "https://myaadhaar.uidai.gov.in/"
+  };
+</script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260722gstfreq"></script>
+{% endblock %}

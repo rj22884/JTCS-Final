@@ -1,0 +1,28 @@
+.bank-master-card {
+  background: #fff;
+  border: 1px solid #e9e4f5;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.bank-master-grid-wrap {
+  max-height: calc(100vh - 320px);
+  overflow: auto;
+}
+
+#bankMasterGrid tbody tr {
+  cursor: pointer;
+}
+
+#bankMasterGrid tbody tr.table-active {
+  --bs-table-bg: rgba(111, 66, 193, 0.12);
+}
+
+#bankMasterModal .modal-header {
+  background: linear-gradient(90deg, #5b2c8e, #7c4dbd);
+  color: #fff;
+}
+
+#bankMasterModal .btn-close {
+  filter: invert(1);
+}

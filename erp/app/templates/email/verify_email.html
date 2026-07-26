@@ -1,0 +1,11 @@
+{% extends 'email/base_email.html' %}
+{% block body %}
+<p style="margin:0 0 16px;font-size:16px;">Hello {{ full_name }},</p>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.6;">Thank you for registering with {{ company_name }}. Please verify your email to continue.</p>
+<p style="margin:0 0 24px;text-align:center;">
+  <a href="{{ verify_url }}" style="display:inline-block;background:#243B7B;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:6px;font-weight:600;">Verify your Email</a>
+</p>
+<p style="margin:0 0 8px;font-size:13px;color:#666;">Or copy this link:</p>
+<p style="margin:0 0 24px;font-size:12px;word-break:break-all;color:#243B7B;">{{ verify_url }}</p>
+<p style="margin:0;font-size:13px;color:#888;">Link expires in {{ expiry_minutes }} minutes.</p>
+{% endblock %}

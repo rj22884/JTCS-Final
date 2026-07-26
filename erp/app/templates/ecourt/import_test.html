@@ -1,0 +1,87 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_import_test.css') }}?v=20260719l">
+{% endblock %}
+
+{% block page_heading_tools %}
+<div class="ecourt-test-head-tools">
+  <input type="file" class="form-control form-control-sm ecourt-test-file-input" id="ecourtTestPdfInput" accept="application/pdf,.pdf" title="Choose PDF">
+  <button type="button" class="btn btn-primary btn-sm" id="ecourtTestReadPdfBtn" data-hotkey="ctrl+enter" data-hotkey-action="Read PDF">
+    <i class="bi bi-file-earmark-pdf"></i> Read PDF
+  </button>
+  <a href="{{ url_for('ecourt.ecourt_activity') }}" class="btn btn-outline-secondary btn-sm" data-hotkey="alt+b" data-hotkey-action="Back">
+    <i class="bi bi-arrow-left"></i> Back
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="ecourt-import-test-page">
+  <div class="ecourt-import-test-toolbar">
+    <div class="small text-muted" id="ecourtTestStatus">Select PDF (top-right) → Read PDF → expand (+) → Stationery Number → Save → Apply → Import.</div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="small text-muted" id="ecourtTestMeta"></span>
+      <span class="small text-muted" id="ecourtTestCount"></span>
+    </div>
+  </div>
+
+  <div class="ecourt-test-excluded d-none" id="ecourtTestExcludedPanel">
+    <div class="ecourt-test-excluded-title">Excluded (invalid / outside 1–999999999)</div>
+    <div class="table-responsive">
+      <table class="table table-sm table-bordered mb-0 ecourt-test-excluded-table">
+        <thead>
+          <tr>
+            <th style="width:40px;">#</th>
+            <th>Receipt No.</th>
+            <th style="width:110px;">Date</th>
+            <th class="text-end" style="width:90px;">Amount</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="ecourtTestExcludedBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="ecourt-import-test-wrap" id="ecourtTestPreviewPanel">
+    <table class="table table-sm table-bordered table-hover align-middle mb-0 ecourt-import-test-table" id="ecourtTestGrid">
+      <thead>
+        <tr class="ecourt-test-group-head">
+          <th class="ecourt-test-col-toggle" rowspan="2"></th>
+          <th class="ecourt-test-col-sr" rowspan="2">#</th>
+          <th class="ecourt-test-head-ready text-center" colspan="4">Ready to import</th>
+          <th class="ecourt-test-head-imported text-center" colspan="5">Already Imported</th>
+        </tr>
+        <tr class="ecourt-test-col-head">
+          <th class="ecourt-test-col-date">Date</th>
+          <th class="ecourt-test-col-amt text-end">Per Record Amt</th>
+          <th class="ecourt-test-col-total text-end">Total</th>
+          <th class="ecourt-test-col-pages text-end">Pages</th>
+          <th class="ecourt-test-col-date">Date</th>
+          <th class="ecourt-test-col-amt text-end">Per Record Amt</th>
+          <th class="ecourt-test-col-total text-end">Total</th>
+          <th class="ecourt-test-col-pages text-end">Pages</th>
+          <th class="ecourt-test-col-stn">Stationery Number</th>
+        </tr>
+      </thead>
+      <tbody id="ecourtTestGridBody">
+        <tr>
+          <td colspan="11" class="text-muted small py-4 text-center">PDF read ke baad grouped rows yahan full-width dikhengi.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ECOURT_IMPORT_TEST_URLS = {
+    parsePdf: {{ url_for('ecourt.ecourt_import_test_parse_pdf') | tojson }},
+    importPage: {{ url_for('ecourt.ecourt_import_test_import_page') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/ecourt_import_test.js') }}?v=20260719l"></script>
+{% endblock %}
