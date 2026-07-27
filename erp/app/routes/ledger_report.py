@@ -196,6 +196,7 @@ def preview(kind: str, entity_id: int):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
+        db.session.rollback()
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 

@@ -322,20 +322,20 @@ class LedgerReportService:
         work_name = (work["WorkName"] or "").strip()
         ledger_kind = (work["LedgerKind"] or "").strip().upper()
 
+        # SQL Server forbids SUM( (SELECT SUM(...)) ); join payment totals instead.
         prior = db.session.execute(
             text(
                 """
                 SELECT
                     ISNULL(SUM(ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)), 0) AS income_amt,
                     ISNULL(SUM(ISNULL(d.ExpenseAmount, 0)), 0) AS expense_amt,
-                    ISNULL(SUM(
-                        (
-                            SELECT ISNULL(SUM(p.Amount), 0)
-                            FROM dbo.JTCSDailyTransactionPayment p
-                            WHERE p.TransactionID = d.TransactionID
-                        )
-                    ), 0) AS paid_amt
+                    ISNULL(SUM(ISNULL(pay.paid_amt, 0)), 0) AS paid_amt
                 FROM dbo.JTCSDailyTransaction d
+                LEFT JOIN (
+                    SELECT TransactionID, SUM(Amount) AS paid_amt
+                    FROM dbo.JTCSDailyTransactionPayment
+                    GROUP BY TransactionID
+                ) pay ON pay.TransactionID = d.TransactionID
                 WHERE d.Status = N'Posted'
                   AND d.TransactionDate < :date_from
                   AND (
