@@ -71,6 +71,7 @@ class FollowupRepository:
                 "e.CreatedDate",
                 "c.CustomerName",
                 "c.MobileNumber",
+                "c.EmailID",
             ]
         )
         # Optional customer GST filing frequency (Customer Master).
@@ -441,6 +442,7 @@ class FollowupRepository:
                 OR c.MobileNumber LIKE :search
                 OR e.PANNumber LIKE :search_upper
                 OR e.BillNo LIKE :search_upper
+                OR ISNULL(c.EmailID, N'') LIKE :search
               )
             """
             params["search"] = f"%{search.strip()}%"

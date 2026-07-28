@@ -84,6 +84,7 @@
     applicationNumber: document.getElementById("fuApplicationNumber"),
     location: document.getElementById("fuLocation"),
     introducedBy: document.getElementById("fuIntroducedBy"),
+    customerEmail: document.getElementById("fuCustomerEmail"),
     saveBtn: document.getElementById("fuSaveBtn"),
     returnType: document.getElementById("fuReturnType"),
     filingFrequency: document.getElementById("fuFilingFrequency"),
@@ -202,6 +203,60 @@
     if (!rowHasTallyBill(row)) return false;
     if (rowHasPaymentReceived(row)) return false;
     return !!(window.FU_API && window.FU_API.payment_reminder);
+  }
+
+  function copyableCell(value) {
+    const text = (value == null ? "" : String(value)).trim();
+    if (!text) {
+      return "<td>—</td>";
+    }
+    return (
+      '<td class="fu-copy-cell">' +
+      '<span class="fu-copy-text">' + escapeHtml(text) + "</span>" +
+      '<button type="button" class="fu-copy-btn" title="Copy" aria-label="Copy">' +
+      '<i class="bi bi-copy"></i></button>' +
+      "</td>"
+    );
+  }
+
+  function copyTextToClipboard(text, button) {
+    const value = (text || "").trim();
+    if (!value) return;
+    const done = function () {
+      if (!button) return;
+      const icon = button.querySelector("i");
+      if (!icon) return;
+      icon.className = "bi bi-check2";
+      button.classList.add("is-copied");
+      window.setTimeout(function () {
+        icon.className = "bi bi-copy";
+        button.classList.remove("is-copied");
+      }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(function () {
+        fallbackCopy(value, done);
+      });
+      return;
+    }
+    fallbackCopy(value, done);
+  }
+
+  function fallbackCopy(text, done) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+      if (typeof done === "function") done();
+    } catch (err) {
+      alert("Unable to copy.");
+    }
+    document.body.removeChild(area);
   }
 
   function isUdhaarText(value) {
@@ -661,6 +716,7 @@
       els.customerSelected.textContent = "";
       els.customerSelected.classList.add("d-none");
     }
+    if (els.customerEmail) els.customerEmail.value = "";
     if (hasGstFields && els.filingFrequency) els.filingFrequency.value = "";
     hideCustomerResults();
   }
@@ -680,8 +736,16 @@
     if (els.customerSelected) {
       const mobile = customer.mobile_number || customer.MobileNumber || "";
       const pan = customer.pan_number || customer.PANNumber || "";
-      els.customerSelected.textContent = [mobile, pan].filter(Boolean).join(" · ");
+      const parts = [mobile, pan];
+      if (isDscModule) {
+        const email = customer.email_id || customer.EmailID || "";
+        if (email) parts.push(email);
+      }
+      els.customerSelected.textContent = parts.filter(Boolean).join(" · ");
       els.customerSelected.classList.remove("d-none");
+    }
+    if (isDscModule && els.customerEmail) {
+      els.customerEmail.value = customer.email_id || customer.EmailID || "";
     }
     if (hasGstFields && els.filingFrequency) {
       els.filingFrequency.value =
@@ -1023,6 +1087,19 @@
       const editTitle = paymentLocked
         ? "Edit (password required)"
         : "Edit";
+      const appNoValue = isDscModule
+        ? (row.application_number || row.bill_no || "")
+        : (row.bill_no || "");
+      const mobileCell = isDscModule
+        ? copyableCell(row.mobile_number)
+        : "<td>" + escapeHtml(row.mobile_number || "—") + "</td>";
+      const emailCell = isDscModule ? copyableCell(row.email_id) : "";
+      const panCell = isDscModule
+        ? copyableCell(row.pan_number)
+        : "<td>" + escapeHtml(row.pan_number || "—") + "</td>";
+      const appOrBillCell = isDscModule
+        ? copyableCell(appNoValue)
+        : "<td>" + escapeHtml(appNoValue || "—") + "</td>";
       return (
         '<tr' + (paymentLocked ? ' class="fu-payment-received-row"' : "") + ">" +
         "<td>" + escapeHtml(formatDate(row.work_date)) + "</td>" +
@@ -1030,9 +1107,10 @@
         tdsPeriodCols +
         gstFieldCols +
         "<td><strong>" + escapeHtml(row.customer_name) + "</strong></td>" +
-        "<td>" + escapeHtml(row.mobile_number || "—") + "</td>" +
-        "<td>" + escapeHtml(row.pan_number || "—") + "</td>" +
-        "<td>" + escapeHtml(isDscModule ? (row.application_number || row.bill_no || "—") : (row.bill_no || "—")) + "</td>" +
+        mobileCell +
+        emailCell +
+        panCell +
+        appOrBillCell +
         "<td>" + escapeHtml(formatDate(row.bill_date)) + "</td>" +
         workOrCheckCell +
         returnCol +
@@ -1139,6 +1217,7 @@
         customer_name: record.customer_name,
         mobile_number: record.mobile_number,
         pan_number: record.pan_number,
+        email_id: record.email_id,
         filing_frequency: record.filing_frequency,
       });
     }
@@ -1289,10 +1368,13 @@
       payload.quarter = quarter;
     }
     if (entryIdRaw) payload.entry_id = parseInt(entryIdRaw, 10);
-    if (isDscModule && els.applicationNumber) {
-      payload.application_number = (els.applicationNumber.value || "").trim();
+    if (isDscModule) {
+      if (els.applicationNumber) {
+        payload.application_number = (els.applicationNumber.value || "").trim();
+      }
       payload.location = (els.location?.value || "").trim();
       payload.introduced_by = (els.introducedBy?.value || "").trim();
+      payload.email_id = (els.customerEmail?.value || "").trim();
     }
     appendBillingPayload(payload);
     if (isStageChecked("payment_received")) {
@@ -1393,11 +1475,14 @@
           els.customerResults.innerHTML = '<div class="list-group-item text-muted">No customers found</div>';
         } else {
           els.customerResults.innerHTML = list.map(function (row) {
-            const sub = [row.mobile_number, row.pan_number].filter(Boolean).join(" · ");
+            const subParts = [row.mobile_number, row.pan_number];
+            if (isDscModule && row.email_id) subParts.push(row.email_id);
+            const sub = subParts.filter(Boolean).join(" · ");
             return (
               '<button type="button" class="list-group-item list-group-item-action fu-customer-pick" ' +
               'data-id="' + row.customer_id + '" data-name="' + escapeHtml(row.customer_name) + '" ' +
               'data-mobile="' + escapeHtml(row.mobile_number) + '" data-pan="' + escapeHtml(row.pan_number) + '" ' +
+              'data-email="' + escapeHtml(row.email_id || "") + '" ' +
               'data-filing-frequency="' + escapeHtml(row.filing_frequency || "") + '">' +
               "<strong>" + escapeHtml(row.customer_name) + "</strong>" +
               (sub ? '<div class="small text-muted">' + escapeHtml(sub) + "</div>" : "") +
@@ -1442,6 +1527,7 @@
           customer_name: c.CustomerName || c.customer_name,
           mobile_number: c.MobileNumber || c.mobile_number,
           pan_number: c.PANNumber || c.pan_number,
+          email_id: c.EmailID || c.email_id,
         });
         customerModal?.hide();
         els.customerForm.reset();
@@ -1748,6 +1834,7 @@
         els.customerSelected.textContent = "";
         els.customerSelected.classList.add("d-none");
       }
+      if (els.customerEmail) els.customerEmail.value = "";
     }
     clearTimeout(customerSearchTimer);
     customerSearchTimer = setTimeout(function () {
@@ -1763,6 +1850,7 @@
       customer_name: btn.dataset.name,
       mobile_number: btn.dataset.mobile,
       pan_number: btn.dataset.pan,
+      email_id: btn.dataset.email || "",
       filing_frequency: btn.dataset.filingFrequency || "",
     });
   });
@@ -1850,6 +1938,18 @@
   }
 
   els.gridBody?.addEventListener("click", function (event) {
+    const copyBtn = event.target.closest(".fu-copy-btn");
+    if (copyBtn) {
+      if (!isDscModule) return;
+      const cell = copyBtn.closest(".fu-copy-cell");
+      const text = (cell && cell.querySelector(".fu-copy-text")
+        ? cell.querySelector(".fu-copy-text").textContent
+        : ""
+      ).trim();
+      if (!text) return;
+      copyTextToClipboard(text, copyBtn);
+      return;
+    }
     const syncBtn = event.target.closest(".fu-status-sync");
     if (syncBtn) {
       const entryId = parseInt(syncBtn.dataset.id, 10);

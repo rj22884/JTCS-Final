@@ -287,6 +287,45 @@ button.fu-stat-card {
   font-size: 12px;
 }
 
+/* DSC only: compact indigo copy icon for Mobile / Email / PAN / Application No. */
+.fu-activity-page[data-module="DSC"] .fu-copy-cell {
+  white-space: nowrap;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-text {
+  margin-right: 0.2rem;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: #5b4fe8;
+  font-size: 0.78rem;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+  border-radius: 0.2rem;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn:hover,
+.fu-activity-page[data-module="DSC"] .fu-copy-btn:focus-visible {
+  color: #473fd0;
+  background: rgba(91, 79, 232, 0.1);
+  outline: none;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn.is-copied {
+  color: #198754;
+  background: rgba(25, 135, 84, 0.1);
+}
+
 /* ITR only: Payment Received rows — light navy + locked controls (Edit / Thank You stay active) */
 .fu-activity-page[data-module="ITR"] #fuDataGrid tbody tr.fu-payment-received-row > td {
   background-color: #c5d0e6 !important;

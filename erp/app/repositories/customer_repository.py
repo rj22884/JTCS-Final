@@ -222,6 +222,7 @@ class CustomerRepository:
         address2 = (payload.get("address_line2") or payload.get("AddressLine2") or "").strip()
         state = (payload.get("state") or payload.get("State") or "").strip()
         country = (payload.get("country") or payload.get("Country") or "India").strip()
+        email = (payload.get("email_id") or payload.get("EmailID") or "").strip() or None
 
         if not name:
             raise ValueError("Customer name is required.")
@@ -242,13 +243,13 @@ class CustomerRepository:
                 """
                 INSERT INTO CustomerMaster (
                     CustomerName, MobileNumber, PANNumber, AadhaarNumber,
-                    Pincode, AddressLine1, AddressLine2, State, Country,
+                    Pincode, AddressLine1, AddressLine2, State, Country, EmailID,
                     CustomerStatus, CreatedDate
                 )
                 OUTPUT INSERTED.CustomerID
                 VALUES (
                     :name, :mobile, :pan, :aadhaar,
-                    :pincode, :addr1, :addr2, :state, :country,
+                    :pincode, :addr1, :addr2, :state, :country, :email,
                     N'Active', :created
                 )
                 """
@@ -263,11 +264,31 @@ class CustomerRepository:
                 "addr2": (address2 or None),
                 "state": (state or None),
                 "country": (country or "India")[:100],
+                "email": (email[:255] if email else None),
                 "created": now,
             },
         ).scalar_one()
         self.session.flush()
         return self._map_row_to_form(self.get_detail(int(result)))
+
+    def update_email(self, customer_id: int, email_id: str | None) -> None:
+        """Update CustomerMaster.EmailID (used by DSC Followup entry save)."""
+        email = (email_id or "").strip() or None
+        self.session.execute(
+            text(
+                """
+                UPDATE CustomerMaster
+                SET EmailID = :email, ModifiedDate = :now
+                WHERE CustomerID = :id
+                """
+            ),
+            {
+                "email": (email[:255] if email else None),
+                "now": datetime.utcnow(),
+                "id": int(customer_id),
+            },
+        )
+        self.session.flush()
 
     def _prepare_db_values(self, payload: dict) -> dict[str, object]:
         values: dict[str, object] = {}

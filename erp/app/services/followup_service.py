@@ -191,9 +191,9 @@ class FollowupService:
             self.followup_repo.ensure_filing_status_columns()
         if self.module_code == "TDS":
             self.followup_repo.ensure_tds_period_columns()
-        # ITR applies status filter after payment-status heal so posted payments
-        # are not stuck under "Tally Bill Generated".
-        repo_status = None if self.module_code == "ITR" else status_filter
+        # Progressive exclusive-bucket status filter (ITR + DSC).
+        # Other modules keep repository tick-based status filtering.
+        repo_status = None if self.module_code in {"ITR", "DSC"} else status_filter
         rows = self.followup_repo.list_entries(
             self.module_code,
             search=search,
@@ -213,6 +213,7 @@ class FollowupService:
             row["entry_id"] = row.get("EntryID")
             row["customer_name"] = row.get("CustomerName") or ""
             row["mobile_number"] = row.get("MobileNumber") or ""
+            row["email_id"] = row.get("EmailID") or row.get("email_id") or ""
             row["pan_number"] = row.get("PANNumber") or row.get("pan_number") or ""
             row["return_type"] = row.get("ReturnType")
             row["application_number"] = row.get("ApplicationNumber")
@@ -256,7 +257,10 @@ class FollowupService:
         if self.module_code == "ITR":
             self._heal_itr_payment_status_rows(rows)
             if status_filter:
-                rows = self._filter_entries_by_status(rows, status_filter)
+                rows = self._filter_entries_by_status(rows, status_filter, module_code="ITR")
+        elif self.module_code == "DSC":
+            if status_filter:
+                rows = self._filter_entries_by_status(rows, status_filter, module_code="DSC")
         return rows
 
     @staticmethod
@@ -292,8 +296,51 @@ class FollowupService:
         return "pending"
 
     @classmethod
-    def _filter_entries_by_status(cls, rows: list[dict], status_filter: str) -> list[dict]:
-        """ITR-only filter helper — Excel progressive current-stage buckets."""
+    def _dsc_progress_bucket(cls, row: dict) -> str:
+        """DSC card bucket: furthest progress tick, exclusive of later stages (ITR-style).
+
+        PENDING → no progress ticks
+        DOCUMENTS RECEIVED → docs ticked, later not
+        APPLICATION → application ticked, later not
+        KYC / DOWNLOAD STATUS → same exclusive rule
+        TALLY BILL GENERATED / PAYMENT PENDING → bill ticked, payment not
+        PAYMENT RECEIVED → payment received
+        """
+        codes = cls._completed_stage_codes(row)
+        status = (row.get("workflow_status") or "").strip()
+        status_l = status.lower()
+        if status == "Unverified" or "unverified" in codes:
+            return "unverified"
+        if row.get("payment_received") or "payment_received" in codes:
+            return "payment_received"
+        if "tally_bill_generated" in codes or status == "Tally Bill Generated":
+            return "tally_bill_generated"
+        if "download_status" in codes or status == "Download Status":
+            return "download_status"
+        if "kyc" in codes or status_l == "kyc":
+            return "kyc"
+        if (
+            "application_received" in codes
+            or "application_no" in codes
+            or any(c.startswith("application") for c in codes)
+            or status_l.startswith("application")
+        ):
+            return "application_received"
+        if "documents_received" in codes or status == "Documents Received":
+            return "documents_received"
+        return "pending"
+
+    @classmethod
+    def _progress_bucket(cls, row: dict, module_code: str) -> str:
+        if module_code == "DSC":
+            return cls._dsc_progress_bucket(row)
+        return cls._itr_progress_bucket(row)
+
+    @classmethod
+    def _filter_entries_by_status(
+        cls, rows: list[dict], status_filter: str, *, module_code: str = "ITR"
+    ) -> list[dict]:
+        """Exclusive progressive current-stage buckets (ITR Excel / DSC same logic)."""
         sf = (status_filter or "").strip().lower()
         if not sf:
             return rows
@@ -304,16 +351,36 @@ class FollowupService:
                 return rows
         # Excel: PAYMENT PENDING = BILL GENERATED without payment received
         if sf == "payment_pending":
-            return [r for r in rows if cls._itr_progress_bucket(r) == "tally_bill_generated"]
-        if sf in {
+            return [
+                r
+                for r in rows
+                if cls._progress_bucket(r, module_code) == "tally_bill_generated"
+            ]
+        itr_codes = {
             "pending",
             "documents_received",
             "itr_filed",
             "tally_bill_generated",
             "payment_received",
             "unverified",
-        }:
-            return [r for r in rows if cls._itr_progress_bucket(r) == sf]
+        }
+        dsc_codes = {
+            "pending",
+            "documents_received",
+            "application_received",
+            "application_no",
+            "kyc",
+            "download_status",
+            "tally_bill_generated",
+            "payment_received",
+            "unverified",
+        }
+        valid = dsc_codes if module_code == "DSC" else itr_codes
+        if sf in valid or (module_code == "DSC" and sf.startswith("application")):
+            bucket_key = "application_received" if sf.startswith("application") else sf
+            return [
+                r for r in rows if cls._progress_bucket(r, module_code) == bucket_key
+            ]
         return [
             r
             for r in rows
@@ -410,7 +477,7 @@ class FollowupService:
     ) -> dict:
         """Card totals.
 
-        ITR: Excel progressive buckets (current furthest stage only).
+        ITR + DSC: Excel progressive buckets (current furthest stage only).
         Other modules: count of cases with each stage tick.
         """
         rows = self.list_entries(
@@ -422,10 +489,10 @@ class FollowupService:
         )
         total = len(rows)
 
-        if self.module_code == "ITR":
+        if self.module_code in {"ITR", "DSC"}:
             buckets: dict[str, int] = {}
             for row in rows:
-                key = self._itr_progress_bucket(row)
+                key = self._progress_bucket(row, self.module_code)
                 buckets[key] = buckets.get(key, 0) + 1
             pending = buckets.get("pending", 0)
             payment_received = buckets.get("payment_received", 0)
@@ -437,7 +504,12 @@ class FollowupService:
                 name = (stage.get("stage_name") or "").strip()
                 if not name:
                     continue
-                by_status[name] = buckets.get(code, 0)
+                bucket_code = (
+                    "application_received"
+                    if self.module_code == "DSC" and code.startswith("application")
+                    else code
+                )
+                by_status[name] = buckets.get(bucket_code, 0)
             return {
                 "total": total,
                 "pending": pending,
@@ -502,6 +574,13 @@ class FollowupService:
             data["application_locked"] = bool(data.get("application_number"))
         data["customer_name"] = customer.get("CustomerName") or ""
         data["mobile_number"] = customer.get("MobileNumber") or ""
+        data["email_id"] = customer.get("EmailID") or customer.get("email_id") or ""
+        data["pan_number"] = (
+            data.get("pan_number")
+            or customer.get("PANNumber")
+            or customer.get("pan_number")
+            or ""
+        )
         if self.meta.get("has_gst_fields"):
             self.customer_repo.ensure_schema()
             data["filing_frequency"] = (
@@ -916,9 +995,11 @@ class FollowupService:
                 raise ValueError("Location is required.")
             if not introduced_by:
                 raise ValueError("Introduced by is required.")
+            email_id = (payload.get("email_id") or payload.get("EmailID") or "").strip()
         else:
             location = None
             introduced_by = None
+            email_id = None
 
         needs_billing = (
             self.module_code == "ITR"
@@ -1014,6 +1095,8 @@ class FollowupService:
             data["BillDate"] = None
 
         def _write() -> dict:
+            if self.module_code == "DSC":
+                self.customer_repo.update_email(customer_id, email_id)
             if entry_id:
                 row = self.followup_repo.get_entry(entry_id)
                 if row is None or not row.IsActive or row.ModuleCode != self.module_code:

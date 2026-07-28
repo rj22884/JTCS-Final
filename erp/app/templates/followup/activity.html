@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260726pending">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260728dsccopy2">
 {% endblock %}
 
 {% block content %}
@@ -86,19 +86,21 @@
     </button>
     {% endfor %}
     {% else %}
-    <button type="button" class="fu-stat-card border-warning" data-status-filter="pending" title="Filter Pending">
+    <button type="button" class="fu-stat-card border-warning" data-status-filter="pending"
+            title="No progress stage ticked yet">
       <div class="fu-stat-label">Pending</div>
       <div class="fu-stat-value" id="fuStatPending">0</div>
     </button>
     {% for stage in workflow_stages %}
     <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
             data-status-filter="{{ stage.stage_code }}"
-            title="Filter {{ stage.stage_name }}">
+            title="{% if module_code == 'DSC' %}Cases currently at {{ stage.stage_name }} (no later stage ticked){% else %}Filter {{ stage.stage_name }}{% endif %}">
       <div class="fu-stat-label">{{ stage.stage_name }}</div>
       <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
     </button>
     {% endfor %}
-    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending" title="Filter Payment Pending">
+    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending"
+            title="{% if module_code == 'DSC' %}Bill generated, payment not received{% else %}Filter Payment Pending{% endif %}">
       <div class="fu-stat-label">Payment Pending</div>
       <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
     </button>
@@ -111,7 +113,7 @@
         <div class="fw-semibold mb-2">Filters</div>
         <label class="form-label" for="fuSearchInput">Search</label>
         <input type="search" class="form-control form-control-sm mb-2" id="fuSearchInput"
-               placeholder="Type name, mobile or PAN">
+               placeholder="{% if module_code == 'DSC' %}Type name, mobile, PAN or email{% else %}Type name, mobile or PAN{% endif %}">
         {% if module_code == 'ITR' %}
         <label class="form-label" for="fuPeriodFilter">Period</label>
         <select class="form-select form-select-sm mb-2" id="fuPeriodFilter">
@@ -184,6 +186,9 @@
                 {% endif %}
                 <th>Customer</th>
                 <th>Mobile</th>
+                {% if module_code == 'DSC' %}
+                <th>Email</th>
+                {% endif %}
                 <th>PAN</th>
                 <th>{% if module_code == 'DSC' %}Application No.{% else %}Bill No.{% endif %}</th>
                 <th>Bill Date</th>
@@ -311,6 +316,15 @@
             <div id="fuCustomerResults" class="list-group fu-customer-results d-none"></div>
             <div id="fuCustomerSelected" class="small text-muted mt-1 d-none"></div>
           </div>
+
+          {% if module_code == 'DSC' %}
+          <div class="mb-3">
+            <label class="form-label" for="fuCustomerEmail">Customer Email</label>
+            <input type="email" class="form-control" id="fuCustomerEmail" name="email_id"
+                   maxlength="255" placeholder="customer@example.com" autocomplete="email">
+            <div class="form-text">Saved to Customer Master with this DSC entry.</div>
+          </div>
+          {% endif %}
 
           {% if module_meta.has_return_type %}
           <div class="mb-3">
@@ -536,5 +550,5 @@
   }
   {% endif %}
 </script>
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260726export"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260728dsccopy2"></script>
 {% endblock %}
