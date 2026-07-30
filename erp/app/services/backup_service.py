@@ -56,7 +56,7 @@ class BackupService:
         self.full_dir.mkdir(parents=True, exist_ok=True)
 
     def connection_info(self) -> dict:
-        sql_disk_dir = self._resolve_sql_staging_root()
+        sql_disk_dir = self._preferred_sql_staging_root()
         info = {
             "server": self.db_server,
             "database": self.db_name,
@@ -185,48 +185,89 @@ class BackupService:
             f"{trust}"
         )
 
-    def _resolve_sql_staging_root(self) -> Path | None:
-        """Folder SQL Server writes .bak into (may differ from app save folder).
+    def _normalize_sql_backup_dir(self) -> Path | None:
+        """Configured SQL_SERVER_BACKUP_DIR, ignoring OS-mismatched paths."""
+        if self.sql_server_backup_dir is None:
+            return None
+        raw = str(self.sql_server_backup_dir).strip()
+        if not raw:
+            return None
+        # Linux path in Windows .env (or vice versa) must be ignored.
+        if os.name == "nt" and raw.startswith("/"):
+            return None
+        if os.name != "nt" and len(raw) >= 2 and raw[1] == ":":
+            return None
+        return Path(raw)
 
-        On Windows, BACKUP TO DISK uses the app folder directly.
-        On Linux, the mssql service account cannot write under /root, so we
-        stage into SQL_SERVER_BACKUP_DIR (or a known writable default) and copy.
-        """
-        if self.sql_server_backup_dir is not None:
-            return self.sql_server_backup_dir
+    def _windows_sql_default_backup_dirs(self) -> list[Path]:
+        roots: list[Path] = []
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        mssql_root = program_files / "Microsoft SQL Server"
+        if mssql_root.is_dir():
+            for backup_dir in mssql_root.glob("MSSQL*/*/MSSQL/Backup"):
+                if backup_dir.is_dir():
+                    roots.append(backup_dir)
+        temp = Path(os.environ.get("TEMP") or os.environ.get("TMP") or r"C:\Temp")
+        roots.append(temp / "jtcs-sql-backup")
+        return roots
 
+    def _preferred_sql_staging_root(self) -> Path | None:
+        """Best guess for UI display (actual backup may retry other folders)."""
+        configured = self._normalize_sql_backup_dir()
+        if configured is not None:
+            return configured
         if os.name == "nt":
             return None
-
-        for candidate in (
-            Path("/var/opt/mssql/backup"),
-            Path("/var/backups/jtcs-erp/sql"),
-        ):
-            if candidate.is_dir():
-                return candidate
-
         return Path("/tmp/jtcs-sql-backup")
 
-    def _sql_disk_target(self, final_target: Path) -> tuple[Path, bool]:
-        """Return (path for BACKUP TO DISK, whether to copy into final_target)."""
-        staging_root = self._resolve_sql_staging_root()
-        if staging_root is None:
-            return final_target, False
+    def _backup_disk_candidates(self, final_target: Path) -> list[tuple[Path, bool]]:
+        """Ordered (disk_path, needs_copy) candidates for BACKUP TO DISK."""
+        seen: set[str] = set()
+        out: list[tuple[Path, bool]] = []
 
-        try:
-            staging_root.mkdir(parents=True, exist_ok=True)
-            # World-writable + sticky so mssql can create files even if we own the dir.
-            if os.name != "nt":
-                os.chmod(staging_root, 0o1777)
-        except OSError:
-            pass
+        def add(root: Path | None) -> None:
+            if root is None:
+                return
+            try:
+                root = root.expanduser()
+                root.mkdir(parents=True, exist_ok=True)
+                if os.name != "nt":
+                    try:
+                        os.chmod(root, 0o1777)
+                    except OSError:
+                        pass
+                key = str(root.resolve()).lower()
+            except OSError:
+                return
+            if key in seen:
+                return
+            seen.add(key)
+            disk = root / final_target.name
+            needs_copy = root.resolve() != final_target.parent.resolve()
+            out.append((disk, needs_copy))
 
-        if staging_root.resolve() == final_target.parent.resolve():
-            return final_target, False
-        return staging_root / final_target.name, True
+        configured = self._normalize_sql_backup_dir()
+        add(configured)
 
-    def _run_sql_backup(self, target: Path) -> None:
-        disk_path, needs_copy = self._sql_disk_target(target)
+        if os.name == "nt":
+            # Localhost Windows: try app folder first, then SQL default Backup dirs.
+            add(final_target.parent)
+            for root in self._windows_sql_default_backup_dirs():
+                add(root)
+        else:
+            # Linux VPS: never write under /root (mssql Access denied). Prefer /tmp.
+            add(Path("/tmp/jtcs-sql-backup"))
+            for root in (Path("/var/opt/mssql/backup"), Path("/var/backups/jtcs-erp/sql")):
+                if root.is_dir():
+                    add(root)
+            if not str(final_target.parent.resolve()).startswith("/root"):
+                add(final_target.parent)
+
+        if not out:
+            add(final_target.parent)
+        return out
+
+    def _execute_backup_to_disk(self, disk_path: Path) -> None:
         disk = str(disk_path.resolve())
         escaped = disk.replace("'", "''")
         sql = (
@@ -243,43 +284,53 @@ class BackupService:
         try:
             cursor = conn.cursor()
             cursor.execute(sql)
-            # Drain informational STATS result sets from BACKUP.
             while cursor.nextset():
                 pass
             cursor.close()
         except Exception as exc:
-            hint = (
-                f"SQL Server must be able to write to {disk_path.parent}. "
-                "On Linux set SQL_SERVER_BACKUP_DIR=/var/opt/mssql/backup "
-                "(sudo mkdir -p that path && sudo chown mssql:mssql it), "
-                "or use /tmp/jtcs-sql-backup."
-            )
-            raise ValueError(
-                f"Database backup failed. {hint} Details: {exc}"
-            ) from exc
+            raise ValueError(str(exc)) from exc
         finally:
             conn.close()
 
         if not disk_path.is_file() or disk_path.stat().st_size <= 0:
             raise ValueError(
-                "Backup command finished but the .bak file was not created. "
-                f"Check SQL Server permissions on {disk_path.parent}."
+                f"BACKUP finished but file missing/empty at {disk_path} "
+                f"(SQL Server cannot write to {disk_path.parent})."
             )
 
-        if needs_copy:
+    def _run_sql_backup(self, target: Path) -> None:
+        candidates = self._backup_disk_candidates(target)
+        errors: list[str] = []
+
+        for disk_path, needs_copy in candidates:
             try:
-                shutil.copy2(disk_path, target)
-            finally:
-                try:
-                    disk_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                self._execute_backup_to_disk(disk_path)
+            except ValueError as exc:
+                errors.append(f"{disk_path.parent}: {exc}")
+                continue
 
-        if not target.is_file() or target.stat().st_size <= 0:
-            raise ValueError(
-                "Backup was created by SQL Server but could not be copied to "
-                f"{target}. Check app write permissions on {self.database_dir}."
-            )
+            if needs_copy:
+                try:
+                    shutil.copy2(disk_path, target)
+                finally:
+                    try:
+                        disk_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            elif disk_path.resolve() != target.resolve():
+                shutil.copy2(disk_path, target)
+
+            if target.is_file() and target.stat().st_size > 0:
+                return
+
+            errors.append(f"{disk_path.parent}: could not copy into {target}")
+
+        detail = " | ".join(errors[-3:]) if errors else "no candidate folders"
+        raise ValueError(
+            "Database backup failed on all folders. "
+            "On Windows ensure SQL Server service can write to the backup folder "
+            f"(or set SQL_SERVER_BACKUP_DIR). Tried: {detail}"
+        )
 
     def _add_tree_to_zip(self, zf: zipfile.ZipFile, root: Path, arc_prefix: str) -> None:
         if not root.exists():
