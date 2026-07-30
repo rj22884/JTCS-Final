@@ -56,18 +56,22 @@ def _odbc_connect_string() -> str:
     trusted = os.getenv("DB_TRUSTED_CONNECTION", "1") == "1"
     user = os.getenv("DB_USER", "")
     password = os.getenv("DB_PASSWORD", "")
-    # Prefer Driver 18 if listed that way on VPS.
-    extra = ""
-    if "18" in driver:
-        extra = "TrustServerCertificate=yes;"
+    trust = "TrustServerCertificate=yes;"
+    if os.getenv("DB_TRUST_SERVER_CERTIFICATE", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        trust = ""
     if trusted:
         return (
             f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};"
-            f"Trusted_Connection=yes;{extra}"
+            f"Trusted_Connection=yes;{trust}"
         )
     return (
         f"DRIVER={{{driver}}};SERVER={server};DATABASE={database};"
-        f"UID={user};PWD={password};{extra}"
+        f"UID={user};PWD={password};{trust}"
     )
 
 

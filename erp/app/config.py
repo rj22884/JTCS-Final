@@ -21,6 +21,9 @@ def build_sqlalchemy_uri() -> str:
     trusted = os.getenv("DB_TRUSTED_CONNECTION", "1") == "1"
     username = os.getenv("DB_USER", "")
     password = os.getenv("DB_PASSWORD", "")
+    # ODBC Driver 18+ requires this for SQL Server self-signed certs (typical on Linux VPS).
+    trust_cert = _env_bool("DB_TRUST_SERVER_CERTIFICATE", "True")
+    trust = "TrustServerCertificate=yes;" if trust_cert else ""
 
     if trusted:
         odbc = (
@@ -28,6 +31,7 @@ def build_sqlalchemy_uri() -> str:
             f"SERVER={server};"
             f"DATABASE={database};"
             "Trusted_Connection=yes;"
+            f"{trust}"
         )
     else:
         odbc = (
@@ -36,6 +40,7 @@ def build_sqlalchemy_uri() -> str:
             f"DATABASE={database};"
             f"UID={username};"
             f"PWD={password};"
+            f"{trust}"
         )
 
     return f"mssql+pyodbc:///?odbc_connect={quote_plus(odbc)}"
@@ -113,5 +118,6 @@ class Config:
     DB_NAME = os.getenv("DB_NAME", "JTCSS")
     DB_DRIVER = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
     DB_TRUSTED_CONNECTION = os.getenv("DB_TRUSTED_CONNECTION", "1") == "1"
+    DB_TRUST_SERVER_CERTIFICATE = _env_bool("DB_TRUST_SERVER_CERTIFICATE", "True")
     DB_USER = os.getenv("DB_USER", "")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")

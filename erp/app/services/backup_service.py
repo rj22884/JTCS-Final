@@ -165,12 +165,16 @@ class BackupService:
 
     def _odbc_connect_string(self) -> str:
         # Connect to master so BACKUP can run even if JTCSS is busy with app pool.
+        trust = ""
+        if bool(current_app.config.get("DB_TRUST_SERVER_CERTIFICATE", True)):
+            trust = "TrustServerCertificate=yes;"
         if self.db_trusted:
             return (
                 f"DRIVER={{{self.db_driver}}};"
                 f"SERVER={self.db_server};"
                 "DATABASE=master;"
                 "Trusted_Connection=yes;"
+                f"{trust}"
             )
         return (
             f"DRIVER={{{self.db_driver}}};"
@@ -178,6 +182,7 @@ class BackupService:
             "DATABASE=master;"
             f"UID={self.db_user};"
             f"PWD={self.db_password};"
+            f"{trust}"
         )
 
     def _resolve_sql_staging_root(self) -> Path | None:
