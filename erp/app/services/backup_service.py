@@ -218,14 +218,73 @@ class BackupService:
             return configured
         if os.name == "nt":
             return None
-        # Linux: mssql always owns its data dir (NOT /tmp — PrivateTmp hides files).
-        return Path("/var/opt/mssql/data")
+        # Linux: shared mssql backup dir (prepared at runtime). Avoid /tmp and /root.
+        return Path("/var/opt/mssql/backup")
 
     def _connect_master(self):
         try:
             return pyodbc.connect(self._odbc_connect_string(), autocommit=True, timeout=30)
         except Exception as exc:
             raise ValueError(f"Could not connect to SQL Server for backup: {exc}") from exc
+
+    def _prepare_linux_mssql_dirs(self) -> list[Path]:
+        """Ensure mssql-owned folders exist so BACKUP TO DISK can succeed on VPS."""
+        prepared: list[Path] = []
+        for folder in (Path("/var/opt/mssql/backup"), Path("/var/opt/mssql/data")):
+            try:
+                subprocess.run(["mkdir", "-p", str(folder)], capture_output=True, check=False)
+                subprocess.run(["chown", "mssql:mssql", str(folder)], capture_output=True, check=False)
+                subprocess.run(["chmod", "775", str(folder)], capture_output=True, check=False)
+                prepared.append(folder)
+            except OSError:
+                continue
+        return prepared
+
+    def _find_mssql_docker_container(self) -> str | None:
+        """If SQL Server runs in Docker, host paths may not see .bak files."""
+        try:
+            completed = subprocess.run(
+                ["docker", "ps", "--format", "{{.Names}}\t{{.Image}}"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if completed.returncode != 0:
+            return None
+        for line in (completed.stdout or "").splitlines():
+            low = line.lower()
+            if any(token in low for token in ("mssql", "azure-sql", "microsoft/mssql", "mssql/server")):
+                return line.split("\t", 1)[0].strip() or None
+        return None
+
+    def _sql_xp_file_exists(self, conn, path: str) -> bool:
+        cursor = conn.cursor()
+        try:
+            escaped = path.replace("'", "''")
+            cursor.execute(
+                f"""
+                DECLARE @t TABLE (
+                    FileExists INT NOT NULL,
+                    FileIsDirectory INT NOT NULL,
+                    ParentDirectoryExists INT NOT NULL
+                );
+                INSERT INTO @t
+                EXEC master.dbo.xp_fileexist N'{escaped}';
+                SELECT FileExists FROM @t;
+                """
+            )
+            row = cursor.fetchone()
+            return bool(row and int(row[0]) == 1)
+        except Exception:
+            return False
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
     def _sql_writable_roots(self, conn) -> list[Path]:
         """Folders the SQL Server process can actually write to."""
@@ -250,6 +309,10 @@ class BackupService:
 
         add(self._normalize_sql_backup_dir())
 
+        if os.name != "nt":
+            for folder in self._prepare_linux_mssql_dirs():
+                add(folder)
+
         cursor = conn.cursor()
         for prop in ("InstanceDefaultBackupPath", "InstanceDefaultDataPath"):
             try:
@@ -270,25 +333,30 @@ class BackupService:
             for root in self._windows_sql_default_backup_dirs():
                 add(root)
         else:
-            # Never use /tmp on Linux: mssql often has systemd PrivateTmp, so the
-            # Flask app cannot see files SQL Server wrote under its private /tmp.
-            add(Path("/var/opt/mssql/data"))
             add(Path("/var/opt/mssql/backup"))
+            add(Path("/var/opt/mssql/data"))
 
         return roots
 
     def _execute_backup_to_disk(self, conn, disk_path: Path) -> None:
-        # Use the exact string we send to SQL (avoid resolve() changing path).
         disk = str(disk_path)
         if os.name == "nt":
             disk = str(Path(disk))
         escaped = disk.replace("'", "''")
-        sql = (
-            f"BACKUP DATABASE [{self.db_name}] TO DISK = N'{escaped}' "
-            "WITH COPY_ONLY, INIT, "
-            f"NAME = N'JTCS {self.db_name} backup', "
-            "DESCRIPTION = N'JTCS ERP Admin Role database backup'"
-        )
+        # TRY/CATCH so Access Denied cannot look like a silent success.
+        sql = f"""
+SET NOCOUNT ON;
+BEGIN TRY
+    BACKUP DATABASE [{self.db_name}] TO DISK = N'{escaped}'
+    WITH COPY_ONLY, INIT,
+         NAME = N'JTCS {self.db_name} backup',
+         DESCRIPTION = N'JTCS ERP Admin Role database backup';
+END TRY
+BEGIN CATCH
+    DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
+    RAISERROR(@msg, 16, 1);
+END CATCH
+"""
         cursor = conn.cursor()
         try:
             cursor.execute(sql)
@@ -306,17 +374,6 @@ class BackupService:
             except Exception:
                 pass
 
-        # Allow brief FS sync; then confirm the file SQL Server wrote.
-        for _ in range(10):
-            if disk_path.is_file() and disk_path.stat().st_size > 0:
-                return
-            time.sleep(0.2)
-
-        raise ValueError(
-            f"BACKUP reported OK but file missing at {disk_path}. "
-            "SQL Server service cannot write that folder."
-        )
-
     def _copy_bak_to_target(self, disk_path: Path, target: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -332,6 +389,63 @@ class BackupService:
                 raise ValueError(
                     f"Could not copy .bak to {target}: {completed.stderr or completed.stdout}"
                 )
+
+    def _materialize_bak(self, conn, disk_path: Path, target: Path) -> None:
+        """Copy .bak into app folder; use docker cp when SQL FS is not host-visible."""
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        for _ in range(15):
+            if disk_path.is_file() and disk_path.stat().st_size > 0:
+                self._copy_bak_to_target(disk_path, target)
+                if target.is_file() and target.stat().st_size > 0:
+                    try:
+                        disk_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return
+            time.sleep(0.2)
+
+        sql_sees = self._sql_xp_file_exists(conn, str(disk_path))
+        container = None if os.name == "nt" else self._find_mssql_docker_container()
+
+        if container:
+            # SQL Server inside Docker: file exists in container FS only.
+            completed = subprocess.run(
+                ["docker", "cp", f"{container}:{disk_path}", str(target)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=600,
+            )
+            if completed.returncode == 0 and target.is_file() and target.stat().st_size > 0:
+                subprocess.run(
+                    ["docker", "exec", container, "rm", "-f", str(disk_path)],
+                    capture_output=True,
+                    check=False,
+                )
+                return
+            raise ValueError(
+                f"docker cp from {container}:{disk_path} failed: "
+                f"{completed.stderr or completed.stdout or 'unknown error'}"
+            )
+
+        if sql_sees:
+            # File exists for SQL user but not readable yet — fix perms then copy.
+            subprocess.run(["chmod", "-R", "a+rX", str(disk_path.parent)], capture_output=True, check=False)
+            subprocess.run(["chmod", "a+r", str(disk_path)], capture_output=True, check=False)
+            if disk_path.is_file() and disk_path.stat().st_size > 0:
+                self._copy_bak_to_target(disk_path, target)
+                if target.is_file() and target.stat().st_size > 0:
+                    try:
+                        disk_path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                    return
+
+        raise ValueError(
+            f"BACKUP finished but .bak not available at {disk_path} "
+            f"(sql_sees_file={sql_sees}, docker={container or 'none'})."
+        )
 
     def _run_sql_backup(self, target: Path) -> None:
         conn = self._connect_master()
@@ -350,13 +464,12 @@ class BackupService:
                 seen.add(key)
                 disk_path = root / target.name
                 try:
-                    # Do not mkdir under /var/opt/mssql/* as root with wrong owner.
-                    if root not in (
-                        Path("/var/opt/mssql/data"),
-                        Path("/var/opt/mssql/backup"),
-                    ) and not (
-                        str(root).lower().startswith("/var/opt/mssql/")
-                    ):
+                    if os.name == "nt":
+                        try:
+                            root.mkdir(parents=True, exist_ok=True)
+                        except OSError:
+                            pass
+                    elif not str(root).startswith("/var/opt/mssql/"):
                         try:
                             root.mkdir(parents=True, exist_ok=True)
                         except OSError:
@@ -364,16 +477,12 @@ class BackupService:
 
                     self._execute_backup_to_disk(conn, disk_path)
 
-                    if disk_path.resolve() != target.resolve():
-                        self._copy_bak_to_target(disk_path, target)
-                        try:
-                            disk_path.unlink(missing_ok=True)
-                        except OSError:
-                            pass
-
-                    if target.is_file() and target.stat().st_size > 0:
+                    if disk_path.resolve() == target.resolve() and target.is_file() and target.stat().st_size > 0:
                         return
 
+                    self._materialize_bak(conn, disk_path, target)
+                    if target.is_file() and target.stat().st_size > 0:
+                        return
                     errors.append(f"{root}: copy to app folder failed")
                 except ValueError as exc:
                     errors.append(f"{root}: {exc}")
@@ -389,11 +498,9 @@ class BackupService:
             )
         else:
             tip = (
-                "On Linux, SQL Server must write under /var/opt/mssql/data "
-                "(owned by mssql). Do not use /tmp or /root. "
-                "Optional: sudo mkdir -p /var/opt/mssql/backup && "
-                "sudo chown mssql:mssql /var/opt/mssql/backup && "
-                "set SQL_SERVER_BACKUP_DIR=/var/opt/mssql/backup"
+                "On Linux/VPS, SQL Server must write under /var/opt/mssql/backup "
+                "(mssql:mssql). If SQL runs in Docker, the app will docker-cp the .bak. "
+                "Do not use /tmp or /root."
             )
         raise ValueError(f"Database backup failed. {tip} Details: {detail}")
 
