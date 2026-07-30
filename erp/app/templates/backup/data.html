@@ -23,6 +23,9 @@
     <div><span class="backup-meta-label">Server</span> {{ connection.server }}</div>
     <div><span class="backup-meta-label">Database</span> {{ connection.database }}</div>
     <div><span class="backup-meta-label">Save folder</span> <code>{{ connection.database_backup_dir }}</code></div>
+    {% if connection.sql_server_backup_dir %}
+    <div><span class="backup-meta-label">SQL Server write folder</span> <code>{{ connection.sql_server_backup_dir }}</code></div>
+    {% endif %}
   </div>
 
   <div id="backupStatus" class="alert d-none mb-3" role="status"></div>

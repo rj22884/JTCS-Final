@@ -100,11 +100,15 @@ class Config:
     MAX_CONTENT_LENGTH = 2 * 1024 * 1024
     UPLOAD_FOLDER = BASE_DIR / "app" / "static" / "uploads"
 
-    # Admin Role — database / full backups (SQL Server must be able to write DB path)
+    # Admin Role — database / full backups
+    # BACKUP_ROOT = where the app stores downloadable .bak / full zip files.
+    # SQL_SERVER_BACKUP_DIR = path SQL Server itself writes to (Linux mssql often
+    # cannot write under /root; defaults to /var/opt/mssql/backup or /tmp).
     BACKUP_ROOT = Path(os.getenv("BACKUP_ROOT", str(BASE_DIR / "backups")))
     BACKUP_DATABASE_DIR = BACKUP_ROOT / "database"
     BACKUP_FULL_DIR = BACKUP_ROOT / "full"
     BACKUP_KEEP_COUNT = int(os.getenv("BACKUP_KEEP_COUNT", "20"))
+    SQL_SERVER_BACKUP_DIR = (os.getenv("SQL_SERVER_BACKUP_DIR") or "").strip() or None
     DB_SERVER = os.getenv("DB_SERVER", r"JTCS\JTCS")
     DB_NAME = os.getenv("DB_NAME", "JTCSS")
     DB_DRIVER = os.getenv("DB_DRIVER", "ODBC Driver 17 for SQL Server")
