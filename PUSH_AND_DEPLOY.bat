@@ -23,6 +23,8 @@ echo ========================================================
 echo   JTCS ERP - ONE CLICK: Push + Deploy
 echo ========================================================
 echo   Local folder : %CD%
+echo   SQL DATA     : SAFE (never overwritten on deploy)
+echo   DB changes   : schema only (new tables/columns)
 echo.
 
 where git >nul 2>&1
@@ -130,25 +132,32 @@ echo -------------------------
 echo Connecting !VPS_USER!@!VPS_HOST! ...
 echo.
 
-REM Write remote bash to a temp file so CMD never re-parses || && 2>
+REM Build remote bash with Unix LF endings (Windows CRLF breaks bash on VPS).
 set "REMOTE_SH=%TEMP%\jtcs_vps_deploy_%RANDOM%.sh"
-(
-    echo set -e
-    echo cd !VPS_PATH!
-    echo echo '== VPS deploy start =='
-    echo export BRANCH='!LOCAL_BRANCH!'
-    echo if [ -f scripts/vps_pull_update.sh ]; then
-    echo   bash scripts/vps_pull_update.sh
-    echo else
-    echo   echo 'scripts/vps_pull_update.sh missing - basic reset'
-    echo   if [ -f erp/.env ]; then cp erp/.env /tmp/jtcs.env.bak; fi
-    echo   git fetch origin
-    echo   git checkout '!LOCAL_BRANCH!'
-    echo   git reset --hard origin/'!LOCAL_BRANCH!'
-    echo   if [ -f /tmp/jtcs.env.bak ]; then cp /tmp/jtcs.env.bak erp/.env; fi
-    echo fi
-    echo echo '== VPS deploy OK =='
-) > "!REMOTE_SH!"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$path = $env:REMOTE_SH;" ^
+  "$vpsPath = $env:VPS_PATH;" ^
+  "$branch = $env:LOCAL_BRANCH;" ^
+  "$nl = [char]10;" ^
+  "$script = @( " ^
+  "  'set -e'," ^
+  "  ('cd {0}' -f $vpsPath)," ^
+  "  'echo ''== VPS deploy start =='''," ^
+  "  ('export BRANCH=''{0}''' -f $branch)," ^
+  "  'if [ -f scripts/vps_pull_update.sh ]; then'," ^
+  "  '  bash scripts/vps_pull_update.sh'," ^
+  "  'else'," ^
+  "  '  echo ''scripts/vps_pull_update.sh missing - basic reset'''," ^
+  "  '  if [ -f erp/.env ]; then cp erp/.env /tmp/jtcs.env.bak; fi'," ^
+  "  '  git fetch origin'," ^
+  "  ('  git checkout ''{0}''' -f $branch)," ^
+  "  ('  git reset --hard origin/{0}' -f $branch)," ^
+  "  '  if [ -f /tmp/jtcs.env.bak ]; then cp /tmp/jtcs.env.bak erp/.env; fi'," ^
+  "  'fi'," ^
+  "  'echo ''== VPS deploy OK ==''" ^
+  ") -join $nl;" ^
+  "[System.IO.File]::WriteAllText($path, $script + $nl)"
 
 if not exist "!REMOTE_SH!" (
     echo [ERROR] Temp deploy script nahi bani.
@@ -224,6 +233,7 @@ echo ========================================================
 echo   Commit : !COMMIT_MSG!
 echo   Branch : !LOCAL_BRANCH!
 echo   VPS    : http://!VPS_HOST!:8000/login
+echo   SQL    : live data preserved (schema-only update)
 echo.
 echo   Mail test on VPS:
 echo     cd ~/JTCS-final/erp

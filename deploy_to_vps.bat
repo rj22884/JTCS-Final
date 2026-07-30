@@ -53,6 +53,7 @@ echo   JTCS ERP - Deploy to VPS
 echo ========================================
 echo   Host : %VPS_USER%@%VPS_HOST%:%VPS_PORT%
 echo   Path : %VPS_PATH%
+echo   SQL  : DATA SAFE (schema-only; no overwrite)
 echo.
 echo Step 1/2: Push local code to GitHub first? (Y/N)
 set /p DOPUSH="> "

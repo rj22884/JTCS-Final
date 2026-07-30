@@ -18,20 +18,24 @@ echo    6. Edit .env settings
 echo    7. Push code to GitHub
 echo    8. Deploy to VPS (git pull on server)
 echo    9. ONE CLICK: Push + Deploy VPS
+echo       (code + schema only — SQL DATA safe)
+echo    D. Database SCHEMA update only (local)
+echo       (new tables/columns only — DATA safe)
 echo    0. Exit
 echo.
-set /p choice="Select option (0-9): "
+set /p choice="Select option (0-9 / D): "
 
-if "%choice%"=="1" goto install
-if "%choice%"=="2" goto start
-if "%choice%"=="3" goto stop
-if "%choice%"=="4" goto test
-if "%choice%"=="5" goto browser
-if "%choice%"=="6" goto editenv
-if "%choice%"=="7" goto pushgit
-if "%choice%"=="8" goto deployvps
-if "%choice%"=="9" goto oneclick
-if "%choice%"=="0" exit /b 0
+if /i "%choice%"=="1" goto install
+if /i "%choice%"=="2" goto start
+if /i "%choice%"=="3" goto stop
+if /i "%choice%"=="4" goto test
+if /i "%choice%"=="5" goto browser
+if /i "%choice%"=="6" goto editenv
+if /i "%choice%"=="7" goto pushgit
+if /i "%choice%"=="8" goto deployvps
+if /i "%choice%"=="9" goto oneclick
+if /i "%choice%"=="D" goto dbschema
+if /i "%choice%"=="0" exit /b 0
 goto menu
 
 :install
@@ -72,4 +76,8 @@ goto menu
 
 :oneclick
 call "%~dp0PUSH_AND_DEPLOY.bat"
+goto menu
+
+:dbschema
+call "%~dp0update_database.bat"
 goto menu

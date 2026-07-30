@@ -61,17 +61,16 @@ if not exist ".env" (
 )
 
 echo.
-echo Applying database updates...
-where sqlcmd >nul 2>&1
-if errorlevel 1 (
-    echo WARNING: sqlcmd not found. Run update_database.bat manually.
-) else (
-    sqlcmd -S "JTCS\JTCS" -d JTCSS -E -i "database\009_add_verification_tracking.sql" >nul
+echo Applying database SCHEMA updates (data safe)...
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" scripts\apply_schema_migrations.py
     if errorlevel 1 (
-        echo WARNING: SQL update failed. Run update_database.bat manually.
+        echo WARNING: Schema update failed. Run update_database.bat manually.
     ) else (
-        echo Database update applied.
+        echo Database schema update applied. Existing data preserved.
     )
+) else (
+    echo WARNING: venv python not found. Run update_database.bat manually.
 )
 
 echo.

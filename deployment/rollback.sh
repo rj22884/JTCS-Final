@@ -7,6 +7,10 @@
 #   ./rollback.sh --latest
 #   ./rollback.sh --backup /var/backups/jtcs-erp/Version_1.0.0_2026-07-29_103000
 #   ./rollback.sh --version 1.0.0
+#   ./rollback.sh --latest --restore-db   # DANGEROUS: overwrites live SQL data
+#
+# Default keeps the live database. Pass --restore-db only when you intentionally
+# want to replace SQL data from the backup .bak.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +22,7 @@ BACKUP_PATH=""
 VERSION=""
 USE_LATEST=0
 REASON="manual rollback"
+RESTORE_DB=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     --version) VERSION="$2"; shift 2 ;;
     --latest) USE_LATEST=1; shift ;;
     --reason) REASON="$2"; shift 2 ;;
+    --restore-db) RESTORE_DB=1; shift ;;
     *) log_error "Unknown arg: $1"; exit 2 ;;
   esac
 done
@@ -83,10 +89,11 @@ if [[ -d "${BACKUP_PATH}/uploads" ]]; then
   rsync -a "${BACKUP_PATH}/uploads/" "${DEST_UP}/"
 fi
 
-# Restore SQL .bak if present and sqlcmd available
+# Restore SQL .bak ONLY when explicitly requested (--restore-db).
+# Default: keep live database data (prevents wiping newer transactions).
 BAK="$(ls -1 "${BACKUP_PATH}/sql/"*.bak 2>/dev/null | head -n 1 || true)"
-if [[ -n "${BAK}" && -n "${MSSQL_SERVER:-}" && -n "${MSSQL_DATABASE:-}" ]] && command -v sqlcmd >/dev/null 2>&1; then
-  log_info "Restoring database from ${BAK}…"
+if [[ ${RESTORE_DB} -eq 1 && -n "${BAK}" && -n "${MSSQL_SERVER:-}" && -n "${MSSQL_DATABASE:-}" ]] && command -v sqlcmd >/dev/null 2>&1; then
+  log_warn "EXPLICIT --restore-db: restoring database from ${BAK} (OVERWRITES LIVE DATA)…"
   SQL_AUTH=()
   if [[ -n "${MSSQL_USER:-}" ]]; then
     SQL_AUTH=(-U "${MSSQL_USER}" -P "${MSSQL_PASSWORD:-}")
@@ -97,8 +104,10 @@ if [[ -n "${BAK}" && -n "${MSSQL_SERVER:-}" && -n "${MSSQL_DATABASE:-}" ]] && co
     "ALTER DATABASE [${MSSQL_DATABASE}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
      RESTORE DATABASE [${MSSQL_DATABASE}] FROM DISK = N'${BAK}' WITH REPLACE;
      ALTER DATABASE [${MSSQL_DATABASE}] SET MULTI_USER;"
+elif [[ ${RESTORE_DB} -eq 1 ]]; then
+  log_warn " --restore-db requested but no .bak / sqlcmd / MSSQL config — DB unchanged"
 else
-  log_warn "Skipping DB restore (no .bak or sqlcmd/MSSQL not configured)"
+  log_info "Keeping live SQL data (no RESTORE). Use --restore-db only if you really want to overwrite DB."
 fi
 
 log_info "Restarting services…"

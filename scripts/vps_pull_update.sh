@@ -89,6 +89,23 @@ if [[ -d "$ERP_DIR" ]]; then
     "$PY" -m pip install -r requirements.txt -q || true
   fi
 
+  # SCHEMA ONLY — never RESTORE / never wipe transaction data.
+  if [[ -n "$PY" && -f scripts/apply_schema_migrations.py ]]; then
+    echo
+    echo "Applying SCHEMA-ONLY SQL migrations (data preserved)..."
+    "$PY" scripts/apply_schema_migrations.py || {
+      echo "WARNING: schema migration failed — app code updated, DATA left untouched."
+    }
+  elif [[ -x "$ROOT/deployment/apply_migrations.sh" ]]; then
+    echo
+    echo "Applying SCHEMA-ONLY SQL migrations via deployment/apply_migrations.sh..."
+    bash "$ROOT/deployment/apply_migrations.sh" || {
+      echo "WARNING: schema migration failed — DATA left untouched."
+    }
+  else
+    echo "No schema migrator found — skipping DB schema update (DATA untouched)."
+  fi
+
   UNIT_SRC="$ROOT/scripts/jtcs-erp.service"
   UNIT_DST="/etc/systemd/system/jtcs-erp.service"
 
