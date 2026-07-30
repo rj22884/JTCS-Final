@@ -130,35 +130,22 @@ echo.
 echo [2/2] VPS DEPLOY...
 echo -------------------------
 echo Connecting !VPS_USER!@!VPS_HOST! ...
+echo Tip: Permission denied = galat password.
 echo.
 
-REM Build remote bash with Unix LF endings (Windows CRLF breaks bash on VPS).
-set "REMOTE_SH=%TEMP%\jtcs_vps_deploy_%RANDOM%.sh"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "$path = $env:REMOTE_SH;" ^
-  "$vpsPath = $env:VPS_PATH;" ^
-  "$branch = $env:LOCAL_BRANCH;" ^
-  "$nl = [char]10;" ^
-  "$script = @( " ^
-  "  'set -e'," ^
-  "  ('cd {0}' -f $vpsPath)," ^
-  "  'echo ''== VPS deploy start =='''," ^
-  "  ('export BRANCH=''{0}''' -f $branch)," ^
-  "  'if [ -f scripts/vps_pull_update.sh ]; then'," ^
-  "  '  bash scripts/vps_pull_update.sh'," ^
-  "  'else'," ^
-  "  '  echo ''scripts/vps_pull_update.sh missing - basic reset'''," ^
-  "  '  if [ -f erp/.env ]; then cp erp/.env /tmp/jtcs.env.bak; fi'," ^
-  "  '  git fetch origin'," ^
-  "  ('  git checkout ''{0}''' -f $branch)," ^
-  "  ('  git reset --hard origin/{0}' -f $branch)," ^
-  "  '  if [ -f /tmp/jtcs.env.bak ]; then cp /tmp/jtcs.env.bak erp/.env; fi'," ^
-  "  'fi'," ^
-  "  'echo ''== VPS deploy OK ==''" ^
-  ") -join $nl;" ^
-  "[System.IO.File]::WriteAllText($path, $script + $nl)"
+REM Prefer absolute path over ~/JTCS-final
+if /i "!VPS_PATH!"=="~/JTCS-final" set "VPS_PATH=/root/JTCS-final"
+if /i "!VPS_PATH!"=="~/JTCS-Final" set "VPS_PATH=/root/JTCS-final"
+if "!VPS_PATH!"=="" set "VPS_PATH=/root/JTCS-final"
 
+REM Unix-LF remote script (Windows CRLF breaks bash on VPS)
+set "REMOTE_SH=%TEMP%\jtcs_vps_deploy_%RANDOM%.sh"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\build_vps_deploy_remote.ps1" -OutFile "!REMOTE_SH!" -RepoPath "!VPS_PATH!" -Branch "!LOCAL_BRANCH!"
+if errorlevel 1 (
+    echo [ERROR] Temp deploy script nahi bani.
+    pause
+    exit /b 1
+)
 if not exist "!REMOTE_SH!" (
     echo [ERROR] Temp deploy script nahi bani.
     pause
