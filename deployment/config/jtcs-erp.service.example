@@ -1,0 +1,23 @@
+[Unit]
+Description=JTCS ERP (Gunicorn)
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/jtcs-erp/erp
+Environment="PATH=/var/www/jtcs-erp/erp/.venv/bin"
+EnvironmentFile=-/var/www/jtcs-erp/erp/.env
+ExecStart=/var/www/jtcs-erp/erp/.venv/bin/gunicorn \
+  --config /var/www/jtcs-erp/deployment/config/gunicorn.conf.py.example \
+  wsgi:app
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

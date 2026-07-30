@@ -42,6 +42,7 @@ from app.routes.backup import bp as backup_bp
 from app.routes.admin_dashboard import bp as admin_dashboard_bp
 from app.routes.admin_import_export import bp as admin_import_export_bp
 from app.routes.ledger_report import bp as ledger_report_bp
+from app.routes.software_update import bp as software_update_bp
 from app.services.auth_service import AuthService
 from app.services.menu_service import MenuService
 from app.utils.date_format import (
@@ -109,6 +110,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(admin_dashboard_bp)
     app.register_blueprint(admin_import_export_bp)
     app.register_blueprint(ledger_report_bp)
+    app.register_blueprint(software_update_bp)
     app.register_blueprint(pages_bp)
 
     with app.app_context():
@@ -266,9 +268,17 @@ def create_app(config_class: type = Config) -> Flask:
             except Exception:
                 login_id = ""
 
+        display_version = app.config["APP_VERSION"]
+        try:
+            from app.services.version_service import VersionService
+
+            display_version = VersionService().get_display_version(app.config["APP_VERSION"])
+        except Exception:
+            display_version = app.config["APP_VERSION"]
+
         return {
             "app_name": app.config["APP_NAME"],
-            "app_version": app.config["APP_VERSION"],
+            "app_version": display_version,
             "company_name": company_name,
             "company_display_name": company_display_name,
             "company_tagline": app.config.get("COMPANY_TAGLINE", "Income Tax | GST | Compliance Services"),

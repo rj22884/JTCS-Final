@@ -68,11 +68,11 @@ class EmailService:
         mail.send(message)
 
     def _send_message_direct(self, message: Message) -> None:
-        """Fallback SMTP send using the same connection style as Flask-Mail."""
+        """Primary SMTP send with VPS-friendly SSL/port fallbacks."""
         from flask_mail import sanitize_address, sanitize_addresses
 
         settings = smtp_settings_from_config(current_app.config)
-        logger.info("[EMAIL] Sending via direct SMTP fallback to %s", settings["server"])
+        logger.info("[EMAIL] Sending via direct SMTP to %s", settings["server"])
         with open_smtp_connection(**settings) as smtp:
             smtp.sendmail(
                 sanitize_address(message.sender),
@@ -134,16 +134,17 @@ class EmailService:
         for attempt in range(1, SMTP_SEND_MAX_ATTEMPTS + 1):
             try:
                 try:
-                    self._send_message(message)
-                except Exception as flask_mail_exc:
+                    # Prefer direct SMTP (SSL/587 fallbacks for VPS). Flask-Mail is backup only.
+                    self._send_message_direct(message)
+                except Exception as direct_exc:
                     logger.warning(
-                        "[EMAIL] Flask-Mail send failed (attempt %s/%s): %s",
+                        "[EMAIL] Direct SMTP send failed (attempt %s/%s): %s",
                         attempt,
                         SMTP_SEND_MAX_ATTEMPTS,
-                        flask_mail_exc,
+                        direct_exc,
                         exc_info=True,
                     )
-                    self._send_message_direct(message)
+                    self._send_message(message)
 
                 logger.info("[EMAIL] Email sent successfully to %s: %s", mask_email(to_email), subject)
                 return True, None

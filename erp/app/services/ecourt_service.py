@@ -773,7 +773,15 @@ class ECourtService:
 
         lines = self.repo.list_all_lines()
         if not lines:
-            raise ValueError("No import found. Import a receipt PDF first.")
+            return {
+                "scope": "all",
+                "import_id": None,
+                "file_name": "",
+                "total_receipts": 0,
+                "group_count": 0,
+                "groups": [],
+                "message": "No receipts yet. Use Import PDF or Manual Entry.",
+            }
 
         latest = self.repo.latest_batch()
         groups, total = self._build_import_tree_groups(lines)
@@ -902,10 +910,127 @@ class ECourtService:
             "message": f"Unsold {len(unique_receipts)} receipt(s). Sale rolled back.",
         }
 
+    def _create_manual_receipt_lines(self, form: dict, receipt_numbers: list[str], *, created_by: str) -> None:
+        """Insert receipt lines for Manual Entry when PDF import was skipped."""
+        normalized = sorted(
+            {(value or "").strip().upper() for value in receipt_numbers if (value or "").strip()}
+        )
+        if not normalized:
+            raise ValueError("Receipt number is required for manual entry.")
+
+        stationery = (
+            form.get("ManualStationeryNumber")
+            or form.get("StationeryNumber")
+            or form.get("StationeryNo")
+            or ""
+        ).strip()
+        if not stationery:
+            raise ValueError("Stationery number is required for manual entry.")
+        if len(stationery) > 20:
+            raise ValueError("Stationery number must be at most 20 characters.")
+
+        buy_amount = self._decimal(
+            form.get("ReceiptBuyAmount")
+            or form.get("ManualAmount")
+            or form.get("BuyAmount")
+            or form.get("Amount")
+        )
+        if buy_amount < self.MIN_IMPORT_AMOUNT:
+            raise ValueError("Receipt amount must be at least 1 for manual entry.")
+
+        receipt_date = (
+            self._date(form.get("ManualReceiptDate") or form.get("ReceiptDate")) or date.today()
+        )
+        remarks = (form.get("ManualRemarks") or form.get("Remarks") or "").strip() or None
+
+        total = (buy_amount * len(normalized)).quantize(Decimal("0.01"))
+        batch = self.repo.create_batch(
+            {
+                "FileName": "manual-entry",
+                "TotalAmount": total,
+                "RecordCount": len(normalized),
+                "ImportedBy": created_by,
+            }
+        )
+        self.repo.add_lines(
+            batch.ImportID,
+            [
+                {
+                    "ReceiptNo": receipt_no,
+                    "ReceiptDate": receipt_date,
+                    "Amount": buy_amount,
+                    "PaymentMode": None,
+                    "ReceiptStatus": "Manual Entry",
+                    "Remarks": remarks,
+                    "StationeryNumber": stationery,
+                }
+                for receipt_no in normalized
+            ],
+        )
+
+    def save_manual_import(self, form: dict, *, imported_by: str) -> dict:
+        """Import one receipt into the stationery tree (PDF Import–style, no sale)."""
+        receipt_no = (form.get("ReceiptNo") or "").strip().upper()
+        stationery = (form.get("StationeryNumber") or form.get("StationeryNo") or "").strip()
+        amount_raw = form.get("Amount") or form.get("amount") or ""
+        receipt_date = (form.get("ReceiptDate") or "").strip() or date.today().isoformat()
+        remarks = (form.get("Remarks") or "").strip()
+
+        if not receipt_no:
+            raise ValueError("Receipt number is required.")
+        if not stationery:
+            raise ValueError("Stationery Number is required.")
+        if len(stationery) > 20:
+            raise ValueError("Stationery number must be at most 20 characters.")
+
+        amount = self._decimal(amount_raw)
+        if amount < self.MIN_IMPORT_AMOUNT:
+            raise ValueError(f"Amount must be at least {self.MIN_IMPORT_AMOUNT}.")
+
+        existing_stn = self.repo.list_lines_for_stationery(stationery, exact=True)
+        if existing_stn:
+            raise ValueError(
+                f"Stationery number '{stationery}' already exists in main table "
+                f"({len(existing_stn)} receipt(s)). Choose another."
+            )
+
+        existing_receipts = self.repo.existing_receipt_numbers_in_db([receipt_no])
+        if existing_receipts:
+            raise ValueError(f"Receipt number '{receipt_no}' already imported.")
+
+        result = self.import_rows(
+            {
+                "file_name": "manual-entry",
+                "total_amount": str(amount),
+                "rows": [
+                    {
+                        "receipt_no": receipt_no,
+                        "receipt_date": receipt_date,
+                        "amount": str(amount),
+                        "payment_mode": "",
+                        "receipt_status": "Manual Entry",
+                        "remarks": remarks,
+                        "stationerynumber": stationery,
+                    }
+                ],
+            },
+            imported_by=imported_by,
+            allow_any_positive_amount=True,
+        )
+        result["stationerynumber"] = stationery
+        result["message"] = (
+            f"Import Successfully — {receipt_no} under stationery {stationery}."
+        )
+        return result
+
     def save_manual_sale(self, form: dict, *, created_by: str) -> dict:
+        """Legacy CLI helper: import if missing, then sell. Prefer save_manual_import for UI."""
         receipt_no = (form.get("ReceiptNo") or "").strip().upper()
         if not receipt_no:
             raise ValueError("Receipt number is required.")
+        existing = self.repo.get_lines_by_receipts([receipt_no])
+        if not existing:
+            self.save_manual_import(form, imported_by=created_by)
         return self.save_receipt_sales(form, [receipt_no], created_by=created_by)
 
     @staticmethod
@@ -989,6 +1114,18 @@ class ECourtService:
         lines = self.repo.get_lines_by_receipts(normalized_receipts)
         found = {line.ReceiptNo for line in lines}
         missing = [receipt for receipt in normalized_receipts if receipt not in found]
+        manual_create = str(form.get("ManualCreate") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        }
+        if missing and manual_create:
+            self._create_manual_receipt_lines(form, missing, created_by=created_by)
+            lines = self.repo.get_lines_by_receipts(normalized_receipts)
+            found = {line.ReceiptNo for line in lines}
+            missing = [receipt for receipt in normalized_receipts if receipt not in found]
         if missing:
             raise ValueError(f"Receipt(s) not found in import data: {', '.join(missing)}.")
 

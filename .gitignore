@@ -30,3 +30,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Deployment secrets / local overrides (never commit)
+deployment/deploy.env
+deployment/config/deploy.env
+deployment/logs/
+deployment/backups/

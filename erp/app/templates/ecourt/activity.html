@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260729-manual-import">
 {% endblock %}
 
 {% block content %}
@@ -79,7 +79,7 @@
             <th class="ecourt-sortable" data-sort-key="sale_status" role="button" tabindex="0">
               Sale Status <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-col-actions" style="width: 220px;"></th>
+            <th class="ecourt-col-actions" style="width: 340px;">Actions</th>
           </tr>
           <tr class="ecourt-filter-row">
             <th></th>
@@ -278,9 +278,9 @@
 
 <div class="modal fade" id="ecourtManualModal" tabindex="-1" aria-labelledby="ecourtManualModalTitle" aria-hidden="true" data-bs-backdrop="static">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
+    <div class="modal-content ecourt-manual-modal-content">
       <div class="modal-header py-2">
-        <h5 class="modal-title" id="ecourtManualModalTitle">Manual Sale Entry</h5>
+        <h5 class="modal-title" id="ecourtManualModalTitle">Manual Entry</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
@@ -291,31 +291,45 @@
             <input type="text" class="form-control form-control-sm" id="ecourtReceiptNo" name="ReceiptNo" placeholder="UKCT1758885D2654K" required>
           </div>
           <div class="col-md-3">
-            <label class="form-label" for="ecourtManualDate">Receipt Date</label>
-            <input type="date" class="form-control form-control-sm" id="ecourtManualDate" name="ReceiptDate">
+            <label class="form-label" for="ecourtManualDate">Receipt Date *</label>
+            <input type="date" class="form-control form-control-sm" id="ecourtManualDate" name="ReceiptDate" required>
           </div>
           <div class="col-md-3">
             <label class="form-label" for="ecourtManualAmount">Amount *</label>
-            <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="ecourtManualAmount" name="Amount" required>
-          </div>
-          <div class="col-md-3">
-            <label class="form-label" for="ecourtStationeryNo">Stationery Number</label>
-            <input type="text" class="form-control form-control-sm" id="ecourtStationeryNo" name="StationeryNumber" placeholder="2654">
-          </div>
-          <div class="col-md-5">
-            <label class="form-label" for="ecourtCustomerName">Customer Name</label>
-            <input type="text" class="form-control form-control-sm" id="ecourtCustomerName" name="CustomerName">
+            <input type="number" step="0.01" min="0.01" class="form-control form-control-sm text-end" id="ecourtManualAmount" name="Amount" required>
           </div>
           <div class="col-md-4">
-            <label class="form-label" for="ecourtMobileNumber">Mobile</label>
-            <input type="tel" class="form-control form-control-sm" id="ecourtMobileNumber" name="MobileNumber" maxlength="10">
+            <label class="form-label" for="ecourtStationeryNo">Stationery Number *</label>
+            <input type="text" class="form-control form-control-sm" id="ecourtStationeryNo" name="StationeryNumber" placeholder="IT0000766519" required>
           </div>
-          <div class="col-md-12">
+          <div class="col-md-8">
             <label class="form-label" for="ecourtManualRemarks">Remarks</label>
             <input type="text" class="form-control form-control-sm" id="ecourtManualRemarks" name="Remarks">
           </div>
           <div class="col-12">
-            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save Sold Receipt</button>
+            <div class="table-responsive ecourt-manual-preview-wrap">
+              <table class="table table-sm table-bordered mb-0 ecourt-manual-preview-table" id="ecourtManualPreviewGrid">
+                <thead>
+                  <tr>
+                    <th>Receipt No.</th>
+                    <th>Stationery</th>
+                    <th>Date</th>
+                    <th class="text-end">Amount</th>
+                    <th style="width: 70px;"></th>
+                  </tr>
+                </thead>
+                <tbody id="ecourtManualPreviewBody">
+                  <tr class="ecourt-manual-preview-empty">
+                    <td colspan="5" class="small text-muted">Fill details above. Save imports into the stationery grid (same as PDF Import).</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-12">
+            <button type="submit" class="btn btn-primary btn-sm" id="ecourtManualSaveBtn" data-hotkey="ctrl+s" data-hotkey-action="Save">
+              <i class="bi bi-save"></i> Save
+            </button>
           </div>
         </form>
       </div>
@@ -345,5 +359,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260721-cards"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260729-manual-import"></script>
 {% endblock %}

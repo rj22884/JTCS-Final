@@ -178,10 +178,11 @@ def unsell_receipts():
 @bp.route("/ecourt-activity/manual", methods=["POST"])
 @login_required
 def manual_sale():
+    """Manual Entry: import one receipt + stationery into the grid (same as PDF Import)."""
     try:
-        result = ECourtService().save_manual_sale(
+        result = ECourtService().save_manual_import(
             request.form,
-            created_by=session.get("user_name", "System"),
+            imported_by=session.get("user_name", "System"),
         )
         from app.extensions import db
 
@@ -192,6 +193,11 @@ def manual_sale():
 
         db.session.rollback()
         return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        from app.extensions import db
+
+        db.session.rollback()
+        return jsonify({"ok": False, "error": f"Unable to save manual entry: {exc}"}), 500
 
 
 @bp.route("/ecourt-activity/sales")

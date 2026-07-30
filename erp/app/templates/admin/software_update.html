@@ -1,0 +1,191 @@
+{% extends 'layouts/base.html' %}
+
+{% block content %}
+<div class="jtcs-card p-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <div>
+      <h1 class="h4 mb-1">Software Updates</h1>
+      <p class="text-muted small mb-0">Version history, change log, health and rollback commands</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="suRefreshHealth">
+        <i class="bi bi-heart-pulse"></i> Health Check
+      </button>
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('software_update.about_software') }}">
+        <i class="bi bi-info-circle"></i> About Software
+      </a>
+    </div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-4">
+      <div class="border rounded p-3 h-100 bg-light">
+        <div class="small text-muted">Current Version</div>
+        <div class="fs-4 fw-semibold">
+          {% if current %}Version {{ current.ApplicationVersion }}{% else %}Version {{ app_version }}{% endif %}
+        </div>
+        {% if current %}
+        <div class="small">Build {{ current.BuildNumber }} · {{ current.DeploymentStatus }}</div>
+        <div class="small text-muted">{{ current.DeployedAt }}</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="border rounded p-3 h-100">
+        <div class="small text-muted">Previous Version</div>
+        <div class="fs-5 fw-semibold">
+          {% if previous %}Version {{ previous.ApplicationVersion }}{% else %}—{% endif %}
+        </div>
+        {% if previous %}
+        <div class="small text-muted">{{ previous.DeployedAt }}</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="border rounded p-3 h-100" id="suHealthBox">
+        <div class="small text-muted">Health Status</div>
+        <div class="fw-semibold" id="suHealthText">Click Health Check</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Version</th>
+          <th>Build</th>
+          <th>Status</th>
+          <th>Branch / Commit</th>
+          <th>Developer</th>
+          <th>Deployed</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in history %}
+        <tr class="{% if row.IsCurrent %}table-success{% endif %}">
+          <td>
+            <strong>v{{ row.ApplicationVersion }}</strong>
+            {% if row.IsCurrent %}<span class="badge text-bg-success ms-1">Current</span>{% endif %}
+          </td>
+          <td>{{ row.BuildNumber }}</td>
+          <td>{{ row.DeploymentStatus }}</td>
+          <td class="small">
+            {{ row.GitBranch or '—' }}<br>
+            <code>{{ (row.GitCommitID or '')[:10] }}</code>
+          </td>
+          <td>{{ row.DeveloperName or '—' }}</td>
+          <td class="small">{{ row.DeployedAt }}</td>
+          <td class="small" style="max-width:240px;">{{ (row.ReleaseNotes or '')[:120] }}</td>
+          <td class="text-end text-nowrap">
+            <button type="button" class="btn btn-outline-secondary btn-sm su-view"
+              data-version="{{ row.ApplicationVersion }}"
+              data-notes="{{ row.ReleaseNotes or '' }}"
+              data-whats="{{ row.WhatsNew or '' }}"
+              data-bugs="{{ row.BugFixes or '' }}"
+              data-features="{{ row.NewFeatures or '' }}"
+              data-db="{{ row.DatabaseChanges or '' }}"
+              data-sec="{{ row.SecurityUpdates or '' }}"
+              data-perf="{{ row.PerformanceImprovements or '' }}"
+              data-backup="{{ row.BackupPath or '' }}">Change Log</button>
+            {% if not row.IsCurrent %}
+            <button type="button" class="btn btn-outline-warning btn-sm su-rollback"
+              data-version="{{ row.ApplicationVersion }}">Rollback</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-muted">No version history yet. Apply SQL 066 and deploy once.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal fade" id="suChangeLogModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Change Log — <span id="suClVersion"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body small">
+        <p id="suClNotes" class="mb-2"></p>
+        <h6>What's New</h6><pre id="suClWhats" class="bg-light p-2 rounded"></pre>
+        <h6>Bug Fixes</h6><pre id="suClBugs" class="bg-light p-2 rounded"></pre>
+        <h6>New Features</h6><pre id="suClFeatures" class="bg-light p-2 rounded"></pre>
+        <h6>Database Changes</h6><pre id="suClDb" class="bg-light p-2 rounded"></pre>
+        <h6>Security Updates</h6><pre id="suClSec" class="bg-light p-2 rounded"></pre>
+        <h6>Performance</h6><pre id="suClPerf" class="bg-light p-2 rounded"></pre>
+        <h6>Backup Path</h6><code id="suClBackup"></code>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const healthBtn = document.getElementById("suRefreshHealth");
+  const healthText = document.getElementById("suHealthText");
+  const modalEl = document.getElementById("suChangeLogModal");
+  const modal = modalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+
+  healthBtn?.addEventListener("click", async function () {
+    healthText.textContent = "Checking…";
+    try {
+      const res = await fetch("{{ url_for('software_update.api_version_health') }}", {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Health failed");
+      healthText.textContent = "OK — DB connected · v" + (data.app_version || "");
+    } catch (err) {
+      healthText.textContent = err.message || String(err);
+    }
+  });
+
+  document.querySelectorAll(".su-view").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.getElementById("suClVersion").textContent = "v" + (btn.dataset.version || "");
+      document.getElementById("suClNotes").textContent = btn.dataset.notes || "";
+      document.getElementById("suClWhats").textContent = btn.dataset.whats || "—";
+      document.getElementById("suClBugs").textContent = btn.dataset.bugs || "—";
+      document.getElementById("suClFeatures").textContent = btn.dataset.features || "—";
+      document.getElementById("suClDb").textContent = btn.dataset.db || "—";
+      document.getElementById("suClSec").textContent = btn.dataset.sec || "—";
+      document.getElementById("suClPerf").textContent = btn.dataset.perf || "—";
+      document.getElementById("suClBackup").textContent = btn.dataset.backup || "—";
+      modal?.show();
+    });
+  });
+
+  document.querySelectorAll(".su-rollback").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const version = btn.dataset.version || "";
+      if (!version) return;
+      if (!confirm("Prepare rollback instructions for Version " + version + "?")) return;
+      try {
+        const res = await fetch("{{ url_for('software_update.api_request_rollback') }}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRFToken": {{ csrf_token() | tojson }},
+          },
+          body: JSON.stringify({ version: version }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Failed");
+        alert((data.message || "") + "\n\n" + (data.command || ""));
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

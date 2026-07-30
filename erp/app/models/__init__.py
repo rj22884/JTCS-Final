@@ -19,6 +19,7 @@ from app.models.others import (
 from app.models.bank_cash import OthersBankCashTransaction, PurposeMaster, RdAccountMaster
 from app.models.credentials_master import CredentialsMaster
 from app.models.whats_new import WhatsNewEntry
+from app.models.app_version import AppVersionHistory
 from app.models.transactions import (
     CustomerMaster,
     JTCSDailyTransaction,
@@ -63,6 +64,7 @@ __all__ = [
     "PurposeMaster",
     "CredentialsMaster",
     "WhatsNewEntry",
+    "AppVersionHistory",
     "RdAccountMaster",
     "FollowupWorkflowStage",
     "FollowupEntryMaster",

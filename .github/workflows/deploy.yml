@@ -1,0 +1,72 @@
+# JTCS ERP — auto-deploy on push to main (see deployment/github-actions.yml)
+name: Deploy JTCS ERP
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Application version (e.g. 1.0.1)"
+        required: false
+        default: ""
+      release_notes:
+        description: "Release notes"
+        required: false
+        default: ""
+
+concurrency:
+  group: jtcs-erp-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Backup → Pull → Restart → Health
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS to known_hosts
+        env:
+          VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          HOST_ONLY="${VPS_SSH_HOST#*@}"
+          PORT="${VPS_SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${PORT}" -H "${HOST_ONLY}" >> ~/.ssh/known_hosts
+
+      - name: Remote deploy
+        env:
+          VPS_SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          VPS_SSH_PORT: ${{ secrets.VPS_SSH_PORT }}
+          VPS_APP_DIR: ${{ secrets.VPS_APP_DIR }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_NOTES: ${{ github.event.inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          PORT="${VPS_SSH_PORT:-22}"
+          APP_DIR="${VPS_APP_DIR:-/var/www/jtcs-erp}"
+          CMD="bash ${APP_DIR}/deployment/deploy.sh --developer 'github-actions'"
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            CMD="${CMD} --version '${INPUT_VERSION}'"
+          fi
+          if [[ -n "${INPUT_NOTES}" ]]; then
+            CMD="${CMD} --notes '${INPUT_NOTES}'"
+          fi
+          CMD="${CMD} --whats-new 'Deployed via GitHub Actions ${GITHUB_SHA}'"
+          ssh -p "${PORT}" -o BatchMode=yes "${VPS_SSH_HOST}" "${CMD}"
+
+      - name: Notify failure
+        if: failure()
+        run: |
+          echo "::error::JTCS ERP deployment failed. VPS deploy.sh should have auto-rolled back."

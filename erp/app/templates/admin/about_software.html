@@ -1,0 +1,60 @@
+{% extends 'layouts/base.html' %}
+
+{% block content %}
+<div class="jtcs-card p-4">
+  <h1 class="h4 mb-1">About Software</h1>
+  <p class="text-muted">{{ company_display_name }} · {{ app_name }}</p>
+
+  <div class="row g-3 mb-4">
+    <div class="col-md-6">
+      <div class="border rounded p-3">
+        <div class="text-muted small">Application Version</div>
+        <div class="fs-3 fw-semibold">
+          Version {% if current %}{{ current.ApplicationVersion }}{% else %}{{ app_version }}{% endif %}
+        </div>
+        {% if current %}
+        <div class="small mt-2">Build {{ current.BuildNumber }}</div>
+        <div class="small">Database Version {{ current.DatabaseVersion or current.ApplicationVersion }}</div>
+        <div class="small">Status: {{ current.DeploymentStatus }}</div>
+        <div class="small text-muted">Deployed: {{ current.DeployedAt }}</div>
+        <div class="small text-muted">By: {{ current.DeveloperName or '—' }}</div>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="border rounded p-3 h-100">
+        <div class="text-muted small mb-2">Release Notes</div>
+        <p class="mb-0">{{ (current.ReleaseNotes if current else '') or 'No release notes for the current build.' }}</p>
+      </div>
+    </div>
+  </div>
+
+  {% if current %}
+  <h2 class="h6">Change Log (current)</h2>
+  <div class="row g-2 small mb-4">
+    <div class="col-md-6"><strong>What's New</strong><pre class="bg-light p-2 rounded">{{ current.WhatsNew or '—' }}</pre></div>
+    <div class="col-md-6"><strong>Bug Fixes</strong><pre class="bg-light p-2 rounded">{{ current.BugFixes or '—' }}</pre></div>
+    <div class="col-md-6"><strong>New Features</strong><pre class="bg-light p-2 rounded">{{ current.NewFeatures or '—' }}</pre></div>
+    <div class="col-md-6"><strong>Database Changes</strong><pre class="bg-light p-2 rounded">{{ current.DatabaseChanges or '—' }}</pre></div>
+    <div class="col-md-6"><strong>Security Updates</strong><pre class="bg-light p-2 rounded">{{ current.SecurityUpdates or '—' }}</pre></div>
+    <div class="col-md-6"><strong>Performance</strong><pre class="bg-light p-2 rounded">{{ current.PerformanceImprovements or '—' }}</pre></div>
+  </div>
+  {% endif %}
+
+  <h2 class="h6">Recent deployments</h2>
+  <ul class="list-group list-group-flush">
+    {% for row in history %}
+    <li class="list-group-item d-flex justify-content-between align-items-start px-0">
+      <div>
+        <strong>v{{ row.ApplicationVersion }}</strong>
+        {% if row.IsCurrent %}<span class="badge text-bg-success">Current</span>{% endif %}
+        <div class="small text-muted">{{ row.ReleaseNotes or '' }}</div>
+      </div>
+      <span class="small text-muted">{{ row.DeployedAt }}</span>
+    </li>
+    {% else %}
+    <li class="list-group-item px-0 text-muted">No history yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}
