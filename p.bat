@@ -96,13 +96,19 @@ if errorlevel 1 (
 echo [OK] GitHub push complete.
 echo.
 
+for /f "delims=" %%B in ('git rev-parse --abbrev-ref HEAD') do set "LOCAL_BRANCH=%%B"
+if "%LOCAL_BRANCH%"=="" set "LOCAL_BRANCH=main"
+echo   Deploy branch: %LOCAL_BRANCH%
+echo.
+
 REM =========================
 echo [2/2] VPS DEPLOY...
 echo -------------------------
 echo Connecting %VPS_USER%@%VPS_HOST% ...
 echo.
 
-set "REMOTE_CMD=cd %VPS_PATH% && (bash scripts/vps_pull_update.sh || (git pull && echo Deploy script missing - only git pull done))"
+REM Keep remote command free of CMD metacharacters (|| && 2>) — those break Windows ssh lines.
+set "REMOTE_CMD=cd %VPS_PATH%; export BRANCH=%LOCAL_BRANCH%; bash scripts/vps_pull_update.sh"
 
 if "%VPS_SSH_KEY%"=="" (
     ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "%REMOTE_CMD%"

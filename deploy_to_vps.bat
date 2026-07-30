@@ -65,9 +65,9 @@ echo Step 2/2: Pull + update on VPS via SSH...
 echo.
 
 if "%VPS_SSH_KEY%"=="" (
-    ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && bash scripts/vps_pull_update.sh"
+    ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH%; bash scripts/vps_pull_update.sh"
 ) else (
-    ssh -p %VPS_PORT% -i "%VPS_SSH_KEY%" -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && bash scripts/vps_pull_update.sh"
+    ssh -p %VPS_PORT% -i "%VPS_SSH_KEY%" -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH%; bash scripts/vps_pull_update.sh"
 )
 
 if errorlevel 1 (

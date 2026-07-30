@@ -7,8 +7,8 @@ REM ============================================================
 REM  E:\Git\JTCS Final\PUSH_AND_DEPLOY.bat
 REM
 REM  1) Commit message poochhega
-REM  2) VPS password poochhega   (root@200.141.5.68)
-REM  3) GitHub push + VPS deploy (local VPS changes auto-fix)
+REM  2) VPS password poochhega
+REM  3) GitHub push + VPS deploy
 REM ============================================================
 
 cd /d "%~dp0"
@@ -36,6 +36,13 @@ where ssh >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] SSH nahi mila.
     echo Windows Settings - Optional features - OpenSSH Client install karo.
+    pause
+    exit /b 1
+)
+
+where powershell >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] PowerShell nahi mila.
     pause
     exit /b 1
 )
@@ -123,59 +130,87 @@ echo -------------------------
 echo Connecting !VPS_USER!@!VPS_HOST! ...
 echo.
 
-REM Self-contained remote script — no dependency on script already existing on VPS
-set "REMOTE_CMD=set -e; cd !VPS_PATH!; echo '== VPS deploy start =='; if [ -f erp/.env ]; then cp erp/.env /tmp/jtcs.env.bak; echo 'backed up erp/.env'; fi; git fetch origin; git checkout !LOCAL_BRANCH! 2>/dev/null || git checkout -B !LOCAL_BRANCH! origin/!LOCAL_BRANCH! 2>/dev/null || git checkout main; git reset --hard origin/!LOCAL_BRANCH! 2>/dev/null || git reset --hard origin/main; if [ -f /tmp/jtcs.env.bak ]; then cp /tmp/jtcs.env.bak erp/.env; echo 'restored erp/.env'; fi; if [ -f scripts/vps_pull_update.sh ]; then bash scripts/vps_pull_update.sh; else echo 'basic pull/reset done'; cd erp; python3 -m pip install -r requirements.txt -q 2>/dev/null || true; fi; ls erp/scripts/check_vps_mail.py 2>/dev/null || true; echo '== VPS deploy OK =='"
+REM Write remote bash to a temp file so CMD never re-parses || && 2>
+set "REMOTE_SH=%TEMP%\jtcs_vps_deploy_%RANDOM%.sh"
+(
+    echo set -e
+    echo cd !VPS_PATH!
+    echo echo '== VPS deploy start =='
+    echo export BRANCH='!LOCAL_BRANCH!'
+    echo if [ -f scripts/vps_pull_update.sh ]; then
+    echo   bash scripts/vps_pull_update.sh
+    echo else
+    echo   echo 'scripts/vps_pull_update.sh missing - basic reset'
+    echo   if [ -f erp/.env ]; then cp erp/.env /tmp/jtcs.env.bak; fi
+    echo   git fetch origin
+    echo   git checkout '!LOCAL_BRANCH!'
+    echo   git reset --hard origin/'!LOCAL_BRANCH!'
+    echo   if [ -f /tmp/jtcs.env.bak ]; then cp /tmp/jtcs.env.bak erp/.env; fi
+    echo fi
+    echo echo '== VPS deploy OK =='
+) > "!REMOTE_SH!"
 
-where plink >nul 2>&1
-if not errorlevel 1 (
-    echo Using plink...
-    echo y | plink -batch -ssh -P !VPS_PORT! -pw "!VPS_PASSWORD!" !VPS_USER!@!VPS_HOST! "!REMOTE_CMD!"
-    if errorlevel 1 goto deploy_fail
-    goto deploy_ok
-)
-
-set "PW_FILE=%TEMP%\jtcs_vps_pw_%RANDOM%.txt"
-set "ASKPASS_FILE=%TEMP%\jtcs_ssh_askpass_%RANDOM%.cmd"
-powershell -NoProfile -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "Set-Content -Path $env:PW_FILE -Value $env:VPS_PASSWORD -Encoding ASCII -NoNewline;" ^
-  "$ask = @('@echo off','type \"' + $env:PW_FILE + '\"');" ^
-  "Set-Content -Path $env:ASKPASS_FILE -Value $ask -Encoding ASCII"
-
-if not exist "!ASKPASS_FILE!" (
-    echo [ERROR] Password helper file nahi bani.
+if not exist "!REMOTE_SH!" (
+    echo [ERROR] Temp deploy script nahi bani.
     pause
     exit /b 1
 )
 
-set "SSH_ASKPASS=!ASKPASS_FILE!"
-set "SSH_ASKPASS_REQUIRE=force"
-set "DISPLAY=jtcs:0"
+set "SSH_EXIT=1"
 
-ssh -p !VPS_PORT! -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no !VPS_USER!@!VPS_HOST! "!REMOTE_CMD!"
+where plink >nul 2>&1
+if not errorlevel 1 (
+    echo Using plink...
+    plink -batch -ssh -P !VPS_PORT! -pw "!VPS_PASSWORD!" !VPS_USER!@!VPS_HOST! "bash -s" < "!REMOTE_SH!"
+    set "SSH_EXIT=!errorlevel!"
+    goto after_ssh
+)
+
+REM OpenSSH + password via SSH_ASKPASS; remote script via stdin (avoids CMD || && bugs)
+set "PW_FILE=%TEMP%\jtcs_vps_pw_%RANDOM%.txt"
+set "ASKPASS_FILE=%TEMP%\jtcs_ssh_askpass_%RANDOM%.cmd"
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "Set-Content -LiteralPath $env:PW_FILE -Value $env:VPS_PASSWORD -Encoding ascii -NoNewline;" ^
+  "$lines = @('@echo off', ('type \"{0}\"' -f $env:PW_FILE));" ^
+  "Set-Content -LiteralPath $env:ASKPASS_FILE -Value $lines -Encoding ascii;" ^
+  "$env:SSH_ASKPASS = $env:ASKPASS_FILE;" ^
+  "$env:SSH_ASKPASS_REQUIRE = 'force';" ^
+  "$env:DISPLAY = 'jtcs:0';" ^
+  "$target = $env:VPS_USER + '@' + $env:VPS_HOST;" ^
+  "Get-Content -LiteralPath $env:REMOTE_SH -Raw | & ssh -p $env:VPS_PORT -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no $target bash -s;" ^
+  "exit $LASTEXITCODE"
+
 set "SSH_EXIT=!errorlevel!"
 
+:after_ssh
+del /q "!REMOTE_SH!" >nul 2>&1
 del /q "!ASKPASS_FILE!" >nul 2>&1
 del /q "!PW_FILE!" >nul 2>&1
 set "SSH_ASKPASS="
 set "SSH_ASKPASS_REQUIRE="
 set "DISPLAY="
 set "VPS_PASSWORD="
+set "PW_FILE="
+set "ASKPASS_FILE="
+set "REMOTE_SH="
 
 if not "!SSH_EXIT!"=="0" goto deploy_fail
 goto deploy_ok
 
 :deploy_fail
+del /q "!REMOTE_SH!" >nul 2>&1
 del /q "!ASKPASS_FILE!" >nul 2>&1
 del /q "!PW_FILE!" >nul 2>&1
 echo.
 echo [ERROR] VPS deploy fail.
 echo.
-echo VPS pe yeh 4 lines chalao ^(ek baar^):
-echo   cd ~/JTCS-final
-echo   cp erp/.env /tmp/jtcs.env.bak
-echo   git fetch origin ^&^& git reset --hard origin/main
-echo   cp /tmp/jtcs.env.bak erp/.env
+echo Manual check:
+echo   ssh !VPS_USER!@!VPS_HOST!
+echo   cd !VPS_PATH!
+echo   export BRANCH=!LOCAL_BRANCH!
+echo   bash scripts/vps_pull_update.sh
 echo.
 pause
 exit /b 1
@@ -187,6 +222,7 @@ echo ========================================================
 echo   HO GAYA - Push + Deploy DONE
 echo ========================================================
 echo   Commit : !COMMIT_MSG!
+echo   Branch : !LOCAL_BRANCH!
 echo   VPS    : http://!VPS_HOST!:8000/login
 echo.
 echo   Mail test on VPS:
