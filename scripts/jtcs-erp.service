@@ -1,0 +1,16 @@
+[Unit]
+Description=JTCS ERP (Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/JTCS-final/erp
+Environment=PYTHONUNBUFFERED=1
+# Prefer venv python if present
+ExecStart=/bin/bash -lc 'if [ -x .venv/bin/python ]; then exec .venv/bin/python run.py; else exec python3 run.py; fi'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

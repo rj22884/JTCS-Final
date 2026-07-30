@@ -134,7 +134,7 @@ class EmailService:
         for attempt in range(1, SMTP_SEND_MAX_ATTEMPTS + 1):
             try:
                 try:
-                    # Prefer direct SMTP (SSL/587 fallbacks for VPS). Flask-Mail is backup only.
+                    # Prefer direct SMTP (SSL/587 fallbacks for VPS). Flask-Mail is backup.
                     self._send_message_direct(message)
                 except Exception as direct_exc:
                     logger.warning(

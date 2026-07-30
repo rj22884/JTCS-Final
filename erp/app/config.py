@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-# Always load erp/.env from the package root (not process CWD) so VPS/systemd starts work.
+# Always load erp/.env from the package root (not process CWD) so VPS starts work.
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -78,7 +78,7 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
 
-    # SMTP - GoDaddy Titan (see .env.example); all secrets from environment only
+    # SMTP — GoDaddy Titan / Workspace (see .env.example); secrets from environment only
     MAIL_SERVER = os.getenv("MAIL_SERVER", "smtpout.secureserver.net")
     MAIL_PORT = int(os.getenv("MAIL_PORT", "465"))
     MAIL_USE_TLS = _env_bool("MAIL_USE_TLS", "False")
@@ -100,7 +100,7 @@ class Config:
     MAX_CONTENT_LENGTH = 2 * 1024 * 1024
     UPLOAD_FOLDER = BASE_DIR / "app" / "static" / "uploads"
 
-    # Admin Role - database / full backups (SQL Server must be able to write DB path)
+    # Admin Role — database / full backups (SQL Server must be able to write DB path)
     BACKUP_ROOT = Path(os.getenv("BACKUP_ROOT", str(BASE_DIR / "backups")))
     BACKUP_DATABASE_DIR = BACKUP_ROOT / "database"
     BACKUP_FULL_DIR = BACKUP_ROOT / "full"
@@ -111,4 +111,3 @@ class Config:
     DB_TRUSTED_CONNECTION = os.getenv("DB_TRUSTED_CONNECTION", "1") == "1"
     DB_USER = os.getenv("DB_USER", "")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
-

@@ -1,4 +1,11 @@
-"""Quick check that mail env is VPS-ready (no secrets printed)."""
+#!/usr/bin/env python3
+"""Quick check that mail env is VPS-ready (no secrets printed).
+
+On Ubuntu/Debian VPS use:
+  python3 scripts/check_vps_mail.py
+or, if a venv exists:
+  .venv/bin/python scripts/check_vps_mail.py
+"""
 
 from __future__ import annotations
 

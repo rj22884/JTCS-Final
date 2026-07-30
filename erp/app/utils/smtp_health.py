@@ -131,7 +131,7 @@ def _connection_attempts(
                 }
             )
 
-    # Alternate port when primary is SSL 465 (common VPS outbound block / Titan).
+    # Alternate port when primary is SSL 465 (common VPS outbound block).
     if use_ssl and port != SMTP_FALLBACK_PORT:
         attempts.append(
             {
@@ -177,7 +177,12 @@ def open_smtp_connection(
 
     for attempt in _connection_attempts(use_ssl=use_ssl, use_tls=use_tls, port=port):
         try:
-            logger.debug("SMTP connect attempt %s -> %s:%s", attempt["label"], server, attempt["port"])
+            logger.debug(
+                "SMTP connect attempt %s -> %s:%s",
+                attempt["label"],
+                server,
+                attempt["port"],
+            )
             client = _build_smtp_client(
                 server=server,
                 port=attempt["port"],
@@ -188,7 +193,12 @@ def open_smtp_connection(
             )
             if username and password:
                 client.login(username, password)
-            logger.info("SMTP connected via %s (%s:%s)", attempt["label"], server, attempt["port"])
+            logger.info(
+                "SMTP connected via %s (%s:%s)",
+                attempt["label"],
+                server,
+                attempt["port"],
+            )
             try:
                 yield client
             finally:
@@ -304,7 +314,8 @@ def log_mail_config(config: dict[str, Any], logger_obj: logging.Logger | None = 
     """Log loaded mail settings with secrets masked."""
     log = logger_obj or logger
     log.info(
-        "[MAIL CONFIG] server=%s port=%s ssl=%s tls=%s user=%s sender=%s password_set=%s app_base_url=%s",
+        "[MAIL CONFIG] server=%s port=%s ssl=%s tls=%s user=%s sender=%s "
+        "password_set=%s app_base_url=%s",
         config.get("MAIL_SERVER"),
         config.get("MAIL_PORT"),
         config.get("MAIL_USE_SSL"),
