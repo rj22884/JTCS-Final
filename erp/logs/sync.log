@@ -1,0 +1,26 @@
+2026-07-13 21:17:03,456 | Customer=- | PAN=- | Period=- | Status=BrowserType.launch: Executable doesn't exist at C:\Users\USER\AppData\Local\ms-playwright\chromium_headless_shell-1228\chrome-headless-shell-win64\chrome-headless-shell.exe
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     playwright install                                     ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝ | Time=2026-07-13 21:17:03
+2026-07-13 21:23:52,454 | Customer=- | PAN=- | Period=- | Status=Unable to open KDK ITR Client Master. | Time=2026-07-13 21:23:52
+2026-07-13 21:27:40,927 | Customer=- | PAN=- | Period=- | Status=Login Failed | Time=2026-07-13 21:27:40
+2026-07-13 21:34:08,449 | Customer=- | PAN=- | Period=- | Status=Login Failed | Time=2026-07-13 21:34:08
+2026-07-14 16:20:48,600 | Customer=PRAMOD KUMAR PATHAK | PAN=AKNPP1747Q | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 16:20:48
+2026-07-14 16:23:26,737 | Customer=BHUMIKA GARKHAL | PAN=BRZPG1019E | Period=2026-27 | Status=Timeout | Time=2026-07-14 16:23:26
+2026-07-14 16:23:26,890 | Customer=- | PAN=- | Period=- | Status=Page.wait_for_timeout: Target page, context or browser has been closed | Time=2026-07-14 16:23:26
+2026-07-14 16:32:55,718 | Customer=PRAMOD KUMAR PATHAK | PAN=AKNPP1747Q | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 16:32:55
+2026-07-14 16:42:03,358 | Customer=PRAMOD KUMAR PATHAK | PAN=AKNPP1747Q | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 16:42:03
+2026-07-14 16:44:14,760 | Customer=- | PAN=- | Period=- | Status=Page.wait_for_timeout: Target page, context or browser has been closed | Time=2026-07-14 16:44:14
+2026-07-14 16:44:14,791 | Customer=BHUMIKA GARKHAL | PAN=BRZPG1019E | Period=2026-27 | Status=Timeout | Time=2026-07-14 16:44:14
+2026-07-14 16:46:48,487 | Customer=PRAMOD KUMAR PATHAK | PAN=AKNPP1747Q | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 16:46:48
+2026-07-14 16:56:05,065 | Customer=PRAMOD KUMAR PATHAK | PAN=AKNPP1747Q | Period=2026-27 | Status=AY Not Found | Time=2026-07-14 16:56:05
+2026-07-14 16:58:53,102 | Customer=RISHABH MEENA | PAN=CFNPM8846L | Period=2026-27 | Status=AY Not Found | Time=2026-07-14 16:58:53
+2026-07-14 16:58:56,274 | Customer=- | PAN=- | Period=- | Status=Page.wait_for_timeout: Target page, context or browser has been closed | Time=2026-07-14 16:58:56
+2026-07-14 17:00:05,213 | Customer=RISHABH MEENA | PAN=CFNPM8846L | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 17:00:05
+2026-07-14 21:01:25,996 | Customer=RAJNEESH JOSHI | PAN=AEBPJ1665H | Period=2026-27 | Status=Customer Not Found | Time=2026-07-14 21:01:25
+2026-07-15 15:44:42,657 | Customer=RAJNEESH JOSHI | PAN=AEBPJ1665H | Period=2026-27 | Status=Customer Not Found | Time=2026-07-15 15:44:42
