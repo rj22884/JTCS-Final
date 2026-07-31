@@ -9,6 +9,7 @@ from flask_mail import Message
 from app.extensions import mail
 from app.utils.smtp_health import (
     TRANSIENT_SMTP_ERRORS,
+    mail_domain_hostname,
     mask_email,
     open_smtp_connection,
     smtp_settings_from_config,
@@ -20,6 +21,9 @@ SMTP_NOT_CONFIGURED = "SMTP mail is not configured."
 SMTP_USER_MESSAGE = "Unable to send email. Please contact Administrator."
 SMTP_SEND_MAX_ATTEMPTS = 2
 SMTP_RETRY_DELAY_SECONDS = 1.0
+# Registration verification: more retries + VPS-first SMTP (587/insecure before slow 465).
+REGISTRATION_SMTP_MAX_ATTEMPTS = 3
+REGISTRATION_SMTP_TIMEOUT = 15.0
 
 
 class EmailService:
@@ -43,7 +47,9 @@ class EmailService:
                 logo_path = profile.LogoPath
         except Exception:
             logger.exception("[EMAIL] Failed to load company profile for email context")
-        base = current_app.config.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
+        from app.utils.url_helpers import public_base_url
+
+        base = public_base_url()
         logo_url = f"{base}/static/{logo_path.lstrip('/')}" if logo_path else None
         return {
             "app_name": current_app.config["APP_NAME"],
@@ -67,15 +73,35 @@ class EmailService:
         logger.info("[EMAIL] Sending via Flask-Mail")
         mail.send(message)
 
-    def _send_message_direct(self, message: Message) -> None:
+    def _send_message_direct(
+        self,
+        message: Message,
+        *,
+        prefer_vps: bool = False,
+        timeout: float | None = None,
+    ) -> None:
         """Primary SMTP send with VPS-friendly SSL/port fallbacks."""
         from flask_mail import sanitize_address, sanitize_addresses
 
         settings = smtp_settings_from_config(current_app.config)
-        logger.info("[EMAIL] Sending via direct SMTP to %s", settings["server"])
+        if timeout is not None:
+            settings["timeout"] = float(timeout)
+        settings["prefer_vps"] = prefer_vps
+        settings["local_hostname"] = mail_domain_hostname(settings.get("username"))
+        # Titan/GoDaddy requires envelope MAIL FROM = authenticated mailbox.
+        envelope_from = sanitize_address(
+            settings.get("username") or message.sender
+        )
+        logger.info(
+            "[EMAIL] Sending via direct SMTP to %s prefer_vps=%s ehlo=%s from=%s",
+            settings["server"],
+            prefer_vps,
+            settings.get("local_hostname"),
+            mask_email(str(envelope_from)),
+        )
         with open_smtp_connection(**settings) as smtp:
             smtp.sendmail(
-                sanitize_address(message.sender),
+                envelope_from,
                 list(sanitize_addresses(message.recipients)),
                 message.as_bytes(),
             )
@@ -99,12 +125,18 @@ class EmailService:
         subject: str,
         html_body: str,
         text_body: str | None = None,
+        *,
+        prefer_vps: bool = False,
+        max_attempts: int | None = None,
+        timeout: float | None = None,
+        reply_to: str | None = None,
     ) -> tuple[bool, str | None]:
         logger.info(
-            "[EMAIL] Preparing email to=%s subject=%s sender=%s",
+            "[EMAIL] Preparing email to=%s subject=%s sender=%s prefer_vps=%s",
             mask_email(to_email),
             subject,
             current_app.config.get("MAIL_DEFAULT_SENDER"),
+            prefer_vps,
         )
 
         if not current_app.config.get("MAIL_PASSWORD"):
@@ -120,30 +152,48 @@ class EmailService:
             )
             return False, SMTP_NOT_CONFIGURED
 
+        sender = current_app.config["MAIL_DEFAULT_SENDER"]
+        username = (current_app.config.get("MAIL_USERNAME") or "").strip()
+        # Keep display name, but force mailbox address = authenticated user (GoDaddy).
+        if username and "<" not in str(sender) and str(sender).lower() != username.lower():
+            sender = f"Joshi Tax Consultancy & Services <{username}>"
+        elif username and "<" in str(sender) and username.lower() not in str(sender).lower():
+            sender = f"Joshi Tax Consultancy & Services <{username}>"
+
         message = Message(
             subject=subject,
             recipients=[to_email],
             body=text_body or "Please view this message in an HTML-capable email client.",
             html=html_body,
-            sender=current_app.config["MAIL_DEFAULT_SENDER"],
+            sender=sender,
         )
+        if reply_to:
+            message.reply_to = reply_to
 
         self._log_smtp_config()
         last_error: Exception | None = None
+        attempts = max_attempts or SMTP_SEND_MAX_ATTEMPTS
 
-        for attempt in range(1, SMTP_SEND_MAX_ATTEMPTS + 1):
+        for attempt in range(1, attempts + 1):
             try:
                 try:
                     # Prefer direct SMTP (SSL/587 fallbacks for VPS). Flask-Mail is backup.
-                    self._send_message_direct(message)
+                    self._send_message_direct(
+                        message,
+                        prefer_vps=prefer_vps,
+                        timeout=timeout,
+                    )
                 except Exception as direct_exc:
                     logger.warning(
                         "[EMAIL] Direct SMTP send failed (attempt %s/%s): %s",
                         attempt,
-                        SMTP_SEND_MAX_ATTEMPTS,
+                        attempts,
                         direct_exc,
                         exc_info=True,
                     )
+                    if prefer_vps:
+                        # Skip Flask-Mail on registration path — it lacks VPS SSL/port fallbacks.
+                        raise
                     self._send_message(message)
 
                 logger.info("[EMAIL] Email sent successfully to %s: %s", mask_email(to_email), subject)
@@ -162,23 +212,29 @@ class EmailService:
                     "[EMAIL] SMTP error sending to %s (attempt %s/%s): %s",
                     mask_email(to_email),
                     attempt,
-                    SMTP_SEND_MAX_ATTEMPTS,
+                    attempts,
                     exc,
                     exc_info=True,
                 )
-                if not self._should_retry(exc, attempt):
+                if attempt >= attempts or isinstance(exc, smtplib.SMTPAuthenticationError):
                     return False, SMTP_USER_MESSAGE
+                if not self._should_retry(exc, attempt):
+                    # Still retry once more for registration (prefer_vps) on generic SMTP errors.
+                    if not prefer_vps:
+                        return False, SMTP_USER_MESSAGE
             except TRANSIENT_SMTP_ERRORS as exc:
                 last_error = exc
                 logger.error(
                     "[EMAIL] SMTP connection error sending to %s (attempt %s/%s): %s",
                     mask_email(to_email),
                     attempt,
-                    SMTP_SEND_MAX_ATTEMPTS,
+                    attempts,
                     exc,
                     exc_info=True,
                 )
-                if not self._should_retry(exc, attempt):
+                if attempt >= attempts:
+                    return False, SMTP_USER_MESSAGE
+                if not prefer_vps and not self._should_retry(exc, attempt):
                     return False, SMTP_USER_MESSAGE
             except Exception as exc:
                 logger.error(
@@ -194,7 +250,7 @@ class EmailService:
         if last_error is not None:
             logger.error(
                 "[EMAIL] SMTP send failed after %s attempts to %s: %s",
-                SMTP_SEND_MAX_ATTEMPTS,
+                attempts,
                 mask_email(to_email),
                 last_error,
                 exc_info=True,
@@ -202,8 +258,14 @@ class EmailService:
         return False, SMTP_USER_MESSAGE
 
     def send_verification_email(self, to_email: str, full_name: str, verify_url: str) -> tuple[bool, str | None]:
+        """Registration verification mail — VPS-hardened SMTP path only."""
         logger.info("[EMAIL] Preparing verification email for %s", mask_email(to_email))
         logger.info("[EMAIL] Verification URL: %s", verify_url)
+        if "localhost" in (verify_url or "").lower() or "127.0.0.1" in (verify_url or ""):
+            logger.error(
+                "[EMAIL] Verification URL still points at localhost — set APP_BASE_URL on VPS "
+                "to the public site URL (e.g. http://app.jtcsexpert.com)."
+            )
         ctx = self._context()
         logger.info("[EMAIL] Rendering template email/verify_email.html")
         html = render_template(
@@ -218,7 +280,17 @@ class EmailService:
             f"Verify your email:\n{verify_url}\n\n"
             f"Support: {ctx['support_email']}"
         )
-        return self.send_html(to_email, "Verify your Email", html, text)
+        support = (ctx.get("support_email") or current_app.config.get("MAIL_USERNAME") or "").strip()
+        return self.send_html(
+            to_email,
+            "Verify your Email",
+            html,
+            text,
+            prefer_vps=True,
+            max_attempts=REGISTRATION_SMTP_MAX_ATTEMPTS,
+            timeout=REGISTRATION_SMTP_TIMEOUT,
+            reply_to=support or None,
+        )
 
     def send_password_reset_email(self, to_email: str, full_name: str, reset_url: str) -> tuple[bool, str | None]:
         ctx = self._context()

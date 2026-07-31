@@ -58,6 +58,17 @@ def _insecure_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+def mail_domain_hostname(username: str | None) -> str | None:
+    """FQDN for SMTP EHLO/HELO — VPS hostnames like 'ubuntu' are often rejected by Titan."""
+    value = (username or "").strip()
+    if "@" not in value:
+        return None
+    domain = value.split("@", 1)[1].strip().lower()
+    if not domain or "." not in domain:
+        return None
+    return domain
+
+
 def _build_smtp_client(
     *,
     server: str,
@@ -66,14 +77,21 @@ def _build_smtp_client(
     use_tls: bool,
     timeout: float,
     ssl_context: ssl.SSLContext | None,
+    local_hostname: str | None = None,
 ) -> smtplib.SMTP | smtplib.SMTP_SSL:
+    host_kw: dict[str, Any] = {}
+    if local_hostname:
+        host_kw["local_hostname"] = local_hostname
+
     if use_ssl:
         if ssl_context is None:
             # Flask-Mail style — works on Windows with GoDaddy.
-            return smtplib.SMTP_SSL(server, port, timeout=timeout)
-        return smtplib.SMTP_SSL(server, port, timeout=timeout, context=ssl_context)
+            return smtplib.SMTP_SSL(server, port, timeout=timeout, **host_kw)
+        return smtplib.SMTP_SSL(
+            server, port, timeout=timeout, context=ssl_context, **host_kw
+        )
 
-    client = smtplib.SMTP(server, port, timeout=timeout)
+    client = smtplib.SMTP(server, port, timeout=timeout, **host_kw)
     if use_tls:
         if ssl_context is None:
             client.starttls()
@@ -87,6 +105,7 @@ def _connection_attempts(
     use_ssl: bool,
     use_tls: bool,
     port: int,
+    prefer_vps: bool = False,
 ) -> list[dict[str, Any]]:
     """Ordered connect strategies: primary config, then VPS-friendly fallbacks."""
     attempts: list[dict[str, Any]] = []
@@ -152,6 +171,22 @@ def _connection_attempts(
             }
         )
 
+    if prefer_vps:
+        # Linux VPS: verified SSL / blocked 465 often hangs — try insecure + 587 first.
+        def _rank(item: dict[str, Any]) -> tuple[int, str]:
+            label = str(item.get("label") or "")
+            if "insecure" in label and "587" in label:
+                return (0, label)
+            if "insecure" in label and "SSL" in label:
+                return (1, label)
+            if "587" in label:
+                return (2, label)
+            if "insecure" in label:
+                return (3, label)
+            return (4, label)
+
+        attempts.sort(key=_rank)
+
     return attempts
 
 
@@ -165,6 +200,8 @@ def open_smtp_connection(
     use_ssl: bool = True,
     use_tls: bool = False,
     timeout: float = 30,
+    local_hostname: str | None = None,
+    prefer_vps: bool = False,
 ) -> Iterator[smtplib.SMTP | smtplib.SMTP_SSL]:
     """
     Open an authenticated SMTP connection with VPS-friendly fallbacks.
@@ -174,8 +211,11 @@ def open_smtp_connection(
     """
     client: smtplib.SMTP | smtplib.SMTP_SSL | None = None
     last_error: Exception | None = None
+    ehlo_host = local_hostname or mail_domain_hostname(username)
 
-    for attempt in _connection_attempts(use_ssl=use_ssl, use_tls=use_tls, port=port):
+    for attempt in _connection_attempts(
+        use_ssl=use_ssl, use_tls=use_tls, port=port, prefer_vps=prefer_vps
+    ):
         try:
             logger.debug(
                 "SMTP connect attempt %s -> %s:%s",
@@ -190,6 +230,7 @@ def open_smtp_connection(
                 use_tls=attempt["use_tls"],
                 timeout=timeout,
                 ssl_context=attempt["ssl_context"],
+                local_hostname=ehlo_host,
             )
             if username and password:
                 client.login(username, password)

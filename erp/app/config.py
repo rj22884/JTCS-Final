@@ -88,17 +88,18 @@ class Config:
     MAIL_PORT = int(os.getenv("MAIL_PORT", "465"))
     MAIL_USE_TLS = _env_bool("MAIL_USE_TLS", "False")
     MAIL_USE_SSL = _env_bool("MAIL_USE_SSL", "True")
-    MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
+    # Strip quotes — VPS .env often has MAIL_PASSWORD="secret" which breaks SMTP auth.
+    MAIL_USERNAME = (os.getenv("MAIL_USERNAME") or "").strip().strip('"').strip("'")
+    MAIL_PASSWORD = (os.getenv("MAIL_PASSWORD") or "").strip().strip('"').strip("'")
     MAIL_DEFAULT_SENDER = (os.getenv("MAIL_DEFAULT_SENDER") or "").strip().strip('"').strip("'")
-    SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL") or os.getenv("MAIL_USERNAME", "")
+    SUPPORT_EMAIL = (os.getenv("SUPPORT_EMAIL") or MAIL_USERNAME or "").strip().strip('"').strip("'")
     MAIL_DEBUG = _env_bool("MAIL_DEBUG", "False")
     MAIL_TIMEOUT = int(os.getenv("MAIL_TIMEOUT", "30"))
     SMTP_HEALTH_CHECK_ON_STARTUP = _env_bool("SMTP_HEALTH_CHECK_ON_STARTUP", "True")
     AUTH_TOKEN_EXPIRY_MINUTES = int(os.getenv("AUTH_TOKEN_EXPIRY_MINUTES", "30"))
     AUTH_TOKEN_EXPIRY_SECONDS = AUTH_TOKEN_EXPIRY_MINUTES * 60
 
-    APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+    APP_BASE_URL = (os.getenv("APP_BASE_URL") or "http://localhost:8000").strip().strip('"').strip("'")
     SERVER_NAME = os.getenv("SERVER_NAME") or None
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "http")
 

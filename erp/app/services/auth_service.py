@@ -353,6 +353,11 @@ class AuthService:
         logger.info("[REGISTER] User registered user_id=%s email=%s", user_id, email)
         logger.info("[REGISTER] Verification token created")
         logger.info("[REGISTER] Verification URL generated: %s", verify_url)
+        if "localhost" in verify_url.lower() or "127.0.0.1" in verify_url:
+            logger.error(
+                "[REGISTER] APP_BASE_URL looks local on a public host — "
+                "set APP_BASE_URL in erp/.env to the VPS public URL before users can verify."
+            )
         try:
             sent, mail_error = self.email.send_verification_email(email, full_name, verify_url)
         except Exception as exc:
@@ -364,7 +369,9 @@ class AuthService:
             )
             return AuthResult.ok(
                 {"email": email, "user_id": user_id},
-                f"Registration saved, but {SMTP_USER_MESSAGE} Use Resend on the verification page.",
+                f"Registration saved, but {SMTP_USER_MESSAGE} "
+                "Open the verification page and click Resend. "
+                "On VPS also confirm MAIL_PASSWORD and APP_BASE_URL in erp/.env.",
             ).as_tuple()
 
         if not sent:
@@ -373,16 +380,22 @@ class AuthService:
                 email,
                 mail_error or SMTP_USER_MESSAGE,
             )
+            detail = mail_error or SMTP_USER_MESSAGE
+            if detail == SMTP_NOT_CONFIGURED:
+                detail = (
+                    "SMTP mail is not configured on the server. "
+                    "Set MAIL_USERNAME / MAIL_PASSWORD / APP_BASE_URL in erp/.env, then Resend."
+                )
             return AuthResult.ok(
                 {"email": email, "user_id": user_id},
-                mail_error or f"Registration saved, but {SMTP_USER_MESSAGE}",
+                f"Registration saved, but {detail}",
             ).as_tuple()
 
         logger.info("[REGISTER] Verification email sent successfully to %s", email)
 
         return AuthResult.ok(
             {"email": email, "user_id": user_id},
-            "Registration submitted. Check your email for the verification link.",
+            "Registration submitted. Check your email (and Spam/Junk) for the verification link.",
         ).as_tuple()
 
     def verify_email_link(self, token: str, client_ip: str | None = None) -> tuple[bool, str | None, dict]:
