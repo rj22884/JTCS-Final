@@ -211,6 +211,7 @@ class MenuService:
         if error:
             return None, error
         menu = self.repository.create(self._normalize_payload(data))
+        self._hide_empty_shcil_parent()
         return menu, None
 
     def update_menu(
@@ -230,6 +231,7 @@ class MenuService:
             return None, error
 
         updated = self.repository.update(menu, self._normalize_payload(data))
+        self._hide_empty_shcil_parent()
         return updated, None
 
     def delete_menu(self, menu_id: int) -> tuple[bool, str | None]:
@@ -243,6 +245,7 @@ class MenuService:
                 return False, error
 
         self.repository.delete(menu)
+        self._hide_empty_shcil_parent()
         return True, None
 
     def set_active(self, menu_id: int, is_active: bool) -> tuple[MenuMaster | None, str | None]:
@@ -312,7 +315,27 @@ class MenuService:
 
         if not self.repository.reorder_many(orders):
             return False, "One or more menus not found."
+        self._hide_empty_shcil_parent()
         return True, None
+
+    def _hide_empty_shcil_parent(self) -> None:
+        """Keep top-level SHCIL hidden unless it still has active children.
+
+        Stamp / eCourt belong under Activities. An empty SHCIL root must not
+        appear as a main-menu item after Menu Admin parent/reorder saves.
+        """
+        shcil = self.repository.find_top_level_by_name("SHCIL")
+        if shcil is None:
+            return
+        active_children = [
+            child for child in self.repository.get_children(shcil.MenuID) if child.IsActive
+        ]
+        if active_children:
+            if not shcil.IsActive:
+                self.repository.activate(shcil)
+            return
+        if shcil.IsActive:
+            self.repository.deactivate(shcil)
 
     def parent_options(self, exclude_id: int | None = None) -> list[MenuMaster]:
         return self.repository.get_parent_options(exclude_id=exclude_id)

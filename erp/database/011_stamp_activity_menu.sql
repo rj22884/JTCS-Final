@@ -1,28 +1,69 @@
 /*
-    Replace legacy SHCIL stamp menus with new Stamp Activity module + reports
+    Stamp Activity menu + stamp report shortcuts under Reports.
+
+    Stamp Activity is a child of Activities (not top-level SHCIL).
+    Safe for fresh DBs; already-applied DBs are tracked in SchemaMigration
+    and get the Activities hierarchy from 067_stamp_activity_under_activities.sql.
 */
 SET NOCOUNT ON;
 
 BEGIN TRANSACTION;
 
+/* Remove legacy SHCIL stamp children only — do not delete Stamp Activity if already under Activities */
 DELETE FROM dbo.MenuMaster
-WHERE ParentMenuID IN (SELECT MenuID FROM dbo.MenuMaster WHERE MenuName = N'SHCIL')
-   OR MenuName IN (N'Stamp Purchase', N'e-Stamp Issue', N'SHCIL Ledger', N'Stamp Activity');
+WHERE MenuName IN (N'Stamp Purchase', N'e-Stamp Issue', N'SHCIL Ledger')
+   OR (
+        MenuName = N'Stamp Activity'
+        AND ParentMenuID IN (
+            SELECT MenuID FROM dbo.MenuMaster WHERE MenuName = N'SHCIL'
+        )
+   );
 
-DECLARE @ShcilID INT = (SELECT TOP 1 MenuID FROM dbo.MenuMaster WHERE MenuName = N'SHCIL' AND ParentMenuID IS NULL);
+DECLARE @ActivitiesID INT = (
+    SELECT TOP 1 MenuID
+    FROM dbo.MenuMaster
+    WHERE MenuName = N'Activities' AND ParentMenuID IS NULL
+    ORDER BY MenuID
+);
 
-IF @ShcilID IS NULL
+IF @ActivitiesID IS NULL
 BEGIN
     INSERT INTO dbo.MenuMaster (MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-    VALUES (N'SHCIL', N'bi-bank2', NULL, 22, N'SHCIL / e-stamping', 1, NULL);
-    SET @ShcilID = SCOPE_IDENTITY();
+    VALUES (N'Activities', N'bi-lightning-charge', NULL, 2, N'Daily operational activities', 1, NULL);
+    SET @ActivitiesID = SCOPE_IDENTITY();
 END;
 
-IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'Stamp Activity' AND ParentMenuID = @ShcilID)
+IF NOT EXISTS (
+    SELECT 1
+    FROM dbo.MenuMaster
+    WHERE MenuName = N'Stamp Activity'
+      AND ParentMenuID = @ActivitiesID
+)
 BEGIN
-    INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-    VALUES (@ShcilID, N'Stamp Activity', N'bi-file-earmark-ruled', N'/shcil/stamp-activity', 1,
-            N'Uttarakhand e-Stamp manual entry and OCR', 1, NULL);
+    /* Re-parent existing row if present elsewhere; else insert */
+    IF EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'Stamp Activity' OR MenuURL = N'/shcil/stamp-activity')
+    BEGIN
+        UPDATE dbo.MenuMaster
+        SET ParentMenuID = @ActivitiesID,
+            MenuName = N'Stamp Activity',
+            MenuURL = N'/shcil/stamp-activity',
+            MenuIcon = N'bi-file-earmark-ruled',
+            Description = N'Uttarakhand e-Stamp manual entry and OCR',
+            IsActive = 1,
+            DisplayOrder = 0
+        WHERE MenuID = (
+            SELECT TOP 1 MenuID
+            FROM dbo.MenuMaster
+            WHERE MenuURL = N'/shcil/stamp-activity' OR MenuName = N'Stamp Activity'
+            ORDER BY CASE WHEN MenuURL = N'/shcil/stamp-activity' THEN 0 ELSE 1 END, MenuID
+        );
+    END
+    ELSE
+    BEGIN
+        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
+        VALUES (@ActivitiesID, N'Stamp Activity', N'bi-file-earmark-ruled', N'/shcil/stamp-activity', 0,
+                N'Uttarakhand e-Stamp manual entry and OCR', 1, NULL);
+    END
 END
 ELSE
 BEGIN
@@ -31,8 +72,20 @@ BEGIN
         MenuIcon = N'bi-file-earmark-ruled',
         Description = N'Uttarakhand e-Stamp manual entry and OCR',
         IsActive = 1
-    WHERE MenuName = N'Stamp Activity' AND ParentMenuID = @ShcilID;
+    WHERE MenuName = N'Stamp Activity' AND ParentMenuID = @ActivitiesID;
 END;
+
+/* Hide empty top-level SHCIL if it has no active children */
+UPDATE dbo.MenuMaster
+SET IsActive = 0
+WHERE MenuName = N'SHCIL'
+  AND ParentMenuID IS NULL
+  AND NOT EXISTS (
+        SELECT 1
+        FROM dbo.MenuMaster c
+        WHERE c.ParentMenuID = MenuMaster.MenuID
+          AND c.IsActive = 1
+  );
 
 DECLARE @ReportsID INT = (SELECT TOP 1 MenuID FROM dbo.MenuMaster WHERE MenuName = N'Reports' AND ParentMenuID IS NULL);
 

@@ -2,8 +2,8 @@
     JTCS ERP - Seed module menus (idempotent)
     Run after 001_create_menu_master.sql
 
-    Adds Transactions hub, business modules (GST, DSC, SHCIL, TDS, Accounting,
-    Payroll, Employee, Stock), report shortcuts, and admin links.
+    Adds Transactions hub, business modules (GST, DSC, Activities/Stamp, TDS,
+    Accounting, Payroll, Employee, Stock), report shortcuts, and admin links.
     Safe to re-run: inserts only when ParentMenuID + MenuName is missing.
 */
 
@@ -56,9 +56,9 @@ VALUES
     (N'DSC',         N'DSC Renewal',        N'bi-arrow-repeat',     N'/transactions/new?work_type=DSC&sub_work_type=Renewal', 2, N'DSC renewal fee', NULL),
     (N'DSC',         N'DSC Status',         N'bi-search',           N'/dsc/status',                                    3,  N'DSC status tracker (coming soon)', NULL),
 
-    /* SHCIL */
-    (NULL,           N'SHCIL',              N'bi-bank2',            NULL,                                              22, N'SHCIL / e-stamping', NULL),
-    (N'SHCIL',       N'Stamp Activity',     N'bi-file-earmark-ruled', N'/shcil/stamp-activity',                        1, N'SHCIL stamp activity (manual / OCR)', NULL),
+    /* Activities — Stamp Activity lives here (not under a top-level SHCIL menu) */
+    (NULL,           N'Activities',         N'bi-lightning-charge', NULL,                                              2,  N'Daily operational activities', NULL),
+    (N'Activities',  N'Stamp Activity',     N'bi-file-earmark-ruled', N'/shcil/stamp-activity',                        0, N'Uttarakhand e-Stamp manual entry and OCR', NULL),
 
     /* TDS */
     (NULL,           N'TDS',                N'bi-percent',          NULL,                                              23, N'Tax Deducted at Source', NULL),
@@ -137,7 +137,7 @@ BEGIN
         FROM dbo.MenuMaster
         WHERE MenuName = @ParentName
           AND (
-              (@ParentName IN (N'Reports', N'Administration', N'ITR') AND ParentMenuID IS NULL)
+              (@ParentName IN (N'Reports', N'Administration', N'ITR', N'Activities') AND ParentMenuID IS NULL)
               OR ParentMenuID IS NOT NULL
           );
 
