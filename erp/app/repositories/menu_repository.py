@@ -1,26 +1,54 @@
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.menu_master import MenuMaster
+
+_MENU_STYLE_SCHEMA_READY = False
 
 
 class MenuRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
 
+    def ensure_style_columns(self) -> None:
+        """Add FontColor / FontName / BackgroundColor if missing (VPS-safe, idempotent)."""
+        global _MENU_STYLE_SCHEMA_READY
+        if _MENU_STYLE_SCHEMA_READY:
+            return
+        for stmt in (
+            """
+            IF COL_LENGTH(N'dbo.MenuMaster', N'FontColor') IS NULL
+                ALTER TABLE dbo.MenuMaster ADD FontColor NVARCHAR(20) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.MenuMaster', N'FontName') IS NULL
+                ALTER TABLE dbo.MenuMaster ADD FontName NVARCHAR(100) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.MenuMaster', N'BackgroundColor') IS NULL
+                ALTER TABLE dbo.MenuMaster ADD BackgroundColor NVARCHAR(20) NULL;
+            """,
+        ):
+            self.session.execute(text(stmt))
+            self.session.commit()
+        _MENU_STYLE_SCHEMA_READY = True
+
     def get_all(self, include_inactive: bool = False) -> list[MenuMaster]:
+        self.ensure_style_columns()
         stmt = select(MenuMaster).order_by(MenuMaster.DisplayOrder, MenuMaster.MenuID)
         if not include_inactive:
             stmt = stmt.where(MenuMaster.IsActive == True)  # noqa: E712
         return list(self.session.scalars(stmt).all())
 
     def get_by_id(self, menu_id: int) -> MenuMaster | None:
+        self.ensure_style_columns()
         return self.session.get(MenuMaster, menu_id)
 
     def get_active_for_role(self, role: str | None) -> list[MenuMaster]:
         from app.utils.roles import has_admin_role, roles_intersect
 
+        self.ensure_style_columns()
         stmt = (
             select(MenuMaster)
             .where(MenuMaster.IsActive == True)  # noqa: E712
@@ -32,6 +60,7 @@ class MenuRepository:
         return [menu for menu in menus if roles_intersect(role, menu.RoleName)]
 
     def get_parent_options(self, exclude_id: int | None = None) -> list[MenuMaster]:
+        self.ensure_style_columns()
         stmt = (
             select(MenuMaster)
             .where(MenuMaster.IsActive == True)  # noqa: E712
@@ -43,10 +72,12 @@ class MenuRepository:
         return [menu for menu in menus if menu.MenuID != exclude_id]
 
     def find_by_url(self, menu_url: str) -> MenuMaster | None:
+        self.ensure_style_columns()
         stmt = select(MenuMaster).where(MenuMaster.MenuURL == menu_url)
         return self.session.scalars(stmt).first()
 
     def find_top_level_by_name(self, menu_name: str) -> MenuMaster | None:
+        self.ensure_style_columns()
         stmt = (
             select(MenuMaster)
             .where(MenuMaster.MenuName == menu_name, MenuMaster.ParentMenuID.is_(None))
@@ -55,27 +86,32 @@ class MenuRepository:
         return self.session.scalars(stmt).first()
 
     def create(self, data: dict) -> MenuMaster:
+        self.ensure_style_columns()
         menu = MenuMaster(**data)
         self.session.add(menu)
         self.session.commit()
         return menu
 
     def update(self, menu: MenuMaster, data: dict) -> MenuMaster:
+        self.ensure_style_columns()
         for key, value in data.items():
             setattr(menu, key, value)
         self.session.commit()
         return menu
 
     def delete(self, menu: MenuMaster) -> None:
+        self.ensure_style_columns()
         self.session.delete(menu)
         self.session.commit()
 
     def deactivate(self, menu: MenuMaster) -> MenuMaster:
+        self.ensure_style_columns()
         menu.IsActive = False
         self.session.commit()
         return menu
 
     def activate(self, menu: MenuMaster) -> MenuMaster:
+        self.ensure_style_columns()
         menu.IsActive = True
         self.session.commit()
         return menu
@@ -93,6 +129,7 @@ class MenuRepository:
         orders: list[tuple[int, int, int | None | object]],
     ) -> bool:
         """Apply display order; optional third value updates ParentMenuID when not omitted."""
+        self.ensure_style_columns()
         omit_parent = object()
         pending: list[tuple[MenuMaster, int, int | None | object]] = []
         for item in orders:
@@ -111,10 +148,12 @@ class MenuRepository:
         return True
 
     def has_children(self, menu_id: int) -> bool:
+        self.ensure_style_columns()
         stmt = select(MenuMaster.MenuID).where(MenuMaster.ParentMenuID == menu_id).limit(1)
         return self.session.scalars(stmt).first() is not None
 
     def get_children(self, menu_id: int) -> list[MenuMaster]:
+        self.ensure_style_columns()
         stmt = (
             select(MenuMaster)
             .where(MenuMaster.ParentMenuID == menu_id)
