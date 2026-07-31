@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from app.models.menu_master import MenuMaster
@@ -17,6 +18,20 @@ class MenuNode:
     role_name: str | None
     children: list[MenuNode] = field(default_factory=list)
     has_children: bool = False
+    font_color: str | None = None
+    font_name: str | None = None
+    background_color: str | None = None
+
+    @property
+    def inline_style(self) -> str:
+        parts: list[str] = []
+        if self.font_color:
+            parts.append(f"color: {self.font_color}")
+        if self.font_name:
+            parts.append(f"font-family: {self.font_name}")
+        if self.background_color:
+            parts.append(f"background-color: {self.background_color}")
+        return "; ".join(parts)
 
 
 @dataclass
@@ -28,6 +43,21 @@ class MenuAdminNode:
 class MenuService:
     ADMIN_ROLES = {"Administrator", "Admin"}
     INVALID_MENU_URLS = frozenset({"none", "/none", "/others/income/none", "/others/expense/none"})
+    HEX_COLOR_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+    ALLOWED_FONT_NAMES = frozenset(
+        {
+            "Source Sans 3, Segoe UI, Arial, sans-serif",
+            "Segoe UI, Tahoma, sans-serif",
+            "Arial, Helvetica, sans-serif",
+            "Tahoma, Geneva, sans-serif",
+            "Verdana, Geneva, sans-serif",
+            "Georgia, Times New Roman, serif",
+            "Times New Roman, Times, serif",
+            "Courier New, Courier, monospace",
+            "Trebuchet MS, Helvetica, sans-serif",
+            "Comic Sans MS, Comic Sans, cursive",
+        }
+    )
 
     def __init__(self, repository: MenuRepository | None = None):
         self.repository = repository or MenuRepository()
@@ -71,6 +101,9 @@ class MenuService:
                     role_name=menu.RoleName,
                     children=child_nodes,
                     has_children=bool(child_nodes),
+                    font_color=getattr(menu, "FontColor", None) or None,
+                    font_name=getattr(menu, "FontName", None) or None,
+                    background_color=getattr(menu, "BackgroundColor", None) or None,
                 )
             )
         return nodes
@@ -223,7 +256,8 @@ class MenuService:
         if menu is None:
             return None, "Menu not found."
 
-        if data.get("ParentMenuID") == menu_id:
+        raw_parent = data.get("ParentMenuID")
+        if raw_parent not in (None, "", "None") and str(raw_parent).strip() == str(menu_id):
             return None, "A menu cannot be its own parent."
 
         error = self._validate(data, current_id=menu_id)
@@ -340,10 +374,27 @@ class MenuService:
     def parent_options(self, exclude_id: int | None = None) -> list[MenuMaster]:
         return self.repository.get_parent_options(exclude_id=exclude_id)
 
+    def _descendant_ids(self, root_id: int, menus: list[MenuMaster] | None = None) -> set[int]:
+        """All MenuIDs under root_id (not including root_id)."""
+        rows = menus if menus is not None else self.repository.get_all(include_inactive=True)
+        by_parent: dict[int | None, list[int]] = {}
+        for menu in rows:
+            by_parent.setdefault(menu.ParentMenuID, []).append(menu.MenuID)
+        found: set[int] = set()
+        stack = list(by_parent.get(root_id, []))
+        while stack:
+            menu_id = stack.pop()
+            if menu_id in found:
+                continue
+            found.add(menu_id)
+            stack.extend(by_parent.get(menu_id, []))
+        return found
+
     def flat_menu_options(self, exclude_id: int | None = None) -> list[tuple[int, str]]:
         menus = self.repository.get_all(include_inactive=True)
         if exclude_id is not None:
-            menus = [menu for menu in menus if menu.MenuID != exclude_id]
+            blocked = {exclude_id} | self._descendant_ids(exclude_id, menus)
+            menus = [menu for menu in menus if menu.MenuID not in blocked]
         tree = self.build_tree(menus, None)
         options: list[tuple[int, str]] = []
 
@@ -355,6 +406,24 @@ class MenuService:
 
         walk(tree)
         return options
+
+    def _normalize_color(self, value: object) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if not text.startswith("#") and re.fullmatch(r"[0-9a-fA-F]{3}|[0-9a-fA-F]{6}", text):
+            text = f"#{text}"
+        if not self.HEX_COLOR_RE.fullmatch(text):
+            return None
+        return text.upper() if len(text) == 7 else text.lower()
+
+    def _normalize_font_name(self, value: object) -> str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text in self.ALLOWED_FONT_NAMES:
+            return text
+        return None
 
     def _normalize_payload(self, data: dict) -> dict:
         parent_id = data.get("ParentMenuID")
@@ -386,6 +455,9 @@ class MenuService:
             "IsActive": str(data.get("IsActive", "1")) in {"1", "true", "True", "on"},
             "Description": (data.get("Description") or "").strip() or None,
             "RoleName": role_name,
+            "FontColor": self._normalize_color(data.get("FontColor")),
+            "FontName": self._normalize_font_name(data.get("FontName")),
+            "BackgroundColor": self._normalize_color(data.get("BackgroundColor")),
         }
 
     def _validate(self, data: dict, current_id: int | None = None) -> str | None:
@@ -400,5 +472,16 @@ class MenuService:
                 return "Selected parent menu does not exist."
             if current_id and int(parent_id) == current_id:
                 return "A menu cannot be its own parent."
+            if current_id and self._is_under_ancestor(current_id, int(parent_id)):
+                return "Cannot set a child (or nested) menu as parent — that would break the sub-menu tree."
+
+        font_raw = str(data.get("FontName") or "").strip()
+        if font_raw and font_raw not in self.ALLOWED_FONT_NAMES:
+            return "Selected font name is not allowed."
+
+        for field_name, label in (("FontColor", "Font colour"), ("BackgroundColor", "Background colour")):
+            raw = str(data.get(field_name) or "").strip()
+            if raw and self._normalize_color(raw) is None:
+                return f"{label} must be a valid hex colour (e.g. #243B7B)."
 
         return None

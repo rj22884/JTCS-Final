@@ -81,8 +81,10 @@
   <div class="fw-semibold mb-1">Order / move kya hai?</div>
   <div class="small text-muted mb-0">
     <strong>Display Order / SR No</strong> same parent ke items ka sequence hai (chhota number pehle).
-    Grip se drag karke move karo, ya SR No box edit karo — phir usi row ka <strong>Save</strong> dabao
-    (Save tabhi dikhega jab drag / SR change hua ho). Parent ke saath sub-menus bhi move hote hain.
+    Grip se drag karke reorder / nest karo — drag ke baad order <strong>auto-save</strong> hota hai
+    (page dubara kholne par bhi wahi parent / sub-menu hierarchy rehti hai).
+    SR No box manually edit karo to usi row ka <strong>Save</strong> dabao.
+    Parent ke saath uske sub-menus bhi move hote hain.
   </div>
 </div>
 
@@ -175,5 +177,5 @@
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/menu_admin.js') }}?v=20260722srnsave"></script>
+<script src="{{ url_for('static', filename='js/menu_admin.js') }}?v=20260731autosave"></script>
 {% endblock %}

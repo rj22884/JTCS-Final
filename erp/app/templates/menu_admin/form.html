@@ -61,6 +61,51 @@
     </div>
 
     <div class="col-md-4">
+      <label class="form-label" for="FontName">Font Name</label>
+      {% set selected_font = menu.FontName if menu and menu.FontName else '' %}
+      <select class="form-select" id="FontName" name="FontName">
+        <option value="" {% if not selected_font %}selected{% endif %}>Default (theme font)</option>
+        <option value="Source Sans 3, Segoe UI, Arial, sans-serif" {% if selected_font == 'Source Sans 3, Segoe UI, Arial, sans-serif' %}selected{% endif %}>Source Sans 3</option>
+        <option value="Segoe UI, Tahoma, sans-serif" {% if selected_font == 'Segoe UI, Tahoma, sans-serif' %}selected{% endif %}>Segoe UI</option>
+        <option value="Arial, Helvetica, sans-serif" {% if selected_font == 'Arial, Helvetica, sans-serif' %}selected{% endif %}>Arial</option>
+        <option value="Tahoma, Geneva, sans-serif" {% if selected_font == 'Tahoma, Geneva, sans-serif' %}selected{% endif %}>Tahoma</option>
+        <option value="Verdana, Geneva, sans-serif" {% if selected_font == 'Verdana, Geneva, sans-serif' %}selected{% endif %}>Verdana</option>
+        <option value="Georgia, Times New Roman, serif" {% if selected_font == 'Georgia, Times New Roman, serif' %}selected{% endif %}>Georgia</option>
+        <option value="Times New Roman, Times, serif" {% if selected_font == 'Times New Roman, Times, serif' %}selected{% endif %}>Times New Roman</option>
+        <option value="Courier New, Courier, monospace" {% if selected_font == 'Courier New, Courier, monospace' %}selected{% endif %}>Courier New</option>
+        <option value="Trebuchet MS, Helvetica, sans-serif" {% if selected_font == 'Trebuchet MS, Helvetica, sans-serif' %}selected{% endif %}>Trebuchet MS</option>
+      </select>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label" for="FontColor">Font Colour</label>
+      {% set font_color = menu.FontColor if menu and menu.FontColor else '' %}
+      <div class="input-group">
+        <input type="color" class="form-control form-control-color" id="FontColorPicker"
+               value="{{ font_color if font_color else '#ffffff' }}" title="Pick font colour"
+               aria-label="Pick font colour">
+        <input type="text" class="form-control" id="FontColor" name="FontColor"
+               value="{{ font_color }}" placeholder="Default" maxlength="20" autocomplete="off">
+        <button type="button" class="btn btn-outline-secondary" data-clear-color="FontColor" title="Clear colour">Clear</button>
+      </div>
+      <div class="form-text">Leave blank for default menu text colour.</div>
+    </div>
+
+    <div class="col-md-4">
+      <label class="form-label" for="BackgroundColor">Background Colour</label>
+      {% set bg_color = menu.BackgroundColor if menu and menu.BackgroundColor else '' %}
+      <div class="input-group">
+        <input type="color" class="form-control form-control-color" id="BackgroundColorPicker"
+               value="{{ bg_color if bg_color else '#243b7b' }}" title="Pick background colour"
+               aria-label="Pick background colour">
+        <input type="text" class="form-control" id="BackgroundColor" name="BackgroundColor"
+               value="{{ bg_color }}" placeholder="Default" maxlength="20" autocomplete="off">
+        <button type="button" class="btn btn-outline-secondary" data-clear-color="BackgroundColor" title="Clear colour">Clear</button>
+      </div>
+      <div class="form-text">Leave blank for default menu bar colour.</div>
+    </div>
+
+    <div class="col-md-4">
       <label class="form-label">Role Name</label>
       {% set selected_roles = [] %}
       {% if menu and menu.RoleName %}
@@ -144,6 +189,33 @@
       });
       syncRoleChecks();
     }
+
+    function wireColorPair(pickerId, textId) {
+      var picker = document.getElementById(pickerId);
+      var text = document.getElementById(textId);
+      if (!picker || !text) return;
+      picker.addEventListener("input", function () {
+        text.value = String(picker.value || "").toUpperCase();
+      });
+      text.addEventListener("input", function () {
+        var raw = String(text.value || "").trim();
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) {
+          picker.value = raw.length === 4
+            ? "#" + raw[1] + raw[1] + raw[2] + raw[2] + raw[3] + raw[3]
+            : raw;
+        }
+      });
+    }
+    wireColorPair("FontColorPicker", "FontColor");
+    wireColorPair("BackgroundColorPicker", "BackgroundColor");
+
+    document.querySelectorAll("[data-clear-color]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var fieldId = btn.getAttribute("data-clear-color");
+        var text = fieldId ? document.getElementById(fieldId) : null;
+        if (text) text.value = "";
+      });
+    });
   });
 </script>
 {% endblock %}

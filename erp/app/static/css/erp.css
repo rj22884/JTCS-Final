@@ -781,7 +781,158 @@ body.jtcs-body .navbar {
   }
 }
 
+/* —— Global centered message dialog (replaces native alert) —— */
+body.jtcs-dialog-open {
+  overflow: hidden;
+}
+
+.jtcs-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s ease, visibility 0.18s ease;
+}
+
+.jtcs-dialog-overlay.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.jtcs-dialog-overlay[hidden] {
+  display: none !important;
+}
+
+.jtcs-dialog {
+  position: relative;
+  width: min(420px, 100%);
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.28), 0 4px 12px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  transform: translateY(10px) scale(0.98);
+  transition: transform 0.18s ease;
+}
+
+.jtcs-dialog-overlay.is-open .jtcs-dialog {
+  transform: translateY(0) scale(1);
+}
+
+.jtcs-dialog-accent {
+  height: 4px;
+  background: var(--jtcs-primary);
+}
+
+.jtcs-dialog[data-type="error"] .jtcs-dialog-accent,
+.jtcs-dialog[data-type="danger"] .jtcs-dialog-accent {
+  background: linear-gradient(90deg, #c82333, #dc3545);
+}
+
+.jtcs-dialog[data-type="warning"] .jtcs-dialog-accent,
+.jtcs-dialog[data-type="invalid"] .jtcs-dialog-accent {
+  background: linear-gradient(90deg, #e0a800, #ffc107);
+}
+
+.jtcs-dialog[data-type="success"] .jtcs-dialog-accent {
+  background: linear-gradient(90deg, #1e7e34, #28a745);
+}
+
+.jtcs-dialog[data-type="info"] .jtcs-dialog-accent {
+  background: linear-gradient(90deg, var(--jtcs-primary), var(--jtcs-secondary));
+}
+
+.jtcs-dialog-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1rem 1.15rem 0.35rem;
+}
+
+.jtcs-dialog-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+.jtcs-dialog[data-type="error"] .jtcs-dialog-icon,
+.jtcs-dialog[data-type="danger"] .jtcs-dialog-icon {
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.12);
+}
+
+.jtcs-dialog[data-type="warning"] .jtcs-dialog-icon,
+.jtcs-dialog[data-type="invalid"] .jtcs-dialog-icon {
+  color: #b8860b;
+  background: rgba(255, 193, 7, 0.22);
+}
+
+.jtcs-dialog[data-type="success"] .jtcs-dialog-icon {
+  color: #28a745;
+  background: rgba(40, 167, 69, 0.12);
+}
+
+.jtcs-dialog[data-type="info"] .jtcs-dialog-icon {
+  color: var(--jtcs-primary);
+  background: rgba(36, 59, 123, 0.1);
+}
+
+.jtcs-dialog-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--jtcs-text);
+  letter-spacing: 0.01em;
+}
+
+.jtcs-dialog-body {
+  padding: 0.35rem 1.15rem 0.85rem;
+}
+
+.jtcs-dialog-message {
+  margin: 0;
+  color: #334155;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.jtcs-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.65rem 1.15rem 1rem;
+}
+
+.jtcs-dialog-ok {
+  min-width: 5.5rem;
+  font-weight: 600;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.jtcs-dialog[data-type="warning"] .jtcs-dialog-ok,
+.jtcs-dialog[data-type="invalid"] .jtcs-dialog-ok {
+  color: #1a1f36;
+}
+
 @media print {
+  .jtcs-dialog-overlay {
+    display: none !important;
+  }
+
   .jtcs-app-header,
   .jtcs-menu-bar,
   .jtcs-ribbon-toolbar,

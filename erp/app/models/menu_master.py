@@ -23,6 +23,9 @@ class MenuMaster(db.Model):
     )
     Description: Mapped[str | None] = mapped_column(Unicode(300), nullable=True)
     RoleName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
+    FontColor: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    FontName: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    BackgroundColor: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
 
     parent: Mapped["MenuMaster | None"] = relationship(
         "MenuMaster",
@@ -49,6 +52,9 @@ class MenuMaster(db.Model):
             "CreatedDate": self.CreatedDate.isoformat() if self.CreatedDate else None,
             "Description": self.Description,
             "RoleName": self.RoleName,
+            "FontColor": self.FontColor,
+            "FontName": self.FontName,
+            "BackgroundColor": self.BackgroundColor,
         }
 
     def __repr__(self) -> str:

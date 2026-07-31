@@ -9,6 +9,7 @@
 
   /** @type {WeakMap<Element, Element[]>} */
   const dirtyGroupsByUnit = new WeakMap();
+  let persistChain = Promise.resolve();
 
   function setStatus(message, kind) {
     if (!statusEl) {
@@ -123,34 +124,43 @@
 
   function persistOrders(orders) {
     setStatus("Saving order…", "secondary");
-    return fetch(cfg.reorderUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-CSRFToken": cfg.csrf || "",
-        "X-Requested-With": "XMLHttpRequest",
-      },
-      body: JSON.stringify({ orders: orders }),
-    })
-      .then(function (response) {
-        return response.json().then(function (data) {
-          return { ok: response.ok && data && data.ok, data: data };
-        });
+    const run = function () {
+      return fetch(cfg.reorderUrl, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": cfg.csrf || "",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+        body: JSON.stringify({ orders: orders }),
       })
-      .then(function (result) {
-        if (!result.ok) {
-          const error = (result.data && result.data.error) || "Could not update order.";
-          setStatus(error, "danger");
+        .then(function (response) {
+          return response.json().then(function (data) {
+            return { ok: response.ok && data && data.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok) {
+            const error = (result.data && result.data.error) || "Could not update order.";
+            setStatus(error, "danger");
+            return false;
+          }
+          setStatus((result.data && result.data.message) || "Display order updated.", "success");
+          return true;
+        })
+        .catch(function () {
+          setStatus("Could not update order. Please refresh and try again.", "danger");
           return false;
-        }
-        setStatus((result.data && result.data.message) || "Display order updated.", "success");
-        return true;
-      })
-      .catch(function () {
-        setStatus("Could not update order. Please refresh and try again.", "danger");
-        return false;
-      });
+        });
+    };
+    // Serialize saves so rapid drags cannot overwrite each other out of order.
+    const job = persistChain.then(run, run);
+    persistChain = job.then(
+      function () {},
+      function () {}
+    );
+    return job;
   }
 
   function persistGroups(groups) {
@@ -259,13 +269,23 @@
           return;
         }
 
-        // Preview new sequence in inputs; wait for row Save (no auto-save).
+        // Keep DOM order + parent in sync, then persist immediately so reload keeps hierarchy.
         refreshOrderInputs(fromGroup);
         if (!sameGroup) {
           refreshOrderInputs(toGroup);
         }
-        markUnitDirty(item, sameGroup ? [toGroup] : [fromGroup, toGroup]);
-        setStatus("Order changed — click Save on this row to apply.", "warning");
+        const groupsToSave = sameGroup ? [toGroup] : [fromGroup, toGroup];
+        markUnitDirty(item, groupsToSave);
+        const btn = saveBtn(item);
+        if (btn) btn.disabled = true;
+        persistGroups(groupsToSave).then(function (ok) {
+          if (ok) {
+            clearUnitDirty(item);
+            setStatus("Menu order / sub-menu parent saved.", "success");
+          } else if (btn) {
+            btn.disabled = false;
+          }
+        });
       },
     });
   });

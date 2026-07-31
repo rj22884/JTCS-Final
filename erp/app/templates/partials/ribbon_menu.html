@@ -2,9 +2,10 @@
 <ul class="jtcs-flyout{% if nested %} jtcs-flyout-sub{% endif %}">
   {% for item in items %}
     {% set is_active = item.url | menu_active if item.url else false %}
+    {% set item_style = item.inline_style if item.inline_style else '' %}
     {% if item.has_children %}
       <li class="jtcs-menu-item has-children">
-        <a href="#" class="jtcs-menu-link jtcs-flyout-toggle{% if is_active %} active{% endif %}" role="button" aria-expanded="false">
+        <a href="#" class="jtcs-menu-link jtcs-flyout-toggle{% if is_active %} active{% endif %}" role="button" aria-expanded="false"{% if item_style %} style="{{ item_style }}"{% endif %}>
           <i class="bi {{ item.icon }}"></i>
           <span>{{ item.name }}</span>
           <i class="bi bi-chevron-right"></i>
@@ -20,7 +21,7 @@
         {% set href = '#' %}
       {% endif %}
       <li class="jtcs-menu-item">
-        <a href="{{ href }}" class="jtcs-menu-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}>
+        <a href="{{ href }}" class="jtcs-menu-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}{% if item_style %} style="{{ item_style }}"{% endif %}>
           <i class="bi {{ item.icon }}"></i>
           <span>{{ item.name }}</span>
         </a>
@@ -38,9 +39,10 @@
   <ul class="jtcs-top-menu" id="jtcsTopMenu">
     {% for item in items %}
       {% set is_active = item.url | menu_active if item.url else false %}
+      {% set item_style = item.inline_style if item.inline_style else '' %}
       {% if item.has_children %}
         <li class="jtcs-top-item has-dropdown">
-          <button type="button" class="jtcs-top-link{% if is_active %} active{% endif %}" aria-expanded="false">
+          <button type="button" class="jtcs-top-link{% if is_active %} active{% endif %}" aria-expanded="false"{% if item_style %} style="{{ item_style }}"{% endif %}>
             <i class="bi {{ item.icon }}"></i>
             <span>{{ item.name }}</span>
             <i class="bi bi-chevron-down"></i>
@@ -52,7 +54,7 @@
       {% else %}
         {% set href = url_for('auth.logout') if item.url == '/logout' else (item.url if item.url and item.url.startswith('/') else '#') %}
         <li class="jtcs-top-item">
-          <a href="{{ href }}" class="jtcs-top-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}>
+          <a href="{{ href }}" class="jtcs-top-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}{% if item_style %} style="{{ item_style }}"{% endif %}>
             <i class="bi {{ item.icon }}"></i>
             <span>{{ item.name }}</span>
           </a>
