@@ -1,4 +1,8 @@
-<header class="jtcs-app-header">
+<header class="jtcs-app-header"
+        data-poll-url="/api/notifications/unread"
+        data-poll-seconds="{{ notification_poll_seconds|default(15) }}"
+        data-search-url="/api/search"
+        data-pending-user-count="{{ pending_user_count|default(0) }}">
   <div class="jtcs-header-brand">
     {% if company_logo %}
       <img src="{{ url_for('static', filename=company_logo) }}" alt="JTCS Logo" class="jtcs-header-logo">
@@ -12,11 +16,30 @@
   </div>
 
   <div class="jtcs-header-meta">
+    <div class="jtcs-global-search-wrap hide-sm">
+      <div class="jtcs-global-search">
+        <i class="bi bi-search jtcs-global-search-icon" aria-hidden="true"></i>
+        <input type="search"
+               class="form-control form-control-sm jtcs-global-search-input"
+               id="jtcsGlobalSearch"
+               placeholder="Search customers, leads, invoices…"
+               autocomplete="off"
+               aria-label="Global search"
+               aria-expanded="false"
+               aria-controls="jtcsGlobalSearchResults">
+        <div class="jtcs-global-search-results dropdown-menu"
+             id="jtcsGlobalSearchResults"
+             role="listbox"
+             aria-label="Search results"></div>
+      </div>
+    </div>
+
     <span class="jtcs-header-pill jtcs-header-user hide-sm">
       <i class="bi bi-person-circle"></i>
       {{ session.user_name }}
     </span>
 
+    {% set notify_badge = (crm_unread_count|default(0)) + (pending_user_count|default(0)) %}
     <div class="dropdown jtcs-header-notify hide-sm">
       <button type="button"
               class="jtcs-header-pill jtcs-header-notify-btn dropdown-toggle"
@@ -26,38 +49,59 @@
               title="Notifications">
         <i class="bi bi-bell"></i>
         <span>Notifications</span>
-        {% if pending_user_count %}
-        <span class="jtcs-notify-badge">{{ pending_user_count }}</span>
+        {% if notify_badge %}
+        <span class="jtcs-notify-badge" id="jtcsNotifyBadge">{{ notify_badge }}</span>
+        {% else %}
+        <span class="jtcs-notify-badge d-none" id="jtcsNotifyBadge">0</span>
         {% endif %}
       </button>
-      <div class="dropdown-menu dropdown-menu-end jtcs-notify-menu" aria-labelledby="jtcsNotifyDropdown">
+      <div class="dropdown-menu dropdown-menu-end jtcs-notify-menu" aria-labelledby="jtcsNotifyDropdown" id="jtcsNotifyMenu">
         <div class="jtcs-notify-head">Notifications</div>
-        {% if is_admin_user %}
-          {% if pending_user_notifications %}
-            {% for item in pending_user_notifications %}
-            <a class="dropdown-item jtcs-notify-item" href="{{ url_for('auth.users_index', user_id=item.user_id) }}">
+        <div id="jtcsNotifyCrmList">
+          {% if crm_notifications %}
+            {% for item in crm_notifications %}
+            <a class="dropdown-item jtcs-notify-item{% if not item.IsRead %} jtcs-notify-unread{% endif %}"
+               href="{{ item.LinkURL or url_for('crm.notifications_page') }}">
               <div class="jtcs-notify-title">
-                <i class="bi bi-person-plus"></i>
-                {{ item.name }}
+                <i class="bi bi-bell-fill"></i>
+                {{ item.Title }}
               </div>
-              <div class="jtcs-notify-meta">
-                {{ item.email }}
-                · {{ item.status }}
-                · {% if item.verified %}Email verified{% else %}Email pending{% endif %}
-              </div>
+              {% if item.Message %}
+              <div class="jtcs-notify-meta">{{ item.Message[:120] }}{% if item.Message|length > 120 %}…{% endif %}</div>
+              {% endif %}
             </a>
             {% endfor %}
-            <div class="dropdown-divider"></div>
-            <a class="dropdown-item text-primary fw-semibold" href="{{ url_for('auth.users_index') }}">
-              Open Users ({{ pending_user_count }} pending)
-            </a>
-          {% else %}
-            <div class="jtcs-notify-empty">No pending user approvals.</div>
-            <a class="dropdown-item text-primary" href="{{ url_for('auth.users_index') }}">Open Users</a>
           {% endif %}
-        {% else %}
-          <div class="jtcs-notify-empty">No new notifications.</div>
+        </div>
+        {% if is_admin_user and pending_user_notifications %}
+          {% if crm_notifications %}<div class="dropdown-divider"></div>{% endif %}
+          <div class="jtcs-notify-head">Pending Users</div>
+          {% for item in pending_user_notifications %}
+          <a class="dropdown-item jtcs-notify-item" href="{{ url_for('auth.users_index', user_id=item.user_id) }}">
+            <div class="jtcs-notify-title">
+              <i class="bi bi-person-plus"></i>
+              {{ item.name }}
+            </div>
+            <div class="jtcs-notify-meta">
+              {{ item.email }}
+              · {{ item.status }}
+              · {% if item.verified %}Email verified{% else %}Email pending{% endif %}
+            </div>
+          </a>
+          {% endfor %}
         {% endif %}
+        {% if not crm_notifications and not (is_admin_user and pending_user_notifications) %}
+          <div class="jtcs-notify-empty" id="jtcsNotifyEmpty">No new notifications.</div>
+        {% endif %}
+        <div class="dropdown-divider"></div>
+        {% if is_admin_user %}
+        <a class="dropdown-item text-primary" href="{{ url_for('auth.users_index') }}">
+          Open Users{% if pending_user_count %} ({{ pending_user_count }} pending){% endif %}
+        </a>
+        {% endif %}
+        <a class="dropdown-item text-primary fw-semibold" href="{{ url_for('crm.notifications_page') }}">
+          View all notifications
+        </a>
       </div>
     </div>
 

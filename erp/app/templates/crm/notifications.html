@@ -1,0 +1,42 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block page_heading_tools %}
+<button type="button" class="btn btn-sm btn-outline-primary" id="crmNotifMarkAllBtn">
+  <i class="bi bi-check2-all"></i> Mark all read
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmNotificationsPage"
+     data-api-list="{{ url_for('notification_api.notifications_list') }}"
+     data-api-read="{{ url_for('notification_api.notifications_read', notification_id=0) }}"
+     data-api-read-all="{{ url_for('notification_api.notifications_read_all') }}"
+     data-api-archive="{{ url_for('notification_api.notifications_archive', notification_id=0) }}"
+     data-poll-seconds="{{ poll_seconds|default(15) }}">
+  <div class="jtcs-card">
+    <div class="crm-toolbar">
+      <select class="form-select form-select-sm crm-field-lg" id="crmNotifFilter">
+        <option value="">All active</option>
+        <option value="unread">Unread only</option>
+        <option value="archived">Archived</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmNotifRefreshBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted ms-auto" id="crmNotifCount"></span>
+    </div>
+    <div class="list-group list-group-flush" id="crmNotifList"></div>
+    <div class="crm-grid-empty d-none" id="crmNotifEmpty">No notifications.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/notifications.js') }}?v=20260802"></script>
+{% endblock %}

@@ -103,8 +103,13 @@ class Config:
     SERVER_NAME = os.getenv("SERVER_NAME") or None
     PREFERRED_URL_SCHEME = os.getenv("PREFERRED_URL_SCHEME", "http")
 
-    MAX_CONTENT_LENGTH = 2 * 1024 * 1024
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH_MB", "10")) * 1024 * 1024
     UPLOAD_FOLDER = BASE_DIR / "app" / "static" / "uploads"
+    CRM_DOCUMENT_FOLDER = UPLOAD_FOLDER / "crm_documents"
+
+    # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
+    WEBSITE_INTAKE_API_KEY = (os.getenv("WEBSITE_INTAKE_API_KEY") or "").strip().strip('"').strip("'")
+    NOTIFICATION_POLL_SECONDS = int(os.getenv("NOTIFICATION_POLL_SECONDS", "15"))
 
     # Admin Role — database / full backups
     # BACKUP_ROOT = where the app stores downloadable .bak / full zip files.

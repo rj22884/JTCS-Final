@@ -1,0 +1,116 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page crm-analytics">
+  <div class="crm-analytics-grid mb-3">
+    <div class="jtcs-metric-card">
+      <span class="jtcs-metric-label">Total Leads</span>
+      <strong class="jtcs-metric-value">{{ lead_summary.total|default(0) }}</strong>
+    </div>
+    <div class="jtcs-metric-card">
+      <span class="jtcs-metric-label">Conversion Rate ({{ conversion.period_days|default(30) }}d)</span>
+      <strong class="jtcs-metric-value">{{ conversion.conversion_rate_pct|default(0) }}%</strong>
+    </div>
+    <div class="jtcs-metric-card">
+      <span class="jtcs-metric-label">Leads Created ({{ conversion.period_days|default(30) }}d)</span>
+      <strong class="jtcs-metric-value">{{ conversion.leads_created|default(0) }}</strong>
+    </div>
+    <div class="jtcs-metric-card">
+      <span class="jtcs-metric-label">Leads Converted ({{ conversion.period_days|default(30) }}d)</span>
+      <strong class="jtcs-metric-value">{{ conversion.leads_converted|default(0) }}</strong>
+    </div>
+    <div class="jtcs-metric-card">
+      <span class="jtcs-metric-label">Pending Documents</span>
+      <strong class="jtcs-metric-value">{{ pending_documents.customers_without_documents|default(0) }}</strong>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Leads by Status</h2>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Status</th><th class="text-end">Count</th></tr></thead>
+            <tbody>
+              {% for status, cnt in (lead_summary.by_status or {}).items() %}
+              <tr><td>{{ status }}</td><td class="text-end">{{ cnt }}</td></tr>
+              {% else %}
+              <tr><td colspan="2" class="text-muted">No data.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Staff Performance</h2>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Staff</th><th class="text-end">Tasks Completed (30d)</th></tr></thead>
+            <tbody>
+              {% for row in staff %}
+              <tr>
+                <td>{{ row.assigned_user_name or row.user_name or '—' }}</td>
+                <td class="text-end">{{ row.tasks_completed|default(0) }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="2" class="text-muted">No staff metrics.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Pending Follow-ups</h2>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Type</th><th>Subject</th><th>Due</th><th>Priority</th></tr></thead>
+            <tbody>
+              {% for f in pending_followups %}
+              <tr>
+                <td>{{ f.FollowUpType or '—' }}</td>
+                <td>{{ f.Subject or f.CustomerName or f.LeadName or '—' }}</td>
+                <td>{{ f.DueAt | display_date if f.DueAt else '—' }}</td>
+                <td>{{ f.Priority or '—' }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-muted">No pending follow-ups.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Daily Activity (14 days)</h2>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead><tr><th>Date</th><th class="text-end">Timeline Events</th></tr></thead>
+            <tbody>
+              {% for row in daily %}
+              <tr>
+                <td>{{ row.date | display_date if row.date else '—' }}</td>
+                <td class="text-end">{{ row.event_count|default(0) }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="2" class="text-muted">No daily activity.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

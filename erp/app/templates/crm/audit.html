@@ -1,0 +1,41 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmAuditPage" data-api-list="{{ api }}">
+  <div class="jtcs-card">
+    <div class="crm-toolbar">
+      <input type="text" class="form-control form-control-sm crm-field-md" id="crmAuditEntityType" placeholder="Entity type">
+      <input type="number" class="form-control form-control-sm crm-field-xs" id="crmAuditEntityId" placeholder="Entity ID">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmAuditLoadBtn">
+        <i class="bi bi-search"></i> Load
+      </button>
+      <span class="small text-muted ms-auto" id="crmAuditCount"></span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>User</th>
+            <th>Action</th>
+            <th>Entity</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="crmAuditGridBody"></tbody>
+      </table>
+    </div>
+    <div class="crm-grid-empty d-none" id="crmAuditEmpty">No audit log entries.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/audit.js') }}?v=20260802"></script>
+{% endblock %}

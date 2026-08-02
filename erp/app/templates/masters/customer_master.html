@@ -22,7 +22,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260802gstcode">
 {% endblock %}
 
 {% block content %}
@@ -101,6 +101,10 @@
           <div class="cm-entry-main">
         <form id="cmEntryForm" novalidate>
           <input type="hidden" id="cm_customer_id" name="customer_id" value="">
+          <input type="hidden" id="cm_photo_path" name="photo_path" data-cm-field="photo_path" value="">
+          <input type="hidden" id="cm_aadhaar_reference_id" name="aadhaar_reference_id" data-cm-field="aadhaar_reference_id" value="">
+          <img id="cm_photo_preview" alt="Customer photo" width="72" height="72" class="d-none rounded border mb-2"
+               style="object-fit:cover;">
 
           <div class="cm-group-bar mb-3">
             <label class="form-label cm-required mb-1" for="cm_customer_group">Customer Group</label>
@@ -210,7 +214,7 @@
   </div>
 </div>
 
-{# Aadhaar portal #}
+{# Aadhaar Offline eKYC (Import Aadhaar Portal) #}
 <div class="modal fade" id="cmAadhaarSyncModal" tabindex="-1" aria-labelledby="cmAadhaarSyncModalTitle" aria-hidden="true"
      data-bs-backdrop="static">
   <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -224,20 +228,21 @@
       <div class="modal-body">
         <div id="cmAadhaarStepAsk">
           <p class="small text-muted mb-3">
-            Aadhaar number enter karein. Portal open hoga, number copy/ready rahega. Captcha aap complete karein —
-            phir details yahan paste/sync kar sakte hain.
+            Enter Aadhaar number. Offline eKYC page opens in a new window.
+            Complete CAPTCHA / OTP yourself, then Download the ZIP. System detects the ZIP automatically.
           </p>
           <div class="mb-2">
             <label class="form-label cm-required" for="cmAadhaarSyncNumber">Aadhaar Number</label>
             <input type="text" class="form-control" id="cmAadhaarSyncNumber" maxlength="12"
-                   inputmode="numeric" placeholder="12-digit Aadhaar">
+                   inputmode="numeric" placeholder="12-digit Aadhaar" autocomplete="off">
           </div>
           <div class="alert alert-danger py-2 small d-none" id="cmAadhaarSyncError"></div>
         </div>
         <div id="cmAadhaarStepPortal" class="d-none">
-          <div class="alert alert-warning py-2 small">
-            <strong>Captcha wait:</strong> Aadhaar portal me captcha complete karein, details dekhein,
-            phir neeche fields me Name / DOB / Address bhar kar <em>Apply to Form</em> dabayein.
+          <div class="alert alert-warning py-2 small" id="cmAadhaarWaitBox">
+            <strong>Waiting for ZIP download…</strong>
+            On UIDAI: enter Aadhaar, CAPTCHA, OTP, Share Code, then click <em>Download</em>.
+            Do not close this dialog.
           </div>
           <div class="d-flex flex-wrap gap-2 mb-3">
             <button type="button" class="btn btn-sm btn-danger" id="cmAadhaarOpenPortalBtn">
@@ -248,34 +253,29 @@
             </button>
             <span class="small text-muted align-self-center" id="cmAadhaarReadyHint"></span>
           </div>
-          <div class="row g-2">
-            <div class="col-md-6">
-              <label class="form-label" for="cmAadhaarSyncName">Full Name (from portal)</label>
-              <input type="text" class="form-control" id="cmAadhaarSyncName" maxlength="200">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label" for="cmAadhaarSyncDob">Date of Birth</label>
-              <input type="date" class="form-control" id="cmAadhaarSyncDob">
-            </div>
-            <div class="col-md-3">
-              <label class="form-label" for="cmAadhaarSyncGender">Gender</label>
-              <select class="form-select" id="cmAadhaarSyncGender">
-                <option value=""></option>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div class="col-12">
-              <label class="form-label" for="cmAadhaarSyncAddress">Address (from portal)</label>
-              <textarea class="form-control" id="cmAadhaarSyncAddress" rows="2" maxlength="300"></textarea>
-            </div>
+          <div id="cmAadhaarStepPassword" class="d-none">
+            <label class="form-label cm-required" for="cmAadhaarZipPassword">ZIP Password (Share Code)</label>
+            <input type="password" class="form-control" id="cmAadhaarZipPassword" maxlength="20"
+                   autocomplete="off" placeholder="Share Code used on UIDAI">
+            <div class="form-text">Example: XXXX — same Share Code you set before Download.</div>
           </div>
+          <div id="cmAadhaarPreviewWrap" class="d-none mt-3 text-center">
+            <img id="cmAadhaarPhotoPreview" alt="Aadhaar photo" class="img-thumbnail"
+                 style="max-height:120px;max-width:120px;">
+          </div>
+          {# Kept for compatibility with existing element IDs (filled from XML, not manual). #}
+          <input type="hidden" id="cmAadhaarSyncName">
+          <input type="hidden" id="cmAadhaarSyncDob">
+          <input type="hidden" id="cmAadhaarSyncGender">
+          <input type="hidden" id="cmAadhaarSyncAddress">
         </div>
       </div>
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-primary" id="cmAadhaarContinueBtn">
           Continue to Portal
+        </button>
+        <button type="button" class="btn btn-primary d-none" id="cmAadhaarUnlockBtn">
+          Unlock ZIP &amp; Read XML
         </button>
         <button type="button" class="btn btn-success d-none" id="cmAadhaarApplyBtn">
           <i class="bi bi-check2-circle"></i> Apply to Form
@@ -364,8 +364,9 @@
   window.CM_PLACEHOLDER_PAN = {{ ui_config.placeholder_pan|tojson }};
   window.CM_PORTALS = {
     incomeTaxLogin: "https://eportal.incometax.gov.in/iec/foservices/#/login",
-    aadhaarPortal: "https://myaadhaar.uidai.gov.in/"
+    aadhaarPortal: "https://myaadhaar.uidai.gov.in/offline-ekyc"
   };
 </script>
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260722gstfreq"></script>
+<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260802aadhaarekyc"></script>
 {% endblock %}

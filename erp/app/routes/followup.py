@@ -5,6 +5,7 @@ from datetime import date
 
 from flask import Blueprint, jsonify, render_template, request, send_file, session, url_for
 
+from app.customer_master.constants import COUNTRIES
 from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
 from app.services.customer_service import CustomerService
@@ -79,10 +80,12 @@ def _make_activity_blueprint(
             gst_return_types=GST_RETURN_TYPES,
             workflow_stages=service.list_stages(),
             allow_customer_add=allow_customer_create,
-        payment_modes=master_repo.list_stamp_bank_payment_modes(),
-        api_urls=_followup_api_urls(blueprint_name, module_code, allow_customer_create),
-        load_entry_id=request.args.get("load_entry", type=int),
-    )
+            countries=COUNTRIES,
+            payment_modes=master_repo.list_stamp_bank_payment_modes(),
+            api_urls=_followup_api_urls(blueprint_name, module_code, allow_customer_create),
+            pincode_lookup_url=url_for("masters_customer.lookup_pincode"),
+            load_entry_id=request.args.get("load_entry", type=int),
+        )
 
     @bp.route("/grid", methods=["GET"], strict_slashes=False)
     @login_required
@@ -438,10 +441,10 @@ def _make_activity_blueprint(
     return bp
 
 
-itr_followup_bp = _make_activity_blueprint("ITR", "/itr/followup", "itr_followup")
+itr_followup_bp = _make_activity_blueprint("ITR", "/itr/followup", "itr_followup", allow_customer_create=True)
 dsc_followup_bp = _make_activity_blueprint("DSC", "/dsc/followup", "dsc_followup", allow_customer_create=True)
-tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup")
-gst_followup_bp = _make_activity_blueprint("GST", "/gst/followup", "gst_followup")
+tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup", allow_customer_create=True)
+gst_followup_bp = _make_activity_blueprint("GST", "/gst/followup", "gst_followup", allow_customer_create=True)
 
 # Spec alias: POST /api/itr/sync-status (same handler as ITR Followup Sync)
 api_itr_bp = Blueprint("api_itr", __name__, url_prefix="/api/itr")

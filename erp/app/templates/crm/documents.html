@@ -1,0 +1,98 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmDocumentsPage"
+     data-api-list="{{ api.list }}"
+     data-api-upload="{{ api.upload }}"
+     data-api-versions="{{ api.versions }}"
+     data-api-delete="{{ api.delete }}">
+  <div class="row g-3">
+    <div class="col-lg-4">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Upload Document</h2>
+        <form id="crmDocUploadForm" enctype="multipart/form-data">
+          <div class="mb-2">
+            <label class="form-label" for="crmDocCustomerId">Customer ID *</label>
+            <input type="number" class="form-control form-control-sm" id="crmDocCustomerId" name="customer_id" required min="1">
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmDocFolder">Folder *</label>
+            <select class="form-select form-select-sm" id="crmDocFolder" name="folder_type" required>
+              {% for folder in folders %}
+              <option value="{{ folder }}">{{ folder }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmDocTitle">Title</label>
+            <input type="text" class="form-control form-control-sm" id="crmDocTitle" name="title">
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmDocFile">File *</label>
+            <input type="file" class="form-control form-control-sm" id="crmDocFile" name="file" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmDocRemarks">Remarks</label>
+            <textarea class="form-control form-control-sm" id="crmDocRemarks" name="remarks" rows="2"></textarea>
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="crmDocUploadError"></div>
+          <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-upload"></i> Upload</button>
+        </form>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="jtcs-card">
+        <div class="crm-toolbar">
+          <input type="number" class="form-control form-control-sm crm-field-sm" id="crmDocListCustomerId" placeholder="Customer ID">
+          <select class="form-select form-select-sm crm-field-sm" id="crmDocListFolder">
+            <option value="">All folders</option>
+            {% for folder in folders %}
+            <option value="{{ folder }}">{{ folder }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="crmDocListBtn"><i class="bi bi-search"></i> List</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Folder</th>
+                <th>Version</th>
+                <th>Uploaded</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="crmDocGridBody"></tbody>
+          </table>
+        </div>
+        <div class="crm-grid-empty d-none" id="crmDocEmpty">Enter a customer ID and click List.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmDocVersionsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Document Versions</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body crm-doc-version-list">
+        <ul class="list-group list-group-flush" id="crmDocVersionList"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/documents.js') }}?v=20260802"></script>
+{% endblock %}

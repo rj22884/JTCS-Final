@@ -1,0 +1,27 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmTimelinePage" data-api-list="{{ api }}">
+  <div class="jtcs-card mb-3">
+    <div class="crm-toolbar">
+      <input type="number" class="form-control form-control-sm crm-field-sm" id="crmTimelineCustomerId" placeholder="Customer ID">
+      <input type="number" class="form-control form-control-sm crm-field-xs" id="crmTimelineLeadId" placeholder="Lead ID">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmTimelineLoadBtn">
+        <i class="bi bi-arrow-clockwise"></i> Load
+      </button>
+    </div>
+    <ul class="crm-timeline" id="crmTimelineList"></ul>
+    <div class="crm-grid-empty d-none" id="crmTimelineEmpty">No activity events.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/timeline.js') }}?v=20260802"></script>
+{% endblock %}

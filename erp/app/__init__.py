@@ -43,6 +43,14 @@ from app.routes.admin_dashboard import bp as admin_dashboard_bp
 from app.routes.admin_import_export import bp as admin_import_export_bp
 from app.routes.ledger_report import bp as ledger_report_bp
 from app.routes.software_update import bp as software_update_bp
+from app.modules.crm.routes import (
+    crm_api_bp,
+    crm_bp,
+    notification_api_bp,
+    public_intake_bp,
+    search_api_bp,
+)
+from app.modules.settings.routes import bp as integration_settings_bp
 from app.services.auth_service import AuthService
 from app.services.menu_service import MenuService
 from app.utils.date_format import (
@@ -64,6 +72,7 @@ SETUP_PUBLIC_ENDPOINTS = {
     "auth.verify_email_link",
     "auth.verify_success",
     "dashboard.health",
+    "public_intake.website_intake",
 }
 
 
@@ -111,12 +120,43 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(admin_import_export_bp)
     app.register_blueprint(ledger_report_bp)
     app.register_blueprint(software_update_bp)
+    app.register_blueprint(crm_bp)
+    app.register_blueprint(crm_api_bp)
+    app.register_blueprint(notification_api_bp)
+    app.register_blueprint(search_api_bp)
+    app.register_blueprint(public_intake_bp)
+    app.register_blueprint(integration_settings_bp)
     app.register_blueprint(pages_bp)
+
+    # Website intake uses API key auth (no session CSRF token).
+    csrf.exempt(public_intake_bp)
+
+    # Integration Settings (and JSON clients): CSRF failures as JSON, not HTML.
+    from app.modules.settings.routes import register_integration_csrf_json_handler
+
+    register_integration_csrf_json_handler(app)
 
     with app.app_context():
         from app.services.ocr_provider_service import OcrProviderService
 
         OcrProviderService.initialize()
+
+        try:
+            from app.modules.shared.schema import ensure_crm_menus, ensure_crm_schema
+
+            ensure_crm_schema()
+            ensure_crm_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("CRM schema/menu ensure skipped: %s", exc)
+
+        try:
+            from app.modules.settings.routes import ensure_integration_settings_bootstrap
+
+            ensure_integration_settings_bootstrap()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Integration Settings bootstrap skipped: %s", exc)
 
         from app.utils.smtp_health import check_smtp_from_config, log_mail_config
 
@@ -232,6 +272,8 @@ def create_app(config_class: type = Config) -> Flask:
 
         pending_user_notifications = []
         pending_user_count = 0
+        crm_notifications = []
+        crm_unread_count = 0
         is_admin_user = False
         if has_request_context() and session.get("user_id"):
             menu_service = MenuService()
@@ -254,6 +296,19 @@ def create_app(config_class: type = Config) -> Flask:
                 except Exception:
                     pending_user_count = 0
                     pending_user_notifications = []
+            try:
+                from app.modules.notification.services import NotificationService
+
+                notif_data = NotificationService().list_for_user(
+                    session.get("user_id"),
+                    page=1,
+                    page_size=8,
+                )
+                crm_unread_count = int(notif_data.get("unread_count") or 0)
+                crm_notifications = notif_data.get("rows") or []
+            except Exception:
+                crm_unread_count = 0
+                crm_notifications = []
 
         db_server = app.config.get("DB_SERVER_DISPLAY", r"JTCS\JTCS")
         db_name = app.config.get("DB_NAME_DISPLAY", "JTCSS")
@@ -294,6 +349,9 @@ def create_app(config_class: type = Config) -> Flask:
             "db_connection_display": db_connection,
             "pending_user_count": pending_user_count,
             "pending_user_notifications": pending_user_notifications,
+            "crm_unread_count": crm_unread_count,
+            "crm_notifications": crm_notifications,
+            "notification_poll_seconds": app.config.get("NOTIFICATION_POLL_SECONDS", 15),
             "is_admin_user": is_admin_user,
             "current_login_id": login_id,
         }

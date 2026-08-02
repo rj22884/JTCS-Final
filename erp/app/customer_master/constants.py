@@ -2,6 +2,8 @@
 Customer Master — field groups, tabs per customer group, form/DB mapping.
 """
 
+from app.customer_master.countries import COUNTRIES
+
 CUSTOMER_GROUPS = [
     {"code": "ITR", "label": "ITR"},
     {"code": "TDS", "label": "TDS"},
@@ -52,6 +54,8 @@ FORM_TO_DB = {
     "date_of_birth": "DateOfBirth",
     "date_of_incorporation": "DateOfIncorporation",
     "gender": "Gender",
+    "photo_path": "PhotoPath",
+    "aadhaar_reference_id": "AadhaarReferenceId",
     "occupation": "Occupation",
     "mobile_number": "MobileNumber",
     "alternate_mobile": "AlternateMobile",
@@ -65,6 +69,7 @@ FORM_TO_DB = {
     "city": "City",
     "district": "District",
     "state": "State",
+    "state_gst_code": "StateGstCode",
     "country": "Country",
     "pincode": "Pincode",
     "aadhaar_number": "AadhaarNumber",

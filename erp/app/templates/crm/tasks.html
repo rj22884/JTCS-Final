@@ -1,0 +1,112 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block page_heading_tools %}
+<button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#crmTaskCreateModal">
+  <i class="bi bi-plus-lg"></i> New Task
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmTasksPage"
+     data-api-list="{{ api.list }}"
+     data-api-create="{{ api.create }}"
+     data-api-complete="{{ api.complete }}"
+     data-api-update="{{ api.update }}">
+  <div class="jtcs-card mb-3">
+    <div class="crm-toolbar">
+      <select class="form-select form-select-sm crm-field-md" id="crmTaskStatusFilter">
+        <option value="">All statuses</option>
+        <option value="Pending" selected>Pending</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmTaskRefreshBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted ms-auto" id="crmTaskCount"></span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Priority</th>
+            <th>Deadline</th>
+            <th>Progress</th>
+            <th>Status</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="crmTaskGridBody"></tbody>
+      </table>
+    </div>
+    <div class="crm-grid-empty d-none" id="crmTaskEmpty">No tasks found.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmTaskCreateModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Create Task</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="crmTaskCreateForm">
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label" for="crmTaskTitle">Title *</label>
+            <input type="text" class="form-control form-control-sm" id="crmTaskTitle" name="title" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmTaskDescription">Description</label>
+            <textarea class="form-control form-control-sm" id="crmTaskDescription" name="description" rows="2"></textarea>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="form-label" for="crmTaskPriority">Priority</label>
+              <select class="form-select form-select-sm" id="crmTaskPriority" name="priority">
+                <option value="Normal">Normal</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="crmTaskDeadline">Deadline</label>
+              <input type="datetime-local" class="form-control form-control-sm" id="crmTaskDeadline" name="deadline">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="crmTaskProgress">Progress %</label>
+              <input type="number" class="form-control form-control-sm" id="crmTaskProgress" name="progress" min="0" max="100" value="0">
+            </div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-md-6">
+              <label class="form-label" for="crmTaskCustomerId">Customer ID</label>
+              <input type="number" class="form-control form-control-sm" id="crmTaskCustomerId" name="customer_id" min="1">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="crmTaskLeadId">Lead ID</label>
+              <input type="number" class="form-control form-control-sm" id="crmTaskLeadId" name="lead_id" min="1">
+            </div>
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="crmTaskFormError"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/tasks.js') }}?v=20260802"></script>
+{% endblock %}

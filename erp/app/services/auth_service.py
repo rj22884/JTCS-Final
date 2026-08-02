@@ -644,7 +644,17 @@ class AuthService:
 
         return AuthResult.ok({"email": delivery_email}, generic_message).as_tuple()
 
-    ASSIGNABLE_ROLES = ("Operator", "Viewer", "Manager", "Admin")
+    ASSIGNABLE_ROLES = (
+        "Operator",
+        "Viewer",
+        "Manager",
+        "Admin",
+        "CA",
+        "Accountant",
+        "DataEntry",
+        "Reception",
+        "Client",
+    )
 
     def approve_user(self, user_id: int, role=None, roles=None) -> tuple[bool, str | None, dict]:
         from app.utils.roles import ASSIGNABLE_ROLES, join_roles, parse_roles

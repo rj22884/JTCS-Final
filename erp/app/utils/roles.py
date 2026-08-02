@@ -3,8 +3,28 @@
 from __future__ import annotations
 
 ADMIN_ROLES = frozenset({"Administrator", "Admin"})
-ASSIGNABLE_ROLES = ("Operator", "Viewer", "Manager", "Admin")
-MENU_ROLES = ("Administrator", "Manager", "Operator", "Viewer")
+ASSIGNABLE_ROLES = (
+    "Operator",
+    "Viewer",
+    "Manager",
+    "Admin",
+    "CA",
+    "Accountant",
+    "DataEntry",
+    "Reception",
+    "Client",
+)
+MENU_ROLES = (
+    "Administrator",
+    "Manager",
+    "Operator",
+    "Viewer",
+    "CA",
+    "Accountant",
+    "DataEntry",
+    "Reception",
+    "Client",
+)
 
 
 def parse_roles(value: str | None) -> set[str]:

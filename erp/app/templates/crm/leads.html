@@ -1,0 +1,155 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block page_heading_tools %}
+<button type="button" class="btn btn-sm btn-primary" id="crmLeadCreateBtn" data-bs-toggle="modal" data-bs-target="#crmLeadCreateModal">
+  <i class="bi bi-plus-lg"></i> New Lead
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmLeadsPage"
+     data-api-list="{{ api.list }}"
+     data-api-create="{{ api.create }}"
+     data-api-convert="{{ api.convert }}"
+     data-api-assign="{{ api.assign }}">
+  <div class="jtcs-card mb-3">
+    <div class="crm-toolbar">
+      <input type="search" class="form-control form-control-sm crm-field-xl" id="crmLeadSearch" placeholder="Search leads…">
+      <select class="form-select form-select-sm crm-field-md" id="crmLeadStatusFilter">
+        <option value="">All statuses</option>
+        <option value="New">New</option>
+        <option value="Contacted">Contacted</option>
+        <option value="Qualified">Qualified</option>
+        <option value="Converted">Converted</option>
+        <option value="Closed">Closed</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmLeadRefreshBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted ms-auto" id="crmLeadCount"></span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Mobile</th>
+            <th>Email</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Created</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="crmLeadGridBody"></tbody>
+      </table>
+    </div>
+    <div class="crm-grid-empty d-none" id="crmLeadEmpty">No leads found.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmLeadCreateModal" tabindex="-1" aria-labelledby="crmLeadCreateTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="crmLeadCreateTitle">Create Lead</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="crmLeadCreateForm">
+        <div class="modal-body">
+          <div class="mb-2">
+            <label class="form-label" for="crmLeadFullName">Full Name *</label>
+            <input type="text" class="form-control form-control-sm" id="crmLeadFullName" name="full_name" required>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="crmLeadMobile">Mobile</label>
+              <input type="tel" class="form-control form-control-sm" id="crmLeadMobile" name="mobile">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="crmLeadEmail">Email</label>
+              <input type="email" class="form-control form-control-sm" id="crmLeadEmail" name="email">
+            </div>
+          </div>
+          <div class="mb-2 mt-2">
+            <label class="form-label" for="crmLeadBusiness">Business Name</label>
+            <input type="text" class="form-control form-control-sm" id="crmLeadBusiness" name="business_name">
+          </div>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="crmLeadSource">Source</label>
+              <select class="form-select form-select-sm" id="crmLeadSource" name="source">
+                <option value="Internal">Internal</option>
+                <option value="Website">Website</option>
+                <option value="Referral">Referral</option>
+                <option value="Walk-in">Walk-in</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="crmLeadRequestType">Request Type</label>
+              <select class="form-select form-select-sm" id="crmLeadRequestType" name="request_type">
+                <option value="Contact">Contact</option>
+                <option value="Consultation">Consultation</option>
+                <option value="Service">Service</option>
+              </select>
+            </div>
+          </div>
+          <div class="mb-2 mt-2">
+            <label class="form-label" for="crmLeadPriority">Priority</label>
+            <select class="form-select form-select-sm" id="crmLeadPriority" name="priority">
+              <option value="Normal">Normal</option>
+              <option value="High">High</option>
+              <option value="Urgent">Urgent</option>
+            </select>
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmLeadMessage">Message</label>
+            <textarea class="form-control form-control-sm" id="crmLeadMessage" name="message" rows="3"></textarea>
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="crmLeadFormError"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save Lead</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmLeadAssignModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Assign Lead</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="crmLeadAssignForm">
+        <div class="modal-body">
+          <input type="hidden" id="crmLeadAssignId">
+          <label class="form-label" for="crmLeadAssignUserId">User ID *</label>
+          <input type="number" class="form-control form-control-sm" id="crmLeadAssignUserId" required min="1">
+          <div class="alert alert-danger py-2 small d-none mt-2" id="crmLeadAssignError"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Assign</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/leads.js') }}?v=20260802a"></script>
+{% endblock %}

@@ -34,7 +34,36 @@
             </div>
             <div class="col-md-6">
               <label class="form-label fu-required" for="fuCustPincode">Pincode</label>
-              <input type="text" class="form-control" id="fuCustPincode" name="pincode" maxlength="10" required>
+              <input type="text" class="form-control" id="fuCustPincode" name="pincode" maxlength="6"
+                     inputmode="numeric" autocomplete="postal-code" required>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="fuCustCountry">Country</label>
+              <select class="form-select" id="fuCustCountry" name="country">
+                {% for c in (countries or ['India']) %}
+                <option value="{{ c }}" {% if c == 'India' %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="fuCustState">State</label>
+              <input type="text" class="form-control" id="fuCustState" name="state" maxlength="100">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-4">
+              <label class="form-label" for="fuCustStateGstCode">State GST Code</label>
+              <input type="text" class="form-control" id="fuCustStateGstCode" name="state_gst_code" maxlength="2">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="fuCustDistrict">District</label>
+              <input type="text" class="form-control" id="fuCustDistrict" name="district" maxlength="100">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="fuCustCity">City</label>
+              <input type="text" class="form-control" id="fuCustCity" name="city" maxlength="100">
             </div>
           </div>
           <div class="mb-2">
@@ -44,16 +73,6 @@
           <div class="mb-2">
             <label class="form-label" for="fuCustAddr2">Address Line 2</label>
             <input type="text" class="form-control" id="fuCustAddr2" name="address_line2" maxlength="300">
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-md-6">
-              <label class="form-label" for="fuCustState">State</label>
-              <input type="text" class="form-control" id="fuCustState" name="state" maxlength="100">
-            </div>
-            <div class="col-md-6">
-              <label class="form-label" for="fuCustCountry">Country</label>
-              <input type="text" class="form-control" id="fuCustCountry" name="country" maxlength="100" value="India">
-            </div>
           </div>
           <div id="fuCustomerFormError" class="alert alert-danger py-2 small d-none"></div>
         </form>

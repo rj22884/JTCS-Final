@@ -42,6 +42,26 @@ class CustomerRepository:
             IF COL_LENGTH(N'dbo.CustomerMaster', N'FilingFrequency') IS NULL
                 ALTER TABLE dbo.CustomerMaster ADD FilingFrequency NVARCHAR(20) NULL;
             """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'ModifiedDate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD ModifiedDate DATETIME2 NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'District') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD District NVARCHAR(100) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'StateGstCode') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD StateGstCode NVARCHAR(2) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PhotoPath') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PhotoPath NVARCHAR(500) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'AadhaarReferenceId') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD AadhaarReferenceId NVARCHAR(100) NULL;
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()
@@ -222,6 +242,11 @@ class CustomerRepository:
         address2 = (payload.get("address_line2") or payload.get("AddressLine2") or "").strip()
         state = (payload.get("state") or payload.get("State") or "").strip()
         country = (payload.get("country") or payload.get("Country") or "India").strip()
+        district = (payload.get("district") or payload.get("District") or "").strip()
+        city = (payload.get("city") or payload.get("City") or "").strip()
+        state_gst_code = re.sub(
+            r"\D", "", (payload.get("state_gst_code") or payload.get("StateGstCode") or "")
+        )[:2]
         email = (payload.get("email_id") or payload.get("EmailID") or "").strip() or None
 
         if not name:
@@ -237,19 +262,20 @@ class CustomerRepository:
         if not address1:
             raise ValueError("Address Line 1 is required.")
 
+        self.ensure_schema()
         now = datetime.utcnow()
         result = self.session.execute(
             text(
                 """
                 INSERT INTO CustomerMaster (
                     CustomerName, MobileNumber, PANNumber, AadhaarNumber,
-                    Pincode, AddressLine1, AddressLine2, State, Country, EmailID,
+                    Pincode, AddressLine1, AddressLine2, State, Country, District, City, StateGstCode, EmailID,
                     CustomerStatus, CreatedDate
                 )
                 OUTPUT INSERTED.CustomerID
                 VALUES (
                     :name, :mobile, :pan, :aadhaar,
-                    :pincode, :addr1, :addr2, :state, :country, :email,
+                    :pincode, :addr1, :addr2, :state, :country, :district, :city, :state_gst_code, :email,
                     N'Active', :created
                 )
                 """
@@ -264,6 +290,9 @@ class CustomerRepository:
                 "addr2": (address2 or None),
                 "state": (state or None),
                 "country": (country or "India")[:100],
+                "district": (district[:100] if district else None),
+                "city": (city[:100] if city else None),
+                "state_gst_code": (state_gst_code or None),
                 "email": (email[:255] if email else None),
                 "created": now,
             },

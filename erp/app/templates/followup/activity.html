@@ -533,6 +533,8 @@
   window.FU_DEFAULT_DATE = {{ default_date|tojson }};
   window.FU_BANK_ACCOUNTS = {{ payment_modes|tojson }};
   window.FU_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+  window.FU_PINCODE_LOOKUP = {{ (pincode_lookup_url or '')|tojson }};
+  window.FU_COUNTRIES = {{ (countries or ['India'])|tojson }};
   {% if module_code == 'DSC' %}
   window.FU_API = window.FU_API || {};
   if (!window.FU_API.sync_status) {
@@ -550,5 +552,8 @@
   }
   {% endif %}
 </script>
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260728dsccopy2"></script>
+{% if allow_customer_add %}
+<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
+{% endif %}
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260802gstcode"></script>
 {% endblock %}

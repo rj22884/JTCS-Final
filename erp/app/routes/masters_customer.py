@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from app.customer_master.constants import (
+    COUNTRIES,
     CUSTOMER_STATUSES,
     CUSTOMER_TYPES,
     GENDERS,
@@ -34,8 +35,12 @@ def index():
         "save": url_for("masters_customer.save_record"),
         "delete": url_for("masters_customer.delete_record", customer_id=0),
         "checkDuplicates": url_for("masters_customer.check_duplicates"),
+        "pincodeLookup": url_for("masters_customer.lookup_pincode"),
         "incomeTaxPortalLogin": url_for("masters_customer.income_tax_portal_login"),
         "incomeTaxPortalStatus": url_for("masters_customer.income_tax_portal_status"),
+        "aadhaarEkycStart": url_for("masters_customer.aadhaar_ekyc_start"),
+        "aadhaarEkycStatus": url_for("masters_customer.aadhaar_ekyc_status"),
+        "aadhaarEkycUnlock": url_for("masters_customer.aadhaar_ekyc_unlock"),
     }
     return render_template(
         "masters/customer_master.html",
@@ -46,6 +51,7 @@ def index():
         customer_types=CUSTOMER_TYPES,
         customer_statuses=CUSTOMER_STATUSES,
         genders=GENDERS,
+        countries=COUNTRIES,
         gst_filing_frequencies=GST_FILING_FREQUENCIES,
         group_tabs=ui["group_tabs"],
         tab_labels=TAB_LABELS,
@@ -76,6 +82,17 @@ def get_record(customer_id: int):
         return jsonify({"ok": True, "record": record})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/api/pincode-lookup", strict_slashes=False)
+@login_required
+def lookup_pincode():
+    """Address tab: resolve pincode → country, state, district."""
+    pin = (request.args.get("pincode") or request.args.get("pin") or "").strip()
+    try:
+        return jsonify(CustomerMasterService.lookup_pincode(pin))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @bp.route("/api/check-duplicates", strict_slashes=False)
@@ -184,6 +201,53 @@ def income_tax_portal_status():
     if not job:
         return jsonify({"ok": False, "error": "Sync job not found."}), 404
     return jsonify({"ok": True, "job": job})
+
+
+@bp.route("/api/aadhaar-ekyc/start", methods=["POST"], strict_slashes=False)
+@login_required
+def aadhaar_ekyc_start():
+    """Start watching Downloads for Offline Aadhaar ZIP (no captcha/OTP automation)."""
+    from app.services.aadhaar_offline_ekyc_service import AadhaarOfflineEkycService
+
+    try:
+        return jsonify(AadhaarOfflineEkycService().start_watch())
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Unable to start Aadhaar import: {exc}"}), 500
+
+
+@bp.route("/api/aadhaar-ekyc/status", strict_slashes=False)
+@login_required
+def aadhaar_ekyc_status():
+    from app.services.aadhaar_offline_ekyc_service import AadhaarOfflineEkycService
+
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "job_id is required."}), 400
+    job = AadhaarOfflineEkycService().get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Aadhaar import job not found."}), 404
+    return jsonify({"ok": True, "job": job})
+
+
+@bp.route("/api/aadhaar-ekyc/unlock", methods=["POST"], strict_slashes=False)
+@login_required
+def aadhaar_ekyc_unlock():
+    """Unlock downloaded ZIP with Share Code, parse XML, return form field mapping (no auto-save)."""
+    from app.services.aadhaar_offline_ekyc_service import AadhaarOfflineEkycService
+
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    job_id = (payload.get("job_id") or "").strip()
+    password = payload.get("password") or payload.get("share_code") or ""
+    if not job_id:
+        return jsonify({"ok": False, "error": "job_id is required."}), 400
+    try:
+        return jsonify(AadhaarOfflineEkycService().unlock_and_parse(job_id, password))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Unable to process Aadhaar ZIP: {exc}"}), 500
 
 
 @bp.route("/exit", strict_slashes=False)

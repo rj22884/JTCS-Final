@@ -1,0 +1,212 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmCustomer360Page"
+     data-customer-id="{{ customer_id or '' }}"
+     data-search-api="{{ search_api }}"
+     data-profile-api="{{ url_for('crm_api.customer_360_api', customer_id=0) }}"
+     data-wa-url="{{ wa_url or '' }}">
+  <div class="crm-c360-search-bar position-relative">
+    <div class="flex-grow-1 position-relative crm-c360-search-wrap">
+      <input type="search"
+             class="form-control form-control-sm"
+             id="crmC360Search"
+             placeholder="Search customer by name, mobile, PAN…"
+             autocomplete="off">
+      <div class="dropdown-menu w-100 crm-c360-search-results" id="crmC360SearchResults"></div>
+    </div>
+    {% if customer_id %}
+    <a href="{{ url_for('crm.inbox_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-inbox"></i> Inbox</a>
+    {% if wa_url %}
+    <a href="{{ wa_url }}" class="btn btn-sm btn-outline-success" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> WhatsApp</a>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <div id="crmC360Content" class="crm-c360-sections{% if not data %} d-none{% endif %}">
+    {% if data %}
+    {% set p = data.profile or {} %}
+    <div class="jtcs-card crm-c360-section" id="crmC360Profile">
+      <h2 class="h6 mb-3"><i class="bi bi-person-vcard"></i> Profile</h2>
+      <div class="row g-2 small">
+        <div class="col-md-4"><span class="text-muted">Name</span><br><strong>{{ p.CustomerName or '—' }}</strong></div>
+        <div class="col-md-4"><span class="text-muted">Mobile</span><br>{{ p.MobileNumber or '—' }}</div>
+        <div class="col-md-4"><span class="text-muted">Email</span><br>{{ p.EmailID or '—' }}</div>
+        <div class="col-md-4"><span class="text-muted">PAN</span><br>{{ p.PANNumber or '—' }}</div>
+        <div class="col-md-4"><span class="text-muted">GSTIN</span><br>{{ p.GSTNumber or '—' }}</div>
+        <div class="col-md-4"><span class="text-muted">WhatsApp</span><br>{{ p.WhatsAppNumber or '—' }}</div>
+      </div>
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-chat-dots"></i> Communication</h2>
+      {% if data.conversations %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Subject</th><th>Channel</th><th>Status</th><th>Last Message</th></tr></thead>
+          <tbody>
+            {% for c in data.conversations %}
+            <tr>
+              <td>{{ c.Subject or '—' }}</td>
+              <td>{{ c.Channel or '—' }}</td>
+              <td>{{ c.Status or '—' }}</td>
+              <td>{{ c.LastMessageAt | display_date if c.LastMessageAt else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No conversations.</p>
+      {% endif %}
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-arrow-repeat"></i> ITR / GST / TDS Follow-up Entries</h2>
+      {% if data.followup_entries %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Module</th><th>Period</th><th>Status</th><th>Updated</th></tr></thead>
+          <tbody>
+            {% for e in data.followup_entries %}
+            <tr>
+              <td>{{ e.module or e.Module or '—' }}</td>
+              <td>{{ e.period or e.Period or '—' }}</td>
+              <td>{{ e.status or e.Status or '—' }}</td>
+              <td>{{ e.updated | display_date if e.updated else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No follow-up module entries.</p>
+      {% endif %}
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-receipt"></i> Invoices</h2>
+      {% if data.invoices %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Number</th><th>Date</th><th class="text-end">Amount</th></tr></thead>
+          <tbody>
+            {% for inv in data.invoices %}
+            <tr>
+              <td>{{ inv.InvoiceNumber or inv.invoice_number or '—' }}</td>
+              <td>{{ inv.InvoiceDate | display_date if inv.InvoiceDate else '—' }}</td>
+              <td class="text-end">₹ {{ '%.2f'|format(inv.GrandTotal|float) if inv.GrandTotal is not none else '0.00' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No invoices.</p>
+      {% endif %}
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-currency-rupee"></i> Outstanding</h2>
+      {% set out = data.outstanding or {} %}
+      <div class="row g-2 small">
+        <div class="col-md-4"><span class="text-muted">Total Billed</span><br><strong>₹ {{ '%.2f'|format(out.total_billed|default(0)|float) }}</strong></div>
+        <div class="col-md-4"><span class="text-muted">Total Received</span><br><strong>₹ {{ '%.2f'|format(out.total_received|default(0)|float) }}</strong></div>
+        <div class="col-md-4"><span class="text-muted">Outstanding</span><br><strong class="text-danger">₹ {{ '%.2f'|format(out.outstanding|default(0)|float) }}</strong></div>
+      </div>
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-folder"></i> Documents</h2>
+      {% if data.documents %}
+      <ul class="list-group list-group-flush small">
+        {% for doc in data.documents %}
+        <li class="list-group-item px-0 d-flex justify-content-between">
+          <span>{{ doc.Title or doc.FileName or 'Document' }} <span class="text-muted">({{ doc.FolderType or 'Others' }})</span></span>
+          <span class="text-muted">{{ doc.UploadedDate | display_date if doc.UploadedDate else '' }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-muted small mb-0">No documents.</p>
+      {% endif %}
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-clock-history"></i> Timeline</h2>
+      <ul class="crm-timeline">
+        {% for ev in data.timeline %}
+        <li class="crm-timeline-item">
+          <div class="crm-timeline-title">{{ ev.Title or ev.EventType or 'Event' }}</div>
+          <div class="crm-timeline-meta">{{ ev.CreatedDate | display_date if ev.CreatedDate else '' }}{% if ev.UserName %} · {{ ev.UserName }}{% endif %}</div>
+          {% if ev.Description %}<div class="crm-timeline-desc">{{ ev.Description }}</div>{% endif %}
+        </li>
+        {% else %}
+        <li class="text-muted small">No timeline events.</li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-list-task"></i> Tasks</h2>
+      {% if data.tasks %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Title</th><th>Priority</th><th>Status</th><th>Deadline</th></tr></thead>
+          <tbody>
+            {% for t in data.tasks %}
+            <tr>
+              <td>{{ t.Title or '—' }}</td>
+              <td>{{ t.Priority or '—' }}</td>
+              <td>{{ t.Status or '—' }}</td>
+              <td>{{ t.Deadline | display_date if t.Deadline else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No tasks.</p>
+      {% endif %}
+    </div>
+
+    <div class="jtcs-card crm-c360-section">
+      <h2 class="h6 mb-3"><i class="bi bi-calendar-event"></i> Follow-ups</h2>
+      {% if data.followups %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Type</th><th>Subject</th><th>Due</th><th>Status</th></tr></thead>
+          <tbody>
+            {% for f in data.followups %}
+            <tr>
+              <td>{{ f.FollowUpType or '—' }}</td>
+              <td>{{ f.Subject or '—' }}</td>
+              <td>{{ f.DueAt | display_date if f.DueAt else '—' }}</td>
+              <td>{{ f.Status or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-muted small mb-0">No follow-ups.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="jtcs-card crm-grid-empty{% if data %} d-none{% endif %}" id="crmC360Empty">
+    Search and select a customer to view their 360° profile.
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/customer360.js') }}?v=20260802"></script>
+{% endblock %}

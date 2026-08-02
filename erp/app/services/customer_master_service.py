@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from app.customer_master.constants import (
     GROUP_TABS,
@@ -9,9 +13,14 @@ from app.customer_master.constants import (
     OTHER_TYPE_MANDATORY_FIELDS,
     TAB_LABELS,
 )
+from app.customer_master.gst_state_codes import gst_code_for_state
 from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
+
+logger = logging.getLogger(__name__)
+
+_PINCODE_API = "https://api.postalpincode.in/pincode/{pin}"
 
 
 class DuplicateFieldError(ValueError):
@@ -227,4 +236,49 @@ class CustomerMasterService:
             "other_type_mandatory_fields": sorted(OTHER_TYPE_MANDATORY_FIELDS),
             "other_customer_type": OTHER_CUSTOMER_TYPE,
             "placeholder_pan": CustomerRepository.PLACEHOLDER_PAN,
+        }
+
+    @staticmethod
+    def lookup_pincode(pincode: str | None) -> dict:
+        """Resolve India pincode → country / state / district for Address tab autofill."""
+        pin = re.sub(r"\D", "", pincode or "")
+        if len(pin) != 6:
+            raise ValueError("Enter a valid 6-digit pincode.")
+
+        url = _PINCODE_API.format(pin=pin)
+        req = Request(url, headers={"User-Agent": "JTCS-ERP-CustomerMaster/1.0", "Accept": "application/json"})
+        try:
+            with urlopen(req, timeout=8) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            logger.warning("Pincode lookup failed for %s: %s", pin, exc)
+            raise ValueError("Unable to look up pincode right now. Try again.") from exc
+
+        row = payload[0] if isinstance(payload, list) and payload else {}
+        if str(row.get("Status") or "").lower() != "success":
+            raise ValueError(row.get("Message") or "Pincode not found.")
+
+        offices = row.get("PostOffice") or []
+        if not offices:
+            raise ValueError("Pincode not found.")
+
+        office = offices[0] if isinstance(offices[0], dict) else {}
+        country = (office.get("Country") or "India").strip() or "India"
+        state = (office.get("State") or "").strip()
+        district = (office.get("District") or "").strip()
+        if not state and not district:
+            raise ValueError("Pincode found but address details are incomplete.")
+
+        city = (office.get("Block") or office.get("Division") or office.get("Name") or district or "").strip()
+        gst_code = gst_code_for_state(state)
+
+        return {
+            "ok": True,
+            "pincode": pin,
+            "country": country,
+            "state": state,
+            "district": district,
+            "city": city,
+            "state_gst_code": gst_code,
+            "post_office": (office.get("Name") or "").strip(),
         }

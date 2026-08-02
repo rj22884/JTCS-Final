@@ -1,0 +1,134 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmWorkflowPage"
+     data-api-start="{{ api.start }}"
+     data-api-advance="{{ api.advance }}"
+     data-api-list="{{ api.list }}">
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <div class="jtcs-card">
+        <h2 class="h6 mb-3">Workflow Definitions</h2>
+        {% if definitions %}
+        <div class="accordion accordion-flush" id="crmWorkflowDefs">
+          {% for def in definitions %}
+          <div class="accordion-item">
+            <h3 class="accordion-header">
+              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#crmWfDef{{ def.DefinitionID }}">
+                {{ def.WorkflowName }}
+                <span class="small text-muted ms-2">({{ def.WorkflowCode }})</span>
+              </button>
+            </h3>
+            <div id="crmWfDef{{ def.DefinitionID }}" class="accordion-collapse collapse" data-bs-parent="#crmWorkflowDefs">
+              <div class="accordion-body small py-2">
+                {% if def.Description %}<p class="mb-2">{{ def.Description }}</p>{% endif %}
+                <ol class="mb-2 ps-3">
+                  {% for step in def.steps %}
+                  <li>{{ step.StepName }} <span class="text-muted">({{ step.StepCode }})</span></li>
+                  {% endfor %}
+                </ol>
+                <button type="button"
+                        class="btn btn-sm btn-primary crm-wf-start-btn"
+                        data-code="{{ def.WorkflowCode }}">
+                  <i class="bi bi-play-fill"></i> Start
+                </button>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted small mb-0">No workflow definitions.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="jtcs-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h2 class="h6 mb-0">Active Instances</h2>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="crmWfRefreshBtn">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+          </button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Workflow</th>
+                <th>Step</th>
+                <th>Status</th>
+                <th>Customer / Lead</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="crmWfInstanceBody">
+              {% for inst in instances %}
+              <tr data-instance-id="{{ inst.InstanceID }}">
+                <td>{{ inst.InstanceID }}</td>
+                <td>{{ inst.WorkflowName or inst.WorkflowCode or '—' }}</td>
+                <td>{{ inst.CurrentStepName or inst.CurrentStepCode or '—' }}</td>
+                <td>{{ inst.Status or '—' }}</td>
+                <td>
+                  {% if inst.CustomerID %}C#{{ inst.CustomerID }}{% endif %}
+                  {% if inst.LeadID %}L#{{ inst.LeadID }}{% endif %}
+                  {% if not inst.CustomerID and not inst.LeadID %}—{% endif %}
+                </td>
+                <td class="text-end">
+                  {% if inst.Status != 'Completed' %}
+                  <button type="button" class="btn btn-sm btn-outline-primary crm-wf-advance-btn" data-id="{{ inst.InstanceID }}">
+                    Advance
+                  </button>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="text-muted">No active instances.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmWfStartModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Start Workflow</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="crmWfStartForm">
+        <div class="modal-body">
+          <input type="hidden" id="crmWfStartCode">
+          <div class="mb-2">
+            <label class="form-label" for="crmWfStartCustomerId">Customer ID</label>
+            <input type="number" class="form-control form-control-sm" id="crmWfStartCustomerId" min="1">
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="crmWfStartLeadId">Lead ID</label>
+            <input type="number" class="form-control form-control-sm" id="crmWfStartLeadId" min="1">
+          </div>
+          <div class="alert alert-danger py-2 small d-none" id="crmWfStartError"></div>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Start</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/workflow.js') }}?v=20260802"></script>
+{% endblock %}

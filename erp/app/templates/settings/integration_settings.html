@@ -1,0 +1,185 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260802b">
+{% endblock %}
+
+{% block content %}
+<div class="intset-page"
+     id="intsetPage"
+     data-csrf="{{ csrf_token() }}"
+     data-api-settings="{{ url_for('integration_settings.api_save_settings') }}"
+     data-api-generate-token="{{ url_for('integration_settings.api_generate_verify_token') }}"
+     data-api-test-whatsapp="{{ url_for('integration_settings.api_test_whatsapp_connection') }}"
+     data-api-connect="{{ url_for('integration_settings.api_whatsapp_connect') }}"
+     data-api-pending-step="{{ url_for('integration_settings.api_whatsapp_pending_step') }}"
+     data-api-select-business="{{ url_for('integration_settings.api_whatsapp_select_business') }}"
+     data-api-select-waba="{{ url_for('integration_settings.api_whatsapp_select_waba') }}"
+     data-api-select-phone="{{ url_for('integration_settings.api_whatsapp_select_phone') }}"
+     data-api-token-guide="{{ url_for('integration_settings.api_whatsapp_token_guide') }}">
+
+  <div class="alert intset-alert" id="intsetAlert" role="alert"></div>
+
+  <div class="intset-shell">
+    <ul class="nav intset-tabs" role="tablist">
+      {% for p in providers %}
+      <li class="nav-item" role="presentation">
+        <button class="nav-link {% if loop.first %}active{% endif %}"
+                id="tab-{{ p.code }}"
+                data-bs-toggle="tab"
+                data-bs-target="#pane-{{ p.code }}"
+                type="button"
+                role="tab"
+                aria-controls="pane-{{ p.code }}"
+                aria-selected="{{ 'true' if loop.first else 'false' }}">
+          {{ p.label }}
+        </button>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <div class="tab-content">
+      {% for p in providers %}
+      {% set fv = p['field_values'] %}
+      <div class="tab-pane fade {% if loop.first %}show active{% endif %} intset-pane"
+           id="pane-{{ p.code }}"
+           data-provider-pane="{{ p.code }}"
+           data-initial-status="{{ fv.get('connection_status') or 'Not Configured' }}"
+           data-initial-status-code="{{ p.get('status_code') or 'not_configured' }}"
+           data-initial-missing="{{ (p.get('missing_labels') or [])|join('|') }}"
+           role="tabpanel"
+           aria-labelledby="tab-{{ p.code }}">
+
+        <p class="intset-help">
+          Configure {{ p.label }} credentials for future use.
+          Secrets are encrypted in the database and masked on screen.
+          {% if p.code == 'whatsapp_meta' %}
+          Use <strong>Connect Meta</strong> to auto-discover Business / WABA / Phone details.
+          App Secret and Permanent Access Token remain manual.
+          {% endif %}
+        </p>
+
+        {% if p.code == 'whatsapp_meta' %}
+        <div class="intset-missing {% if not p.get('missing_labels') %}d-none{% endif %}" data-missing-box>
+          <strong>Missing:</strong> <span data-missing-list>{{ (p.get('missing_labels') or [])|join(', ') }}</span>
+        </div>
+        {% endif %}
+
+        <div class="row g-3">
+          {% for field in p.fields %}
+          <div class="col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}">
+            <label class="form-label" for="fld-{{ p.code }}-{{ field.key }}">{{ field.label }}</label>
+            {% if field.input == 'readonly' %}
+              <div>
+                <span class="intset-status"
+                      data-connection-status
+                      id="fld-{{ p.code }}-{{ field.key }}">
+                  {{ fv.get(field.key) or 'Not Configured' }}
+                </span>
+                <input type="hidden"
+                       data-setting-key="{{ field.key }}"
+                       value="{{ fv.get(field.key) or '' }}">
+              </div>
+            {% elif field.input == 'textarea' %}
+              <textarea class="form-control form-control-sm"
+                        id="fld-{{ p.code }}-{{ field.key }}"
+                        data-setting-key="{{ field.key }}"
+                        rows="3">{{ fv.get(field.key) or '' }}</textarea>
+            {% elif field.input == 'password' %}
+              <input type="password"
+                     class="form-control form-control-sm"
+                     id="fld-{{ p.code }}-{{ field.key }}"
+                     data-setting-key="{{ field.key }}"
+                     value="{{ fv.get(field.key) or '' }}"
+                     autocomplete="new-password"
+                     placeholder="Leave unchanged to keep existing secret">
+              <div class="intset-secret-hint">Masked value shown. Enter a new value only to replace.</div>
+            {% else %}
+              <input type="text"
+                     class="form-control form-control-sm"
+                     id="fld-{{ p.code }}-{{ field.key }}"
+                     data-setting-key="{{ field.key }}"
+                     value="{{ fv.get(field.key) or '' }}"
+                     autocomplete="off">
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="intset-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
+            <i class="bi bi-save"></i> Save
+          </button>
+          {% if p.code == 'whatsapp_meta' %}
+          <button type="button" class="btn btn-success btn-sm" data-intset-connect-meta>
+            <i class="bi bi-meta"></i> Connect Meta
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-token-guide>
+            <i class="bi bi-journal-text"></i> Generate Access Token Guide
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-generate-token>
+            <i class="bi bi-key"></i> Generate Verify Token
+          </button>
+          <button type="button" class="btn btn-outline-primary btn-sm" data-intset-test-whatsapp>
+            <i class="bi bi-plug"></i> Test Connection
+          </button>
+          <div class="intset-test-extra">
+            <div class="form-check mb-0">
+              <input class="form-check-input" type="checkbox" id="waSendTestMsg" data-send-test-message>
+              <label class="form-check-label small" for="waSendTestMsg">Send test message</label>
+            </div>
+            <input type="text"
+                   class="form-control form-control-sm"
+                   data-test-to-number
+                   placeholder="Test mobile (E.164)"
+                   autocomplete="off">
+          </div>
+          {% endif %}
+        </div>
+
+        {% if p.code == 'whatsapp_meta' %}
+        <div class="mt-3" data-test-checks></div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# Selection dialog #}
+<div class="modal fade" id="intsetSelectModal" tabindex="-1" aria-labelledby="intsetSelectTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="intsetSelectTitle">Select</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0">
+        <div class="list-group list-group-flush intset-select-list" id="intsetSelectList"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Token guide dialog #}
+<div class="modal fade" id="intsetGuideModal" tabindex="-1" aria-labelledby="intsetGuideTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="intsetGuideTitle">Generate Permanent Access Token</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="intsetGuideBody"></div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260802d"></script>
+{% endblock %}

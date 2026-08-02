@@ -1,0 +1,191 @@
+/* Integration Settings — module stylesheet only */
+
+.intset-page {
+  --intset-border: #d9e2ec;
+  --intset-bg: #f8fafc;
+  --intset-accent: #0b5cab;
+}
+
+.intset-shell {
+  border: 1px solid var(--intset-border);
+  background: #fff;
+  border-radius: 0.35rem;
+}
+
+.intset-tabs {
+  border-bottom: 1px solid var(--intset-border);
+  background: var(--intset-bg);
+  padding: 0.5rem 0.75rem 0;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.intset-tabs .nav-link {
+  border: 1px solid transparent;
+  border-bottom: none;
+  color: #334155;
+  font-size: 0.875rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.3rem 0.3rem 0 0;
+}
+
+.intset-tabs .nav-link.active {
+  background: #fff;
+  border-color: var(--intset-border);
+  color: var(--intset-accent);
+  font-weight: 600;
+}
+
+.intset-pane {
+  padding: 1rem 1.1rem 1.25rem;
+}
+
+.intset-help {
+  font-size: 0.85rem;
+  color: #64748b;
+  margin-bottom: 1rem;
+}
+
+.intset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--intset-border);
+  align-items: center;
+}
+
+.intset-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+}
+
+.intset-status.is-connected {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.intset-status.is-partial {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.intset-status.is-missing,
+.intset-status.is-not-configured {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.intset-missing {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  border-radius: 0.35rem;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: #9f1239;
+}
+
+.intset-missing.d-none {
+  display: none !important;
+}
+
+.intset-secret-hint {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.intset-alert {
+  display: none;
+  margin-bottom: 0.75rem;
+}
+
+.intset-alert.is-visible {
+  display: block;
+}
+
+.intset-checks {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.intset-checks li {
+  margin-bottom: 0.25rem;
+}
+
+.intset-checks .ok {
+  color: #047857;
+}
+
+.intset-checks .bad {
+  color: #b91c1c;
+}
+
+.intset-checks .skip {
+  color: #64748b;
+}
+
+.intset-select-list {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.intset-select-list .list-group-item {
+  cursor: pointer;
+}
+
+.intset-select-list .list-group-item:hover,
+.intset-select-list .list-group-item.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.intset-test-extra {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.intset-test-extra .form-control {
+  max-width: 220px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .intset-page {
+    --intset-border: #334155;
+    --intset-bg: #0f172a;
+    --intset-accent: #60a5fa;
+  }
+
+  .intset-shell,
+  .intset-tabs .nav-link.active {
+    background: #111827;
+    color: #e5e7eb;
+  }
+
+  .intset-tabs .nav-link {
+    color: #cbd5e1;
+  }
+
+  .intset-missing {
+    background: #450a0a;
+    border-color: #7f1d1d;
+    color: #fecaca;
+  }
+
+  .intset-select-list .list-group-item:hover,
+  .intset-select-list .list-group-item.active {
+    background: #1e3a5f;
+    border-color: #1d4ed8;
+    color: #e2e8f0;
+  }
+}

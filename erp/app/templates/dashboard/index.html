@@ -100,6 +100,47 @@
     </div>
   </div>
 
+  {% if crm_widgets %}
+  <div class="row g-2 mb-3" id="dashCrmWidgets">
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.leads_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Today's Leads</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.today_leads }}</strong>
+      </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.notifications_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Unread Notifications</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.unread_notifications }}</strong>
+      </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.inbox_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Unread Messages</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.unread_messages }}</strong>
+      </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.tasks_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Pending Tasks</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.pending_tasks }}</strong>
+      </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.followups_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Upcoming Follow-up</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.pending_followups }}</strong>
+      </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a href="{{ url_for('crm.leads_page') }}" class="jtcs-metric-card w-100 text-decoration-none text-reset">
+        <span class="jtcs-metric-label">Open Leads</span>
+        <strong class="jtcs-metric-value">{{ crm_widgets.open_leads }}</strong>
+      </a>
+    </div>
+  </div>
+  {% endif %}
+
   <div class="row g-2 mb-3" id="dashMetricCards">
     <div class="col-6 col-md-4 col-xl">
       <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"

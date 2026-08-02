@@ -100,6 +100,7 @@
   const customerModal = allowCustomerAdd && els.customerModalEl
     ? new bootstrap.Modal(els.customerModalEl)
     : null;
+  let fuPincodeBinder = null;
   const kdkLoginModal = isItrModule && els.kdkLoginModalEl
     ? new bootstrap.Modal(els.kdkLoginModalEl)
     : null;
@@ -1531,9 +1532,15 @@
         });
         customerModal?.hide();
         els.customerForm.reset();
-        if (els.customerForm.querySelector("#fuCustCountry")) {
-          els.customerForm.querySelector("#fuCustCountry").value = "India";
+        const countryEl = els.customerForm.querySelector("#fuCustCountry");
+        if (countryEl) {
+          if (window.JtcsPincodeAutofill) {
+            window.JtcsPincodeAutofill.ensureSelectValue(countryEl, "India");
+          } else {
+            countryEl.value = "India";
+          }
         }
+        if (fuPincodeBinder && fuPincodeBinder.resetCache) fuPincodeBinder.resetCache();
       })
       .catch(function (err) {
         if (els.customerFormError) {
@@ -1790,11 +1797,30 @@
   });
 
   if (allowCustomerAdd) {
+    if (window.JtcsPincodeAutofill && window.FU_PINCODE_LOOKUP) {
+      fuPincodeBinder = window.JtcsPincodeAutofill.bind({
+        pincode: "fuCustPincode",
+        country: "fuCustCountry",
+        state: "fuCustState",
+        district: "fuCustDistrict",
+        city: "fuCustCity",
+        stateGstCode: "fuCustStateGstCode",
+        apiUrl: window.FU_PINCODE_LOOKUP,
+        lookupOnBind: false,
+      });
+    }
     els.addCustomerBtn?.addEventListener("click", function () {
       if (els.customerForm) {
         els.customerForm.reset();
         const country = document.getElementById("fuCustCountry");
-        if (country) country.value = "India";
+        if (country) {
+          if (window.JtcsPincodeAutofill) {
+            window.JtcsPincodeAutofill.ensureSelectValue(country, "India");
+          } else {
+            country.value = "India";
+          }
+        }
+        if (fuPincodeBinder && fuPincodeBinder.resetCache) fuPincodeBinder.resetCache();
       }
       if (els.customerFormError) {
         els.customerFormError.classList.add("d-none");

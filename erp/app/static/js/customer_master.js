@@ -53,14 +53,21 @@
     aadhaarStepAsk: document.getElementById("cmAadhaarStepAsk"),
     aadhaarStepPortal: document.getElementById("cmAadhaarStepPortal"),
     aadhaarContinueBtn: document.getElementById("cmAadhaarContinueBtn"),
+    aadhaarUnlockBtn: document.getElementById("cmAadhaarUnlockBtn"),
     aadhaarApplyBtn: document.getElementById("cmAadhaarApplyBtn"),
     aadhaarOpenPortalBtn: document.getElementById("cmAadhaarOpenPortalBtn"),
     aadhaarCopyBtn: document.getElementById("cmAadhaarCopyBtn"),
     aadhaarReadyHint: document.getElementById("cmAadhaarReadyHint"),
+    aadhaarStepPassword: document.getElementById("cmAadhaarStepPassword"),
+    aadhaarZipPassword: document.getElementById("cmAadhaarZipPassword"),
+    aadhaarWaitBox: document.getElementById("cmAadhaarWaitBox"),
+    aadhaarPreviewWrap: document.getElementById("cmAadhaarPreviewWrap"),
+    aadhaarPhotoPreview: document.getElementById("cmAadhaarPhotoPreview"),
     aadhaarSyncName: document.getElementById("cmAadhaarSyncName"),
     aadhaarSyncDob: document.getElementById("cmAadhaarSyncDob"),
     aadhaarSyncGender: document.getElementById("cmAadhaarSyncGender"),
     aadhaarSyncAddress: document.getElementById("cmAadhaarSyncAddress"),
+    photoPreview: document.getElementById("cm_photo_preview"),
   };
 
   if (!els.gridBody || !window.CM_API) return;
@@ -73,6 +80,10 @@
   const portals = window.CM_PORTALS || {};
   let itCredentials = { userId: "", password: "" };
   let aadhaarSyncValue = "";
+  let aadhaarJobId = "";
+  let aadhaarPollTimer = null;
+  let aadhaarParsedData = null;
+  let aadhaarPhotoUrl = "";
   const groupTabs = window.CM_GROUP_TABS || {};
   const tabLabels = window.CM_TAB_LABELS || {};
   const mandatoryFields = new Set(window.CM_MANDATORY || []);
@@ -523,8 +534,69 @@
   }
 
   function openAadhaarPortal() {
-    const url = portals.aadhaarPortal || "https://myaadhaar.uidai.gov.in/";
+    const url = portals.aadhaarPortal || "https://myaadhaar.uidai.gov.in/offline-ekyc";
     window.open(url, "cmAadhaarPortal", "noopener,noreferrer,width=1100,height=800");
+  }
+
+  function stopAadhaarPoll() {
+    if (aadhaarPollTimer) {
+      clearInterval(aadhaarPollTimer);
+      aadhaarPollTimer = null;
+    }
+  }
+
+  function showAadhaarError(message) {
+    if (!els.aadhaarSyncError) return;
+    if (!message) {
+      els.aadhaarSyncError.classList.add("d-none");
+      els.aadhaarSyncError.textContent = "";
+      return;
+    }
+    els.aadhaarSyncError.textContent = message;
+    els.aadhaarSyncError.classList.remove("d-none");
+  }
+
+  function setCustomerPhotoPreview(url) {
+    const src = url || "";
+    if (els.aadhaarPhotoPreview) {
+      if (src) {
+        els.aadhaarPhotoPreview.src = src;
+        els.aadhaarPreviewWrap?.classList.remove("d-none");
+      } else {
+        els.aadhaarPhotoPreview.removeAttribute("src");
+        els.aadhaarPreviewWrap?.classList.add("d-none");
+      }
+    }
+    if (els.photoPreview) {
+      if (src) {
+        els.photoPreview.src = src;
+        els.photoPreview.classList.remove("d-none");
+      } else {
+        els.photoPreview.removeAttribute("src");
+        els.photoPreview.classList.add("d-none");
+      }
+    }
+  }
+
+  function applyAadhaarMappedFields(data) {
+    if (!data || typeof data !== "object") return 0;
+    let count = 0;
+    Object.keys(data).forEach(function (key) {
+      const value = data[key];
+      if (value == null || String(value).trim() === "") return;
+      const field = document.getElementById("cm_" + key);
+      if (!field) return;
+      if (field.tagName === "SELECT" && key === "country" && window.JtcsPincodeAutofill) {
+        window.JtcsPincodeAutofill.ensureSelectValue(field, value);
+      } else {
+        field.value = value;
+      }
+      count += 1;
+    });
+    if (data.pincode && typeof refreshPincodeIntegration === "function") {
+      refreshPincodeIntegration();
+    }
+    return count;
   }
 
   function openItCredentialsModal() {
@@ -576,22 +648,27 @@
   }
 
   function resetAadhaarModal() {
-    if (els.aadhaarSyncError) {
-      els.aadhaarSyncError.classList.add("d-none");
-      els.aadhaarSyncError.textContent = "";
-    }
+    stopAadhaarPoll();
+    aadhaarJobId = "";
+    aadhaarParsedData = null;
+    aadhaarPhotoUrl = "";
+    showAadhaarError("");
     els.aadhaarStepAsk?.classList.remove("d-none");
     els.aadhaarStepPortal?.classList.add("d-none");
+    els.aadhaarStepPassword?.classList.add("d-none");
     els.aadhaarContinueBtn?.classList.remove("d-none");
+    els.aadhaarUnlockBtn?.classList.add("d-none");
     els.aadhaarApplyBtn?.classList.add("d-none");
+    if (els.aadhaarZipPassword) els.aadhaarZipPassword.value = "";
     if (els.aadhaarSyncNumber) {
-      els.aadhaarSyncNumber.value = aadhaarSyncValue || getFieldValue("aadhaar_number") || "";
+      els.aadhaarSyncNumber.value = getFieldValue("aadhaar_number") || "";
     }
-    if (els.aadhaarSyncName) els.aadhaarSyncName.value = "";
-    if (els.aadhaarSyncDob) els.aadhaarSyncDob.value = "";
-    if (els.aadhaarSyncGender) els.aadhaarSyncGender.value = "";
-    if (els.aadhaarSyncAddress) els.aadhaarSyncAddress.value = "";
     if (els.aadhaarReadyHint) els.aadhaarReadyHint.textContent = "";
+    if (els.aadhaarWaitBox) {
+      els.aadhaarWaitBox.innerHTML =
+        "<strong>Waiting for ZIP download…</strong> On UIDAI: enter Aadhaar, CAPTCHA, OTP, Share Code, then click <em>Download</em>. Do not close this dialog.";
+    }
+    els.aadhaarPreviewWrap?.classList.add("d-none");
   }
 
   function openAadhaarSyncModal() {
@@ -599,54 +676,193 @@
     aadhaarSyncModal?.show();
   }
 
+  function pollAadhaarJob(jobId) {
+    const statusUrl = (window.CM_API && window.CM_API.aadhaarEkycStatus) || "";
+    if (!statusUrl || !jobId) return;
+    stopAadhaarPoll();
+    let tries = 0;
+    aadhaarPollTimer = setInterval(function () {
+      tries += 1;
+      fetch(statusUrl + "?job_id=" + encodeURIComponent(jobId), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      })
+        .then(function (res) {
+          return res.json();
+        })
+        .then(function (payload) {
+          if (!payload.ok || !payload.job) return;
+          const job = payload.job;
+          if (els.aadhaarReadyHint) els.aadhaarReadyHint.textContent = job.message || "";
+          if (job.status === "need_password") {
+            stopAadhaarPoll();
+            els.aadhaarStepPassword?.classList.remove("d-none");
+            els.aadhaarUnlockBtn?.classList.remove("d-none");
+            if (els.aadhaarWaitBox) {
+              els.aadhaarWaitBox.innerHTML =
+                "<strong>ZIP detected:</strong> " +
+                (job.zip_name || "Aadhaar ZIP") +
+                ". Enter Share Code (ZIP password), then Unlock.";
+            }
+            setSyncStatus("Aadhaar ZIP detected. Enter Share Code.");
+          } else if (job.status === "done") {
+            stopAadhaarPoll();
+            aadhaarParsedData = job.data || null;
+            aadhaarPhotoUrl = job.photo_url || "";
+            setCustomerPhotoPreview(aadhaarPhotoUrl);
+            els.aadhaarUnlockBtn?.classList.add("d-none");
+            els.aadhaarApplyBtn?.classList.remove("d-none");
+            setSyncStatus(job.message || "Aadhaar XML ready. Apply to form.");
+          } else if (job.status === "error") {
+            stopAadhaarPoll();
+            showAadhaarError(job.message || "Aadhaar import failed.");
+            setSyncStatus(job.message || "Aadhaar import failed.", true);
+          }
+        })
+        .catch(function () {
+          if (tries >= 200) {
+            stopAadhaarPoll();
+            showAadhaarError("Timed out waiting for ZIP download.");
+          }
+        });
+      if (tries >= 200) {
+        stopAadhaarPoll();
+        showAadhaarError("Timed out waiting for ZIP download.");
+      }
+    }, 1500);
+  }
+
   function continueAadhaarToPortal() {
     const aadhaar = (els.aadhaarSyncNumber?.value || "").replace(/\D/g, "");
     if (aadhaar.length !== 12) {
-      if (els.aadhaarSyncError) {
-        els.aadhaarSyncError.textContent = "Valid 12-digit Aadhaar number is required.";
-        els.aadhaarSyncError.classList.remove("d-none");
-      }
+      showAadhaarError("Valid 12-digit Aadhaar number is required.");
       return;
     }
+    showAadhaarError("");
     aadhaarSyncValue = aadhaar;
+    // Keep on form for review/save; not logged server-side by eKYC APIs.
     setFieldValue("aadhaar_number", aadhaar);
-    els.aadhaarStepAsk?.classList.add("d-none");
-    els.aadhaarStepPortal?.classList.remove("d-none");
-    els.aadhaarContinueBtn?.classList.add("d-none");
-    els.aadhaarApplyBtn?.classList.remove("d-none");
-    if (els.aadhaarReadyHint) {
-      els.aadhaarReadyHint.textContent = "Aadhaar " + aadhaar + " ready — complete captcha on portal.";
+
+    const startUrl = (window.CM_API && window.CM_API.aadhaarEkycStart) || "";
+    if (!startUrl) {
+      showAadhaarError("Aadhaar eKYC API is not configured.");
+      return;
     }
-    copyText(aadhaar)
-      .then(function () {
-        setSyncStatus("Aadhaar copied. Portal opening — complete captcha, then apply details.");
+    els.aadhaarContinueBtn.disabled = true;
+    fetch(startUrl, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken(),
+      },
+      body: JSON.stringify({}),
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to start Aadhaar watch.");
+          return data;
+        });
       })
-      .catch(function () {
-        setSyncStatus("Aadhaar saved on form. Open portal and enter number, then captcha.");
+      .then(function (data) {
+        aadhaarJobId = data.job_id || "";
+        if (data.portal_url) portals.aadhaarPortal = data.portal_url;
+        els.aadhaarStepAsk?.classList.add("d-none");
+        els.aadhaarStepPortal?.classList.remove("d-none");
+        els.aadhaarContinueBtn?.classList.add("d-none");
+        if (els.aadhaarReadyHint) {
+          els.aadhaarReadyHint.textContent = "Waiting for Offline Aadhaar ZIP in Downloads…";
+        }
+        copyText(aadhaar).catch(function () {});
+        setSyncStatus("Offline eKYC portal opening. Complete CAPTCHA/OTP, then Download.");
+        openAadhaarPortal();
+        pollAadhaarJob(aadhaarJobId);
+      })
+      .catch(function (err) {
+        showAadhaarError(err.message || "Unable to start Aadhaar import.");
+      })
+      .finally(function () {
+        els.aadhaarContinueBtn.disabled = false;
       });
-    openAadhaarPortal();
+  }
+
+  function unlockAadhaarZip() {
+    const password = (els.aadhaarZipPassword?.value || "").trim();
+    if (!password) {
+      showAadhaarError("ZIP password (Share Code) is required.");
+      return;
+    }
+    if (!aadhaarJobId) {
+      showAadhaarError("Import session expired. Start again.");
+      return;
+    }
+    showAadhaarError("");
+    const unlockUrl = (window.CM_API && window.CM_API.aadhaarEkycUnlock) || "";
+    if (!unlockUrl) return;
+    els.aadhaarUnlockBtn.disabled = true;
+    fetch(unlockUrl, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken(),
+      },
+      body: JSON.stringify({ job_id: aadhaarJobId, password: password }),
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to unlock ZIP.");
+          return data;
+        });
+      })
+      .then(function (data) {
+        aadhaarParsedData = data.data || null;
+        aadhaarPhotoUrl = data.photo_url || "";
+        setCustomerPhotoPreview(aadhaarPhotoUrl);
+        els.aadhaarUnlockBtn?.classList.add("d-none");
+        els.aadhaarApplyBtn?.classList.remove("d-none");
+        if (els.aadhaarZipPassword) els.aadhaarZipPassword.value = "";
+        setSyncStatus(data.message || "Aadhaar XML read successfully.");
+      })
+      .catch(function (err) {
+        showAadhaarError(err.message || "Wrong password or invalid ZIP.");
+        setSyncStatus(err.message || "Unable to unlock Aadhaar ZIP.", true);
+      })
+      .finally(function () {
+        els.aadhaarUnlockBtn.disabled = false;
+      });
   }
 
   function applyAadhaarSyncToForm() {
+    // Never clear the whole form — only overwrite fields present in XML mapping.
     if (aadhaarSyncValue) setFieldValue("aadhaar_number", aadhaarSyncValue);
-    const name = (els.aadhaarSyncName?.value || "").trim();
-    const dob = els.aadhaarSyncDob?.value || "";
-    const gender = els.aadhaarSyncGender?.value || "";
-    const address = (els.aadhaarSyncAddress?.value || "").trim();
-    if (name) setFieldValue("customer_name", name);
-    if (dob) setFieldValue("date_of_birth", dob);
-    if (gender) setFieldValue("gender", gender);
-    if (address) setFieldValue("address_line1", address);
-    setSyncStatus("Aadhaar details applied to customer form.");
+    const data = aadhaarParsedData || {};
+    const n = applyAadhaarMappedFields(data);
+    if (aadhaarPhotoUrl) setCustomerPhotoPreview(aadhaarPhotoUrl);
+    setSyncStatus(
+      n
+        ? "Aadhaar Offline eKYC applied (" + n + " field(s)). Review, then Save Customer."
+        : "No Aadhaar fields to apply."
+    );
     aadhaarSyncModal?.hide();
+    stopAadhaarPoll();
   }
 
   function clearForm() {
     resetSyncState();
+    if (typeof cmPincodeBinder !== "undefined" && cmPincodeBinder) {
+      if (cmPincodeBinder.unlock) cmPincodeBinder.unlock();
+      if (cmPincodeBinder.resetCache) cmPincodeBinder.resetCache();
+    }
     els.form?.querySelectorAll("[data-cm-field]").forEach(function (field) {
+      field.classList.remove("cm-integrated-locked");
       if (field.tagName === "SELECT") {
         field.selectedIndex = 0;
+        field.disabled = false;
       } else {
+        field.readOnly = false;
         field.value = "";
       }
       field.classList.remove("cm-field-error");
@@ -656,6 +872,14 @@
     if (els.customerGroup) els.customerGroup.value = "";
     const statusField = document.getElementById("cm_customer_status");
     if (statusField) statusField.value = "Active";
+    const countryField = document.getElementById("cm_country");
+    if (countryField) {
+      if (window.JtcsPincodeAutofill) {
+        window.JtcsPincodeAutofill.ensureSelectValue(countryField, "India");
+      } else {
+        countryField.value = "India";
+      }
+    }
     if (els.tabNav) els.tabNav.innerHTML = "";
     els.formPanels?.querySelectorAll(".cm-tab-panel").forEach(function (p) {
       p.classList.add("d-none");
@@ -685,6 +909,8 @@
       if (val == null) return;
       if (field.type === "date") {
         field.value = String(val).slice(0, 10);
+      } else if (field.tagName === "SELECT" && key === "country" && window.JtcsPincodeAutofill) {
+        window.JtcsPincodeAutofill.ensureSelectValue(field, val || "India");
       } else {
         field.value = val;
       }
@@ -701,6 +927,13 @@
     }
     syncMandatoryMarkers();
     syncFilingFrequencyVisibility();
+    refreshPincodeIntegration();
+    if (record.photo_path) {
+      const rel = String(record.photo_path).replace(/^\/?static\//, "");
+      setCustomerPhotoPreview("/static/" + rel.replace(/^\//, ""));
+    } else {
+      setCustomerPhotoPreview("");
+    }
   }
 
   function openNew() {
@@ -708,6 +941,7 @@
     if (els.modalTitle) els.modalTitle.textContent = "New Customer";
     if (els.displayId) els.displayId.value = "Auto";
     syncMandatoryMarkers();
+    if (cmPincodeBinder) cmPincodeBinder.resetCache();
     modal?.show();
   }
 
@@ -998,6 +1232,7 @@
     });
   });
   els.aadhaarContinueBtn?.addEventListener("click", continueAadhaarToPortal);
+  els.aadhaarUnlockBtn?.addEventListener("click", unlockAadhaarZip);
   els.aadhaarOpenPortalBtn?.addEventListener("click", function () {
     if (aadhaarSyncValue) {
       copyText(aadhaarSyncValue).catch(function () {});
@@ -1012,6 +1247,9 @@
     );
   });
   els.aadhaarApplyBtn?.addEventListener("click", applyAadhaarSyncToForm);
+  els.aadhaarSyncModalEl?.addEventListener("hidden.bs.modal", function () {
+    stopAadhaarPoll();
+  });
 
   syncFilingFrequencyVisibility();
   els.form?.querySelectorAll('[data-cm-field="gst_number"]').forEach(function (field) {
@@ -1026,6 +1264,30 @@
       });
     });
   });
+
+  // Address tab: pincode + country → state / district / city / GST code (locked)
+  var cmPincodeBinder = null;
+  function refreshPincodeIntegration() {
+    if (!cmPincodeBinder) return;
+    cmPincodeBinder.resetCache();
+    const pin = getFieldValue("pincode").replace(/\D/g, "");
+    const country = getFieldValue("country") || "India";
+    if (pin.length === 6 && country.toLowerCase() === "india") {
+      cmPincodeBinder.lookup();
+    }
+  }
+  if (window.JtcsPincodeAutofill && window.CM_API && window.CM_API.pincodeLookup) {
+    cmPincodeBinder = window.JtcsPincodeAutofill.bind({
+      pincode: "cm_pincode",
+      country: "cm_country",
+      state: "cm_state",
+      district: "cm_district",
+      city: "cm_city",
+      stateGstCode: "cm_state_gst_code",
+      apiUrl: window.CM_API.pincodeLookup,
+      lookupOnBind: false,
+    });
+  }
 
   renderGrid(rows);
 })();

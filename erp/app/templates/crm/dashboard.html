@@ -1,0 +1,61 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page crm-dashboard">
+  <div class="crm-dash-widgets">
+    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-person-plus"></i></span>
+      <span class="crm-widget-label">Today's Leads</span>
+      <span class="crm-widget-value">{{ stats.today_leads|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-funnel"></i></span>
+      <span class="crm-widget-label">Open Leads</span>
+      <span class="crm-widget-value">{{ stats.open_leads|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget crm-widget--success">
+      <span class="crm-widget-icon"><i class="bi bi-check-circle"></i></span>
+      <span class="crm-widget-label">Converted</span>
+      <span class="crm-widget-value">{{ stats.converted|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.inbox_page') }}" class="crm-widget crm-widget--warning">
+      <span class="crm-widget-icon"><i class="bi bi-chat-dots"></i></span>
+      <span class="crm-widget-label">Unread Messages</span>
+      <span class="crm-widget-value">{{ unread_msgs|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.notifications_page') }}" class="crm-widget crm-widget--warning">
+      <span class="crm-widget-icon"><i class="bi bi-bell"></i></span>
+      <span class="crm-widget-label">Unread Notifications</span>
+      <span class="crm-widget-value">{{ unread_notif|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.tasks_page') }}" class="crm-widget crm-widget--danger">
+      <span class="crm-widget-icon"><i class="bi bi-list-task"></i></span>
+      <span class="crm-widget-label">Pending Tasks</span>
+      <span class="crm-widget-value">{{ pending_tasks|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.followups_page') }}" class="crm-widget crm-widget--danger">
+      <span class="crm-widget-icon"><i class="bi bi-calendar-event"></i></span>
+      <span class="crm-widget-label">Pending Follow-ups</span>
+      <span class="crm-widget-value">{{ pending_followups|default(0) }}</span>
+    </a>
+  </div>
+
+  <div class="jtcs-card">
+    <h2 class="h6 mb-3">Quick Links</h2>
+    <div class="crm-quick-links">
+      <a href="{{ url_for('crm.inbox_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-inbox"></i> Inbox</a>
+      <a href="{{ url_for('crm.customer_360') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-vcard"></i> Customer 360</a>
+      <a href="{{ url_for('crm.documents_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-folder"></i> Documents</a>
+      <a href="{{ url_for('crm.calendar_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar3"></i> Calendar</a>
+      <a href="{{ url_for('crm.analytics_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-graph-up"></i> Analytics</a>
+      <a href="{{ url_for('crm.workflow_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-diagram-3"></i> Workflow</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

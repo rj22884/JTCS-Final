@@ -1,0 +1,29 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmCalendarPage" data-api-events="{{ api }}">
+  <div class="jtcs-card">
+    <div class="crm-toolbar">
+      <label class="small text-muted mb-0" for="crmCalFrom">From</label>
+      <input type="date" class="form-control form-control-sm crm-field-sm" id="crmCalFrom">
+      <label class="small text-muted mb-0" for="crmCalTo">To</label>
+      <input type="date" class="form-control form-control-sm crm-field-sm" id="crmCalTo">
+      <button type="button" class="btn btn-sm btn-outline-primary" id="crmCalLoadBtn">
+        <i class="bi bi-calendar3"></i> Load Events
+      </button>
+    </div>
+    <div id="crmCalEventList"></div>
+    <div class="crm-grid-empty d-none" id="crmCalEmpty">No events in this range.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/calendar.js') }}?v=20260802"></script>
+{% endblock %}

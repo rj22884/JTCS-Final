@@ -11,6 +11,10 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/erp.css') }}?v=20260731dialog" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/hotkey.css') }}?v=20260719" rel="stylesheet">
+  {% if session.get('user_id') %}
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802" rel="stylesheet">
+  {% endif %}
   {% block extra_css %}{% endblock %}
 </head>
 <body class="jtcs-body">
@@ -146,6 +150,9 @@
 <script src="{{ url_for('static', filename='js/hotkey.js') }}?v=20260722altn"></script>
 {% if session.get('user_id') %}
 <script src="{{ url_for('static', filename='js/delete_confirm.js') }}?v=20260719a"></script>
+<script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260802"></script>
+<script src="{{ url_for('static', filename='js/notifications/poll.js') }}?v=20260802"></script>
+<script src="{{ url_for('static', filename='js/crm/global_search.js') }}?v=20260802a"></script>
 {% endif %}
 {% block extra_js %}{% endblock %}
 </body>
