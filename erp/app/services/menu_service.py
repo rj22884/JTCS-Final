@@ -138,10 +138,18 @@ class MenuService:
         url = (getattr(menu, "MenuURL", None) or "").strip().lower()
         parent_id = getattr(menu, "ParentMenuID", None)
 
-        if name in {"crm", "exceptional report", "stamp exception", "e-court exception", "logout", "log out"}:
+        # Parent "Exceptional Report" stays hidden; Stamp / e-Court Exception
+        # are shown under Reports and Analysis (existing module URLs kept).
+        if name in {"crm", "exceptional report", "logout", "log out"}:
             return True
         if url.startswith("/crm/") or url == "/crm":
             return True
+        allowed_exception_urls = {
+            "/exceptional-report/stamp-certificate",
+            "/exceptional-report/ecourt-exception",
+        }
+        if url in allowed_exception_urls:
+            return False
         if url.startswith("/exceptional-report/") or url == "/exceptional-report":
             return True
         if url in {"/logout", "/auth/logout"}:

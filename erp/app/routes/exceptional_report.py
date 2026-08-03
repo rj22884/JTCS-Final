@@ -15,42 +15,173 @@ _MENU_ENSURED = False
 
 
 def _ensure_exceptional_report_menus() -> None:
-    """Hide Exceptional Report menu tree from navigation (rows kept, IsActive = 0)."""
+    """Move Stamp / e-Court Exception under Reports and Analysis (after Ledger Report).
+
+    Keeps existing module URLs. Hides only the old Exceptional Report parent.
+    Does not change or remove any other menus.
+    """
     global _MENU_ENSURED
     if _MENU_ENSURED:
         return
     db.session.execute(
         text(
             """
-            DECLARE @ParentID INT;
+            DECLARE @ReportsID INT;
+            DECLARE @LedgerOrder INT;
+            DECLARE @StampOrder INT;
+            DECLARE @EcourtOrder INT;
+            DECLARE @ReportsOrder INT = (
+                SELECT TOP 1 DisplayOrder FROM dbo.MenuMaster
+                WHERE MenuName IN (N'Reports', N'Reports and Analysis', N'Reports & Analysis')
+                  AND ParentMenuID IS NULL
+                ORDER BY MenuID
+            );
 
-            SELECT TOP 1 @ParentID = MenuID
-            FROM dbo.MenuMaster
+            /* Hide old Exceptional Report parent only (children are relocated below) */
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0,
+                Description = N'Exceptional and special reports (hidden from nav; children under Reports and Analysis)'
             WHERE MenuName = N'Exceptional Report'
-              AND ParentMenuID IS NULL
+              AND ParentMenuID IS NULL;
+
+            SELECT TOP 1 @ReportsID = MenuID
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID IS NULL
+              AND (
+                    MenuURL = N'/Reports_and_analysis'
+                 OR MenuName IN (
+                        N'Reports and Analysis',
+                        N'Reports & Analysis',
+                        N'Reports_and_analysis'
+                    )
+              )
             ORDER BY MenuID;
 
-            IF @ParentID IS NOT NULL
+            IF @ReportsID IS NULL
             BEGIN
-                UPDATE dbo.MenuMaster
-                SET IsActive = 0,
-                    Description = N'Exceptional and special reports (hidden from nav)'
-                WHERE MenuID = @ParentID;
-
-                UPDATE dbo.MenuMaster
-                SET IsActive = 0
-                WHERE ParentMenuID = @ParentID
-                   OR MenuURL LIKE N'/exceptional-report/%'
-                   OR MenuName IN (N'Stamp Exception', N'e-Court Exception', N'Stamp Certificate Reconciliation');
+                INSERT INTO dbo.MenuMaster (
+                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+                    Description, IsActive, RoleName
+                )
+                VALUES (
+                    NULL,
+                    N'Reports and Analysis',
+                    N'bi-graph-up',
+                    NULL,
+                    ISNULL(@ReportsOrder, 50),
+                    N'Reports and analysis',
+                    1,
+                    NULL
+                );
+                SET @ReportsID = SCOPE_IDENTITY();
             END
             ELSE
-            BEGIN
-                /* No parent row — still hide any orphan exceptional-report links */
+                UPDATE dbo.MenuMaster SET IsActive = 1 WHERE MenuID = @ReportsID;
+
+            SELECT @LedgerOrder = MAX(DisplayOrder)
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID = @ReportsID
+              AND (
+                    MenuURL = N'/Reports_and_analysis/ledger_report'
+                 OR MenuName = N'Ledger Report'
+              );
+
+            SET @StampOrder = ISNULL(@LedgerOrder, 10) + 10;
+            SET @EcourtOrder = @StampOrder + 10;
+
+            /* Stamp Exception → Reports and Analysis (after Ledger Report) */
+            IF EXISTS (
+                SELECT 1 FROM dbo.MenuMaster
+                WHERE MenuURL = N'/exceptional-report/stamp-certificate'
+                   OR MenuName IN (N'Stamp Exception', N'Stamp Certificate Reconciliation')
+            )
                 UPDATE dbo.MenuMaster
-                SET IsActive = 0
-                WHERE MenuURL LIKE N'/exceptional-report/%'
-                   OR MenuName IN (N'Stamp Exception', N'e-Court Exception', N'Stamp Certificate Reconciliation');
-            END;
+                SET ParentMenuID = @ReportsID,
+                    MenuName = N'Stamp Exception',
+                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-file-earmark-spreadsheet'),
+                    MenuURL = N'/exceptional-report/stamp-certificate',
+                    DisplayOrder = @StampOrder,
+                    Description = N'SHCIL stamp certificate reconciliation',
+                    IsActive = 1,
+                    RoleName = NULL
+                WHERE MenuURL = N'/exceptional-report/stamp-certificate'
+                   OR MenuName IN (N'Stamp Exception', N'Stamp Certificate Reconciliation');
+            ELSE
+                INSERT INTO dbo.MenuMaster (
+                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+                    Description, IsActive, RoleName
+                )
+                VALUES (
+                    @ReportsID,
+                    N'Stamp Exception',
+                    N'bi-file-earmark-spreadsheet',
+                    N'/exceptional-report/stamp-certificate',
+                    @StampOrder,
+                    N'SHCIL stamp certificate reconciliation',
+                    1,
+                    NULL
+                );
+
+            /* e-Court Exception → Reports and Analysis (after Stamp Exception) */
+            IF EXISTS (
+                SELECT 1 FROM dbo.MenuMaster
+                WHERE MenuURL = N'/exceptional-report/ecourt-exception'
+                   OR MenuName IN (N'e-Court Exception', N'E-Court Exception')
+            )
+                UPDATE dbo.MenuMaster
+                SET ParentMenuID = @ReportsID,
+                    MenuName = N'e-Court Exception',
+                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-check'),
+                    MenuURL = N'/exceptional-report/ecourt-exception',
+                    DisplayOrder = @EcourtOrder,
+                    Description = N'e-Court exceptional report',
+                    IsActive = 1,
+                    RoleName = NULL
+                WHERE MenuURL = N'/exceptional-report/ecourt-exception'
+                   OR MenuName IN (N'e-Court Exception', N'E-Court Exception');
+            ELSE
+                INSERT INTO dbo.MenuMaster (
+                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+                    Description, IsActive, RoleName
+                )
+                VALUES (
+                    @ReportsID,
+                    N'e-Court Exception',
+                    N'bi-journal-check',
+                    N'/exceptional-report/ecourt-exception',
+                    @EcourtOrder,
+                    N'e-Court exceptional report',
+                    1,
+                    NULL
+                );
+
+            /* Hide any other leftover /exceptional-report/* links (not the two above) */
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0
+            WHERE MenuURL LIKE N'/exceptional-report/%'
+              AND MenuURL NOT IN (
+                    N'/exceptional-report/stamp-certificate',
+                    N'/exceptional-report/ecourt-exception'
+              );
+
+            /* Keep a single active row per exception URL (dedupe legacy seeds) */
+            ;WITH d AS (
+                SELECT MenuID,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY MenuURL
+                           ORDER BY MenuID
+                       ) AS rn
+                FROM dbo.MenuMaster
+                WHERE MenuURL IN (
+                    N'/exceptional-report/stamp-certificate',
+                    N'/exceptional-report/ecourt-exception'
+                )
+            )
+            UPDATE m
+            SET IsActive = 0
+            FROM dbo.MenuMaster m
+            INNER JOIN d ON d.MenuID = m.MenuID
+            WHERE d.rn > 1;
             """
         )
     )

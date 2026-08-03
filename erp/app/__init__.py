@@ -190,14 +190,6 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.info("SMTP startup health check running in background…")
 
         try:
-            from app.routes.exceptional_report import _ensure_exceptional_report_menus
-
-            _ensure_exceptional_report_menus()
-        except Exception as exc:
-            db.session.rollback()
-            app.logger.warning("Exceptional Report menu ensure skipped: %s", exc)
-
-        try:
             from app.routes.backup import ensure_backup_menus
 
             ensure_backup_menus()
@@ -244,6 +236,15 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Ledger Report menu ensure skipped: %s", exc)
+
+        # After Ledger Report so Stamp / e-Court Exception sit after it under Reports.
+        try:
+            from app.routes.exceptional_report import _ensure_exceptional_report_menus
+
+            _ensure_exceptional_report_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Exception report menus ensure skipped: %s", exc)
 
     @app.before_request
     def enforce_initial_setup():
