@@ -143,6 +143,7 @@ def create_app(config_class: type = Config) -> Flask:
 
         try:
             from app.modules.shared.schema import (
+                ensure_activities_shcil_menus,
                 ensure_crm_menus,
                 ensure_crm_schema,
                 ensure_erp_core_nav_menus,
@@ -151,6 +152,7 @@ def create_app(config_class: type = Config) -> Flask:
             ensure_crm_schema()
             ensure_crm_menus()
             ensure_erp_core_nav_menus()
+            ensure_activities_shcil_menus()
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("CRM/core nav menu ensure skipped: %s", exc)
