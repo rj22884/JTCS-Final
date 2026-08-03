@@ -447,15 +447,16 @@ force_ui_refresh() {
   fi
   git -C "$ROOT" push -u origin HEAD || { fail "Push failed"; return; }
   pass "Pushed"
-  info "Running force_ui_refresh.sh on VPS…"
+  info "Sync scripts on VPS then run force_ui_refresh.sh…"
   local logf="${LOG_DIR}/ui_refresh_$$.log"
+  local remote_cmd="cd '$VPS_PATH' && ENV_BAK=/tmp/jtcs.env.bak.\$\$ && if [ -f erp/.env ]; then cp erp/.env \$ENV_BAK; fi && git fetch origin $LOCAL_BRANCH && git checkout -B $LOCAL_BRANCH origin/$LOCAL_BRANCH && git reset --hard origin/$LOCAL_BRANCH && if [ -f \$ENV_BAK ]; then cp \$ENV_BAK erp/.env; rm -f \$ENV_BAK; fi && test -f deployment/force_ui_refresh.sh && export BRANCH='$LOCAL_BRANCH' VPS_APP_DIR='$VPS_PATH' GIT_BRANCH='$LOCAL_BRANCH' && bash deployment/force_ui_refresh.sh"
   if [[ "$ON_VPS" -eq 1 ]]; then
-    (cd "$VPS_PATH" && export BRANCH="$LOCAL_BRANCH" VPS_APP_DIR="$VPS_PATH" GIT_BRANCH="$LOCAL_BRANCH" && bash deployment/force_ui_refresh.sh) 2>&1 | tee "$logf"
+    bash -lc "$remote_cmd" 2>&1 | tee "$logf"
   else
     require_ssh || return
     ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new \
       "${VPS_USER}@${VPS_HOST}" \
-      "cd '$VPS_PATH' && export BRANCH='$LOCAL_BRANCH' VPS_APP_DIR='$VPS_PATH' GIT_BRANCH='$LOCAL_BRANCH' && bash deployment/force_ui_refresh.sh" \
+      "$remote_cmd" \
       2>&1 | tee "$logf"
   fi
   if grep -q '===UI_REFRESH:SUCCESS===' "$logf"; then

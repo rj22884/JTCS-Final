@@ -734,10 +734,11 @@ if errorlevel 1 (
 )
 call :pass "Pushed origin/!LOCAL_BRANCH!"
 
-echo %C_CYAN%Step 2/3%C_RESET% VPS force_ui_refresh.sh
+echo %C_CYAN%Step 2/3%C_RESET% Sync new scripts on VPS then force_ui_refresh.sh
 set "UI_LOG=%LOG_DIR%\ui_refresh_%RANDOM%.log"
 echo Enter VPS password when asked.
-ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/force_ui_refresh.sh" > "%UI_LOG%" 2>&1
+REM First pull so force_ui_refresh.sh exists on VPS, then run it.
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && ENV_BAK=/tmp/jtcs.env.bak.$$ && if [ -f erp/.env ]; then cp erp/.env $ENV_BAK; fi && git fetch origin %LOCAL_BRANCH% && git checkout -B %LOCAL_BRANCH% origin/%LOCAL_BRANCH% && git reset --hard origin/%LOCAL_BRANCH% && if [ -f $ENV_BAK ]; then cp $ENV_BAK erp/.env; rm -f $ENV_BAK; fi && test -f deployment/force_ui_refresh.sh && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/force_ui_refresh.sh" > "%UI_LOG%" 2>&1
 set "UI_RC=!ERRORLEVEL!"
 type "%UI_LOG%"
 echo.
