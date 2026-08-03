@@ -1,6 +1,8 @@
 /*
     Clone legacy base table STRUCTURES from JTCS into JTCSS (no data).
     Read-only against JTCS. All DDL applies only to JTCSS.
+
+    Safe on VPS: if JTCS DB/table is missing, skip that table (no hard fail).
 */
 USE JTCSS;
 GO
@@ -15,6 +17,7 @@ INSERT INTO @tables (Name) VALUES
     (N'TransactionTypeMaster');
 
 DECLARE @t SYSNAME;
+DECLARE @sql NVARCHAR(MAX);
 DECLARE c CURSOR LOCAL FAST_FORWARD FOR SELECT Name FROM @tables;
 OPEN c;
 FETCH NEXT FROM c INTO @t;
@@ -22,11 +25,24 @@ WHILE @@FETCH_STATUS = 0
 BEGIN
     IF OBJECT_ID(N'dbo.' + @t, N'U') IS NULL
     BEGIN
-        DECLARE @sql NVARCHAR(MAX) =
-            N'SELECT * INTO dbo.' + QUOTENAME(@t) +
-            N' FROM JTCS.dbo.' + QUOTENAME(@t) + N' WHERE 1 = 0;';
-        EXEC sp_executesql @sql;
-        PRINT 'Cloned structure: ' + @t;
+        -- Skip cleanly when legacy JTCS source DB/table is not on this server.
+        IF OBJECT_ID(N'JTCS.dbo.' + @t, N'U') IS NULL
+        BEGIN
+            PRINT 'Skip clone (source missing): ' + @t;
+        END
+        ELSE
+        BEGIN
+            BEGIN TRY
+                SET @sql =
+                    N'SELECT * INTO dbo.' + QUOTENAME(@t) +
+                    N' FROM JTCS.dbo.' + QUOTENAME(@t) + N' WHERE 1 = 0;';
+                EXEC sp_executesql @sql;
+                PRINT 'Cloned structure: ' + @t;
+            END TRY
+            BEGIN CATCH
+                PRINT 'Skip clone (error): ' + @t + N' — ' + ERROR_MESSAGE();
+            END CATCH
+        END
     END
     FETCH NEXT FROM c INTO @t;
 END
