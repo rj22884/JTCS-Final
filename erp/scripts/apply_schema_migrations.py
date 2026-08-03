@@ -46,6 +46,20 @@ FORBIDDEN_SQL = re.compile(
     re.IGNORECASE,
 )
 
+# Schema already matches script intent — mark applied and continue.
+BENIGN_SQL_ERRORS = re.compile(
+    r"already an object named|"
+    r"There is already an object|"
+    r"already exists|"
+    r"duplicate column name|"
+    r"Column .+ already exists|"
+    r"The column .+ is already|"
+    r"Cannot create .+ because it already|"
+    r"already has a primary key|"
+    r"The constraint .+ already exists",
+    re.IGNORECASE,
+)
+
 GO_SPLIT = re.compile(r"^\s*GO\s*(?:--.*)?$", re.IGNORECASE | re.MULTILINE)
 
 
@@ -139,6 +153,8 @@ def apply_migrations() -> int:
     applied = 0
     skipped = 0
     blocked = 0
+    benign = 0
+    failed: list[str] = []
 
     try:
         cursor = conn.cursor()
@@ -178,12 +194,37 @@ def apply_migrations() -> int:
                 )
                 applied += 1
             except Exception as exc:
+                msg = str(exc)
+                if BENIGN_SQL_ERRORS.search(msg):
+                    print(f"[SKIP already-present] {name}")
+                    try:
+                        cursor.execute(
+                            "INSERT INTO dbo.SchemaMigration (ScriptName) VALUES (?)",
+                            name,
+                        )
+                    except Exception:
+                        pass
+                    benign += 1
+                    continue
                 print(f"[ERROR] Failed on {name}: {exc}")
-                print("  Database left as-is (no restore / no data wipe).")
-                return 1
+                print("  Database left as-is (no restore / no data wipe). Continuing…")
+                failed.append(name)
+                # Fresh connection state for next script (failed batch may poison cursor).
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                continue
 
         print()
-        print(f"[OK] Applied={applied}  AlreadyDone={skipped}  Blocked={blocked}")
+        print(
+            f"[OK] Applied={applied}  AlreadyDone={skipped}  "
+            f"AlreadyPresent={benign}  Blocked={blocked}  Failed={len(failed)}"
+        )
+        if failed:
+            print("  Failed scripts:")
+            for name in failed:
+                print(f"    - {name}")
         if MANUAL_DIR.is_dir():
             manuals = sorted(MANUAL_DIR.glob("*.sql"))
             if manuals:
@@ -192,7 +233,7 @@ def apply_migrations() -> int:
                     "(run by hand only — never auto)."
                 )
         print("========================================")
-        return 0
+        return 1 if failed else 0
     finally:
         conn.close()
 

@@ -1,23 +1,23 @@
 /*
     Other Bank/Cash Transactions + RD Account Master
+
+    Do NOT re-add CK_JtcsBankAccountMaster_AccountType — production uses many
+    AccountType codes (CA-Current Account, etc.). Source of truth is
+    AccountTypeMaster (057_account_type_master.sql).
 */
 USE JTCSS;
 GO
 
--- Allow AccountType = RD on bank master (RD shadow ledger account)
+-- Drop legacy restrictive CHECK if present
 IF EXISTS (
     SELECT 1 FROM sys.check_constraints
     WHERE name = N'CK_JtcsBankAccountMaster_AccountType'
+      AND parent_object_id = OBJECT_ID(N'dbo.JtcsBankAccountMaster')
 )
 BEGIN
     ALTER TABLE dbo.JtcsBankAccountMaster
     DROP CONSTRAINT CK_JtcsBankAccountMaster_AccountType;
 END;
-GO
-
-ALTER TABLE dbo.JtcsBankAccountMaster
-ADD CONSTRAINT CK_JtcsBankAccountMaster_AccountType
-    CHECK (AccountType IS NULL OR AccountType IN (N'SB', N'CC/OD', N'OTH', N'RD'));
 GO
 
 IF OBJECT_ID(N'dbo.RdAccountMaster', N'U') IS NULL

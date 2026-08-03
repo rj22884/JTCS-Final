@@ -1,5 +1,9 @@
 /*
-    Bank Master — AccountType column + Masters menu entry
+    Bank Master — AccountType column + Masters menu entry.
+
+    NOTE: Do NOT add a hard CHECK on AccountType here.
+    Production already has codes beyond SB/CC/OD/OTH (e.g. CA-Current Account).
+    Validation lives in AccountTypeMaster (see 057_account_type_master.sql).
 */
 USE JTCSS;
 GO
@@ -7,24 +11,26 @@ GO
 IF COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'AccountType') IS NULL
 BEGIN
     ALTER TABLE dbo.JtcsBankAccountMaster
-    ADD AccountType NVARCHAR(10) NULL;
+    ADD AccountType NVARCHAR(20) NULL;
 END;
 GO
 
+/* Only fill blanks — never overwrite existing account-type codes. */
 UPDATE dbo.JtcsBankAccountMaster
 SET AccountType = N'OTH'
 WHERE AccountType IS NULL OR LTRIM(RTRIM(AccountType)) = N'';
 GO
 
-IF NOT EXISTS (
+/* Drop legacy restrictive CHECK if a partial older run created it. */
+IF EXISTS (
     SELECT 1
     FROM sys.check_constraints
     WHERE name = N'CK_JtcsBankAccountMaster_AccountType'
+      AND parent_object_id = OBJECT_ID(N'dbo.JtcsBankAccountMaster')
 )
 BEGIN
     ALTER TABLE dbo.JtcsBankAccountMaster
-    ADD CONSTRAINT CK_JtcsBankAccountMaster_AccountType
-        CHECK (AccountType IS NULL OR AccountType IN (N'SB', N'CC/OD', N'OTH'));
+    DROP CONSTRAINT CK_JtcsBankAccountMaster_AccountType;
 END;
 GO
 
