@@ -30,11 +30,13 @@ if [[ ! -x "${VENV}/bin/python" ]]; then
 fi
 # shellcheck disable=SC1091
 source "${VENV}/bin/activate"
-pip install --upgrade pip >/dev/null
-if [[ -f "${ERP_DIR}/requirements.txt" ]]; then
-  pip install -r "${ERP_DIR}/requirements.txt"
+# Only ensure gunicorn here — full requirements install belongs to deploy.sh
+if [[ ! -x "${VENV}/bin/gunicorn" ]]; then
+  log_info "Installing gunicorn…"
+  pip install -q "gunicorn>=22.0.0"
+else
+  log_info "gunicorn already present"
 fi
-pip install "gunicorn>=22.0.0"
 
 if [[ ! -f "${ERP_DIR}/wsgi.py" ]]; then
   log_error "wsgi.py missing in ${ERP_DIR} — cannot install WSGI service"
@@ -91,13 +93,23 @@ fi
 systemctl restart "${SERVICE}"
 sleep 2
 
-if systemctl is-active --quiet "${SERVICE}"; then
-  log_ok "Service ${SERVICE} is active (running)"
-  systemctl --no-pager --full status "${SERVICE}" | head -20 || true
+if ! systemctl is-active --quiet "${SERVICE}"; then
+  log_error "Service ${SERVICE} failed to start"
+  systemctl --no-pager --full status "${SERVICE}" | head -40 || true
+  journalctl -u "${SERVICE}" -n 40 --no-pager || true
+  exit 1
+fi
+
+log_ok "Service ${SERVICE} is active (running)"
+systemctl --no-pager --full status "${SERVICE}" | head -20 || true
+
+# Wait until /health answers (workers may still be loading torch/OCR)
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
+if wait_for_http "${HEALTH_URL}" "${HEALTH_WAIT_SECONDS:-180}" 3; then
+  log_ok "Service accepting HTTP on ${HEALTH_URL}"
   exit 0
 fi
 
-log_error "Service ${SERVICE} failed to start"
-systemctl --no-pager --full status "${SERVICE}" | head -40 || true
-journalctl -u "${SERVICE}" -n 40 --no-pager || true
+log_error "Service active but /health not ready in time"
+journalctl -u "${SERVICE}" -n 50 --no-pager || true
 exit 1

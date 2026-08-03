@@ -244,7 +244,9 @@ pip install -q "gunicorn>=22.0.0"
 # ---------------------------------------------------------------------------
 # 4) Schema-only migrations
 # ---------------------------------------------------------------------------
-if [[ -x "${SCRIPT_DIR}/apply_migrations.sh" ]]; then
+# Use -f (not -x): git on Windows often drops the executable bit.
+if [[ -f "${SCRIPT_DIR}/apply_migrations.sh" ]]; then
+  chmod +x "${SCRIPT_DIR}/apply_migrations.sh" 2>/dev/null || true
   log_info "Applying SCHEMA-ONLY migrations…"
   if ! bash "${SCRIPT_DIR}/apply_migrations.sh"; then
     rollback_on_fail "database migration failed"
@@ -312,8 +314,9 @@ fi
 # ---------------------------------------------------------------------------
 # 7) Health checks (local required; public best-effort then required from bat)
 # ---------------------------------------------------------------------------
-sleep 3
-log_info "Health check: ${HEALTH_URL}"
+# Do NOT use a short sleep — gunicorn + torch/OCR needs a long warm-up.
+log_info "Health check: ${HEALTH_URL} (waiting for workers to accept connections)"
+export HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-180}"
 if ! bash "${SCRIPT_DIR}/healthcheck.sh"; then
   rollback_on_fail "health check failed after restart"
   exit 1

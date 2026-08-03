@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # JTCS ERP — healthcheck.sh
-# Verifies systemd (Gunicorn/WSGI), HTTP /health, optional Nginx + DB.
+# Verifies systemd (Gunicorn/WSGI), HTTP /health (with wait), optional Nginx + DB.
 # Exit 0 = healthy, non-zero = unhealthy.
 # =============================================================================
 
@@ -13,6 +13,7 @@ load_deploy_env
 SERVICE="${VPS_SYSTEMD_SERVICE:-jtcs-erp}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
 API_HEALTH_URL="${API_HEALTH_URL:-${HEALTH_URL}}"
+HEALTH_WAIT_SECONDS="${HEALTH_WAIT_SECONDS:-180}"
 FAILS=0
 
 check() {
@@ -45,7 +46,16 @@ else
   log_warn "systemctl not available — skipping service checks"
 fi
 
-check "Application URL (${HEALTH_URL})" http_ok "${HEALTH_URL}"
+# Wait for gunicorn workers (torch/OCR boot can exceed 60s)
+if wait_for_http "${HEALTH_URL}" "${HEALTH_WAIT_SECONDS}" 3; then
+  log_ok "Application URL (${HEALTH_URL})"
+else
+  log_error "Application URL (${HEALTH_URL}) FAILED"
+  FAILS=$((FAILS + 1))
+  log_info "Recent service logs:"
+  journalctl -u "${SERVICE}" -n 40 --no-pager 2>/dev/null || true
+fi
+
 if [[ "${API_HEALTH_URL}" != "${HEALTH_URL}" ]]; then
   check "API health (${API_HEALTH_URL})" http_ok "${API_HEALTH_URL}"
 fi

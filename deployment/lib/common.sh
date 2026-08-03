@@ -92,6 +92,30 @@ http_ok() {
   [[ "${code}" == "200" || "${code}" == "204" ]]
 }
 
+# Heavy apps (torch/OCR) can take 1–3 minutes before /health answers.
+wait_for_http() {
+  local url="$1"
+  local timeout_s="${2:-180}"
+  local interval_s="${3:-3}"
+  local elapsed=0
+  local code=""
+  log_info "Waiting up to ${timeout_s}s for ${url} …"
+  while [[ ${elapsed} -lt ${timeout_s} ]]; do
+    code="$(curl -fsS -o /dev/null -w "%{http_code}" --max-time 10 "${url}" 2>/dev/null || true)"
+    if [[ "${code}" == "200" || "${code}" == "204" ]]; then
+      log_ok "HTTP ${code} from ${url} after ${elapsed}s"
+      return 0
+    fi
+    sleep "${interval_s}"
+    elapsed=$((elapsed + interval_s))
+    if (( elapsed % 15 == 0 )); then
+      log_info "Still waiting for ${url} (${elapsed}s, last=${code:-none})…"
+    fi
+  done
+  log_error "Timed out waiting for ${url} after ${timeout_s}s (last HTTP=${code:-none})"
+  return 1
+}
+
 # Write APP_VERSION into Flask .env without printing secrets.
 sync_app_version_env() {
   local env_file="$1"
