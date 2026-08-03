@@ -49,12 +49,11 @@ echo  14. Open Deployment Logs
 echo  15. Rollback Previous Version
 echo  16. Repair Deployment
 echo  17. Full Diagnostics
-echo  18. Exit
-echo.
-echo  %C_YELLOW%L. Local tools%C_RESET% (install / start / stop / test / env / schema)
+echo  18. Local Tools (install / start / stop / test / env / schema)
+echo   0. Exit
 echo.
 set "choice="
-set /p choice="Select option (1-18 / L): "
+set /p choice="Select option (0-18): "
 if defined choice set "choice=!choice: =!"
 
 if /i "!choice!"=="1" goto git_status
@@ -74,7 +73,7 @@ if /i "!choice!"=="14" goto open_logs
 if /i "!choice!"=="15" goto rollback
 if /i "!choice!"=="16" goto repair
 if /i "!choice!"=="17" goto diagnostics
-if /i "!choice!"=="18" exit /b 0
+if /i "!choice!"=="18" goto local_menu
 if /i "!choice!"=="L" goto local_menu
 if /i "!choice!"=="0" exit /b 0
 echo.
