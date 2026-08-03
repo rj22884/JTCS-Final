@@ -385,6 +385,56 @@ diagnostics() {
   remote_or_local "export VPS_APP_DIR='$VPS_PATH' && bash deployment/diagnostics.sh" || true
 }
 
+db_structure_sync() {
+  echo "${C_BOLD}[19] Check DB structure Local vs VPS + Update VPS${C_RESET}"
+  echo
+  warn "Policy: SCHEMA only — tables/columns. SQL DATA is never copied or wiped."
+  echo
+  require_git || return
+  init_branch
+  local py="${ROOT}/erp/.venv/bin/python"
+  [[ -x "$py" ]] || py="${ROOT}/erp/.venv/Scripts/python.exe"
+  if [[ ! -x "$py" && ! -f "$py" ]]; then
+    fail "Local venv missing — run option 18 Install first"
+    return
+  fi
+  local dump="${LOG_DIR}/schema_local_$$.json"
+  echo "${C_CYAN}Step 1/5${C_RESET} Dump LOCAL database structure"
+  (cd "${ROOT}/erp" && "$py" scripts/compare_and_sync_schema.py --dump "$dump") || {
+    fail "Local schema dump failed — check erp/.env"
+    return
+  }
+  pass "Local schema dumped → $dump"
+
+  echo "${C_CYAN}Step 2/5${C_RESET} Push + sync code to VPS"
+  push_and_sync_vps || return
+
+  echo "${C_CYAN}Step 3/5${C_RESET} Upload schema dump to VPS"
+  if [[ "$ON_VPS" -eq 1 ]]; then
+    cp "$dump" /tmp/jtcs_schema_local.json
+  else
+    require_ssh || return
+    scp -P "$VPS_PORT" -o StrictHostKeyChecking=accept-new \
+      "$dump" "${VPS_USER}@${VPS_HOST}:/tmp/jtcs_schema_local.json" || {
+      fail "scp upload failed"
+      return
+    }
+  fi
+  pass "Dump ready on VPS: /tmp/jtcs_schema_local.json"
+
+  echo "${C_CYAN}Step 4/5${C_RESET} Apply numbered migrations on VPS"
+  remote_or_local "cd '$VPS_PATH/erp' && if [ -x .venv/bin/python ]; then .venv/bin/python scripts/apply_schema_migrations.py; else python3 scripts/apply_schema_migrations.py; fi" \
+    && pass "VPS migrations OK" \
+    || fail "VPS migrations reported errors — continuing to column sync"
+
+  echo "${C_CYAN}Step 5/5${C_RESET} Compare + add missing columns on VPS"
+  if remote_or_local "cd '$VPS_PATH/erp' && if [ -x .venv/bin/python ]; then .venv/bin/python scripts/compare_and_sync_schema.py --sync-from /tmp/jtcs_schema_local.json; else python3 scripts/compare_and_sync_schema.py --sync-from /tmp/jtcs_schema_local.json; fi"; then
+    pass "DB structure sync COMPLETE — VPS columns match local"
+  else
+    fail "Schema sync finished with warnings/errors (missing tables need migrations)"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Local tools (this machine — Ubuntu PC or VPS)
 # ---------------------------------------------------------------------------
@@ -539,10 +589,11 @@ main_menu() {
     echo "  16. Repair Deployment"
     echo "  17. Full Diagnostics"
     echo "  18. Local Tools (install / start / stop / test / env / schema)"
+    echo "  19. Check DB structure Local vs VPS + Update VPS"
     echo "   0. Exit"
     echo
     local choice
-    read -r -p "Select option (0-18): " choice
+    read -r -p "Select option (0-19): " choice
     choice="${choice// /}"
     case "$choice" in
       1) git_status; pause ;;
@@ -563,6 +614,7 @@ main_menu() {
       16) repair; pause ;;
       17) diagnostics; pause ;;
       18|L|l) local_menu ;;
+      19) db_structure_sync; pause ;;
       0) echo "Bye."; exit 0 ;;
       *) fail "Invalid option: ${choice}"; pause ;;
     esac

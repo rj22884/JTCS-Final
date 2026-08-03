@@ -50,10 +50,11 @@ echo  15. Rollback Previous Version
 echo  16. Repair Deployment
 echo  17. Full Diagnostics
 echo  18. Local Tools (install / start / stop / test / env / schema)
+echo  19. Check DB structure Local vs VPS + Update VPS
 echo   0. Exit
 echo.
 set "choice="
-set /p choice="Select option (0-18): "
+set /p choice="Select option (0-19): "
 if defined choice set "choice=!choice: =!"
 
 if /i "!choice!"=="1" goto git_status
@@ -74,6 +75,7 @@ if /i "!choice!"=="15" goto rollback
 if /i "!choice!"=="16" goto repair
 if /i "!choice!"=="17" goto diagnostics
 if /i "!choice!"=="18" goto local_menu
+if /i "!choice!"=="19" goto db_structure_sync
 if /i "!choice!"=="L" goto local_menu
 if /i "!choice!"=="0" exit /b 0
 echo.
@@ -602,6 +604,93 @@ if errorlevel 1 (
 )
 echo Enter VPS password when asked.
 ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && export VPS_APP_DIR=%VPS_PATH% && bash deployment/diagnostics.sh"
+pause
+goto menu
+
+:db_structure_sync
+echo.
+echo %C_BOLD%[19] Check DB structure Local vs VPS + Update VPS%C_RESET%
+echo.
+echo  %C_YELLOW%Policy:%C_RESET% SCHEMA only — tables/columns. SQL DATA is never copied or wiped.
+echo.
+call :require_git
+call :require_ssh
+call :load_vps_env
+call :init_branch
+
+if not exist "%ROOT%\erp\.venv\Scripts\python.exe" (
+    call :fail "Local venv missing — run option 18 then Install first"
+    pause
+    goto menu
+)
+where scp >nul 2>&1
+if errorlevel 1 (
+    call :fail "scp not found. Install OpenSSH Client."
+    pause
+    goto menu
+)
+
+set "SCHEMA_DUMP=%LOG_DIR%\schema_local_%RANDOM%.json"
+set "SCHEMA_LOG=%LOG_DIR%\schema_sync_%RANDOM%.log"
+
+echo %C_CYAN%Step 1/5%C_RESET% Dump LOCAL database structure
+cd /d "%ROOT%\erp"
+".venv\Scripts\python.exe" scripts\compare_and_sync_schema.py --dump "%SCHEMA_DUMP%"
+if errorlevel 1 (
+    call :fail "Local schema dump failed — check erp\.env DB settings"
+    cd /d "%ROOT%"
+    pause
+    goto menu
+)
+call :pass "Local schema dumped"
+cd /d "%ROOT%"
+
+echo %C_CYAN%Step 2/5%C_RESET% Push + sync code to VPS (migrations/scripts)
+call :push_and_sync_vps
+if errorlevel 1 (
+    pause
+    goto menu
+)
+
+echo %C_CYAN%Step 3/5%C_RESET% Upload schema dump to VPS
+echo Enter VPS password when asked ^(scp^).
+scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%SCHEMA_DUMP%" %VPS_USER%@%VPS_HOST%:/tmp/jtcs_schema_local.json
+if errorlevel 1 (
+    call :fail "scp upload failed"
+    pause
+    goto menu
+)
+call :pass "Dump uploaded to /tmp/jtcs_schema_local.json"
+
+echo %C_CYAN%Step 4/5%C_RESET% Apply numbered migrations on VPS
+echo Enter VPS password when asked ^(migrations^).
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH%/erp && if [ -x .venv/bin/python ]; then .venv/bin/python scripts/apply_schema_migrations.py; else python3 scripts/apply_schema_migrations.py; fi" > "%SCHEMA_LOG%" 2>&1
+set "MIG_RC=!ERRORLEVEL!"
+type "%SCHEMA_LOG%"
+echo.
+if not "!MIG_RC!"=="0" (
+    call :fail "VPS migrations reported errors — continuing to column sync"
+) else (
+    call :pass "VPS migrations OK"
+)
+
+echo %C_CYAN%Step 5/5%C_RESET% Compare Local dump vs VPS DB + add missing columns
+set "SYNC_OUT=%LOG_DIR%\schema_sync_out_%RANDOM%.log"
+echo Enter VPS password when asked ^(schema sync^).
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH%/erp && if [ -x .venv/bin/python ]; then .venv/bin/python scripts/compare_and_sync_schema.py --sync-from /tmp/jtcs_schema_local.json; else python3 scripts/compare_and_sync_schema.py --sync-from /tmp/jtcs_schema_local.json; fi" > "%SYNC_OUT%" 2>&1
+set "SYNC_RC=!ERRORLEVEL!"
+type "%SYNC_OUT%"
+type "%SYNC_OUT%" >> "%SCHEMA_LOG%"
+echo.
+if "!SYNC_RC!"=="0" (
+    call :pass "DB structure sync COMPLETE — VPS columns match local"
+) else if "!SYNC_RC!"=="2" (
+    call :fail "Some tables still missing on VPS — run option 9 then re-run 19"
+) else (
+    call :fail "Schema sync finished with errors — see log"
+)
+echo Dump: %SCHEMA_DUMP%
+echo Log : %SCHEMA_LOG%
 pause
 goto menu
 
