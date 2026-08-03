@@ -86,11 +86,15 @@ EOF
 cp "/tmp/${SERVICE}.service" "${UNIT_DST}"
 systemctl daemon-reload
 systemctl enable "${SERVICE}"
-# Free stale listeners on 8000 (old run.py leftovers)
+# Hard kill stale workers so old Python code cannot keep serving
+systemctl stop "${SERVICE}" 2>/dev/null || true
+pkill -9 -f 'gunicorn.*wsgi:app' 2>/dev/null || true
+pkill -9 -f 'python.*run.py' 2>/dev/null || true
 if command -v fuser >/dev/null 2>&1; then
   fuser -k 8000/tcp 2>/dev/null || true
 fi
-systemctl restart "${SERVICE}"
+sleep 1
+systemctl start "${SERVICE}"
 sleep 2
 
 if ! systemctl is-active --quiet "${SERVICE}"; then

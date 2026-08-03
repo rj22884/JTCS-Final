@@ -435,6 +435,38 @@ db_structure_sync() {
   fi
 }
 
+force_ui_refresh() {
+  echo "${C_BOLD}[20] FORCE Live UI Refresh${C_RESET}"
+  require_git || return
+  init_branch
+  [[ "$LOCAL_BRANCH" == "DETACHED" ]] && { fail "Detached HEAD"; return; }
+  info "Push…"
+  git -C "$ROOT" add -A
+  if ! git -C "$ROOT" diff --cached --quiet; then
+    git -C "$ROOT" commit -m "force ui refresh ${LOCAL_BRANCH}" || { fail "Commit failed"; return; }
+  fi
+  git -C "$ROOT" push -u origin HEAD || { fail "Push failed"; return; }
+  pass "Pushed"
+  info "Running force_ui_refresh.sh on VPS…"
+  local logf="${LOG_DIR}/ui_refresh_$$.log"
+  if [[ "$ON_VPS" -eq 1 ]]; then
+    (cd "$VPS_PATH" && export BRANCH="$LOCAL_BRANCH" VPS_APP_DIR="$VPS_PATH" GIT_BRANCH="$LOCAL_BRANCH" && bash deployment/force_ui_refresh.sh) 2>&1 | tee "$logf"
+  else
+    require_ssh || return
+    ssh -p "$VPS_PORT" -o StrictHostKeyChecking=accept-new \
+      "${VPS_USER}@${VPS_HOST}" \
+      "cd '$VPS_PATH' && export BRANCH='$LOCAL_BRANCH' VPS_APP_DIR='$VPS_PATH' GIT_BRANCH='$LOCAL_BRANCH' && bash deployment/force_ui_refresh.sh" \
+      2>&1 | tee "$logf"
+  fi
+  if grep -q '===UI_REFRESH:SUCCESS===' "$logf"; then
+    pass "UI refresh SUCCESS"
+    run_public_health || true
+    echo "Browser: Ctrl+F5 then Logout/Login on https://app.jtcsxpert.com"
+  else
+    fail "UI refresh FAILED — see $logf"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Local tools (this machine — Ubuntu PC or VPS)
 # ---------------------------------------------------------------------------
@@ -590,10 +622,11 @@ main_menu() {
     echo "  17. Full Diagnostics"
     echo "  18. Local Tools (install / start / stop / test / env / schema)"
     echo "  19. Check DB structure Local vs VPS + Update VPS"
+    echo "  20. FORCE Live UI Refresh (menus + hard restart)"
     echo "   0. Exit"
     echo
     local choice
-    read -r -p "Select option (0-19): " choice
+    read -r -p "Select option (0-20): " choice
     choice="${choice// /}"
     case "$choice" in
       1) git_status; pause ;;
@@ -615,6 +648,7 @@ main_menu() {
       17) diagnostics; pause ;;
       18|L|l) local_menu ;;
       19) db_structure_sync; pause ;;
+      20) force_ui_refresh; pause ;;
       0) echo "Bye."; exit 0 ;;
       *) fail "Invalid option: ${choice}"; pause ;;
     esac

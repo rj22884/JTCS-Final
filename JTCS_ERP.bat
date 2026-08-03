@@ -51,10 +51,11 @@ echo  16. Repair Deployment
 echo  17. Full Diagnostics
 echo  18. Local Tools (install / start / stop / test / env / schema)
 echo  19. Check DB structure Local vs VPS + Update VPS
+echo  20. FORCE Live UI Refresh (menus + hard restart)
 echo   0. Exit
 echo.
 set "choice="
-set /p choice="Select option (0-19): "
+set /p choice="Select option (0-20): "
 if defined choice set "choice=!choice: =!"
 
 if /i "!choice!"=="1" goto git_status
@@ -76,6 +77,7 @@ if /i "!choice!"=="16" goto repair
 if /i "!choice!"=="17" goto diagnostics
 if /i "!choice!"=="18" goto local_menu
 if /i "!choice!"=="19" goto db_structure_sync
+if /i "!choice!"=="20" goto force_ui_refresh
 if /i "!choice!"=="L" goto local_menu
 if /i "!choice!"=="0" exit /b 0
 echo.
@@ -691,6 +693,77 @@ if "!SYNC_RC!"=="0" (
 )
 echo Dump: %SCHEMA_DUMP%
 echo Log : %SCHEMA_LOG%
+pause
+goto menu
+
+:force_ui_refresh
+echo.
+echo %C_BOLD%[20] FORCE Live UI Refresh%C_RESET%
+echo.
+echo  Ye option:
+echo   - latest code push/sync
+echo   - MenuMaster core nav + eCourt ensure
+echo   - gunicorn HARD kill + restart (purana UI hataata hai)
+echo.
+call :require_git
+call :require_ssh
+call :load_vps_env
+call :init_branch
+if /i "!LOCAL_BRANCH!"=="DETACHED" (
+    call :fail "Detached HEAD — checkout a branch first"
+    pause
+    goto menu
+)
+
+echo %C_CYAN%Step 1/3%C_RESET% Push local changes
+git -C "%ROOT%" add -A
+git -C "%ROOT%" diff --cached --quiet
+if errorlevel 1 (
+    git -C "%ROOT%" commit -m "force ui refresh !LOCAL_BRANCH!"
+    if errorlevel 1 (
+        call :fail "Commit failed"
+        pause
+        goto menu
+    )
+)
+git -C "%ROOT%" push -u origin HEAD
+if errorlevel 1 (
+    call :fail "Push failed"
+    pause
+    goto menu
+)
+call :pass "Pushed origin/!LOCAL_BRANCH!"
+
+echo %C_CYAN%Step 2/3%C_RESET% VPS force_ui_refresh.sh
+set "UI_LOG=%LOG_DIR%\ui_refresh_%RANDOM%.log"
+echo Enter VPS password when asked.
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/force_ui_refresh.sh" > "%UI_LOG%" 2>&1
+set "UI_RC=!ERRORLEVEL!"
+type "%UI_LOG%"
+echo.
+
+echo %C_CYAN%Step 3/3%C_RESET% Verify
+findstr /C:"===UI_REFRESH:SUCCESS===" "%UI_LOG%" >nul 2>&1
+if errorlevel 1 (
+    call :fail "UI refresh FAILED — see log"
+    echo Log: %UI_LOG%
+    pause
+    goto menu
+)
+if not "!UI_RC!"=="0" (
+    call :fail "SSH exit code !UI_RC!"
+    pause
+    goto menu
+)
+call :pass "UI refresh SUCCESS on VPS"
+call :run_public_health
+echo.
+echo Ab browser me:
+echo   1. https://app.jtcsxpert.com
+echo   2. Ctrl+F5
+echo   3. Logout + Login
+echo Top menu me ITR/GST/Payroll NAHI dikhne chahiye.
+echo Activities me eCourt Activity dikhna chahiye.
 pause
 goto menu
 
