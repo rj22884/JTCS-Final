@@ -363,6 +363,56 @@ def ensure_crm_menus() -> None:
     db.session.commit()
 
 
+# Top-level menus that match the local ERP nav (everything else top-level is hidden).
+ERP_CORE_TOP_LEVEL_MENUS = (
+    "Admin Role",
+    "Dashboard",
+    "Activities",
+    "Reports and Analysis",
+    "Masters",
+    "Accounting",
+    "Others",
+)
+
+
+def ensure_erp_core_nav_menus() -> None:
+    """Align VPS/local top nav to core ERP menus (same as local simplified UI).
+
+    Deactivates legacy top-level items (ITR, GST, Payroll, Menu Management, …)
+    while keeping child modules that live under Admin Role / Activities / etc.
+    DATA safe — only MenuMaster.IsActive changes.
+    """
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0,
+                Description = CASE
+                    WHEN Description LIKE N'%core ERP nav%' THEN Description
+                    ELSE LEFT(CONCAT(ISNULL(Description, N''), N' (hidden from core ERP nav)'), 300)
+                END
+            WHERE ParentMenuID IS NULL
+              AND MenuName NOT IN (
+                    N'Admin Role',
+                    N'Dashboard',
+                    N'Activities',
+                    N'Reports and Analysis',
+                    N'Masters',
+                    N'Accounting',
+                    N'Others'
+              );
+
+            /* Logout / orphan utility rows that should not be nav items */
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0
+            WHERE MenuName IN (N'Logout', N'Log Out')
+               OR LOWER(ISNULL(MenuURL, N'')) IN (N'/logout', N'/auth/logout');
+            """
+        )
+    )
+    db.session.commit()
+
+
 def _seed_default_workflow() -> None:
     exists = db.session.execute(
         text("SELECT TOP 1 DefinitionID FROM dbo.CrmWorkflowDefinition WHERE WorkflowCode = N'website_lead'")

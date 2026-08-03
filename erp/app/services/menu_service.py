@@ -108,9 +108,22 @@ class MenuService:
             )
         return nodes
 
+    # Match local ERP top bar — hide legacy top-level modules still active in JTCSS.
+    CORE_TOP_LEVEL_MENUS = frozenset(
+        {
+            "admin role",
+            "dashboard",
+            "activities",
+            "reports and analysis",
+            "masters",
+            "accounting",
+            "others",
+        }
+    )
+
     def get_navigation(self, role: str | None) -> list[MenuNode]:
         menus = self.repository.get_active_for_role(role)
-        # Hidden from app nav (CRM / Exceptional Report — separate apps later).
+        # Hidden from app nav (CRM / Exceptional / non-core top-level).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
         if has_admin_role(role):
             allowed_ids = {menu.MenuID for menu in menus}
@@ -119,15 +132,22 @@ class MenuService:
             menus = self._menus_with_accessible_ancestors(menus, role)
         return self.build_tree(menus, None)
 
-    @staticmethod
-    def _is_hidden_nav_menu(menu) -> bool:
+    @classmethod
+    def _is_hidden_nav_menu(cls, menu) -> bool:
         name = (getattr(menu, "MenuName", None) or "").strip().lower()
         url = (getattr(menu, "MenuURL", None) or "").strip().lower()
-        if name in {"crm", "exceptional report", "stamp exception", "e-court exception"}:
+        parent_id = getattr(menu, "ParentMenuID", None)
+
+        if name in {"crm", "exceptional report", "stamp exception", "e-court exception", "logout", "log out"}:
             return True
         if url.startswith("/crm/") or url == "/crm":
             return True
         if url.startswith("/exceptional-report/") or url == "/exceptional-report":
+            return True
+        if url in {"/logout", "/auth/logout"}:
+            return True
+        # Top-level only: keep core ERP bar (same as local), hide ITR/GST/Payroll/…
+        if parent_id is None and name and name not in cls.CORE_TOP_LEVEL_MENUS:
             return True
         return False
 

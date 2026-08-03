@@ -142,13 +142,18 @@ def create_app(config_class: type = Config) -> Flask:
         OcrProviderService.initialize()
 
         try:
-            from app.modules.shared.schema import ensure_crm_menus, ensure_crm_schema
+            from app.modules.shared.schema import (
+                ensure_crm_menus,
+                ensure_crm_schema,
+                ensure_erp_core_nav_menus,
+            )
 
             ensure_crm_schema()
             ensure_crm_menus()
+            ensure_erp_core_nav_menus()
         except Exception as exc:
             db.session.rollback()
-            app.logger.warning("CRM schema/menu ensure skipped: %s", exc)
+            app.logger.warning("CRM/core nav menu ensure skipped: %s", exc)
 
         try:
             from app.modules.settings.routes import ensure_integration_settings_bootstrap
