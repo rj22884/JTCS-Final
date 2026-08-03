@@ -1,5 +1,9 @@
 /*
-    CRM MenuMaster seeds (idempotent)
+    CRM MenuMaster seeds (idempotent).
+
+    CRM is moving to a separate app — keep rows for reference / What's New
+    history, but keep IsActive = 0 so they never appear in ERP navigation.
+    (App startup also calls ensure_crm_menus() for the same policy.)
 */
 USE JTCSS;
 GO
@@ -11,13 +15,24 @@ DECLARE @CrmParentID INT = (
 IF @CrmParentID IS NULL
 BEGIN
     INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-    VALUES (NULL, N'CRM', N'bi-people', NULL, 25, N'Customer Relationship Management', 1, NULL);
+    VALUES (
+        NULL,
+        N'CRM',
+        N'bi-people',
+        NULL,
+        25,
+        N'Customer Relationship Management (moved to separate app)',
+        0,
+        NULL
+    );
     SET @CrmParentID = SCOPE_IDENTITY();
 END
 ELSE
 BEGIN
     UPDATE dbo.MenuMaster
-    SET MenuIcon = N'bi-people', IsActive = 1, Description = N'Customer Relationship Management'
+    SET MenuIcon = N'bi-people',
+        IsActive = 0,
+        Description = N'Customer Relationship Management (moved to separate app)'
     WHERE MenuID = @CrmParentID;
 END;
 
@@ -56,10 +71,16 @@ WHEN MATCHED THEN
         MenuURL = s.MenuURL,
         DisplayOrder = s.DisplayOrder,
         Description = s.Description,
-        IsActive = 1
+        IsActive = 0
 WHEN NOT MATCHED THEN
     INSERT (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-    VALUES (s.ParentMenuID, s.MenuName, s.MenuIcon, s.MenuURL, s.DisplayOrder, s.Description, 1, NULL);
+    VALUES (s.ParentMenuID, s.MenuName, s.MenuIcon, s.MenuURL, s.DisplayOrder, s.Description, 0, NULL);
 
-PRINT '073_crm_menus.sql completed.';
+-- Any other /crm/* rows (safety)
+UPDATE dbo.MenuMaster
+SET IsActive = 0
+WHERE MenuURL LIKE N'/crm/%'
+   OR (MenuName = N'CRM' AND ParentMenuID IS NULL);
+
+PRINT '073_crm_menus.sql completed (CRM menus kept inactive).';
 GO
