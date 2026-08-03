@@ -155,7 +155,7 @@ def _ensure_exceptional_report_menus() -> None:
                     NULL
                 );
 
-            /* Hide any other leftover /exceptional-report/* links (not the two above) */
+            /* Hide leftover exceptional-report URLs other than stamp and ecourt */
             UPDATE dbo.MenuMaster
             SET IsActive = 0
             WHERE MenuURL LIKE N'/exceptional-report/%'
