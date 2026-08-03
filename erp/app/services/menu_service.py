@@ -110,12 +110,26 @@ class MenuService:
 
     def get_navigation(self, role: str | None) -> list[MenuNode]:
         menus = self.repository.get_active_for_role(role)
+        # Hidden from app nav (CRM / Exceptional Report — separate apps later).
+        menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
         if has_admin_role(role):
             allowed_ids = {menu.MenuID for menu in menus}
             menus = self._include_parent_chain(menus, allowed_ids)
         else:
             menus = self._menus_with_accessible_ancestors(menus, role)
         return self.build_tree(menus, None)
+
+    @staticmethod
+    def _is_hidden_nav_menu(menu) -> bool:
+        name = (getattr(menu, "MenuName", None) or "").strip().lower()
+        url = (getattr(menu, "MenuURL", None) or "").strip().lower()
+        if name in {"crm", "exceptional report", "stamp exception", "e-court exception"}:
+            return True
+        if url.startswith("/crm/") or url == "/crm":
+            return True
+        if url.startswith("/exceptional-report/") or url == "/exceptional-report":
+            return True
+        return False
 
     def _ancestors_accessible(self, menu: MenuMaster, role: str | None) -> bool:
         """True only if this menu and every parent allow the user's role."""

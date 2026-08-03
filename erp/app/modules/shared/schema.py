@@ -319,7 +319,11 @@ def ensure_crm_schema() -> None:
 
 
 def ensure_crm_menus() -> None:
-    """Ensure CRM parent + child menus exist in MenuMaster."""
+    """Hide CRM parent + child menus from navigation (CRM moves to a separate app).
+
+    Keeps MenuMaster rows for reference but sets IsActive = 0 so they never
+    appear in the top menu / tree. Does not remove CRM module code or routes.
+    """
     row = db.session.execute(
         text(
             """
@@ -328,87 +332,34 @@ def ensure_crm_menus() -> None:
             """
         )
     ).first()
-    if row:
-        parent_id = int(row[0])
-        db.session.execute(
-            text(
-                """
-                UPDATE dbo.MenuMaster
-                SET MenuIcon = N'bi-people', IsActive = 1,
-                    Description = N'Customer Relationship Management'
-                WHERE MenuID = :id
-                """
-            ),
-            {"id": parent_id},
-        )
-    else:
-        db.session.execute(
-            text(
-                """
-                INSERT INTO dbo.MenuMaster
-                    (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-                VALUES (NULL, N'CRM', N'bi-people', NULL, 25, N'Customer Relationship Management', 1, NULL)
-                """
-            )
-        )
-        db.session.commit()
-        parent_id = int(
-            db.session.execute(
-                text(
-                    """
-                    SELECT TOP 1 MenuID FROM dbo.MenuMaster
-                    WHERE MenuName = N'CRM' AND ParentMenuID IS NULL
-                    """
-                )
-            ).scalar()
-        )
+    if not row:
+        # No CRM menu seeded — nothing to hide.
+        return
 
-    for name, icon, url, order, desc in _MENU_ITEMS:
-        exists = db.session.execute(
-            text(
-                """
-                SELECT TOP 1 MenuID FROM dbo.MenuMaster
-                WHERE ParentMenuID = :parent AND MenuName = :name
-                """
-            ),
-            {"parent": parent_id, "name": name},
-        ).first()
-        if exists:
-            db.session.execute(
-                text(
-                    """
-                    UPDATE dbo.MenuMaster
-                    SET MenuIcon = :icon, MenuURL = :url, DisplayOrder = :ord,
-                        Description = :desc, IsActive = 1
-                    WHERE MenuID = :id
-                    """
-                ),
-                {
-                    "icon": icon,
-                    "url": url,
-                    "ord": order,
-                    "desc": desc,
-                    "id": int(exists[0]),
-                },
-            )
-        else:
-            db.session.execute(
-                text(
-                    """
-                    INSERT INTO dbo.MenuMaster
-                        (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
-                    VALUES (:parent, :name, :icon, :url, :ord, :desc, 1, NULL)
-                    """
-                ),
-                {
-                    "parent": parent_id,
-                    "name": name,
-                    "icon": icon,
-                    "url": url,
-                    "ord": order,
-                    "desc": desc,
-                },
-            )
+    parent_id = int(row[0])
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0,
+                Description = N'Customer Relationship Management (moved to separate app)'
+            WHERE MenuID = :id
+            """
+        ),
+        {"id": parent_id},
+    )
+    # Deactivate entire CRM tree (known children + any nested under CRM parent)
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0
+            WHERE ParentMenuID = :parent
+               OR MenuURL LIKE N'/crm/%'
+            """
+        ),
+        {"parent": parent_id},
+    )
     db.session.commit()
 
 
