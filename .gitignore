@@ -1,0 +1,9 @@
+# Local / VPS secrets — never commit
+deploy_vps.env
+deployment/deploy.env
+deployment/config/deploy.env
+erp/.env
+erp/.env.local
+
+# Local deploy console logs
+deployment/logs/

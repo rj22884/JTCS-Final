@@ -1,16 +1,25 @@
 [Unit]
-Description=JTCS ERP (Flask)
+Description=JTCS ERP (Gunicorn / Flask WSGI)
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=root
+Group=root
 WorkingDirectory=/root/JTCS-final/erp
 Environment=PYTHONUNBUFFERED=1
-# Prefer venv python if present
-ExecStart=/bin/bash -lc 'if [ -x .venv/bin/python ]; then exec .venv/bin/python run.py; else exec python3 run.py; fi'
+Environment=GUNICORN_BIND=0.0.0.0:8000
+EnvironmentFile=-/root/JTCS-final/erp/.env
+# Production entrypoint: wsgi:app (NEVER run.py)
+ExecStart=/root/JTCS-final/erp/.venv/bin/gunicorn \
+  --config /root/JTCS-final/deployment/config/gunicorn.conf.py \
+  wsgi:app
+ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
-RestartSec=3
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

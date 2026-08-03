@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# JTCS ERP — deploy.sh (Ubuntu VPS)
-# Pulls latest code, migrates, restarts services, records version, health-checks.
-# On critical failure: automatic rollback to previous backup.
+# JTCS ERP — CANONICAL production deploy (Ubuntu VPS)
+# ONLY deployment path. Do not use scripts/vps_pull_update.sh.
+#
+# Entry: Flask WSGI via Gunicorn (wsgi:app) — NEVER run.py
+# Branch: BRANCH / GIT_BRANCH / current branch — NEVER hardcode main
 #
 # Usage:
-#   ./deploy.sh
-#   ./deploy.sh --version 1.0.1 --notes "Fix SMTP" --developer "Ravi" \
-#               --whats-new "..." --bug-fixes "..." --features "..." \
-#               --db-changes "..." --security "..." --performance "..."
+#   export BRANCH="$(git branch --show-current)"   # from Windows SSH caller
+#   bash deployment/deploy.sh
+#   bash deployment/deploy.sh --skip-backup
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +42,7 @@ while [[ $# -gt 0 ]]; do
     --performance) PERFORMANCE="$2"; shift 2 ;;
     --skip-backup) SKIP_BACKUP=1; shift ;;
     --skip-rollback) SKIP_ROLLBACK=1; shift ;;
-    *) log_error "Unknown arg: $1"; exit 2 ;;
+    *) log_error "Unknown arg: $1"; echo "===DEPLOY_RESULT:FAILED==="; exit 2 ;;
   esac
 done
 
@@ -49,17 +50,44 @@ APP_DIR="${VPS_APP_DIR:-${REPO_ROOT}}"
 ERP_DIR="${APP_DIR}/${VPS_ERP_DIR:-erp}"
 VENV="${VPS_VENV_DIR:-${ERP_DIR}/.venv}"
 SERVICE="${VPS_SYSTEMD_SERVICE:-jtcs-erp}"
-BRANCH="${GIT_BRANCH:-main}"
 REMOTE="${GIT_REMOTE:-origin}"
 LOG_DIR="${VPS_LOG_DIR:-/var/log/jtcs-erp}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/health}"
+PUBLIC_HEALTH="${PUBLIC_HEALTH_URL:-https://app.jtcsxpert.com/health}"
 ensure_dir "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/deploy_$(timestamp_now).log"
 STATUS="Failed"
 BACKUP_PATH=""
 PREV_COMMIT=""
 START_EPOCH="$(date +%s)"
+ROLLED=0
+
+# Resolve branch — never hardcode main
+BRANCH="${BRANCH:-${GIT_BRANCH:-}}"
+if [[ -z "${BRANCH}" || "${BRANCH}" == "HEAD" ]]; then
+  BRANCH="$(git -C "${APP_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fi
+if [[ -z "${BRANCH}" || "${BRANCH}" == "HEAD" ]]; then
+  log_error "Cannot determine git branch. Export BRANCH=<name> before deploy."
+  echo "===DEPLOY_RESULT:FAILED==="
+  exit 1
+fi
 
 exec > >(tee -a "${LOG_FILE}") 2>&1
+
+emit_result() {
+  local result="$1"
+  echo ""
+  echo "===DEPLOY_RESULT:${result}==="
+  echo "===DEPLOY_BRANCH:$(git_branch_name)==="
+  echo "===DEPLOY_COMMIT:$(git_full_commit)==="
+  echo "===DEPLOY_SHORT:$(git_commit_id)==="
+  echo "===DEPLOY_VERSION:${VERSION:-n/a}==="
+  echo "===DEPLOY_TIME:$(iso_now)==="
+  echo "===DEPLOY_LOG:${LOG_FILE}==="
+  echo "===DEPLOY_HEALTH:${HEALTH_URL}==="
+  echo "===DEPLOY_PUBLIC_HEALTH:${PUBLIC_HEALTH}==="
+}
 
 rollback_on_fail() {
   local reason="$1"
@@ -77,11 +105,12 @@ rollback_on_fail() {
       bash "${SCRIPT_DIR}/rollback.sh" --latest --reason "${reason}" || true
     fi
     STATUS="RolledBack"
+    ROLLED=1
   fi
 }
 
 finish() {
-  local end duration
+  local end duration ec
   end="$(date +%s)"
   duration=$((end - START_EPOCH))
   append_deploy_log "${LOG_DIR}/deploy_history.log" \
@@ -96,55 +125,95 @@ Duration: ${duration}s
 Log: ${LOG_FILE}
 "
   if [[ "${STATUS}" == "Success" ]]; then
-    log_ok "DEPLOYMENT SUCCESS (${duration}s) — version ${VERSION:-unknown}"
+    log_ok "DEPLOYMENT SUCCESS (${duration}s) — $(git_branch_name) @ $(git_commit_id)"
+    emit_result "SUCCESS"
     exit 0
   fi
   log_error "DEPLOYMENT ${STATUS} (${duration}s) — see ${LOG_FILE}"
+  emit_result "${STATUS}"
   exit 1
 }
 
 trap finish EXIT
 
 log_info "=== JTCS ERP deploy start ==="
-log_info "App dir: ${APP_DIR}"
-log_info "Log: ${LOG_FILE}"
+log_info "App dir : ${APP_DIR}"
+log_info "Branch  : ${BRANCH} (auto / exported — not hardcoded)"
+log_info "Service : ${SERVICE}"
+log_info "Log     : ${LOG_FILE}"
 
-require_cmd git rsync curl
+require_cmd git curl
+command -v rsync >/dev/null 2>&1 || log_warn "rsync missing — backup may be limited"
 
 cd "${APP_DIR}"
 PREV_COMMIT="$(git_full_commit)"
+log_info "Previous commit: ${PREV_COMMIT}"
 
 # ---------------------------------------------------------------------------
-# 1) Backup before changing anything
+# 1) Backup
 # ---------------------------------------------------------------------------
-if [[ ${SKIP_BACKUP} -eq 0 ]]; then
-  BACKUP_PATH="$(bash "${SCRIPT_DIR}/backup.sh" ${VERSION:+--version "${VERSION}"})"
-  BACKUP_PATH="$(echo "${BACKUP_PATH}" | tail -n 1)"
-  log_info "Backup path: ${BACKUP_PATH}"
+if [[ ${SKIP_BACKUP} -eq 0 && -x "${SCRIPT_DIR}/backup.sh" ]] && command -v rsync >/dev/null 2>&1; then
+  if BACKUP_PATH="$(bash "${SCRIPT_DIR}/backup.sh" ${VERSION:+--version "${VERSION}"} | tail -n 1)"; then
+    log_info "Backup path: ${BACKUP_PATH}"
+  else
+    log_warn "Backup failed — continuing with --no hard stop (set SKIP to force). Using skip."
+    BACKUP_PATH=""
+  fi
 else
-  log_warn "Skipping backup (--skip-backup)"
+  log_warn "Skipping full backup (rsync/backup.sh unavailable or --skip-backup)"
 fi
 
 # ---------------------------------------------------------------------------
-# 2) Pull latest code
+# 2) Preserve .env + pull CURRENT branch
 # ---------------------------------------------------------------------------
+ENV_BAK="/tmp/jtcs.env.bak.$$"
+if [[ -f "${ERP_DIR}/.env" ]]; then
+  cp "${ERP_DIR}/.env" "${ENV_BAK}"
+  log_info "Backed up erp/.env"
+fi
+
 log_info "Fetching ${REMOTE}/${BRANCH}…"
 if ! git fetch "${REMOTE}" "${BRANCH}"; then
-  rollback_on_fail "git fetch failed"
+  rollback_on_fail "git fetch failed for ${BRANCH}"
   exit 1
 fi
-if ! git checkout "${BRANCH}"; then
+
+if ! git show-ref --verify --quiet "refs/remotes/${REMOTE}/${BRANCH}"; then
+  rollback_on_fail "remote branch ${REMOTE}/${BRANCH} not found"
+  exit 1
+fi
+
+log_info "Hard reset to ${REMOTE}/${BRANCH} (deploy clean)…"
+if ! git checkout -B "${BRANCH}" "${REMOTE}/${BRANCH}"; then
   rollback_on_fail "git checkout ${BRANCH} failed"
   exit 1
 fi
-if ! git pull --ff-only "${REMOTE}" "${BRANCH}"; then
-  rollback_on_fail "git pull failed"
+if ! git reset --hard "${REMOTE}/${BRANCH}"; then
+  rollback_on_fail "git reset --hard failed"
   exit 1
 fi
-log_ok "Code updated to $(git_commit_id) on $(git_branch_name)"
+
+if [[ -f "${ENV_BAK}" ]]; then
+  mkdir -p "${ERP_DIR}"
+  cp "${ENV_BAK}" "${ERP_DIR}/.env"
+  rm -f "${ENV_BAK}"
+  log_ok "Restored erp/.env"
+fi
+
+if [[ ! -f "${ERP_DIR}/.env" ]]; then
+  rollback_on_fail "erp/.env missing after deploy"
+  exit 1
+fi
+
+log_ok "Code updated: branch=$(git_branch_name) commit=$(git_full_commit)"
+
+if [[ ! -f "${ERP_DIR}/wsgi.py" ]]; then
+  rollback_on_fail "wsgi.py missing — refusing run.py fallback"
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
-# 3) Python dependencies
+# 3) Python deps + gunicorn
 # ---------------------------------------------------------------------------
 REQ_FILE="${ERP_DIR}/requirements.txt"
 REQ_HASH_FILE="${ERP_DIR}/.requirements.sha256"
@@ -163,19 +232,20 @@ fi
 source "${VENV}/bin/activate"
 
 if [[ "${NEW_HASH}" != "${OLD_HASH}" ]]; then
-  log_info "Installing Python packages (requirements changed)…"
+  log_info "Installing Python packages…"
   pip install --upgrade pip
   pip install -r "${REQ_FILE}"
   echo "${NEW_HASH}" > "${REQ_HASH_FILE}"
 else
-  log_info "requirements.txt unchanged — skipping pip install"
+  log_info "requirements.txt unchanged — ensuring gunicorn"
 fi
+pip install -q "gunicorn>=22.0.0"
 
 # ---------------------------------------------------------------------------
-# 4) Database migrations (numbered SQL under erp/database)
+# 4) Schema-only migrations
 # ---------------------------------------------------------------------------
 if [[ -x "${SCRIPT_DIR}/apply_migrations.sh" ]]; then
-  log_info "Applying database migrations…"
+  log_info "Applying SCHEMA-ONLY migrations…"
   if ! bash "${SCRIPT_DIR}/apply_migrations.sh"; then
     rollback_on_fail "database migration failed"
     exit 1
@@ -185,14 +255,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 5) Sync APP_VERSION in .env + record version row
+# 5) Version record (best-effort)
 # ---------------------------------------------------------------------------
 if [[ -n "${VERSION}" ]]; then
   sync_app_version_env "${VPS_FLASK_ENV_FILE:-${ERP_DIR}/.env}" "${VERSION}"
 fi
-
 if [[ -f "${SCRIPT_DIR}/record_version.py" ]]; then
-  log_info "Recording version history…"
   python "${SCRIPT_DIR}/record_version.py" \
     --version "${VERSION:-}" \
     --notes "${RELEASE_NOTES}" \
@@ -207,40 +275,55 @@ if [[ -f "${SCRIPT_DIR}/record_version.py" ]]; then
     --db-changes "${DB_CHANGES}" \
     --security "${SECURITY_UPDATES}" \
     --performance "${PERFORMANCE}" \
-    || log_warn "Version recording failed (non-fatal until health)"
+    || log_warn "Version recording failed (non-fatal)"
 fi
 
 # ---------------------------------------------------------------------------
-# 6) Restart Gunicorn + reload Nginx
+# 6) Ensure systemd uses gunicorn/wsgi + restart (HARD FAIL if restart fails)
 # ---------------------------------------------------------------------------
-log_info "Restarting ${SERVICE}…"
-if ! systemctl restart "${SERVICE}"; then
-  rollback_on_fail "gunicorn/systemd restart failed"
+find "${ERP_DIR}" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k 8000/tcp 2>/dev/null || true
+fi
+pkill -f 'python.*run.py' 2>/dev/null || true
+
+log_info "Installing/repairing systemd unit (gunicorn wsgi:app)…"
+if ! bash "${SCRIPT_DIR}/install_service.sh"; then
+  rollback_on_fail "systemd install/restart failed"
   exit 1
 fi
 
-if [[ "${VPS_NGINX_RELOAD:-1}" == "1" ]]; then
-  if nginx -t; then
-    systemctl reload nginx || {
-      rollback_on_fail "nginx reload failed"
-      exit 1
-    }
-  else
-    rollback_on_fail "nginx -t failed"
-    exit 1
+if ! systemctl is-active --quiet "${SERVICE}"; then
+  rollback_on_fail "service ${SERVICE} not active after restart"
+  exit 1
+fi
+log_ok "Service ${SERVICE} active"
+
+if [[ "${VPS_NGINX_RELOAD:-1}" == "1" ]] && command -v nginx >/dev/null 2>&1; then
+  if systemctl is-active --quiet nginx; then
+    if nginx -t; then
+      systemctl reload nginx || log_warn "nginx reload failed (non-fatal if direct :8000 works)"
+    else
+      log_warn "nginx -t failed — skipped reload"
+    fi
   fi
 fi
 
-# Clear Python caches under erp (safe)
-find "${ERP_DIR}" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
-
 # ---------------------------------------------------------------------------
-# 7) Health check
+# 7) Health checks (local required; public best-effort then required from bat)
 # ---------------------------------------------------------------------------
-sleep 2
+sleep 3
+log_info "Health check: ${HEALTH_URL}"
 if ! bash "${SCRIPT_DIR}/healthcheck.sh"; then
-  rollback_on_fail "health check failed"
+  rollback_on_fail "health check failed after restart"
   exit 1
+fi
+
+# Public URL from VPS (may fail if DNS/outbound blocked — Windows bat also checks)
+if http_ok "${PUBLIC_HEALTH}"; then
+  log_ok "Public health OK: ${PUBLIC_HEALTH}"
+else
+  log_warn "Public health not reachable from VPS: ${PUBLIC_HEALTH} (Windows will re-check)"
 fi
 
 STATUS="Success"

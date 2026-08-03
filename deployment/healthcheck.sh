@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # JTCS ERP — healthcheck.sh
-# Verifies Gunicorn, Nginx, HTTP health, and optional DB connectivity.
+# Verifies systemd (Gunicorn/WSGI), HTTP /health, optional Nginx + DB.
 # Exit 0 = healthy, non-zero = unhealthy.
 # =============================================================================
 
@@ -29,8 +29,18 @@ check() {
 log_info "Running health checks…"
 
 if command -v systemctl >/dev/null 2>&1; then
-  check "Gunicorn/systemd (${SERVICE})" service_is_active "${SERVICE}"
-  check "Nginx" service_is_active nginx
+  check "systemd ${SERVICE} active" service_is_active "${SERVICE}"
+  if systemctl cat "${SERVICE}" 2>/dev/null | grep -q 'run.py'; then
+    log_error "systemd unit still references run.py"
+    FAILS=$((FAILS + 1))
+  else
+    log_ok "systemd unit uses WSGI (no run.py)"
+  fi
+  if command -v nginx >/dev/null 2>&1 && systemctl is-enabled nginx >/dev/null 2>&1; then
+    check "Nginx active" service_is_active nginx
+  else
+    log_info "Nginx not required / not enabled — skip"
+  fi
 else
   log_warn "systemctl not available — skipping service checks"
 fi
@@ -40,7 +50,6 @@ if [[ "${API_HEALTH_URL}" != "${HEALTH_URL}" ]]; then
   check "API health (${API_HEALTH_URL})" http_ok "${API_HEALTH_URL}"
 fi
 
-# Lightweight DB check via Flask if venv + wsgi available.
 APP_DIR="${VPS_APP_DIR:-${REPO_ROOT}}"
 ERP_DIR="${APP_DIR}/${VPS_ERP_DIR:-erp}"
 VENV="${VPS_VENV_DIR:-${ERP_DIR}/.venv}"

@@ -1,23 +1,25 @@
 [Unit]
-Description=JTCS ERP (Gunicorn)
+Description=JTCS ERP (Gunicorn / Flask WSGI)
 After=network.target
+Wants=network-online.target
 
 [Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/var/www/jtcs-erp/erp
-Environment="PATH=/var/www/jtcs-erp/erp/.venv/bin"
-EnvironmentFile=-/var/www/jtcs-erp/erp/.env
-ExecStart=/var/www/jtcs-erp/erp/.venv/bin/gunicorn \
-  --config /var/www/jtcs-erp/deployment/config/gunicorn.conf.py.example \
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/JTCS-final/erp
+Environment=PYTHONUNBUFFERED=1
+Environment=GUNICORN_BIND=0.0.0.0:8000
+EnvironmentFile=-/root/JTCS-final/erp/.env
+# Production entrypoint: wsgi:app (NEVER run.py)
+ExecStart=/root/JTCS-final/erp/.venv/bin/gunicorn \
+  --config /root/JTCS-final/deployment/config/gunicorn.conf.py \
   wsgi:app
 ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=5
-
-# Hardening
-NoNewPrivileges=true
-PrivateTmp=true
+KillMode=mixed
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target
