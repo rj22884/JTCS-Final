@@ -41,15 +41,17 @@ echo.
 echo   1. Run at local
 echo   2. Push and deploy
 echo   3. Full overwrite on VPS ^(fresh clone from GitHub^)
+echo   4. Fix 502 / repair VPS ^(.env + restart^)
 echo   0. Exit
 echo.
 set "choice="
-set /p choice="Select option (0-3): "
+set /p choice="Select option (0-4): "
 if defined choice set "choice=!choice: =!"
 
 if /i "!choice!"=="1" goto run_local
 if /i "!choice!"=="2" goto push_and_deploy
 if /i "!choice!"=="3" goto full_overwrite_vps
+if /i "!choice!"=="4" goto repair_vps_502
 if /i "!choice!"=="0" exit /b 0
 echo.
 echo %C_RED%[FAIL]%C_RESET% Invalid option: "!choice!"
@@ -425,6 +427,79 @@ if errorlevel 1 (
 
 call :show_deploy_summary
 call :pass "FULL OVERWRITE COMPLETE"
+echo Log: %DEPLOY_LOG%
+pause
+goto menu
+
+REM =============================================================================
+REM 4. Fix 502 - upload local erp/.env, restore from .old_* if needed, restart
+REM =============================================================================
+:repair_vps_502
+call :require_ssh
+call :load_vps_env
+call :init_branch
+echo.
+echo %C_BOLD%[4] Fix 502 / repair VPS%C_RESET%
+echo  This uploads local erp\.env and restarts jtcs-erp on VPS.
+echo  VPS : %VPS_USER%@%VPS_HOST%:%VPS_PATH%
+echo  App : https://app.jtcsxpert.com
+echo.
+
+if not exist "%ROOT%\erp\.env" (
+    call :fail "Local erp\.env missing - cannot repair secrets"
+    pause
+    goto menu
+)
+if not exist "%ROOT%\deployment\vps_repair_502.sh" (
+    call :fail "deployment\vps_repair_502.sh missing"
+    pause
+    goto menu
+)
+
+set "DEPLOY_LOG=%LOG_DIR%\repair_%RANDOM%.log"
+set "REMOTE_ENV=/tmp/jtcs.env.from_windows"
+set "REMOTE_REPAIR=/tmp/jtcs_repair_502.sh"
+echo Enter VPS password when asked ^(scp then ssh^).
+
+scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\erp\.env" %VPS_USER%@%VPS_HOST%:%REMOTE_ENV%
+if errorlevel 1 (
+    call :fail "scp of erp\.env failed"
+    pause
+    goto menu
+)
+scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\deployment\vps_repair_502.sh" %VPS_USER%@%VPS_HOST%:%REMOTE_REPAIR%
+if errorlevel 1 (
+    call :fail "scp of repair script failed"
+    pause
+    goto menu
+)
+
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "sed -i 's/\r$//' %REMOTE_REPAIR% && bash %REMOTE_REPAIR% %VPS_PATH% %LOCAL_BRANCH% %GIT_REPO_URL%" > "%DEPLOY_LOG%" 2>&1
+set "SSH_RC=!ERRORLEVEL!"
+type "%DEPLOY_LOG%"
+echo.
+call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
+if errorlevel 1 (
+    echo.
+    echo --- last 40 lines ---
+    powershell -NoProfile -Command "Get-Content -LiteralPath '%DEPLOY_LOG%' -Tail 40"
+    echo Log: %DEPLOY_LOG%
+    echo.
+    call :info "If app tree is gone, use menu option 3 Full overwrite"
+    pause
+    goto menu
+)
+call :pass "Repair script SUCCESS"
+
+call :run_public_health
+if errorlevel 1 (
+    call :fail "Health still not HTTP 200 - try option 3 Full overwrite"
+    pause
+    goto menu
+)
+
+call :show_deploy_summary
+call :pass "502 REPAIR COMPLETE - open https://app.jtcsxpert.com"
 echo Log: %DEPLOY_LOG%
 pause
 goto menu
