@@ -187,7 +187,15 @@ export BRANCH="${BRANCH}"
 export GIT_BRANCH="${BRANCH}"
 export VPS_APP_DIR="${APP_DIR}"
 echo "[INFO] Running deployment/deploy.sh --skip-backup..."
-bash "${APP_DIR}/deployment/deploy.sh" --skip-backup
+if bash "${APP_DIR}/deployment/deploy.sh" --skip-backup; then
+  # Re-emit after deploy.sh: SSH+tee can drop the in-script SUCCESS line.
+  echo "===DEPLOY_RESULT:SUCCESS==="
+  echo "===FULL_OVERWRITE:SUCCESS==="
+  echo "[OK] === FULL OVERWRITE COMPLETE ==="
+  exit 0
+fi
 
-echo "[OK] === FULL OVERWRITE COMPLETE ==="
-exit 0
+echo "===DEPLOY_RESULT:FAILED==="
+echo "===FULL_OVERWRITE:FAILED==="
+echo "[ERROR] deploy.sh failed during full overwrite"
+exit 1

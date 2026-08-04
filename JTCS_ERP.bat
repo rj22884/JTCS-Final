@@ -128,6 +128,20 @@ powershell -NoProfile -Command ^
   "try { $r = Invoke-WebRequest -Uri '%PUBLIC_HEALTH_URL%' -UseBasicParsing -TimeoutSec 25 -Headers @{ 'Cache-Control'='no-cache' }; if ($r.StatusCode -eq 200) { Write-Host '[PASS] Health HTTP 200'; exit 0 } else { Write-Host ('[FAIL] Health HTTP ' + $r.StatusCode); exit 1 } } catch { Write-Host ('[FAIL] Health: ' + $_.Exception.Message); exit 1 }"
 exit /b %ERRORLEVEL%
 
+:judge_remote_deploy
+REM Args: %1 = log file, %2 = ssh exit code
+REM Exit 0 = OK to continue to health check; 1 = hard fail.
+REM Note: findstr is unreliable with '=' in markers; PowerShell is used instead.
+set "JD_LOG=%~1"
+set "JD_RC=%~2"
+if not exist "!JD_LOG!" (
+    call :fail "Deploy log missing"
+    exit /b 1
+)
+powershell -NoProfile -Command "$p='!JD_LOG!'; $rc='!JD_RC!'; try { $t = Get-Content -LiteralPath $p -Raw -ErrorAction Stop } catch { Write-Host ('[FAIL] Cannot read log: ' + $_.Exception.Message); exit 1 }; $ok = $t -match 'DEPLOY_RESULT:SUCCESS|FULL_OVERWRITE:SUCCESS|DEPLOYMENT SUCCESS'; $bad = $t -match 'DEPLOY_RESULT:FAILED|DEPLOY_RESULT:Failed|FULL_OVERWRITE:FAILED'; if ($bad -and -not $ok) { Write-Host '[FAIL] Remote reported FAILED'; $m = [regex]::Match($t, 'ABORT:\s*(.+)'); if ($m.Success) { Write-Host ('[FAIL] ' + $m.Groups[1].Value.Trim()) }; $m2 = [regex]::Match($t, '\[ERROR\]\s*(.+)'); if ($m2.Success) { Write-Host ('[FAIL] ' + $m2.Groups[1].Value.Trim()) }; exit 1 }; if ($ok) { Write-Host '[PASS] SUCCESS marker found in log'; exit 0 }; if ($rc -eq '0') { Write-Host '[INFO] SUCCESS marker missing in captured log - SSH exit 0, continuing to health check'; exit 0 }; Write-Host ('[FAIL] Remote failed (SSH exit ' + $rc + ')'); exit 1"
+if errorlevel 1 exit /b 1
+exit /b 0
+
 :show_deploy_summary
 call :init_branch
 set "LOCAL_COMMIT="
@@ -291,22 +305,16 @@ if errorlevel 1 (
 echo %C_CYAN%Deploy%C_RESET% on VPS ^(deployment/deploy.sh^)
 set "DEPLOY_LOG=%LOG_DIR%\deploy_%RANDOM%.log"
 echo Enter VPS password when asked.
-ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && git remote set-url origin %GIT_REPO_URL% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/deploy.sh" > "%DEPLOY_LOG%" 2>&1
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && git remote set-url origin %GIT_REPO_URL% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/deploy.sh && echo ===DEPLOY_RESULT:SUCCESS===" > "%DEPLOY_LOG%" 2>&1
 set "SSH_RC=!ERRORLEVEL!"
 type "%DEPLOY_LOG%"
 echo.
-findstr /C:"===DEPLOY_RESULT:SUCCESS===" "%DEPLOY_LOG%" >nul 2>&1
+call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
 if errorlevel 1 (
-    call :fail "Deploy FAILED - SUCCESS marker not found"
     echo.
     echo --- last 40 lines of deploy log ---
     powershell -NoProfile -Command "Get-Content -LiteralPath '%DEPLOY_LOG%' -Tail 40"
     echo Log: %DEPLOY_LOG%
-    pause
-    goto menu
-)
-if not "!SSH_RC!"=="0" (
-    call :fail "SSH/deploy exit code !SSH_RC! - FAILED"
     pause
     goto menu
 )
@@ -397,18 +405,12 @@ ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "sed
 set "SSH_RC=!ERRORLEVEL!"
 type "%DEPLOY_LOG%"
 echo.
-findstr /C:"===DEPLOY_RESULT:SUCCESS===" "%DEPLOY_LOG%" >nul 2>&1
+call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
 if errorlevel 1 (
-    call :fail "Full overwrite FAILED - SUCCESS marker not found"
     echo.
     echo --- last 40 lines ---
     powershell -NoProfile -Command "Get-Content -LiteralPath '%DEPLOY_LOG%' -Tail 40"
     echo Log: %DEPLOY_LOG%
-    pause
-    goto menu
-)
-if not "!SSH_RC!"=="0" (
-    call :fail "SSH/overwrite exit code !SSH_RC! - FAILED"
     pause
     goto menu
 )
