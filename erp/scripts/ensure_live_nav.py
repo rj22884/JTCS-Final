@@ -51,13 +51,43 @@ BATCHES = [
     WHERE ParentMenuID IS NULL
       AND MenuName NOT IN (
             N'Admin Role', N'Dashboard', N'Activities', N'Reports and Analysis',
-            N'Masters', N'Accounting', N'Others'
+            N'Masters', N'Accounting'
       );
+
+    UPDATE dbo.MenuMaster
+    SET IsActive = 0
+    WHERE ParentMenuID IS NULL
+      AND MenuName IN (
+            N'ITR', N'Others', N'GST', N'DSC', N'TDS',
+            N'Payroll', N'Transactions', N'Employee', N'Stock',
+            N'Menu Management', N'Settings', N'CRM'
+      );
+
+    /* Permanently remove customized Menu Management (Admin Role → Settings) */
+    UPDATE dbo.MenuMaster
+    SET IsActive = 0,
+        Description = N'Removed — customized menu disabled'
+    WHERE MenuName IN (N'Settings', N'Menu Management', N'Menu Admin')
+       OR LOWER(ISNULL(MenuURL, N'')) IN (N'/admin/menus', N'/admin/menus/', N'/settings', N'/settings/');
 
     UPDATE dbo.MenuMaster
     SET IsActive = 0
     WHERE MenuName IN (N'Logout', N'Log Out')
        OR LOWER(ISNULL(MenuURL, N'')) IN (N'/logout', N'/auth/logout');
+    """,
+    """
+    IF COL_LENGTH(N'dbo.MenuMaster', N'BackgroundColor') IS NULL
+        ALTER TABLE dbo.MenuMaster ADD BackgroundColor NVARCHAR(20) NULL;
+    """,
+    """
+    UPDATE dbo.MenuMaster SET BackgroundColor = N'#257B24'
+    WHERE ParentMenuID IS NULL AND MenuName = N'Dashboard';
+    UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B25'
+    WHERE ParentMenuID IS NULL AND MenuName = N'Activities';
+    UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B29'
+    WHERE ParentMenuID IS NULL AND MenuName = N'Reports and Analysis';
+    UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B3E'
+    WHERE ParentMenuID IS NULL AND MenuName = N'Masters';
     """,
     """
     DECLARE @ActivitiesID INT = (
@@ -300,6 +330,7 @@ def main() -> int:
 
         forbidden = {
             "ITR",
+            "Others",
             "GST",
             "DSC",
             "TDS",
@@ -308,10 +339,25 @@ def main() -> int:
             "Employee",
             "Stock",
             "Menu Management",
+            "Settings",
         }
         bad = forbidden.intersection(set(tops))
         if bad:
             print(f"[FAIL] Still active top menus that should be hidden: {sorted(bad)}")
+            return 1
+
+        cur.execute(
+            """
+            SELECT COUNT(1) FROM dbo.MenuMaster
+            WHERE IsActive = 1
+              AND (
+                    MenuName IN (N'Settings', N'Menu Management', N'Menu Admin')
+                 OR LOWER(ISNULL(MenuURL, N'')) IN (N'/admin/menus', N'/admin/menus/')
+              )
+            """
+        )
+        if int(cur.fetchone()[0] or 0) > 0:
+            print("[FAIL] Settings / Menu Management still active (customized menu)")
             return 1
 
         cur.execute(

@@ -256,12 +256,35 @@ class FollowupService:
             )
         if self.module_code == "ITR":
             self._heal_itr_payment_status_rows(rows)
+            self._attach_itr_payment_receive_dates(rows)
             if status_filter:
                 rows = self._filter_entries_by_status(rows, status_filter, module_code="ITR")
         elif self.module_code == "DSC":
             if status_filter:
                 rows = self._filter_entries_by_status(rows, status_filter, module_code="DSC")
         return rows
+
+    def _attach_itr_payment_receive_dates(self, rows: list[dict]) -> None:
+        """ITR grid: payment receive date(s) only when Payment Received is ticked."""
+        bill_nos = {
+            (row.get("bill_no") or row.get("BillNo") or "").strip().upper()
+            for row in rows
+            if row.get("payment_received")
+            and (row.get("bill_no") or row.get("BillNo") or "").strip()
+        }
+        dates_map: dict[str, list[str]] = {}
+        if bill_nos:
+            dates_map = FollowupPaymentService("ITR").payment_dates_by_bills(bill_nos)
+
+        for row in rows:
+            if not row.get("payment_received"):
+                row["payment_receive_dates"] = []
+                row["payment_receive_date"] = ""
+                continue
+            bill = (row.get("bill_no") or row.get("BillNo") or "").strip().upper()
+            dates = list(dates_map.get(bill) or [])
+            row["payment_receive_dates"] = dates
+            row["payment_receive_date"] = ", ".join(dates)
 
     @staticmethod
     def _completed_stage_codes(row: dict) -> set[str]:

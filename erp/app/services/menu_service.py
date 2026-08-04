@@ -108,7 +108,7 @@ class MenuService:
             )
         return nodes
 
-    # Match local ERP top bar — hide legacy top-level modules still active in JTCSS.
+    # Match simplified ERP top bar — Accounting kept; ITR/GST/Payroll/Others/… hidden.
     CORE_TOP_LEVEL_MENUS = frozenset(
         {
             "admin role",
@@ -117,20 +117,60 @@ class MenuService:
             "reports and analysis",
             "masters",
             "accounting",
-            "others",
+        }
+    )
+
+    # Customized Menu Management — permanently removed from Admin Role / nav.
+    HIDDEN_MENU_NAMES = frozenset(
+        {
+            "settings",
+            "menu management",
+            "menu admin",
+        }
+    )
+    HIDDEN_MENU_URLS = frozenset(
+        {
+            "/admin/menus",
+            "/admin/menus/",
+            "/settings",
+            "/settings/",
         }
     )
 
     def get_navigation(self, role: str | None) -> list[MenuNode]:
         menus = self.repository.get_active_for_role(role)
-        # Hidden from app nav (CRM / Exceptional / non-core top-level).
+        # Hidden from app nav (CRM / Exceptional / Settings / non-core modules).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
+        # Drop children of ITR/GST/Payroll/… so _include_parent_chain cannot
+        # bring those top modules back into the ribbon.
+        menus = [m for m in menus if self._is_under_core_nav(m)]
         if has_admin_role(role):
             allowed_ids = {menu.MenuID for menu in menus}
             menus = self._include_parent_chain(menus, allowed_ids)
+            menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
         else:
             menus = self._menus_with_accessible_ancestors(menus, role)
+            menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
         return self.build_tree(menus, None)
+
+    def _top_level_ancestor(self, menu: MenuMaster) -> MenuMaster | None:
+        current: MenuMaster | None = menu
+        seen: set[int] = set()
+        while current is not None:
+            if current.MenuID in seen:
+                return None
+            seen.add(current.MenuID)
+            if not current.ParentMenuID:
+                return current
+            current = self.repository.get_by_id(current.ParentMenuID)
+        return None
+
+    def _is_under_core_nav(self, menu: MenuMaster) -> bool:
+        root = self._top_level_ancestor(menu)
+        if root is None:
+            return False
+        name = (root.MenuName or "").strip().lower()
+        return name in self.CORE_TOP_LEVEL_MENUS
 
     @classmethod
     def _is_hidden_nav_menu(cls, menu) -> bool:
@@ -141,6 +181,12 @@ class MenuService:
         # Parent "Exceptional Report" stays hidden; Stamp / e-Court Exception
         # are shown under Reports and Analysis (existing module URLs kept).
         if name in {"crm", "exceptional report", "logout", "log out"}:
+            return True
+        if name in cls.HIDDEN_MENU_NAMES:
+            return True
+        if url.rstrip("/") in {u.rstrip("/") for u in cls.HIDDEN_MENU_URLS} or url.startswith(
+            "/admin/menus"
+        ):
             return True
         if url.startswith("/crm/") or url == "/crm":
             return True
@@ -154,7 +200,7 @@ class MenuService:
             return True
         if url in {"/logout", "/auth/logout"}:
             return True
-        # Top-level only: keep core ERP bar (same as local), hide ITR/GST/Payroll/…
+        # Top-level only: keep core ERP bar; hide ITR/GST/DSC/TDS/Payroll/Others/…
         if parent_id is None and name and name not in cls.CORE_TOP_LEVEL_MENUS:
             return True
         return False
@@ -214,10 +260,26 @@ class MenuService:
         for menu_id in list(allowed_ids):
             current = by_id.get(menu_id)
             while current and current.ParentMenuID:
-                expanded_ids.add(current.ParentMenuID)
                 parent = self.repository.get_by_id(current.ParentMenuID)
-                if parent is None:
+                if parent is None or self._is_hidden_nav_menu(parent):
                     break
+                root_name = ""
+                root = parent
+                walk = parent
+                seen: set[int] = set()
+                while walk is not None and walk.MenuID not in seen:
+                    seen.add(walk.MenuID)
+                    if not walk.ParentMenuID:
+                        root = walk
+                        break
+                    nxt = self.repository.get_by_id(walk.ParentMenuID)
+                    if nxt is None:
+                        break
+                    walk = nxt
+                root_name = (root.MenuName or "").strip().lower()
+                if root_name and root_name not in self.CORE_TOP_LEVEL_MENUS:
+                    break
+                expanded_ids.add(parent.MenuID)
                 by_id[parent.MenuID] = parent
                 current = parent
 

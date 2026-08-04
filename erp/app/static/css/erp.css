@@ -290,6 +290,43 @@ body.jtcs-body .navbar {
   color: #fff;
 }
 
+/* Core top-menu colours (deploy with CSS; matches local MenuMaster) */
+.jtcs-top-item[data-menu-key="dashboard"] > .jtcs-top-link {
+  background-color: #257b24;
+}
+.jtcs-top-item[data-menu-key="dashboard"] > .jtcs-top-link:hover,
+.jtcs-top-item[data-menu-key="dashboard"].open > .jtcs-top-link,
+.jtcs-top-item[data-menu-key="dashboard"] > .jtcs-top-link.active {
+  background-color: #2d8f2c;
+}
+
+.jtcs-top-item[data-menu-key="activities"] > .jtcs-top-link {
+  background-color: #247b25;
+}
+.jtcs-top-item[data-menu-key="activities"] > .jtcs-top-link:hover,
+.jtcs-top-item[data-menu-key="activities"].open > .jtcs-top-link,
+.jtcs-top-item[data-menu-key="activities"] > .jtcs-top-link.active {
+  background-color: #2d8f2e;
+}
+
+.jtcs-top-item[data-menu-key="reports-and-analysis"] > .jtcs-top-link {
+  background-color: #247b29;
+}
+.jtcs-top-item[data-menu-key="reports-and-analysis"] > .jtcs-top-link:hover,
+.jtcs-top-item[data-menu-key="reports-and-analysis"].open > .jtcs-top-link,
+.jtcs-top-item[data-menu-key="reports-and-analysis"] > .jtcs-top-link.active {
+  background-color: #2d8f32;
+}
+
+.jtcs-top-item[data-menu-key="masters"] > .jtcs-top-link {
+  background-color: #247b3e;
+}
+.jtcs-top-item[data-menu-key="masters"] > .jtcs-top-link:hover,
+.jtcs-top-item[data-menu-key="masters"].open > .jtcs-top-link,
+.jtcs-top-item[data-menu-key="masters"] > .jtcs-top-link.active {
+  background-color: #2d8f4a;
+}
+
 .jtcs-top-link .bi-chevron-down {
   font-size: 0.65rem;
   opacity: 0.85;

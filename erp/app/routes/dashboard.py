@@ -90,33 +90,6 @@ def index():
         request.args.get("from") or request.args.get("to") or request.args.get("date_from") or request.args.get("date_to")
     )
 
-    crm_widgets = {
-        "today_leads": 0,
-        "open_leads": 0,
-        "unread_notifications": 0,
-        "unread_messages": 0,
-        "pending_tasks": 0,
-        "pending_followups": 0,
-    }
-    try:
-        from app.modules.communication.services import CommunicationService
-        from app.modules.crm.followup_service import CrmFollowUpService
-        from app.modules.crm.lead_service import CrmLeadService
-        from app.modules.crm.task_service import CrmTaskService
-        from app.modules.notification.services import NotificationService
-
-        lead_stats = CrmLeadService().dashboard_stats()
-        crm_widgets["today_leads"] = int(lead_stats.get("today_leads") or 0)
-        crm_widgets["open_leads"] = int(lead_stats.get("open_leads") or 0)
-        crm_widgets["unread_notifications"] = NotificationService().unread_count(session.get("user_id"))
-        crm_widgets["unread_messages"] = CommunicationService().unread_message_count()
-        crm_widgets["pending_tasks"] = int(CrmTaskService().list_tasks(status="Pending", page=1).get("total") or 0)
-        crm_widgets["pending_followups"] = int(
-            CrmFollowUpService().list_followups(status="Pending", page=1).get("total") or 0
-        )
-    except Exception:
-        pass
-
     return render_template(
         "dashboard/index.html",
         page_title="Dashboard",
@@ -138,7 +111,6 @@ def index():
         prev_fy_from=prev_fy_from,
         prev_fy_to=prev_fy_to,
         whats_new=list_whats_new(limit=6),
-        crm_widgets=crm_widgets,
     )
 
 

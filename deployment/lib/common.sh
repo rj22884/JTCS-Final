@@ -68,16 +68,22 @@ append_deploy_log() {
   } >> "${log_file}"
 }
 
+# Prefer DEPLOY_GIT_ROOT / VPS_APP_DIR when deploy.sh exports them so reports
+# always reflect the live app tree (not a mismatched script checkout).
+_git_root() {
+  echo "${DEPLOY_GIT_ROOT:-${VPS_APP_DIR:-${REPO_ROOT}}}"
+}
+
 git_commit_id() {
-  git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  git -C "$(_git_root)" rev-parse --short HEAD 2>/dev/null || echo "unknown"
 }
 
 git_branch_name() {
-  git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
+  git -C "$(_git_root)" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown"
 }
 
 git_full_commit() {
-  git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo "unknown"
+  git -C "$(_git_root)" rev-parse HEAD 2>/dev/null || echo "unknown"
 }
 
 service_is_active() {

@@ -1,0 +1,125 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/backup.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card backup-card mb-3">
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+    <div>
+      <h3 class="h5 mb-1">Restore Backup</h3>
+      <p class="text-muted small mb-0">
+        VPS se download kiya hua <code>.bak</code> / <code>.zip</code> yahan
+        <strong>Upload to Local</strong> karke is PC ke local database par restore karein.
+        Large files ko Data/Full folder mein copy bhi kar sakte ho, phir <strong>Restore</strong>.
+        Administrator only — local live data replace hoga.
+      </p>
+    </div>
+  </div>
+
+  <div class="backup-meta small text-muted mb-3">
+    <div><span class="backup-meta-label">Local server</span> {{ connection.server }}</div>
+    <div><span class="backup-meta-label">Local database</span> {{ connection.database }}</div>
+    <div><span class="backup-meta-label">Local data folder</span> <code>{{ connection.database_backup_dir }}</code></div>
+    <div><span class="backup-meta-label">Local full folder</span> <code>{{ connection.full_backup_dir }}</code></div>
+  </div>
+
+  <div class="backup-upload-row mb-3">
+    <label class="form-label small fw-semibold mb-1" for="restoreUploadFile">VPS backup → upload to this local PC</label>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <input type="file" class="form-control form-control-sm" id="restoreUploadFile"
+             accept=".bak,.zip,application/zip,application/octet-stream">
+      <select class="form-select form-select-sm backup-kind-select" id="restoreUploadKind" aria-label="Backup kind">
+        <option value="auto">Auto (.bak / .zip)</option>
+        <option value="database">Database (.bak)</option>
+        <option value="full">Full (.zip)</option>
+      </select>
+      <button type="button" class="btn btn-outline-primary btn-sm" id="restoreUploadBtn">
+        <i class="bi bi-hdd"></i> Upload to Local
+      </button>
+    </div>
+  </div>
+
+  <div id="restoreStatus" class="alert d-none mb-3" role="status"></div>
+
+  <h4 class="h6 mb-2">Local database backups (.bak)</h4>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-hover align-middle mb-0" id="restoreDbGrid">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Created</th>
+          <th class="text-end">Size</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="restoreDbBody">
+        {% for row in database_backups %}
+        <tr data-kind="database" data-file="{{ row.file_name }}">
+          <td><code>{{ row.file_name }}</code></td>
+          <td>{{ row.modified_label }}</td>
+          <td class="text-end">{{ row.size_label }}</td>
+          <td class="text-end">
+            <button type="button" class="btn btn-warning btn-sm restore-run-btn"
+                    data-kind="database" data-file="{{ row.file_name }}">
+              <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr class="backup-empty-row">
+          <td colspan="4" class="text-center text-muted py-4">No local database backups yet. Upload a VPS .bak first.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h4 class="h6 mb-2">Local full backups (.zip)</h4>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0" id="restoreFullGrid">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Created</th>
+          <th class="text-end">Size</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="restoreFullBody">
+        {% for row in full_backups %}
+        <tr data-kind="full" data-file="{{ row.file_name }}">
+          <td><code>{{ row.file_name }}</code></td>
+          <td>{{ row.modified_label }}</td>
+          <td class="text-end">{{ row.size_label }}</td>
+          <td class="text-end">
+            <button type="button" class="btn btn-warning btn-sm restore-run-btn"
+                    data-kind="full" data-file="{{ row.file_name }}">
+              <i class="bi bi-arrow-counterclockwise"></i> Restore
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr class="backup-empty-row">
+          <td colspan="4" class="text-center text-muted py-4">No local full backups yet. Upload a VPS .zip first.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.RESTORE_PAGE = {
+    listUrl: {{ url_for('backup.list_restore_backups') | tojson }},
+    uploadUrl: {{ url_for('backup.upload_restore_backup') | tojson }},
+    restoreUrl: {{ url_for('backup.run_restore_backup') | tojson }},
+    csrf: {{ csrf_token() | tojson }},
+    database: {{ connection.database | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/backup_restore.js') }}?v=20260804restore3"></script>
+{% endblock %}

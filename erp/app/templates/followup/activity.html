@@ -205,6 +205,9 @@
                 <th>Filing Date</th>
                 {% endif %}
                 <th>Workflow Status</th>
+                {% if module_code == 'ITR' %}
+                <th>Payment Receive Date</th>
+                {% endif %}
                 <th>Remarks</th>
                 {% if module_code == 'ITR' %}
                 <th class="text-center" title="Payment Reminder"><i class="bi bi-bell"></i></th>
@@ -555,5 +558,5 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260802gstcode"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260803paydate"></script>
 {% endblock %}

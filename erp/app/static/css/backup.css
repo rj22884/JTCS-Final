@@ -22,3 +22,15 @@
 .backup-card #backupGrid td .btn {
   margin-left: 0.25rem;
 }
+
+.backup-card .backup-upload-row {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+
+.backup-card .backup-kind-select {
+  width: auto;
+  min-width: 10rem;
+}

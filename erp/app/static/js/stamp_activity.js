@@ -494,14 +494,36 @@
     renderMainDataGrid(mainGridRows);
   }
 
+  function effectiveCertificateFilter() {
+    const top = (els.filterCert?.value || "").trim();
+    const col = (gridFilters.certificate_number || "").trim();
+    // Prefer the more specific / longer of the two active certificate inputs.
+    if (top && col) return top.length >= col.length ? top : col;
+    return top || col;
+  }
+
   function buildGridQueryParams() {
     const params = new URLSearchParams();
-    if (els.filterDateFrom?.value) params.set("date_from", els.filterDateFrom.value);
-    if (els.filterDateTo?.value) params.set("date_to", els.filterDateTo.value);
-    if (els.filterCert?.value.trim()) params.set("certificate", els.filterCert.value.trim());
+    const cert = effectiveCertificateFilter();
+    // Certificate search is server-side (full JTCS). Dates still sent for summary context
+    // but backend ignores period when certificate is present.
+    if (!cert) {
+      if (els.filterDateFrom?.value) params.set("date_from", els.filterDateFrom.value);
+      if (els.filterDateTo?.value) params.set("date_to", els.filterDateTo.value);
+    }
+    if (cert) params.set("certificate", cert);
     if (els.filterMobile?.value.trim()) params.set("mobile", els.filterMobile.value.trim());
     if (els.filterCustomer?.value.trim()) params.set("customer", els.filterCustomer.value.trim());
     return params;
+  }
+
+  let certFilterReloadTimer = null;
+  function scheduleCertificateServerReload() {
+    if (certFilterReloadTimer) clearTimeout(certFilterReloadTimer);
+    certFilterReloadTimer = setTimeout(function () {
+      certFilterReloadTimer = null;
+      loadMainGrid();
+    }, 350);
   }
 
   function renderPeriodSummary(summary) {
@@ -2466,7 +2488,29 @@
     const input = event.target.closest(".stamp-col-filter");
     if (!input) return;
     readGridFiltersFromDom();
+    // Certificate column filter must query the server — the grid only holds a page of rows
+    // (period can have 1000+ stamps), so client-only filtering misses JTCS matches.
+    if (input.dataset.filterKey === "certificate_number") {
+      if (els.filterCert && !(els.filterCert.value || "").trim()) {
+        els.filterCert.value = gridFilters.certificate_number || "";
+      }
+      scheduleCertificateServerReload();
+      return;
+    }
     renderMainDataGrid(mainGridRows);
+  });
+  stampGridHead?.addEventListener("keydown", function (event) {
+    const input = event.target.closest(".stamp-col-filter");
+    if (!input || input.dataset.filterKey !== "certificate_number") return;
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (certFilterReloadTimer) {
+      clearTimeout(certFilterReloadTimer);
+      certFilterReloadTimer = null;
+    }
+    readGridFiltersFromDom();
+    if (els.filterCert) els.filterCert.value = gridFilters.certificate_number || "";
+    loadMainGrid();
   });
 
   updateEngineBanner(window.STAMP_OCR_STATUS);

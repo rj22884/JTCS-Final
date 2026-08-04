@@ -137,7 +137,7 @@ class StampRepository:
         return self.session.scalars(stmt).first()
 
     def search_by_certificate(self, query: str, limit: int = 100) -> list[dict]:
-        normalized = (query or "").strip()
+        normalized = self._normalize_certificate_query(query)
         if not normalized:
             return []
 
@@ -149,7 +149,9 @@ class StampRepository:
                 JtcsBankTransaction.JtcsBankTransactionID == JTCSDailyTransaction.BankTransactionID,
             )
             .where(StampMaster.IsActive == True)  # noqa: E712
-            .where(StampMaster.CertificateNumber.like(f"%{normalized}%"))
+            .where(
+                func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{normalized}%")
+            )
             .order_by(StampMaster.CreatedDate.desc(), JTCSDailyTransaction.TransactionID.desc())
             .limit(limit)
         )
@@ -206,13 +208,29 @@ class StampRepository:
             )
         return rows
 
-    def _apply_transaction_filters(self, stmt, filters: StampGridFilters):
-        if filters.date_from:
-            stmt = stmt.where(JTCSDailyTransaction.TransactionDate >= filters.date_from)
-        if filters.date_to:
-            stmt = stmt.where(JTCSDailyTransaction.TransactionDate <= filters.date_to)
-        if filters.certificate:
-            stmt = stmt.where(StampMaster.CertificateNumber.like(f"%{filters.certificate.strip()}%"))
+    @staticmethod
+    def _normalize_certificate_query(value: str) -> str:
+        """Uppercase + strip spaces so UI / OCR spacing variants still match."""
+        return "".join((value or "").strip().upper().split())
+
+    def _apply_transaction_filters(
+        self,
+        stmt,
+        filters: StampGridFilters,
+        *,
+        apply_dates: bool = True,
+    ):
+        cert = self._normalize_certificate_query(filters.certificate)
+        # Certificate search must find the row anywhere in JTCS (period does not hide it).
+        if cert:
+            stmt = stmt.where(
+                func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{cert}%")
+            )
+        elif apply_dates:
+            if filters.date_from:
+                stmt = stmt.where(JTCSDailyTransaction.TransactionDate >= filters.date_from)
+            if filters.date_to:
+                stmt = stmt.where(JTCSDailyTransaction.TransactionDate <= filters.date_to)
         if filters.mobile:
             mobile = "".join(ch for ch in filters.mobile if ch.isdigit())[-10:]
             if mobile:
@@ -535,10 +553,17 @@ class StampRepository:
 
     def grid_rows(self, filters: StampGridFilters, *, limit: int = 500) -> list[dict]:
         ocr_stamp_ids = self._ocr_stamp_ids()
+        # Targeted searches must not be truncated by the default period page size.
+        cert = self._normalize_certificate_query(filters.certificate)
+        mobile = "".join(ch for ch in (filters.mobile or "") if ch.isdigit())[-10:]
+        customer = (filters.customer or "").strip()
+        effective_limit = limit
+        if cert or mobile or customer:
+            effective_limit = max(limit, 5000)
         stmt = (
             self._grid_base_stmt(filters)
             .order_by(JTCSDailyTransaction.TransactionDate.desc(), StampMaster.CreatedDate.desc())
-            .limit(limit)
+            .limit(effective_limit)
         )
         rows: list[dict] = []
         for stamp, daily, customer in self.session.execute(stmt).all():

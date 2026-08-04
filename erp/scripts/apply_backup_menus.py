@@ -18,7 +18,9 @@ def main() -> int:
     with app.app_context():
         ensure_backup_menus()
         rows = (
-            MenuMaster.query.filter(MenuMaster.MenuName.in_(["Admin Role", "Backup Full", "Data Backup"]))
+            MenuMaster.query.filter(
+                MenuMaster.MenuName.in_(["Admin Role", "Backup Full", "Data Backup", "Restore Backup"])
+            )
             .order_by(MenuMaster.MenuID)
             .all()
         )

@@ -3,11 +3,13 @@
 
     Keep only these top-level menus active:
       Admin Role, Dashboard, Activities, Reports and Analysis,
-      Masters, Accounting, Others
+      Masters, Accounting
 
-    Everything else at top level (ITR, GST, DSC, TDS, Payroll, Menu Management,
+    Everything else at top level (ITR, Others, GST, DSC, TDS, Payroll,
     Transactions, Employee, Stock, Settings, Logout, CRM, …) is hidden.
-    Child menus under Admin Role / Activities / etc. stay as-is.
+    Admin Role → Settings (customized menu) is also deactivated.
+    Child menus under Admin Role / Activities / etc. stay as-is
+    (except Settings / Menu Management).
     DATA safe — MenuMaster.IsActive only.
 */
 USE JTCSS;
@@ -26,9 +28,15 @@ WHERE ParentMenuID IS NULL
         N'Activities',
         N'Reports and Analysis',
         N'Masters',
-        N'Accounting',
-        N'Others'
+        N'Accounting'
   );
+GO
+
+UPDATE dbo.MenuMaster
+SET IsActive = 0,
+    Description = N'Removed — customized menu disabled'
+WHERE MenuName IN (N'Settings', N'Menu Management', N'Menu Admin')
+   OR LOWER(ISNULL(MenuURL, N'')) IN (N'/admin/menus', N'/admin/menus/', N'/settings', N'/settings/');
 GO
 
 UPDATE dbo.MenuMaster

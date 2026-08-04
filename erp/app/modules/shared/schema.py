@@ -371,15 +371,14 @@ ERP_CORE_TOP_LEVEL_MENUS = (
     "Reports and Analysis",
     "Masters",
     "Accounting",
-    "Others",
 )
 
 
 def ensure_erp_core_nav_menus() -> None:
     """Align VPS/local top nav to core ERP menus (same as local simplified UI).
 
-    Deactivates legacy top-level items (ITR, GST, Payroll, Menu Management, …)
-    while keeping child modules that live under Admin Role / Activities / etc.
+    Deactivates legacy top-level items (ITR, GST, Payroll, Others, Menu Management, …)
+    and permanently removes Admin Role → Settings (customized menu).
     DATA safe — only MenuMaster.IsActive changes.
     """
     db.session.execute(
@@ -398,8 +397,36 @@ def ensure_erp_core_nav_menus() -> None:
                     N'Activities',
                     N'Reports and Analysis',
                     N'Masters',
-                    N'Accounting',
-                    N'Others'
+                    N'Accounting'
+              );
+
+            /* Explicit legacy top modules (belt-and-suspenders after VPS restore) */
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0
+            WHERE ParentMenuID IS NULL
+              AND MenuName IN (
+                    N'ITR', N'Others', N'GST', N'DSC', N'TDS',
+                    N'Payroll', N'Transactions', N'Employee', N'Stock',
+                    N'Menu Management', N'Settings', N'CRM'
+              );
+
+            /* Permanently remove customized Menu Management (Admin Role → Settings) */
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0,
+                Description = N'Removed — customized menu disabled'
+            WHERE MenuName IN (N'Settings', N'Menu Management', N'Menu Admin')
+               OR LOWER(ISNULL(MenuURL, N'')) IN (N'/admin/menus', N'/admin/menus/', N'/settings', N'/settings/');
+
+            /* Also deactivate children under removed top modules (stops them reappearing in nav) */
+            UPDATE c
+            SET c.IsActive = 0
+            FROM dbo.MenuMaster AS c
+            INNER JOIN dbo.MenuMaster AS p ON p.MenuID = c.ParentMenuID
+            WHERE p.ParentMenuID IS NULL
+              AND p.MenuName IN (
+                    N'ITR', N'Others', N'GST', N'DSC', N'TDS',
+                    N'Payroll', N'Transactions', N'Employee', N'Stock',
+                    N'Menu Management', N'Settings', N'CRM'
               );
 
             /* Logout / orphan utility rows that should not be nav items */
@@ -407,6 +434,32 @@ def ensure_erp_core_nav_menus() -> None:
             SET IsActive = 0
             WHERE MenuName IN (N'Logout', N'Log Out')
                OR LOWER(ISNULL(MenuURL, N'')) IN (N'/logout', N'/auth/logout');
+
+            """
+        )
+    )
+    db.session.commit()
+    # Separate batch so newly added BackgroundColor is visible to the parser.
+    db.session.execute(
+        text(
+            """
+            IF COL_LENGTH(N'dbo.MenuMaster', N'BackgroundColor') IS NULL
+                ALTER TABLE dbo.MenuMaster ADD BackgroundColor NVARCHAR(20) NULL;
+            """
+        )
+    )
+    db.session.commit()
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster SET BackgroundColor = N'#257B24'
+            WHERE ParentMenuID IS NULL AND MenuName = N'Dashboard';
+            UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B25'
+            WHERE ParentMenuID IS NULL AND MenuName = N'Activities';
+            UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B29'
+            WHERE ParentMenuID IS NULL AND MenuName = N'Reports and Analysis';
+            UPDATE dbo.MenuMaster SET BackgroundColor = N'#247B3E'
+            WHERE ParentMenuID IS NULL AND MenuName = N'Masters';
             """
         )
     )

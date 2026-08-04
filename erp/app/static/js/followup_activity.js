@@ -132,6 +132,23 @@
     });
   }
 
+  function formatPaymentReceiveDateCell(row) {
+    // Only show dates when Payment Received is ticked; otherwise "-".
+    if (!rowHasPaymentReceived(row)) return "—";
+    let dates = Array.isArray(row.payment_receive_dates) ? row.payment_receive_dates.slice() : [];
+    if (!dates.length && row.payment_receive_date) {
+      dates = String(row.payment_receive_date)
+        .split(",")
+        .map(function (part) { return part.trim(); })
+        .filter(Boolean);
+    }
+    if (!dates.length) return "—";
+    const formatted = dates
+      .map(function (value) { return formatDate(value); })
+      .filter(function (value) { return value && value !== "—"; });
+    return formatted.length ? formatted.join(", ") : "—";
+  }
+
   function rowHasPaymentReceived(row) {
     if (!row) return false;
     if (row.payment_received === true || row.payment_received === 1) return true;
@@ -558,6 +575,7 @@
       "Return Filing Status",
       "Filing Date",
       "Workflow Status",
+      "Payment Receive Date",
       "Remarks",
     ];
     function exportDate(value) {
@@ -567,6 +585,7 @@
     }
     const lines = [headers.map(csvCell).join(",")];
     dataRows.forEach(function (row) {
+      const payDates = formatPaymentReceiveDateCell(row);
       lines.push(
         [
           exportDate(row.work_date),
@@ -581,6 +600,7 @@
           row.return_filing_status || "",
           exportDate(row.filing_date),
           row.workflow_status || "",
+          payDates === "—" ? "" : payDates,
           row.remarks || "",
         ]
           .map(csvCell)
@@ -874,10 +894,11 @@
         { key: "filing_date", type: "date" }
       );
     }
-    cols.push(
-      { key: "workflow_status", type: "text" },
-      { key: "remarks", type: "text" }
-    );
+    cols.push({ key: "workflow_status", type: "text" });
+    if (isItrModule) {
+      cols.push({ key: "payment_receive_date", type: "text" });
+    }
+    cols.push({ key: "remarks", type: "text" });
     return cols;
   }
 
@@ -1117,6 +1138,9 @@
         returnCol +
         filingCols +
         '<td><span class="fu-status-badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + "</span></td>" +
+        (isItrModule
+          ? "<td>" + escapeHtml(formatPaymentReceiveDateCell(row)) + "</td>"
+          : "") +
         "<td>" + escapeHtml(row.remarks || "—") + "</td>" +
         paymentReminderCell +
         rowSyncCell +

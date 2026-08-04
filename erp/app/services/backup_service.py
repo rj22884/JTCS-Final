@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 import zipfile
 from datetime import datetime
@@ -164,6 +165,382 @@ class BackupService:
         path = self.resolve_download(kind, file_name)
         path.unlink(missing_ok=False)
         return f"Deleted {path.name}."
+
+    def save_uploaded_backup(self, kind: str, file_name: str, data) -> dict:
+        """Save a previously downloaded backup into the server backup folder.
+
+        ``data`` may be bytes or a file-like / Werkzeug FileStorage stream.
+        Streams are written in chunks so large .bak files do not fill RAM.
+        """
+        safe = self._safe_file_name(file_name)
+        if kind == "database":
+            if Path(safe).suffix.lower() != ".bak":
+                raise ValueError("Database restore upload must be a .bak file.")
+            target = self.database_dir / safe
+        elif kind == "full":
+            if Path(safe).suffix.lower() != ".zip":
+                raise ValueError("Full restore upload must be a .zip file.")
+            target = self.full_dir / safe
+        else:
+            raise ValueError("Unknown backup kind.")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(target.suffix + ".partial")
+        try:
+            if hasattr(data, "save") and callable(getattr(data, "save")):
+                # Werkzeug FileStorage — stream to disk
+                data.save(tmp)
+            elif hasattr(data, "read") and callable(getattr(data, "read")):
+                with open(tmp, "wb") as out:
+                    shutil.copyfileobj(data, out, length=1024 * 1024)
+            elif isinstance(data, (bytes, bytearray)):
+                if not data:
+                    raise ValueError("Uploaded file is empty.")
+                tmp.write_bytes(data)
+            else:
+                raise ValueError("Unsupported upload payload.")
+            if not tmp.is_file() or tmp.stat().st_size <= 0:
+                raise ValueError("Uploaded file is empty.")
+            tmp.replace(target)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        info = self._file_info(target)
+        info["kind"] = kind
+        info["message"] = f"Uploaded to local: {target.name} — ab Restore dabayein."
+        return info
+
+    def restore_database(self, file_name: str, *, restored_by: str = "System") -> dict:
+        bak_path = self.resolve_download("database", file_name)
+        return self._restore_database_from_bak(bak_path, restored_by=restored_by)
+
+    def restore_full(self, file_name: str, *, restored_by: str = "System") -> dict:
+        """Restore DB from full ZIP (+ application files). Preserves live .env / venv."""
+        zip_path = self.resolve_download("full", file_name)
+        if not zipfile.is_zipfile(zip_path):
+            raise ValueError("Invalid full backup ZIP.")
+
+        with tempfile.TemporaryDirectory(prefix="jtcs_restore_") as tmp:
+            tmp_root = Path(tmp)
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                bak_members = [
+                    name
+                    for name in zf.namelist()
+                    if name.lower().endswith(".bak") and not name.endswith("/")
+                ]
+                if not bak_members:
+                    raise ValueError("Full backup ZIP has no .bak database file.")
+                bak_members.sort()
+                bak_member = bak_members[0]
+                zf.extract(bak_member, path=tmp_root)
+                bak_path = tmp_root / bak_member
+                if not bak_path.is_file():
+                    raise ValueError(f"Could not extract {bak_member} from ZIP.")
+
+                db_info = self._restore_database_from_bak(bak_path, restored_by=restored_by)
+
+                # Application files (skip secrets / runtime dirs)
+                app_restored = 0
+                for member in zf.namelist():
+                    if member.endswith("/"):
+                        continue
+                    posix = member.replace("\\", "/")
+                    if posix in {"MANIFEST.txt"}:
+                        continue
+                    if posix.lower().endswith(".bak"):
+                        continue
+                    if posix == ".env" or posix.endswith("/.env"):
+                        continue
+                    dest = self._map_full_restore_member(posix)
+                    if dest is None:
+                        continue
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+                    app_restored += 1
+
+        return {
+            "ok": True,
+            "kind": "full",
+            "file_name": zip_path.name,
+            "database_backup": db_info.get("file_name"),
+            "app_files_restored": app_restored,
+            "restored_by": restored_by,
+            "message": (
+                f"Full restore complete from {zip_path.name}: "
+                f"database restored, {app_restored} application file(s) written "
+                f"(.env and venv preserved)."
+            ),
+        }
+
+    def _map_full_restore_member(self, posix: str) -> Path | None:
+        """Map ZIP member path → live ERP path; return None to skip."""
+        parts = [p for p in posix.split("/") if p and p not in {".", ".."}]
+        if not parts:
+            return None
+        # Skip anything under excluded runtime folders
+        if any(part in self.FULL_EXCLUDE_DIR_NAMES for part in parts):
+            return None
+        if parts[0] == "app":
+            return BASE_DIR.joinpath(*parts)
+        if parts[0] == "database" and len(parts) > 1 and parts[1] == "sql_scripts":
+            # ZIP layout: database/sql_scripts/... → erp/database/...
+            return BASE_DIR.joinpath("database", *parts[2:])
+        if parts[0] == "scripts":
+            return BASE_DIR.joinpath(*parts)
+        if len(parts) == 1 and parts[0] in self.FULL_INCLUDE_FILES:
+            return BASE_DIR / parts[0]
+        return None
+
+    def _dispose_app_db_pool(self) -> None:
+        """Drop Flask-SQLAlchemy pooled connections so RESTORE can take the DB offline."""
+        try:
+            from app.extensions import db
+
+            try:
+                db.session.invalidate()
+            except Exception:
+                pass
+            try:
+                db.session.remove()
+            except Exception:
+                pass
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _restore_database_from_bak(self, bak_path: Path, *, restored_by: str = "System") -> dict:
+        if not bak_path.is_file() or bak_path.stat().st_size <= 0:
+            raise ValueError(f"Backup file missing or empty: {bak_path}")
+
+        # App pool holds open connections to JTCSS — RESTORE SINGLE_USER kills them
+        # and later SQLAlchemy teardown raises 08S01 / pipe closed.
+        self._dispose_app_db_pool()
+
+        conn = self._connect_master()
+        try:
+            # Long-running RESTORE (60MB+ .bak) — do not use short query timeout.
+            try:
+                conn.timeout = 0
+            except Exception:
+                pass
+
+            sql_disk = self._stage_bak_for_sql(conn, bak_path)
+            logical_files = self._restore_filelist(conn, sql_disk)
+            data_files = [f for f in logical_files if f["type"] == "D"]
+            log_files = [f for f in logical_files if f["type"] == "L"]
+            if not data_files:
+                raise ValueError("BACKUP file list has no data file.")
+
+            move_targets = self._current_db_file_paths(conn)
+            move_clauses: list[str] = []
+            default_data = self._instance_default_path(conn, "InstanceDefaultDataPath")
+            default_log = self._instance_default_path(conn, "InstanceDefaultLogPath") or default_data
+
+            for idx, item in enumerate(data_files):
+                logical = item["logical"]
+                if logical in move_targets:
+                    physical = move_targets[logical]
+                elif idx == 0 and move_targets:
+                    # Fall back to first existing data file path's directory
+                    sample = next(iter(move_targets.values()))
+                    physical = str(Path(sample).with_name(f"{self.db_name}.mdf"))
+                else:
+                    root = Path(default_data or str(bak_path.parent))
+                    physical = str(root / f"{self.db_name}_{idx}.mdf")
+                move_clauses.append(
+                    f"MOVE N'{logical.replace(chr(39), chr(39)+chr(39))}' TO N'{physical.replace(chr(39), chr(39)+chr(39))}'"
+                )
+
+            for idx, item in enumerate(log_files):
+                logical = item["logical"]
+                if logical in move_targets:
+                    physical = move_targets[logical]
+                else:
+                    root = Path(default_log or default_data or str(bak_path.parent))
+                    physical = str(root / f"{self.db_name}_{idx}.ldf")
+                move_clauses.append(
+                    f"MOVE N'{logical.replace(chr(39), chr(39)+chr(39))}' TO N'{physical.replace(chr(39), chr(39)+chr(39))}'"
+                )
+
+            disk_escaped = str(sql_disk).replace("'", "''")
+            db_escaped = self.db_name.replace("'", "''")
+            move_sql = ",\n         ".join(move_clauses)
+            # Kick off other sessions first (app pool already disposed), then restore.
+            sql = f"""
+SET NOCOUNT ON;
+BEGIN TRY
+    IF DB_ID(N'{db_escaped}') IS NOT NULL
+    BEGIN
+        ALTER DATABASE [{self.db_name}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+    END;
+
+    RESTORE DATABASE [{self.db_name}] FROM DISK = N'{disk_escaped}'
+    WITH REPLACE, RECOVERY
+         {(',' + chr(10) + '         ' + move_sql) if move_sql else ''};
+
+    IF DB_ID(N'{db_escaped}') IS NOT NULL
+    BEGIN
+        ALTER DATABASE [{self.db_name}] SET MULTI_USER;
+    END;
+END TRY
+BEGIN CATCH
+    BEGIN TRY
+        IF DB_ID(N'{db_escaped}') IS NOT NULL
+            ALTER DATABASE [{self.db_name}] SET MULTI_USER;
+    END TRY
+    BEGIN CATCH
+    END CATCH;
+    DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
+    RAISERROR(@msg, 16, 1);
+END CATCH
+"""
+            cursor = conn.cursor()
+            try:
+                cursor.execute(sql)
+                while True:
+                    try:
+                        if not cursor.nextset():
+                            break
+                    except pyodbc.ProgrammingError:
+                        break
+            except Exception as exc:
+                raise ValueError(f"Database restore failed: {exc}") from exc
+            finally:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
+            # Clean staged copy when different from original
+            try:
+                if Path(sql_disk).resolve() != bak_path.resolve():
+                    Path(sql_disk).unlink(missing_ok=True)
+            except OSError:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            # Drop any dead pooled handles left from before SINGLE_USER.
+            self._dispose_app_db_pool()
+
+        return {
+            "ok": True,
+            "kind": "database",
+            "file_name": bak_path.name,
+            "restored_by": restored_by,
+            "message": (
+                f"Database [{self.db_name}] restored from {bak_path.name}. "
+                f"Page refresh / re-login recommended."
+            ),
+            "reload_recommended": True,
+        }
+
+    def _stage_bak_for_sql(self, conn, bak_path: Path) -> Path:
+        """Place .bak where SQL Server (or Docker mssql) can read it."""
+        roots = self._sql_writable_roots(conn)
+        if os.name == "nt":
+            roots = [bak_path.parent, *roots]
+
+        container = None if os.name == "nt" else self._find_mssql_docker_container()
+
+        # Prefer a root SQL can see; copy when needed.
+        for root in roots:
+            try:
+                staged = root / bak_path.name
+                if staged.resolve() == bak_path.resolve():
+                    if self._sql_xp_file_exists(conn, str(staged)):
+                        return staged
+                staged.parent.mkdir(parents=True, exist_ok=True)
+                if staged.resolve() != bak_path.resolve():
+                    self._copy_bak_to_target(bak_path, staged)
+                if container:
+                    # Ensure file is inside container FS at the same path.
+                    subprocess.run(
+                        ["docker", "cp", str(staged), f"{container}:{staged}"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        timeout=600,
+                    )
+                if self._sql_xp_file_exists(conn, str(staged)) or staged.is_file():
+                    return staged
+            except (OSError, ValueError):
+                continue
+
+        # Last resort: original path (Windows local often works)
+        if self._sql_xp_file_exists(conn, str(bak_path)) or bak_path.is_file():
+            return bak_path
+        raise ValueError(
+            f"Could not stage {bak_path.name} to a path SQL Server can read. "
+            "On VPS, ensure /var/opt/mssql/backup is writable by mssql."
+        )
+
+    def _restore_filelist(self, conn, disk_path: Path) -> list[dict]:
+        escaped = str(disk_path).replace("'", "''")
+        cursor = conn.cursor()
+        try:
+            cursor.execute(f"RESTORE FILELISTONLY FROM DISK = N'{escaped}'")
+            cols = [col[0] for col in cursor.description] if cursor.description else []
+            rows = cursor.fetchall()
+            out: list[dict] = []
+            for row in rows:
+                data = dict(zip(cols, row))
+                logical = str(data.get("LogicalName") or "")
+                ftype = str(data.get("Type") or "").strip().upper()
+                if logical:
+                    out.append({"logical": logical, "type": ftype or "D"})
+            if not out:
+                raise ValueError("RESTORE FILELISTONLY returned no files.")
+            return out
+        except Exception as exc:
+            raise ValueError(f"Could not read backup file list: {exc}") from exc
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+    def _current_db_file_paths(self, conn) -> dict[str, str]:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                SELECT mf.name, mf.physical_name
+                FROM sys.master_files AS mf
+                INNER JOIN sys.databases AS d ON d.database_id = mf.database_id
+                WHERE d.name = ?
+                """,
+                self.db_name,
+            )
+            return {str(row[0]): str(row[1]) for row in cursor.fetchall() if row and row[0]}
+        except Exception:
+            return {}
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+
+    def _instance_default_path(self, conn, prop: str) -> str | None:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(f"SELECT CAST(SERVERPROPERTY('{prop}') AS NVARCHAR(512))")
+            row = cursor.fetchone()
+            if row and row[0]:
+                return str(row[0]).strip()
+            return None
+        except Exception:
+            return None
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
     def _odbc_connect_string(self) -> str:
         # Connect to master so BACKUP can run even if JTCSS is busy with app pool.
