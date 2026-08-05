@@ -18,10 +18,30 @@ class SubWorkMasterService:
     def __init__(self):
         self._entry_repo = OthersIncomeExpenseRepository()
         self._work_repo = WorkMasterRepository()
+        self._group_name_cache: dict[int, str] | None = None
 
     def _ensure(self) -> None:
         self._entry_repo.ensure_schema()
         self._seed_misc_defaults()
+
+    def _group_name_map(self) -> dict[int, str]:
+        if self._group_name_cache is not None:
+            return self._group_name_cache
+        mapping: dict[int, str] = {}
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            for item in ChartGroupService().list_active_for_dropdown():
+                try:
+                    gid = int(item.get("group_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if gid:
+                    mapping[gid] = item.get("group_name") or item.get("label") or ""
+        except Exception:
+            mapping = {}
+        self._group_name_cache = mapping
+        return mapping
 
     def _seed_misc_defaults(self) -> None:
         seeds = (
@@ -77,9 +97,23 @@ class SubWorkMasterService:
                 by_name[name] = row
         return by_name
 
+    def _under_group_for_work(self, work: WorkMaster | None) -> tuple[int | None, str | None]:
+        if work is None:
+            return None, None
+        gid = getattr(work, "ChartGroupID", None)
+        try:
+            gid = int(gid) if gid is not None else None
+        except (TypeError, ValueError):
+            gid = None
+        if not gid:
+            return None, None
+        name = self._group_name_map().get(gid)
+        return gid, name or None
+
     def _row_dict(self, row: WorkTypeMaster, work_lookup: dict[str, WorkMaster] | None = None) -> dict:
         lookup = work_lookup if work_lookup is not None else self._work_lookup()
         parent = lookup.get((row.WorkTypeName or "").strip())
+        chart_group_id, under_group = self._under_group_for_work(parent)
         return {
             "work_type_id": row.WorkTypeID,
             "work_id": parent.WorkID if parent else None,
@@ -87,6 +121,8 @@ class SubWorkMasterService:
             "work_name": row.WorkTypeName or "",
             "sub_work_type": row.SubWorkType or "",
             "ledger_kind": parent.LedgerKind if parent else "",
+            "chart_group_id": chart_group_id,
+            "under_group": under_group,
             "active_status": bool(row.ActiveStatus),
         }
 
@@ -100,14 +136,19 @@ class SubWorkMasterService:
         if not kind:
             return []
         rows = self._work_repo.list_active(ledger_kind=kind)
-        return [
-            {
-                "work_id": row.WorkID,
-                "work_name": row.WorkName,
-                "ledger_kind": row.LedgerKind,
-            }
-            for row in rows
-        ]
+        out = []
+        for row in rows:
+            chart_group_id, under_group = self._under_group_for_work(row)
+            out.append(
+                {
+                    "work_id": row.WorkID,
+                    "work_name": row.WorkName,
+                    "ledger_kind": row.LedgerKind,
+                    "chart_group_id": chart_group_id,
+                    "under_group": under_group,
+                }
+            )
+        return out
 
     def list_work_groups(self) -> dict[str, list[dict]]:
         """WorkMaster grouped by LedgerKind for the form/filter."""
@@ -117,11 +158,14 @@ class SubWorkMasterService:
             kind = row.LedgerKind if row.LedgerKind in self.LEDGER_KINDS else None
             if not kind:
                 continue
+            chart_group_id, under_group = self._under_group_for_work(row)
             groups[kind].append(
                 {
                     "work_id": row.WorkID,
                     "work_name": row.WorkName,
                     "ledger_kind": row.LedgerKind,
+                    "chart_group_id": chart_group_id,
+                    "under_group": under_group,
                 }
             )
         return groups

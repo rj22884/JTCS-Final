@@ -905,7 +905,9 @@
         return isManualReceiptRow(row);
       });
       parentTr.className =
-        "ecourt-tree-parent" + (isManualGroup ? " ecourt-row-manual" : " ecourt-row-imported");
+        "ecourt-tree-parent" +
+        (isManualGroup ? " ecourt-row-manual" : " ecourt-row-imported") +
+        (isSold ? " ecourt-row-sold" : "");
 
       let buyValueCell = "";
       let sellValueCell = "";
@@ -957,7 +959,8 @@
         childTr.className =
           "ecourt-tree-child ecourt-tree-child-" + gi +
           (expanded ? "" : " d-none") +
-          (manualRow ? " ecourt-row-manual" : " ecourt-row-imported");
+          (manualRow ? " ecourt-row-manual" : " ecourt-row-imported") +
+          (sold ? " ecourt-row-sold" : "");
         childTr.dataset.receiptNo = row.receipt_no || "";
         childTr.dataset.stationery = row.stationerynumber || group.stationerynumber || "";
 

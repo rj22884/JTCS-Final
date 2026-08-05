@@ -70,14 +70,21 @@
                data-cm-field="opening_balance" step="0.01" min="0" placeholder="0.00">
       </div>
       {{ cm_field('opening_balance_date', 'Opening Balance Date', 'date', col='col-md-3') }}
-      <div class="col-md-2 cm-field-wrap" data-field="opening_balance_dr_cr">
-        <label class="form-label" for="cm_opening_balance_dr_cr">Dr / Cr</label>
-        <select class="form-select" id="cm_opening_balance_dr_cr" name="opening_balance_dr_cr"
-                data-cm-field="opening_balance_dr_cr">
-          <option value="">-- Select --</option>
-          <option value="Dr">Dr</option>
-          <option value="Cr">Cr</option>
-        </select>
+      <div class="col-md-3 cm-field-wrap" data-field="opening_balance_dr_cr">
+        <label class="form-label d-block">Dr / Cr</label>
+        <div class="d-flex flex-wrap gap-3 pt-1">
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="opening_balance_dr_cr"
+                   id="cm_opening_balance_dr" value="Dr" data-cm-field="opening_balance_dr_cr">
+            <label class="form-check-label" for="cm_opening_balance_dr">Dr</label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="opening_balance_dr_cr"
+                   id="cm_opening_balance_cr" value="Cr" data-cm-field="opening_balance_dr_cr">
+            <label class="form-check-label" for="cm_opening_balance_cr">Cr</label>
+          </div>
+        </div>
+        <div class="form-text">Default follows Chart Group (Assets → Dr, Liabilities → Cr).</div>
       </div>
     </div>
   </div>

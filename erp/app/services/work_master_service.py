@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.repositories.others_repository import WorkMasterRepository
 from app.utils.db_session import persist
+from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 
 
 class WorkMasterService:
@@ -16,10 +17,105 @@ class WorkMasterService:
 
     def __init__(self, repository: WorkMasterRepository | None = None):
         self.repository = repository or WorkMasterRepository()
+        self._chart_groups_cache: list[dict] | None = None
 
-    @staticmethod
-    def _row_dict(row) -> dict:
+    def list_chart_groups_for_form(self) -> list[dict]:
+        """Active Chart of Group Master rows for Under Group dropdown."""
+        if self._chart_groups_cache is not None:
+            return self._chart_groups_cache
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            self._chart_groups_cache = ChartGroupService().list_active_for_dropdown()
+        except Exception:
+            self._chart_groups_cache = []
+        return self._chart_groups_cache
+
+    def _group_meta(self, chart_group_id: int | None) -> tuple[str | None, str | None]:
+        if not chart_group_id:
+            return None, None
+        try:
+            gid = int(chart_group_id)
+        except (TypeError, ValueError):
+            return None, None
+        for item in self.list_chart_groups_for_form():
+            try:
+                if int(item.get("group_id") or 0) == gid:
+                    return (
+                        item.get("group_name") or item.get("label"),
+                        item.get("under_type") or "",
+                    )
+            except (TypeError, ValueError):
+                continue
+        return None, None
+
+    def _parse_chart_group_id(self, payload: dict) -> int:
+        raw = (
+            payload.get("chart_group_id")
+            if "chart_group_id" in payload
+            else payload.get("ChartGroupID")
+            if "ChartGroupID" in payload
+            else payload.get("under_group_id")
+        )
+        try:
+            gid = int(raw)
+        except (TypeError, ValueError):
+            gid = 0
+        if not gid:
+            raise ValueError("Under Group is required.")
+        allowed = {
+            int(g["group_id"])
+            for g in self.list_chart_groups_for_form()
+            if g.get("group_id") is not None
+        }
+        if gid not in allowed:
+            raise ValueError("Selected Under Group is invalid or inactive.")
+        return gid
+
+    def _parse_active_status(self, payload: dict, *, default: bool = True) -> bool:
+        if "active_status" not in payload and "ActiveStatus" not in payload:
+            return default
+        raw = payload.get("active_status")
+        if raw is None:
+            raw = payload.get("ActiveStatus")
+        if raw is None or raw == "":
+            return default
+        return self._truthy(raw)
+
+    def _sync_chart_account(self, work_id: int, chart_group_id: int, payload: dict) -> None:
+        """Best-effort CoA sync — never fail WorkMaster save on CoA errors."""
+        try:
+            from app.services.chart_account_service import ChartAccountService
+
+            ChartAccountService().assign_work_group(
+                work_id,
+                {
+                    "group_id": chart_group_id,
+                    "opening_balance": payload.get("opening_balance")
+                    or payload.get("OpeningBalance"),
+                    "opening_balance_date": payload.get("opening_balance_date")
+                    or payload.get("OpeningBalanceDate"),
+                    "opening_balance_dr_cr": payload.get("opening_balance_dr_cr")
+                    or payload.get("OpeningBalanceDrCr"),
+                },
+            )
+        except Exception:
+            # WorkMaster row is source of truth for this page.
+            pass
+
+    def _row_dict(self, row) -> dict:
         kind = row.LedgerKind or WorkMasterService.LEDGER_INCOME
+        chart_group_id = getattr(row, "ChartGroupID", None)
+        try:
+            chart_group_id = int(chart_group_id) if chart_group_id is not None else None
+        except (TypeError, ValueError):
+            chart_group_id = None
+        under_group, under_type = self._group_meta(chart_group_id)
+        ob = getattr(row, "OpeningBalance", None)
+        ob_date = getattr(row, "OpeningBalanceDate", None)
+        ob_dr_cr = getattr(row, "OpeningBalanceDrCr", None) or (
+            default_dr_cr_for_under_type(under_type) if under_type else "Dr"
+        )
         return {
             "work_id": row.WorkID,
             "work_name": row.WorkName,
@@ -27,14 +123,37 @@ class WorkMasterService:
             "is_income": kind == WorkMasterService.LEDGER_INCOME,
             "is_expense": kind == WorkMasterService.LEDGER_EXPENSE,
             "is_misc": kind == WorkMasterService.LEDGER_MISC,
+            "chart_group_id": chart_group_id,
+            "under_group": under_group,
+            "under_type": under_type or "",
+            "opening_balance": str(ob) if ob is not None else "",
+            "opening_balance_date": ob_date.isoformat() if ob_date else "",
+            "opening_balance_dr_cr": ob_dr_cr or "Dr",
             "active_status": bool(row.ActiveStatus),
         }
 
-    def list_records(self, *, search: str | None = None, ledger_kind: str | None = None) -> list[dict]:
+    def list_records(
+        self,
+        *,
+        search: str | None = None,
+        ledger_kind: str | None = None,
+        status: str | None = None,
+    ) -> list[dict]:
         from app.repositories.others_repository import OthersIncomeExpenseRepository
 
         OthersIncomeExpenseRepository().ensure_schema()
-        rows = self.repository.list_active(ledger_kind=ledger_kind)
+        self.repository.ensure_schema()
+        status_key = (status or "").strip().lower()
+        active_only: bool | None
+        if status_key in {"active", "1", "true"}:
+            active_only = True
+        elif status_key in {"inactive", "0", "false"}:
+            active_only = False
+        else:
+            active_only = None
+        rows = self.repository.list_records(
+            ledger_kind=ledger_kind, active_only=active_only
+        )
         if search:
             needle = search.strip().lower()
             rows = [row for row in rows if needle in (row.WorkName or "").lower()]
@@ -42,7 +161,7 @@ class WorkMasterService:
 
     def get_record(self, work_id: int) -> dict:
         row = self.repository.get_by_id(work_id)
-        if row is None or not row.ActiveStatus:
+        if row is None:
             raise ValueError("Work type not found.")
         return self._row_dict(row)
 
@@ -98,8 +217,6 @@ class WorkMasterService:
         if income_on and expense_on:
             raise ValueError("Select only one of Income, Expense, or Misc.")
 
-        # Both flags present but off (legacy Misc. payload without is_misc) — do not
-        # treat is_income=0 as Expense.
         if has_income and has_expense and not income_on and not expense_on:
             raise ValueError("Select Income, Expense, or Misc.")
 
@@ -118,53 +235,93 @@ class WorkMasterService:
         if not work_name:
             raise ValueError("Work name is required.")
         ledger_kind = self._resolve_ledger_kind(payload)
-        if self.repository.find_by_name_kind(work_name, ledger_kind):
+        chart_group_id = self._parse_chart_group_id(payload)
+        active_status = self._parse_active_status(payload, default=True)
+        ob_fields = parse_opening_balance_fields(payload)
+        if not ob_fields.get("OpeningBalanceDrCr"):
+            _, under_type = self._group_meta(chart_group_id)
+            ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under_type)
+
+        existing = self.repository.find_by_name_kind(work_name, ledger_kind)
+        if existing and existing.ActiveStatus:
             raise ValueError(f"Work name '{work_name}' already exists for {ledger_kind}.")
 
         def _write() -> dict:
-            row = self.repository.create(
-                {
-                    "WorkName": work_name,
-                    "LedgerKind": ledger_kind,
-                    "ActiveStatus": True,
-                    "CreatedDate": datetime.utcnow(),
-                }
-            )
+            data = {
+                "WorkName": work_name,
+                "LedgerKind": ledger_kind,
+                "ChartGroupID": chart_group_id,
+                **ob_fields,
+                "ActiveStatus": active_status,
+            }
+            if existing and not existing.ActiveStatus:
+                # Reuse inactive row instead of inserting a duplicate name/kind.
+                updated = self.repository.update(
+                    existing,
+                    {**data, "CreatedDate": existing.CreatedDate or datetime.utcnow()},
+                )
+                return self._row_dict(updated)
+            row = self.repository.create({**data, "CreatedDate": datetime.utcnow()})
             return self._row_dict(row)
 
         try:
-            return persist(_write)
+            record = persist(_write)
         except IntegrityError as exc:
             raise ValueError(f"Work name '{work_name}' already exists for {ledger_kind}.") from exc
 
+        self._sync_chart_account(int(record["work_id"]), chart_group_id, payload)
+        return self.get_record(int(record["work_id"]))
+
     def update_record(self, work_id: int, payload: dict) -> dict:
         row = self.repository.get_by_id(work_id)
-        if row is None or not row.ActiveStatus:
+        if row is None:
             raise ValueError("Work type not found.")
         work_name = (payload.get("work_name") or payload.get("WorkName") or row.WorkName).strip()
         if not work_name:
             raise ValueError("Work name is required.")
         ledger_kind = self._resolve_ledger_kind(payload)
-        existing = self.repository.find_by_name_kind(work_name, ledger_kind)
-        if existing and existing.WorkID != row.WorkID:
+        chart_group_id = self._parse_chart_group_id(payload)
+        active_status = self._parse_active_status(payload, default=bool(row.ActiveStatus))
+        ob_fields = parse_opening_balance_fields(payload)
+        if not ob_fields.get("OpeningBalanceDrCr"):
+            _, under_type = self._group_meta(chart_group_id)
+            ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under_type)
+
+        conflict = self.repository.find_by_name_kind(work_name, ledger_kind)
+        if conflict and conflict.WorkID != row.WorkID and conflict.ActiveStatus:
             raise ValueError(f"Work name '{work_name}' already exists for {ledger_kind}.")
 
         def _write() -> dict:
+            # Expense → Misc. (etc.): free unique key held by an inactive twin row.
+            self.repository.release_inactive_name_kind(
+                work_name, ledger_kind, keep_work_id=row.WorkID
+            )
             updated = self.repository.update(
                 row,
-                {"WorkName": work_name, "LedgerKind": ledger_kind},
+                {
+                    "WorkName": work_name,
+                    "LedgerKind": ledger_kind,
+                    "ChartGroupID": chart_group_id,
+                    "ActiveStatus": active_status,
+                    **ob_fields,
+                },
             )
             return self._row_dict(updated)
 
         try:
-            return persist(_write)
+            record = persist(_write)
         except IntegrityError as exc:
             raise ValueError(f"Work name '{work_name}' already exists for {ledger_kind}.") from exc
 
+        self._sync_chart_account(int(record["work_id"]), chart_group_id, payload)
+        return self.get_record(int(record["work_id"]))
+
     def delete_record(self, work_id: int) -> str:
         row = self.repository.get_by_id(work_id)
-        if row is None or not row.ActiveStatus:
+        if row is None:
             raise ValueError("Work type not found.")
+        if not row.ActiveStatus:
+            return "Work type is already inactive."
 
         def _write() -> str:
             self.repository.deactivate(row)

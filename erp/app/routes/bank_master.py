@@ -29,6 +29,9 @@ def index():
         page_title="Bank Master",
         breadcrumb=menu_service.get_breadcrumb("/masters/bank", session.get("role")),
         account_types=service.list_account_types_for_form(),
+        chart_groups=service.list_chart_groups_for_form(),
+        default_bank_group_id=service._default_chart_group_id(is_cash=False),
+        default_cash_group_id=service._default_chart_group_id(is_cash=True),
         initial_rows=rows,
     )
 

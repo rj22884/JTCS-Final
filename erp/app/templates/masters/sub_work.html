@@ -53,6 +53,7 @@
           <th>ID</th>
           <th>Ledger Kind</th>
           <th>Work Name</th>
+          <th>Under Group</th>
           <th>Sub Work Type</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
@@ -94,7 +95,14 @@
             <select class="form-select" id="swWorkId" required>
               <option value="">-- Select Work --</option>
             </select>
-            <div class="form-text">Works come from Masters → Income/Expense for the selected Ledger Kind.</div>
+            <div class="form-text">Works come from Masters → Work/Category Master for the selected Ledger Kind.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="swUnderGroup">Under Group</label>
+            <input type="text" class="form-control" id="swUnderGroup" readonly
+                   placeholder="Set on Work/Category Master">
+            <div class="form-text">Inherited from the selected Work (Chart of Group Master).</div>
           </div>
 
           <div class="mb-0">
@@ -129,5 +137,5 @@
   window.SUB_WORK_GROUPS = {{ work_groups | tojson }};
   window.SUB_WORK_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260718sw3"></script>
+<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260804undergroup"></script>
 {% endblock %}

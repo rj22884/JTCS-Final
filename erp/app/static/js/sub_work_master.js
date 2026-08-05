@@ -19,6 +19,7 @@
     form: document.getElementById("swForm"),
     id: document.getElementById("swId"),
     workId: document.getElementById("swWorkId"),
+    underGroup: document.getElementById("swUnderGroup"),
     subWorkType: document.getElementById("swSubWorkType"),
   };
 
@@ -69,6 +70,13 @@
     return '<span class="badge text-bg-secondary">' + escapeHtml(kind || "-") + "</span>";
   }
 
+  function syncUnderGroupFromWork() {
+    if (!els.underGroup || !els.workId) return;
+    const opt = els.workId.selectedOptions && els.workId.selectedOptions[0];
+    const label = (opt && opt.dataset.underGroup) || "";
+    els.underGroup.value = label || "";
+  }
+
   function fillWorkOptions(kind, selectedWorkId, selectedWorkName) {
     if (!els.workId) return;
     const rows = workGroups[kind] || [];
@@ -78,12 +86,17 @@
       opt.value = String(row.work_id);
       opt.textContent = row.work_name;
       opt.dataset.workName = row.work_name || "";
+      opt.dataset.underGroup = row.under_group || "";
+      if (row.chart_group_id != null) {
+        opt.dataset.chartGroupId = String(row.chart_group_id);
+      }
       els.workId.appendChild(opt);
     });
     if (selectedWorkId && Array.from(els.workId.options).some(function (o) {
       return o.value === String(selectedWorkId);
     })) {
       els.workId.value = String(selectedWorkId);
+      syncUnderGroupFromWork();
       return;
     }
     if (selectedWorkName) {
@@ -92,6 +105,7 @@
       });
       if (match) els.workId.value = match.value;
     }
+    syncUnderGroupFromWork();
   }
 
   function loadWorksFromApi(kind, selectedWorkId, selectedWorkName) {
@@ -143,6 +157,9 @@
         escapeHtml(row.work_name || row.work_type_name) +
         "</td>" +
         "<td>" +
+        escapeHtml(row.under_group || "—") +
+        "</td>" +
+        "<td>" +
         escapeHtml(row.sub_work_type) +
         "</td>" +
         "<td>" +
@@ -188,6 +205,7 @@
   function openAdd() {
     if (els.id) els.id.value = "";
     if (els.subWorkType) els.subWorkType.value = "";
+    if (els.underGroup) els.underGroup.value = "";
     setLedgerKind("Misc.");
     if (els.modalTitle) els.modalTitle.textContent = "Add Sub Work";
     loadWorksFromApi("Misc.", null, null).then(function () {
@@ -309,6 +327,8 @@
       loadWorksFromApi(selectedLedgerKind(), null, null);
     });
   });
+
+  els.workId?.addEventListener("change", syncUnderGroupFromWork);
 
   els.addBtn?.addEventListener("click", openAdd);
   els.addNewBtn?.addEventListener("click", openAdd);

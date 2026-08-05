@@ -116,8 +116,10 @@ class JtcsBankAccountMaster(db.Model):
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     OpeningBalance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     OpeningBalanceDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    OpeningBalanceDrCr: Mapped[str | None] = mapped_column(Unicode(2), nullable=True)
     DisplayOrder: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     UpiId: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    ChartGroupID: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PaymentModeMaster(db.Model):

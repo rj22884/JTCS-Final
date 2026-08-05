@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from app.repositories.bank_master_repository import BankMasterRepository
 from app.services.account_type_master_service import AccountTypeMasterService
 from app.utils.db_session import persist
+from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -31,10 +32,39 @@ def account_type_needs_upi(account_type: str | None) -> bool:
 
 
 class BankMasterService:
+    DEFAULT_BANK_GROUP_NAME = "Bank Accounts"
+    DEFAULT_CASH_GROUP_NAME = "Cash-in-Hand"
+
     def __init__(self, repository: BankMasterRepository | None = None):
         self.repo = repository or BankMasterRepository()
         # Kept only so Account Type Master schema/seed is not broken for its own page.
         self.account_types = AccountTypeMasterService()
+
+    def list_chart_groups_for_form(self) -> list[dict]:
+        """Active Chart of Group Master rows for Under Group dropdown (read-only)."""
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            return ChartGroupService().list_active_for_dropdown()
+        except Exception:
+            return []
+
+    def _group_id_by_name(self, group_name: str) -> int | None:
+        needle = (group_name or "").strip().casefold()
+        if not needle:
+            return None
+        for item in self.list_chart_groups_for_form():
+            name = (item.get("group_name") or "").strip().casefold()
+            if name == needle:
+                try:
+                    return int(item["group_id"])
+                except (TypeError, ValueError, KeyError):
+                    return None
+        return None
+
+    def _default_chart_group_id(self, *, is_cash: bool) -> int | None:
+        name = self.DEFAULT_CASH_GROUP_NAME if is_cash else self.DEFAULT_BANK_GROUP_NAME
+        return self._group_id_by_name(name)
 
     @staticmethod
     def _clean(value, max_len: int | None = None) -> str | None:
@@ -141,6 +171,25 @@ class BankMasterService:
         if not account_type_needs_upi(account_type):
             upi_id = None
 
+        chart_group_id = self._int_or_default(
+            form.get("ChartGroupID") or form.get("chart_group_id") or form.get("under_group_id"),
+            0,
+        )
+        if not chart_group_id:
+            chart_group_id = self._default_chart_group_id(is_cash=is_cash) or 0
+        if not chart_group_id:
+            raise ValueError("Under Group is required.")
+        allowed_groups = {
+            int(g["group_id"]): g for g in self.list_chart_groups_for_form() if g.get("group_id") is not None
+        }
+        if chart_group_id not in allowed_groups:
+            raise ValueError("Under Group is invalid. Select a group from Chart of Group Master.")
+
+        ob_fields = parse_opening_balance_fields(form)
+        if not ob_fields.get("OpeningBalanceDrCr"):
+            under = (allowed_groups.get(chart_group_id) or {}).get("under_type") or ""
+            ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under)
+
         return {
             "BankName": bank_name,
             "AccountNumber": account_number,
@@ -152,16 +201,28 @@ class BankMasterService:
             "Description": self._clean(form.get("Description"), 500),
             "ActiveStatus": active,
             "QrBillReceived": qr_bill_received,
-            "OpeningBalance": self._decimal_or_none(form.get("OpeningBalance")),
-            "OpeningBalanceDate": self._date_or_none(form.get("OpeningBalanceDate")),
+            "OpeningBalance": ob_fields["OpeningBalance"],
+            "OpeningBalanceDate": ob_fields["OpeningBalanceDate"],
+            "OpeningBalanceDrCr": ob_fields["OpeningBalanceDrCr"],
             "DisplayOrder": display_order,
             "UpiId": upi_id,
+            "ChartGroupID": chart_group_id,
         }
 
-    @staticmethod
-    def _serialize(row) -> dict:
+    def _serialize(self, row) -> dict:
         is_cash = BankMasterService._is_cash_account(row.BankName, row.AccountNumber)
         account_type = row.AccountType or BANK_ACCOUNT_TYPES[0]
+        chart_group_id = getattr(row, "ChartGroupID", None)
+        if chart_group_id is None:
+            chart_group_id = self._default_chart_group_id(is_cash=is_cash)
+        group_name = ""
+        under_type = ""
+        if chart_group_id:
+            for item in self.list_chart_groups_for_form():
+                if int(item.get("group_id") or 0) == int(chart_group_id):
+                    group_name = item.get("group_name") or ""
+                    under_type = item.get("under_type") or ""
+                    break
         return {
             "account_id": row.JtcsBankAccountID,
             "bank_name": row.BankName or "",
@@ -180,9 +241,14 @@ class BankMasterService:
             "opening_balance_date": row.OpeningBalanceDate.isoformat()
             if row.OpeningBalanceDate
             else "",
+            "opening_balance_dr_cr": getattr(row, "OpeningBalanceDrCr", None)
+            or default_dr_cr_for_under_type(under_type),
             "display_order": int(
                 getattr(row, "DisplayOrder", 1 if is_cash else 100) or (1 if is_cash else 100)
             ),
+            "chart_group_id": int(chart_group_id) if chart_group_id else None,
+            "under_group": group_name,
+            "under_type": under_type,
             "is_cash": is_cash,
             "created_date": row.CreatedDate.isoformat() if isinstance(row.CreatedDate, datetime) else "",
             "modified_date": row.ModifiedDate.isoformat() if isinstance(row.ModifiedDate, datetime) else "",

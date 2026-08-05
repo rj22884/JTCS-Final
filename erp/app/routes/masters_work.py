@@ -11,7 +11,7 @@ MENU_NAME = "Work/Category Master"
 
 
 def _ensure_menu() -> None:
-    """Ensure Masters → Work/Category Master is visible (rename legacy Income/Expense)."""
+    """Ensure one Masters → Work/Category Master row (dedupe legacy duplicates)."""
     from sqlalchemy import text
 
     from app.extensions import db
@@ -28,33 +28,49 @@ def _ensure_menu() -> None:
             IF @MastersID IS NULL
                 RETURN;
 
-            UPDATE dbo.MenuMaster
-            SET MenuName = N'Work/Category Master',
-                MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-sliders'),
-                MenuURL = N'/masters/income-expense',
-                DisplayOrder = 2,
-                Description = N'Work / category master (Income, Expense, Misc.)',
-                IsActive = 1,
-                RoleName = NULL
+            DECLARE @KeepID INT;
+            SELECT TOP 1 @KeepID = MenuID
+            FROM dbo.MenuMaster
             WHERE ParentMenuID = @MastersID
               AND (
-                  MenuName IN (N'Income/Expense', N'Income Expense', N'Work Master')
-                  OR MenuURL = N'/masters/income-expense'
-              )
-              AND MenuName <> N'Work/Category Master';
+                    MenuName IN (
+                        N'Work/Category Master',
+                        N'Income/Expense',
+                        N'Income Expense',
+                        N'Work Master'
+                    )
+                    OR MenuURL = N'/masters/income-expense'
+                  )
+            ORDER BY
+                CASE WHEN MenuName = N'Work/Category Master' THEN 0 ELSE 1 END,
+                MenuID;
 
-            IF EXISTS (
-                SELECT 1 FROM dbo.MenuMaster
-                WHERE ParentMenuID = @MastersID AND MenuName = N'Work/Category Master'
-            )
+            IF @KeepID IS NOT NULL
+            BEGIN
                 UPDATE dbo.MenuMaster
-                SET MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-sliders'),
+                SET MenuName = N'Work/Category Master',
+                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-sliders'),
                     MenuURL = N'/masters/income-expense',
                     DisplayOrder = 2,
                     Description = N'Work / category master (Income, Expense, Misc.)',
                     IsActive = 1,
                     RoleName = NULL
-                WHERE ParentMenuID = @MastersID AND MenuName = N'Work/Category Master';
+                WHERE MenuID = @KeepID;
+
+                UPDATE dbo.MenuMaster
+                SET IsActive = 0
+                WHERE ParentMenuID = @MastersID
+                  AND MenuID <> @KeepID
+                  AND (
+                        MenuName IN (
+                            N'Work/Category Master',
+                            N'Income/Expense',
+                            N'Income Expense',
+                            N'Work Master'
+                        )
+                        OR MenuURL = N'/masters/income-expense'
+                      );
+            END
             ELSE
                 INSERT INTO dbo.MenuMaster (
                     ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
@@ -87,12 +103,14 @@ def index():
 
         db.session.rollback()
     menu_service = MenuService()
-    rows = WorkMasterService().list_records()
+    service = WorkMasterService()
+    rows = service.list_records(status="active")
     return render_template(
         "masters/income_expense.html",
         page_title=MENU_NAME,
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
+        chart_groups=service.list_chart_groups_for_form(),
     )
 
 
@@ -101,7 +119,12 @@ def index():
 def list_records():
     search = (request.args.get("search") or "").strip() or None
     ledger_kind = (request.args.get("ledger_kind") or "").strip() or None
-    rows = WorkMasterService().list_records(search=search, ledger_kind=ledger_kind or None)
+    status = (request.args.get("status") or "").strip() or None
+    rows = WorkMasterService().list_records(
+        search=search,
+        ledger_kind=ledger_kind or None,
+        status=status,
+    )
     return jsonify({"ok": True, "rows": rows, "count": len(rows)})
 
 
@@ -148,25 +171,26 @@ def delete_record(work_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 404
 
 
-@bp.route("/exit")
-@login_required
-def exit_module():
-    return redirect(url_for("dashboard.index"))
-
-
+# Legacy URLs used by older menus / bookmarks.
 legacy_income_bp = Blueprint("masters_income_legacy", __name__, url_prefix="/masters/income")
 legacy_expense_bp = Blueprint("masters_expense_legacy", __name__, url_prefix="/masters/expense")
 
 
-@legacy_income_bp.route("/", defaults={"path": ""})
-@legacy_income_bp.route("/<path:path>")
+@legacy_income_bp.route("", strict_slashes=False)
+@legacy_income_bp.route("/", strict_slashes=False)
 @login_required
-def redirect_income(path: str):
+def legacy_income_redirect():
     return redirect(url_for("masters_work.index"))
 
 
-@legacy_expense_bp.route("/", defaults={"path": ""})
-@legacy_expense_bp.route("/<path:path>")
+@legacy_expense_bp.route("", strict_slashes=False)
+@legacy_expense_bp.route("/", strict_slashes=False)
 @login_required
-def redirect_expense(path: str):
+def legacy_expense_redirect():
     return redirect(url_for("masters_work.index"))
+
+
+@bp.route("/exit")
+@login_required
+def exit_module():
+    return redirect(url_for("dashboard.index"))

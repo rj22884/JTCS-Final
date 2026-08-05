@@ -1,0 +1,156 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/menu_customization.css') }}?v=20260804d">
+{% endblock %}
+
+{% block content %}
+<div class="mcust-page" id="menuCustomizationPage"
+     data-list-url="{{ url_for('menu_customization.api_list') }}"
+     data-move-url="{{ url_for('menu_customization.api_move') }}"
+     data-add-url="{{ url_for('menu_customization.api_add') }}"
+     data-edit-url="{{ url_for('menu_customization.api_edit') }}"
+     data-remove-url="{{ url_for('menu_customization.api_remove') }}">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+      <div class="mcust-section-head mb-0">Menu Customization</div>
+      <div class="small text-muted">
+        Main menus + submenus — open Masters, then move Item Master to the top.
+      </div>
+    </div>
+    <a href="{{ url_for('admin_dashboard.index') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> Admin Dashboard
+    </a>
+  </div>
+
+  <div class="mcust-layout">
+    <section class="mcust-card">
+      <div class="mcust-card-head">
+        <div>
+          <strong id="mcustLevelTitle">Main menus</strong>
+          <nav class="mcust-breadcrumb small" id="mcustBreadcrumb" aria-label="Menu path"></nav>
+        </div>
+        <span class="small text-muted" id="mcustCount">0 items</span>
+      </div>
+      <div class="mcust-toolbar">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="mcustBtnBack" disabled title="Back to parent">
+          <i class="bi bi-arrow-left"></i> Back
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" id="mcustBtnOpen" disabled title="Open submenus">
+          <i class="bi bi-folder2-open"></i> Open
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" id="mcustBtnUp" disabled title="Move up">
+          <i class="bi bi-arrow-up"></i> Up
+        </button>
+        <button type="button" class="btn btn-sm btn-primary" id="mcustBtnDown" disabled title="Move down">
+          <i class="bi bi-arrow-down"></i> Down
+        </button>
+        <button type="button" class="btn btn-sm btn-success" id="mcustBtnAdd" title="Add menu here">
+          <i class="bi bi-plus-lg"></i> Add
+        </button>
+        <button type="button" class="btn btn-sm btn-warning" id="mcustBtnEdit" disabled title="Edit selected menu">
+          <i class="bi bi-pencil"></i> Edit
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="mcustBtnRemove" disabled title="Remove from menu">
+          <i class="bi bi-trash"></i> Remove
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="mcustBtnRefresh" title="Reload">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="mcust-list-wrap">
+        <table class="table table-sm align-middle mb-0 mcust-table" id="mcustTable">
+          <thead>
+            <tr>
+              <th style="width:2.5rem"></th>
+              <th>Menu</th>
+              <th>URL</th>
+              <th class="text-center" style="width:5.5rem">Submenus</th>
+              <th class="text-end" style="width:5rem">Order</th>
+            </tr>
+          </thead>
+          <tbody id="mcustBody">
+            <tr><td colspan="5" class="text-muted text-center py-4">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="small text-muted mt-2" id="mcustStatus"></div>
+    </section>
+
+    <aside class="mcust-help">
+      <h6 class="mb-2">How it works</h6>
+      <ul class="small mb-0 ps-3">
+        <li>Select <strong>Masters</strong> → click <strong>Open</strong> (or double-click)</li>
+        <li>Select <strong>Item Master</strong></li>
+        <li>Press <strong>Up</strong> until it is at the top</li>
+        <li><strong>Add / Edit / Remove</strong> work on the current level</li>
+      </ul>
+      <p class="small text-muted mt-3 mb-0">
+        After changes, refresh the page to update the top ribbon / dropdowns.
+      </p>
+    </aside>
+  </div>
+</div>
+
+<!-- Add modal -->
+<div class="modal fade" id="mcustAddModal" tabindex="-1" aria-labelledby="mcustAddTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="mcustAddTitle">Add menu</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted" id="mcustAddHint">Adding under: Main menus</p>
+        <div class="mb-2">
+          <label class="form-label" for="mcustAddName">Menu name <span class="text-danger">*</span></label>
+          <input type="text" class="form-control" id="mcustAddName" maxlength="100" placeholder="e.g. Chart Account Master" autocomplete="off">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="mcustAddUrl">URL</label>
+          <input type="text" class="form-control" id="mcustAddUrl" maxlength="250" placeholder="/masters/chart_account" autocomplete="off">
+          <div class="form-text" id="mcustUrlHint">Auto from parent + menu name (spaces → _).</div>
+        </div>
+        <div class="mb-0">
+          <label class="form-label" for="mcustAddIcon">Icon</label>
+          <div class="input-group">
+            <span class="input-group-text" id="mcustIconPreview" title="Preview"><i class="bi bi-circle"></i></span>
+            <input type="text" class="form-control" id="mcustAddIcon" maxlength="100" placeholder="bi-circle" autocomplete="off">
+            <button type="button" class="btn btn-outline-primary" id="mcustBtnBrowseIcon">Browse…</button>
+          </div>
+        </div>
+        <div class="text-danger small mt-2 d-none" id="mcustAddError"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="mcustAddSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Icon browse modal -->
+<div class="modal fade" id="mcustIconModal" tabindex="-1" aria-labelledby="mcustIconTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="mcustIconTitle">Browse icons</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="search" class="form-control form-control-sm mb-2" id="mcustIconSearch" placeholder="Search icons (e.g. bank, people, gear)…" autocomplete="off">
+        <div class="mcust-icon-grid" id="mcustIconGrid"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/menu_customization.js') }}?v=20260804d"></script>
+{% endblock %}

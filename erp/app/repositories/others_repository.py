@@ -27,38 +27,132 @@ BILL_NO_PREFIX = {"Income": "S", "Expense": "E", "Misc.": "M"}
 class WorkMasterRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
+        self._schema_ready = False
+
+    def ensure_schema(self) -> None:
+        """Add ChartGroupID + opening balance columns on WorkMaster — masters only."""
+        if self._schema_ready:
+            return
+        for col_sql in (
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'ChartGroupID') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD ChartGroupID INT NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'OpeningBalance') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD OpeningBalance DECIMAL(18, 2) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'OpeningBalanceDate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD OpeningBalanceDate DATE NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'OpeningBalanceDrCr') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD OpeningBalanceDrCr NVARCHAR(2) NULL;
+            """,
+        ):
+            self.session.execute(text(col_sql))
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.WorkMaster', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.WorkMaster', N'ChartGroupID') IS NOT NULL
+                   AND OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.foreign_keys
+                       WHERE name = N'FK_WorkMaster_ChartGroup'
+                         AND parent_object_id = OBJECT_ID(N'dbo.WorkMaster')
+                   )
+                    ALTER TABLE dbo.WorkMaster
+                        ADD CONSTRAINT FK_WorkMaster_ChartGroup
+                        FOREIGN KEY (ChartGroupID) REFERENCES dbo.ChartOfGroupMaster (GroupID);
+                """
+            )
+        )
+        self.session.commit()
+        self._schema_ready = True
 
     def list_active(self, *, ledger_kind: str | None = None) -> list[WorkMaster]:
-        stmt = select(WorkMaster).where(WorkMaster.ActiveStatus == True)  # noqa: E712
+        return self.list_records(ledger_kind=ledger_kind, active_only=True)
+
+    def list_records(
+        self,
+        *,
+        ledger_kind: str | None = None,
+        active_only: bool | None = None,
+    ) -> list[WorkMaster]:
+        """List WorkMaster rows. active_only=None → all; True/False → filter."""
+        self.ensure_schema()
+        stmt = select(WorkMaster)
+        if active_only is True:
+            stmt = stmt.where(WorkMaster.ActiveStatus == True)  # noqa: E712
+        elif active_only is False:
+            stmt = stmt.where(WorkMaster.ActiveStatus == False)  # noqa: E712
         if ledger_kind:
             stmt = stmt.where(WorkMaster.LedgerKind == ledger_kind)
-        stmt = stmt.order_by(WorkMaster.LedgerKind, WorkMaster.WorkName)
+        stmt = stmt.order_by(
+            WorkMaster.ActiveStatus.desc(),
+            WorkMaster.LedgerKind,
+            WorkMaster.WorkName,
+        )
         return list(self.session.scalars(stmt).all())
 
     def get_by_id(self, work_id: int) -> WorkMaster | None:
+        self.ensure_schema()
         return self.session.get(WorkMaster, work_id)
 
     def find_by_name_kind(self, work_name: str, ledger_kind: str) -> WorkMaster | None:
+        self.ensure_schema()
         stmt = select(WorkMaster).where(
             WorkMaster.WorkName == work_name.strip(),
             WorkMaster.LedgerKind == ledger_kind.strip(),
         )
         return self.session.scalars(stmt).first()
 
+    def release_inactive_name_kind(
+        self,
+        work_name: str,
+        ledger_kind: str,
+        *,
+        keep_work_id: int,
+    ) -> None:
+        """
+        Free UNIQUE(WorkName, LedgerKind) when an inactive conflicting row blocks
+        a ledger-kind change (e.g. Expense → Misc. on the same name).
+        """
+        existing = self.find_by_name_kind(work_name, ledger_kind)
+        if existing is None or existing.WorkID == keep_work_id:
+            return
+        if existing.ActiveStatus:
+            return
+        archived = f"__archived_{existing.WorkID}_{work_name}".strip()[:100]
+        existing.WorkName = archived
+        existing.ActiveStatus = False
+        self.session.flush()
+
     def create(self, data: dict) -> WorkMaster:
+        self.ensure_schema()
         row = WorkMaster(**data)
         self.session.add(row)
         self.session.flush()
         return row
 
     def update(self, row: WorkMaster, data: dict) -> WorkMaster:
+        self.ensure_schema()
         for key, value in data.items():
             setattr(row, key, value)
         self.session.flush()
         return row
 
     def deactivate(self, row: WorkMaster) -> WorkMaster:
+        self.ensure_schema()
         row.ActiveStatus = False
+        self.session.flush()
+        return row
+
+    def activate(self, row: WorkMaster) -> WorkMaster:
+        self.ensure_schema()
+        row.ActiveStatus = True
         self.session.flush()
         return row
 

@@ -15,6 +15,10 @@ class WorkMaster(db.Model):
     WorkID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     WorkName: Mapped[str] = mapped_column(Unicode(100), nullable=False)
     LedgerKind: Mapped[str] = mapped_column(Unicode(10), nullable=False)
+    ChartGroupID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    OpeningBalance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    OpeningBalanceDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    OpeningBalanceDrCr: Mapped[str | None] = mapped_column(Unicode(2), nullable=True)
     ActiveStatus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 

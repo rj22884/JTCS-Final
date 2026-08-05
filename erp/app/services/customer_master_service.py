@@ -64,7 +64,168 @@ class CustomerMasterService:
         )
 
     def get_record(self, customer_id: int) -> dict:
-        return self.repository.get_full(customer_id)
+        record = self.repository.get_full(customer_id)
+        record.update(self._chart_group_fields(customer_id))
+        record.update(self._income_expense_work_fields(customer_id))
+        return record
+
+    @staticmethod
+    def _chart_group_fields(customer_id: int | None) -> dict:
+        """Read Chart of Account group links (does not alter CustomerMaster table)."""
+        empty = {"chart_group_ids": [], "chart_group_names": ""}
+        if not customer_id:
+            return empty
+        try:
+            from app.services.chart_account_service import ChartAccountService
+
+            linked = ChartAccountService().get_customer_record(int(customer_id))
+            return {
+                "chart_group_ids": list(linked.get("group_ids") or []),
+                "chart_group_names": linked.get("group_name") or "",
+            }
+        except Exception:
+            return empty
+
+    def _income_expense_work_fields(self, customer_id: int | None) -> dict:
+        empty = {
+            "income_expense_work_ids": [],
+            "requires_income_expense_works": False,
+        }
+        if not customer_id:
+            return empty
+        try:
+            work_ids = self.repository.list_income_expense_work_ids(int(customer_id))
+            chart = self._chart_group_fields(customer_id)
+            requires = self._requires_income_expense_works(
+                chart.get("chart_group_ids") or [],
+                customer_group=None,
+            ) or bool(work_ids)
+            return {
+                "income_expense_work_ids": work_ids,
+                "requires_income_expense_works": requires,
+            }
+        except Exception:
+            return empty
+
+    @staticmethod
+    def _parse_id_list(raw) -> list[int]:
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            values = [p.strip() for p in raw.replace(";", ",").split(",") if p.strip()]
+        elif isinstance(raw, (list, tuple, set)):
+            values = list(raw)
+        else:
+            values = [raw]
+        ids: list[int] = []
+        seen: set[int] = set()
+        for value in values:
+            try:
+                num = int(value)
+            except (TypeError, ValueError):
+                continue
+            if num <= 0 or num in seen:
+                continue
+            seen.add(num)
+            ids.append(num)
+        return ids
+
+    @staticmethod
+    def _group_text_is_income_expense(text: str) -> bool:
+        t = (text or "").casefold()
+        return any(
+            token in t
+            for token in (
+                "income",
+                "expense",
+                "purchase",
+                "sale",
+                "sales",
+                "salary",
+                "wages",
+                "contra",
+            )
+        )
+
+    def _requires_income_expense_works(
+        self,
+        chart_group_ids: list[int],
+        *,
+        customer_group: str | None,
+    ) -> bool:
+        """True when selected chart groups (or customer group) are Income/Expense related."""
+        if customer_group and self._group_text_is_income_expense(customer_group):
+            return True
+        if not chart_group_ids:
+            return False
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            by_id = {
+                int(g["group_id"]): g
+                for g in ChartGroupService().list_active_for_dropdown()
+            }
+        except Exception:
+            return False
+        for gid in chart_group_ids:
+            g = by_id.get(int(gid))
+            if not g:
+                continue
+            blob = f"{g.get('label') or ''} {g.get('group_name') or ''} {g.get('under_type') or ''}"
+            if self._group_text_is_income_expense(blob):
+                return True
+        return False
+
+    def _sync_chart_groups(self, customer_id: int, payload: dict) -> None:
+        """Persist Chart of Account groups for this customer (CoA table only)."""
+        from app.services.chart_account_service import ChartAccountService
+
+        raw = payload.get("chart_group_ids")
+        if raw is None:
+            raw = payload.get("group_ids")
+        ChartAccountService().assign_customer_group(
+            int(customer_id),
+            {
+                "group_ids": raw,
+                "group_id": payload.get("group_id"),
+                "opening_balance": payload.get("opening_balance")
+                or payload.get("OpeningBalance"),
+                "opening_balance_date": payload.get("opening_balance_date")
+                or payload.get("OpeningBalanceDate"),
+                "opening_balance_dr_cr": payload.get("opening_balance_dr_cr")
+                or payload.get("OpeningBalanceDrCr"),
+            },
+        )
+
+    def _sync_income_expense_works(self, customer_id: int, payload: dict) -> None:
+        work_ids = self._parse_id_list(
+            payload.get("income_expense_work_ids")
+            if "income_expense_work_ids" in payload
+            else payload.get("work_ids")
+        )
+        chart_ids = self._parse_id_list(
+            payload.get("chart_group_ids")
+            if payload.get("chart_group_ids") is not None
+            else payload.get("group_ids")
+        )
+        requires = self._requires_income_expense_works(
+            chart_ids,
+            customer_group=(payload.get("customer_group") or ""),
+        )
+        if requires and not work_ids:
+            raise ValueError("Select at least one Income/Expense work type.")
+        if not requires:
+            # Clear links when no longer applicable.
+            self.repository.replace_income_expense_work_ids(int(customer_id), [])
+            return
+        # Validate against active WorkMaster (read-only).
+        from app.services.work_master_service import WorkMasterService
+
+        active = {int(r["work_id"]) for r in WorkMasterService().list_records()}
+        invalid = [wid for wid in work_ids if wid not in active]
+        if invalid:
+            raise ValueError("One or more Income/Expense work types are invalid or inactive.")
+        self.repository.replace_income_expense_work_ids(int(customer_id), work_ids)
 
     def check_duplicates(
         self,
@@ -205,10 +366,44 @@ class CustomerMasterService:
         self._check_blocking_duplicates(payload, entry_id)
         self._check_mobile_duplicate(payload, entry_id, allow=allow_duplicate_mobile)
 
+        # Chart of Account groups required (Sale/Purchase/Income/Expense/Contra — max 5).
+        from app.services.chart_account_service import ChartAccountService
+
+        ChartAccountService()._parse_groups(payload)
+
         def _write() -> dict:
             return self.repository.save_full(payload, customer_id=entry_id)
 
-        return persist(_write)
+        # Validate Income/Expense work requirement before write (when chart groups imply it).
+        chart_ids = self._parse_id_list(
+            payload.get("chart_group_ids")
+            if payload.get("chart_group_ids") is not None
+            else payload.get("group_ids")
+        )
+        if self._requires_income_expense_works(
+            chart_ids, customer_group=(payload.get("customer_group") or "")
+        ):
+            work_ids = self._parse_id_list(
+                payload.get("income_expense_work_ids")
+                if "income_expense_work_ids" in payload
+                else payload.get("work_ids")
+            )
+            if not work_ids:
+                raise ValueError("Select at least one Income/Expense work type.")
+
+        saved = persist(_write)
+        cid = saved.get("customer_id") or entry_id
+        if not cid:
+            raise ValueError("Customer saved but ID is missing — cannot assign chart groups.")
+        self._sync_chart_groups(int(cid), payload)
+        # Work links need their own transaction after customer exists.
+        def _sync_works() -> None:
+            self._sync_income_expense_works(int(cid), payload)
+
+        persist(_sync_works)
+        saved.update(self._chart_group_fields(int(cid)))
+        saved.update(self._income_expense_work_fields(int(cid)))
+        return saved
 
     def delete_record(self, customer_id: int) -> str:
         def _write() -> str:

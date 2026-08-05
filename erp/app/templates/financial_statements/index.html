@@ -1,0 +1,77 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financial_statements.css') }}?v=20260805fs2">
+{% endblock %}
+
+{% block content %}
+<div class="fs-shell">
+  <aside class="fs-nav jtcs-card">
+    <div class="fs-nav-title">Financial Statements</div>
+    <nav class="fs-nav-list" id="fsNavList">
+      {% for key, label in reports %}
+      <a href="{{ url_for('financial_statements.index', report_key=key) }}"
+         class="fs-nav-item {% if key == active_report %}active{% endif %}"
+         data-report="{{ key }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+  </aside>
+
+  <section class="fs-main jtcs-card">
+    <div class="fs-toolbar">
+      <div class="fs-toolbar-title" id="fsReportTitle">Financial Statements</div>
+      <div class="fs-filters">
+        <label class="form-label mb-0 small" for="fsDateFrom">From</label>
+        <input type="date" class="form-control form-control-sm" id="fsDateFrom" value="{{ default_from }}">
+        <label class="form-label mb-0 small" for="fsDateTo">To</label>
+        <input type="date" class="form-control form-control-sm" id="fsDateTo" value="{{ default_to }}">
+        <input type="search" class="form-control form-control-sm fs-search" id="fsSearch"
+               placeholder="Search ledger / group...">
+        <button type="button" class="btn btn-primary btn-sm" id="fsRefreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="fsPrintBtn">
+          <i class="bi bi-printer"></i> Print
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="fsPdfBtn">
+          <i class="bi bi-file-earmark-pdf"></i> PDF
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="fsExcelBtn">
+          <i class="bi bi-file-earmark-excel"></i> Excel
+        </button>
+      </div>
+    </div>
+
+    <div id="fsStatus" class="alert py-2 small d-none mb-2" role="alert"></div>
+    <div class="fs-meta small text-muted mb-2" id="fsMeta"></div>
+    <div class="fs-report-body" id="fsReportBody">
+      <div class="text-muted small py-4">Loading report…</div>
+    </div>
+  </section>
+</div>
+
+<div class="modal fade" id="fsDrillModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="fsDrillTitle">Drill-down</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="fsDrillBody"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.FS_API = {
+    report: {{ url_for('financial_statements.api_report', report_key='__KEY__') | tojson }},
+    vouchers: {{ url_for('financial_statements.api_vouchers') | tojson }},
+    voucherDetail: {{ url_for('financial_statements.api_voucher_detail') | tojson }},
+    export: {{ url_for('financial_statements.api_export', report_key='__KEY__') | tojson }}
+  };
+  window.FS_ACTIVE_REPORT = {{ active_report | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/financial_statements.js') }}?v=20260805fs2"></script>
+{% endblock %}

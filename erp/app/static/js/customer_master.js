@@ -20,6 +20,10 @@
     customerId: document.getElementById("cm_customer_id"),
     displayId: document.getElementById("cm_display_customer_id"),
     customerGroup: document.getElementById("cm_customer_group"),
+    chartGroupBar: document.getElementById("cmChartGroupBar"),
+    chartGroups: document.getElementById("cm_chart_groups"),
+    ieWorkBar: document.getElementById("cmIeWorkBar"),
+    ieWorks: document.getElementById("cm_ie_works"),
     tabNav: document.getElementById("cmTabNav"),
     formPanels: document.getElementById("cmFormPanels"),
     formError: document.getElementById("cmFormError"),
@@ -850,6 +854,138 @@
     stopAadhaarPoll();
   }
 
+  const chartGroupMeta = {};
+  (window.CM_CHART_GROUPS || []).forEach(function (g) {
+    if (g && g.group_id != null) chartGroupMeta[String(g.group_id)] = g;
+  });
+
+  function selectedChartGroupIds() {
+    if (!els.chartGroups) return [];
+    const v = (els.chartGroups.value || "").trim();
+    return v ? [v] : [];
+  }
+
+  function selectedIeWorkIds() {
+    if (!els.ieWorks) return [];
+    return Array.prototype.slice
+      .call(els.ieWorks.selectedOptions || [])
+      .map(function (opt) {
+        return opt.value;
+      })
+      .filter(Boolean);
+  }
+
+  function setChartGroupSelection(ids) {
+    if (!els.chartGroups) return;
+    const list = Array.isArray(ids) ? ids : [];
+    const first = list.length ? String(list[0]) : "";
+    els.chartGroups.value = first;
+    els.chartGroups.classList.remove("cm-field-error");
+  }
+
+  function defaultChartGroupIds() {
+    if (window.CM_DEFAULT_CHART_GROUP_ID != null && window.CM_DEFAULT_CHART_GROUP_ID !== "") {
+      return [String(window.CM_DEFAULT_CHART_GROUP_ID)];
+    }
+    const found = (window.CM_CHART_GROUPS || []).find(function (g) {
+      return String((g && g.group_name) || "")
+        .trim()
+        .toLowerCase() === "individual client";
+    });
+    return found && found.group_id != null ? [String(found.group_id)] : [];
+  }
+
+  function applyDefaultChartGroupsIfEmpty() {
+    if (!els.chartGroups) return;
+    if (selectedChartGroupIds().length) return;
+    setChartGroupSelection(defaultChartGroupIds());
+  }
+
+  function defaultDrCrFromUnderType(underType) {
+    return String(underType || "").trim().toLowerCase() === "liabilities" ? "Cr" : "Dr";
+  }
+
+  function setOpeningDrCr(value) {
+    const v = value === "Cr" ? "Cr" : "Dr";
+    const dr = document.getElementById("cm_opening_balance_dr");
+    const cr = document.getElementById("cm_opening_balance_cr");
+    if (dr) dr.checked = v === "Dr";
+    if (cr) cr.checked = v === "Cr";
+  }
+
+  function applyDefaultDrCrFromChartGroups() {
+    const ids = selectedChartGroupIds();
+    let under = "";
+    if (ids.length) {
+      const g = chartGroupMeta[String(ids[0])] || {};
+      under = g.under_type || "";
+    }
+    setOpeningDrCr(defaultDrCrFromUnderType(under));
+  }
+
+  function setIeWorkSelection(ids) {
+    if (!els.ieWorks) return;
+    const keep = {};
+    (Array.isArray(ids) ? ids : []).forEach(function (id) {
+      keep[String(id)] = true;
+    });
+    Array.prototype.forEach.call(els.ieWorks.options || [], function (opt) {
+      opt.selected = !!keep[String(opt.value)];
+    });
+    els.ieWorks.classList.remove("cm-field-error");
+  }
+
+  function textLooksIncomeExpense(text) {
+    const t = String(text || "").toLowerCase();
+    return (
+      t.indexOf("income") >= 0 ||
+      t.indexOf("expense") >= 0 ||
+      t.indexOf("purchase") >= 0 ||
+      t.indexOf("sale") >= 0 ||
+      t.indexOf("salary") >= 0 ||
+      t.indexOf("wages") >= 0 ||
+      t.indexOf("contra") >= 0
+    );
+  }
+
+  function needsIncomeExpenseWorks() {
+    const custGroup = (els.customerGroup?.value || "").trim();
+    if (textLooksIncomeExpense(custGroup)) return true;
+    return selectedChartGroupIds().some(function (id) {
+      const g = chartGroupMeta[String(id)] || {};
+      return textLooksIncomeExpense(
+        (g.label || "") + " " + (g.group_name || "") + " " + (g.under_type || "")
+      );
+    });
+  }
+
+  function syncChartGroupBar() {
+    const hasGroup = !!(els.customerGroup && (els.customerGroup.value || "").trim());
+    if (els.chartGroupBar) {
+      els.chartGroupBar.classList.toggle("d-none", !hasGroup);
+    }
+    if (!hasGroup) {
+      setChartGroupSelection([]);
+      setIeWorkSelection([]);
+    } else {
+      // New customer / empty selection → default Individual Client.
+      applyDefaultChartGroupsIfEmpty();
+      applyDefaultDrCrFromChartGroups();
+    }
+    syncIeWorkBar();
+  }
+
+  function syncIeWorkBar() {
+    const show = needsIncomeExpenseWorks();
+    if (els.ieWorkBar) {
+      els.ieWorkBar.classList.toggle("d-none", !show);
+    }
+    if (!show) {
+      setIeWorkSelection([]);
+      if (els.ieWorks) els.ieWorks.classList.remove("cm-field-error");
+    }
+  }
+
   function clearForm() {
     resetSyncState();
     if (typeof cmPincodeBinder !== "undefined" && cmPincodeBinder) {
@@ -858,7 +994,10 @@
     }
     els.form?.querySelectorAll("[data-cm-field]").forEach(function (field) {
       field.classList.remove("cm-integrated-locked");
-      if (field.tagName === "SELECT") {
+      if (field.type === "radio") {
+        field.checked = false;
+        field.disabled = false;
+      } else if (field.tagName === "SELECT") {
         field.selectedIndex = 0;
         field.disabled = false;
       } else {
@@ -870,6 +1009,10 @@
     if (els.customerId) els.customerId.value = "";
     if (els.displayId) els.displayId.value = "";
     if (els.customerGroup) els.customerGroup.value = "";
+    setChartGroupSelection([]);
+    setIeWorkSelection([]);
+    setOpeningDrCr("Dr");
+    syncChartGroupBar();
     const statusField = document.getElementById("cm_customer_status");
     if (statusField) statusField.value = "Active";
     const countryField = document.getElementById("cm_country");
@@ -902,11 +1045,24 @@
       els.customerGroup.value = record.customer_group || "";
       buildTabs(els.customerGroup.value);
     }
+    syncChartGroupBar();
+    const savedChartIds = record.chart_group_ids || record.group_ids || [];
+    if (Array.isArray(savedChartIds) && savedChartIds.length) {
+      setChartGroupSelection(savedChartIds);
+    } else {
+      applyDefaultChartGroupsIfEmpty();
+    }
+    syncIeWorkBar();
+    setIeWorkSelection(record.income_expense_work_ids || record.work_ids || []);
     els.form?.querySelectorAll("[data-cm-field]").forEach(function (field) {
       const key = field.dataset.cmField;
       if (!key || key === "customer_group") return;
       const val = record[key];
       if (val == null) return;
+      if (field.type === "radio") {
+        field.checked = String(field.value) === String(val);
+        return;
+      }
       if (field.type === "date") {
         field.value = String(val).slice(0, 10);
       } else if (field.tagName === "SELECT" && key === "country" && window.JtcsPincodeAutofill) {
@@ -915,6 +1071,11 @@
         field.value = val;
       }
     });
+    if (record.opening_balance_dr_cr) {
+      setOpeningDrCr(record.opening_balance_dr_cr);
+    } else {
+      applyDefaultDrCrFromChartGroups();
+    }
     if (record.pan_number && record.income_tax_password) {
       itCredentials = {
         userId: String(record.pan_number || "").toUpperCase(),
@@ -967,11 +1128,22 @@
     els.form?.querySelectorAll(".cm-tab-panel").forEach(function (panel) {
       if (!allowedTabs.includes(panel.dataset.tab)) return;
       panel.querySelectorAll("[data-cm-field]").forEach(function (field) {
+        if (field.type === "radio") {
+          if (field.checked) payload[field.dataset.cmField] = field.value;
+          return;
+        }
         payload[field.dataset.cmField] = field.value;
       });
     });
     if (els.customerGroup) payload.customer_group = els.customerGroup.value;
     if (els.customerId?.value) payload.customer_id = els.customerId.value;
+    const chartIds = selectedChartGroupIds();
+    payload.chart_group_ids = chartIds;
+    payload.group_ids = chartIds;
+    if (chartIds.length) payload.group_id = chartIds[0];
+    const workIds = selectedIeWorkIds();
+    payload.income_expense_work_ids = workIds;
+    payload.work_ids = workIds;
     return payload;
   }
 
@@ -980,6 +1152,16 @@
     const required = activeMandatoryFields();
     const otherMode = isOtherCustomerType();
     if (!payload.customer_group) errors.push("Select customer group.");
+    const chartIds = Array.isArray(payload.chart_group_ids) ? payload.chart_group_ids : [];
+    if (payload.customer_group && !chartIds.length) {
+      errors.push("Select Chart of Account group.");
+    }
+    const workIds = Array.isArray(payload.income_expense_work_ids)
+      ? payload.income_expense_work_ids
+      : [];
+    if (needsIncomeExpenseWorks() && !workIds.length) {
+      errors.push("Select at least one Income/Expense work type.");
+    }
     if (otherMode && !(payload.customer_type || "").trim()) {
       errors.push("Customer type is required.");
     }
@@ -1005,6 +1187,8 @@
     els.form?.querySelectorAll("[data-cm-field]").forEach(function (f) {
       f.classList.remove("cm-field-error");
     });
+    if (els.chartGroups) els.chartGroups.classList.remove("cm-field-error");
+    if (els.ieWorks) els.ieWorks.classList.remove("cm-field-error");
     if (errors.length) {
       required.forEach(function (key) {
         if (!(payload[key] || "").trim()) {
@@ -1014,6 +1198,12 @@
       });
       if (!payload.customer_group && els.customerGroup) {
         els.customerGroup.classList.add("cm-field-error");
+      }
+      if (payload.customer_group && !chartIds.length && els.chartGroups) {
+        els.chartGroups.classList.add("cm-field-error");
+      }
+      if (needsIncomeExpenseWorks() && !workIds.length && els.ieWorks) {
+        els.ieWorks.classList.add("cm-field-error");
       }
     }
     return errors;
@@ -1144,7 +1334,16 @@
   els.customerGroup?.addEventListener("change", function () {
     els.customerGroup.classList.remove("cm-field-error");
     buildTabs(els.customerGroup.value);
+    syncChartGroupBar();
     syncMandatoryMarkers();
+  });
+  els.chartGroups?.addEventListener("change", function () {
+    els.chartGroups.classList.remove("cm-field-error");
+    applyDefaultDrCrFromChartGroups();
+    syncIeWorkBar();
+  });
+  els.ieWorks?.addEventListener("change", function () {
+    els.ieWorks.classList.remove("cm-field-error");
   });
 
   els.form?.addEventListener("change", function (event) {

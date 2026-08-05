@@ -108,7 +108,7 @@ class MenuService:
             )
         return nodes
 
-    # Match simplified ERP top bar — Accounting kept; ITR/GST/Payroll/Others/… hidden.
+    # Default ERP top bar (seed). Customization may add more active top-level menus.
     CORE_TOP_LEVEL_MENUS = frozenset(
         {
             "admin role",
@@ -120,7 +120,30 @@ class MenuService:
         }
     )
 
-    # Customized Menu Management — permanently removed from Admin Role / nav.
+    # Permanently blocked legacy top modules (never re-show via customization).
+    LEGACY_HIDDEN_TOP_LEVEL = frozenset(
+        {
+            "itr",
+            "others",
+            "gst",
+            "dsc",
+            "tds",
+            "payroll",
+            "transactions",
+            "employee",
+            "stock",
+            "crm",
+            "exceptional report",
+            "settings",
+            "menu management",
+            "menu admin",
+        }
+    )
+
+    # Protected from delete/remove in Menu Customization.
+    PROTECTED_MAIN_MENUS = frozenset({"admin role", "dashboard"})
+
+    # Old Menu Management page — keep out of ribbon (new page is Menu Customization).
     HIDDEN_MENU_NAMES = frozenset(
         {
             "settings",
@@ -166,11 +189,14 @@ class MenuService:
         return None
 
     def _is_under_core_nav(self, menu: MenuMaster) -> bool:
+        """True when menu sits under an allowed (non-legacy) top-level item."""
         root = self._top_level_ancestor(menu)
         if root is None:
             return False
         name = (root.MenuName or "").strip().lower()
-        return name in self.CORE_TOP_LEVEL_MENUS
+        if name in self.LEGACY_HIDDEN_TOP_LEVEL or name in self.HIDDEN_MENU_NAMES:
+            return False
+        return True
 
     @classmethod
     def _is_hidden_nav_menu(cls, menu) -> bool:
@@ -200,8 +226,8 @@ class MenuService:
             return True
         if url in {"/logout", "/auth/logout"}:
             return True
-        # Top-level only: keep core ERP bar; hide ITR/GST/DSC/TDS/Payroll/Others/…
-        if parent_id is None and name and name not in cls.CORE_TOP_LEVEL_MENUS:
+        # Top-level: hide only blocked legacy modules (customization can add others).
+        if parent_id is None and name and name in cls.LEGACY_HIDDEN_TOP_LEVEL:
             return True
         return False
 
@@ -277,7 +303,10 @@ class MenuService:
                         break
                     walk = nxt
                 root_name = (root.MenuName or "").strip().lower()
-                if root_name and root_name not in self.CORE_TOP_LEVEL_MENUS:
+                if root_name and (
+                    root_name in self.LEGACY_HIDDEN_TOP_LEVEL
+                    or root_name in self.HIDDEN_MENU_NAMES
+                ):
                     break
                 expanded_ids.add(parent.MenuID)
                 by_id[parent.MenuID] = parent
@@ -589,3 +618,249 @@ class MenuService:
                 return f"{label} must be a valid hex colour (e.g. #243B7B)."
 
         return None
+
+    # -------------------------------------------------------------------------
+    # Menu Customization (Admin Role) — main menus + submenus
+    # -------------------------------------------------------------------------
+    def _customization_child_count(self, parent_id: int) -> int:
+        children = [
+            c
+            for c in self.repository.get_children(parent_id)
+            if c.IsActive and not self._is_hidden_nav_menu(c)
+        ]
+        return len(children)
+
+    def list_menus_for_customization(self, parent_id: int | None = None) -> dict:
+        """List siblings under parent_id (None = main / top-level ribbon)."""
+        parent = None
+        breadcrumb: list[dict] = []
+        if parent_id is not None:
+            parent = self.repository.get_by_id(parent_id)
+            if parent is None:
+                return {"ok": False, "error": "Parent menu not found.", "items": [], "breadcrumb": []}
+            # Build breadcrumb root → parent
+            chain: list[MenuMaster] = []
+            current: MenuMaster | None = parent
+            seen: set[int] = set()
+            while current is not None and current.MenuID not in seen:
+                seen.add(current.MenuID)
+                chain.insert(0, current)
+                if not current.ParentMenuID:
+                    break
+                current = self.repository.get_by_id(current.ParentMenuID)
+            breadcrumb = [
+                {
+                    "menu_id": m.MenuID,
+                    "name": m.MenuName,
+                }
+                for m in chain
+            ]
+
+        menus = self.repository.get_all(include_inactive=False)
+        siblings = [m for m in menus if m.ParentMenuID == parent_id]
+        if parent_id is None:
+            siblings = [
+                m
+                for m in siblings
+                if (m.MenuName or "").strip().lower() not in self.LEGACY_HIDDEN_TOP_LEVEL
+                and (m.MenuName or "").strip().lower() not in self.HIDDEN_MENU_NAMES
+            ]
+        else:
+            siblings = [m for m in siblings if not self._is_hidden_nav_menu(m)]
+
+        siblings.sort(key=lambda item: (item.DisplayOrder, item.MenuID))
+        items = []
+        for m in siblings:
+            name_key = (m.MenuName or "").strip().lower()
+            protected = parent_id is None and name_key in self.PROTECTED_MAIN_MENUS
+            child_count = self._customization_child_count(m.MenuID)
+            items.append(
+                {
+                    "menu_id": m.MenuID,
+                    "name": m.MenuName,
+                    "icon": m.MenuIcon or "bi-circle",
+                    "url": m.MenuURL or "",
+                    "display_order": m.DisplayOrder,
+                    "protected": protected,
+                    "has_children": child_count > 0,
+                    "child_count": child_count,
+                    "parent_menu_id": m.ParentMenuID,
+                }
+            )
+
+        parent_url = ""
+        if parent is not None:
+            parent_url = (self.normalize_menu_url(parent.MenuURL) or "").strip()
+            if not parent_url:
+                # Fallback: /masters from "Masters"
+                slug = re.sub(r"[^a-z0-9]+", "_", (parent.MenuName or "").strip().lower())
+                slug = slug.strip("_")
+                parent_url = f"/{slug}" if slug else ""
+
+        return {
+            "ok": True,
+            "parent_id": parent_id,
+            "parent_name": parent.MenuName if parent else None,
+            "parent_url": parent_url.rstrip("/") if parent_url else "",
+            "breadcrumb": breadcrumb,
+            "items": items,
+        }
+
+    def list_main_menus_for_customization(self) -> list[dict]:
+        return self.list_menus_for_customization(None).get("items") or []
+
+    def move_customization_menu(
+        self,
+        menu_id: int,
+        direction: str,
+        parent_id: int | None = None,
+    ) -> tuple[bool, str | None]:
+        direction = (direction or "").strip().lower()
+        if direction not in {"up", "down"}:
+            return False, "Direction must be up or down."
+
+        payload = self.list_menus_for_customization(parent_id)
+        items = payload.get("items") or []
+        index = next((i for i, row in enumerate(items) if row["menu_id"] == menu_id), -1)
+        if index < 0:
+            return False, "Menu not found at this level."
+        swap_with = index - 1 if direction == "up" else index + 1
+        if swap_with < 0 or swap_with >= len(items):
+            return False, "Already at the edge."
+
+        a = self.repository.get_by_id(items[index]["menu_id"])
+        b = self.repository.get_by_id(items[swap_with]["menu_id"])
+        if a is None or b is None:
+            return False, "Menu not found."
+        if a.ParentMenuID != b.ParentMenuID:
+            return False, "Menus are not siblings."
+
+        a_order, b_order = a.DisplayOrder, b.DisplayOrder
+        if a_order == b_order:
+            for i, row in enumerate(items):
+                menu = self.repository.get_by_id(row["menu_id"])
+                if menu is not None:
+                    menu.DisplayOrder = (i + 1) * 10
+            self.repository.session.commit()
+            a = self.repository.get_by_id(menu_id)
+            b = self.repository.get_by_id(items[swap_with]["menu_id"])
+            if a is None or b is None:
+                return False, "Menu not found."
+            a_order, b_order = a.DisplayOrder, b.DisplayOrder
+
+        a.DisplayOrder, b.DisplayOrder = b_order, a_order
+        self.repository.session.commit()
+        return True, None
+
+    def move_main_menu(self, menu_id: int, direction: str) -> tuple[bool, str | None]:
+        return self.move_customization_menu(menu_id, direction, parent_id=None)
+
+    def add_customization_menu(
+        self,
+        name: str,
+        *,
+        parent_id: int | None = None,
+        url: str | None = None,
+        icon: str | None = None,
+    ) -> tuple[MenuMaster | None, str | None]:
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return None, "Menu name is required."
+        key = clean_name.lower()
+        if parent_id is None:
+            if key in self.LEGACY_HIDDEN_TOP_LEVEL or key in self.HIDDEN_MENU_NAMES:
+                return None, "This menu name is reserved / blocked."
+            if self.repository.find_top_level_by_name(clean_name) is not None:
+                return None, "A main menu with this name already exists."
+        else:
+            parent = self.repository.get_by_id(parent_id)
+            if parent is None:
+                return None, "Parent menu not found."
+            for child in self.repository.get_children(parent_id):
+                if child.IsActive and (child.MenuName or "").strip().lower() == key:
+                    return None, "A submenu with this name already exists here."
+
+        payload = self.list_menus_for_customization(parent_id)
+        items = payload.get("items") or []
+        next_order = (max((row["display_order"] for row in items), default=0) or 0) + 10
+        menu = self.repository.create(
+            {
+                "ParentMenuID": parent_id,
+                "MenuName": clean_name,
+                "MenuIcon": (icon or "").strip() or ("bi-folder" if parent_id is None else "bi-circle"),
+                "MenuURL": self.normalize_menu_url(url),
+                "DisplayOrder": next_order,
+                "IsActive": True,
+                "Description": "Added via Menu Customization",
+                "RoleName": None,
+                "FontColor": None,
+                "FontName": None,
+                "BackgroundColor": None,
+            }
+        )
+        return menu, None
+
+    def add_main_menu(
+        self,
+        name: str,
+        url: str | None = None,
+        icon: str | None = None,
+    ) -> tuple[MenuMaster | None, str | None]:
+        return self.add_customization_menu(name, parent_id=None, url=url, icon=icon)
+
+    def remove_customization_menu(self, menu_id: int) -> tuple[bool, str | None]:
+        menu = self.repository.get_by_id(menu_id)
+        if menu is None:
+            return False, "Menu not found."
+        name = (menu.MenuName or "").strip().lower()
+        if menu.ParentMenuID is None:
+            if name in self.PROTECTED_MAIN_MENUS:
+                return False, "Admin Role and Dashboard cannot be removed."
+            if name in self.LEGACY_HIDDEN_TOP_LEVEL:
+                return False, "This menu is already blocked."
+        # Soft-remove from nav (keeps children in DB).
+        self.repository.deactivate(menu)
+        return True, None
+
+    def remove_main_menu(self, menu_id: int) -> tuple[bool, str | None]:
+        return self.remove_customization_menu(menu_id)
+
+    def update_customization_menu(
+        self,
+        menu_id: int,
+        *,
+        name: str,
+        url: str | None = None,
+        icon: str | None = None,
+    ) -> tuple[MenuMaster | None, str | None]:
+        menu = self.repository.get_by_id(menu_id)
+        if menu is None or not menu.IsActive:
+            return None, "Menu not found."
+
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return None, "Menu name is required."
+        key = clean_name.lower()
+        parent_id = menu.ParentMenuID
+
+        if parent_id is None:
+            if key in self.LEGACY_HIDDEN_TOP_LEVEL or key in self.HIDDEN_MENU_NAMES:
+                return None, "This menu name is reserved / blocked."
+            existing = self.repository.find_top_level_by_name(clean_name)
+            if existing is not None and existing.MenuID != menu_id:
+                return None, "A main menu with this name already exists."
+        else:
+            for child in self.repository.get_children(parent_id):
+                if (
+                    child.IsActive
+                    and child.MenuID != menu_id
+                    and (child.MenuName or "").strip().lower() == key
+                ):
+                    return None, "A submenu with this name already exists here."
+
+        # Keep parent + order; only edit label / link / icon.
+        menu.MenuName = clean_name
+        menu.MenuURL = self.normalize_menu_url(url)
+        menu.MenuIcon = (icon or "").strip() or menu.MenuIcon or "bi-circle"
+        self.repository.session.commit()
+        return menu, None

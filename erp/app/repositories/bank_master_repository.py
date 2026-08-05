@@ -36,7 +36,12 @@ class BankMasterRepository:
         )
 
     def ensure_schema(self) -> None:
-        if self._schema_ready and self._column_exists("QrBillReceived"):
+        if (
+            self._schema_ready
+            and self._column_exists("QrBillReceived")
+            and self._column_exists("ChartGroupID")
+            and self._column_exists("OpeningBalanceDrCr")
+        ):
             return
         try:
             if not self._column_exists("DisplayOrder"):
@@ -99,10 +104,92 @@ class BankMasterRepository:
                 )
                 self.session.commit()
 
-            self._schema_ready = self._column_exists("QrBillReceived")
+            if not self._column_exists("ChartGroupID"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD ChartGroupID INT NULL
+                        """
+                    )
+                )
+                self.session.commit()
+
+            if not self._column_exists("OpeningBalanceDrCr"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD OpeningBalanceDrCr NVARCHAR(2) NULL
+                        """
+                    )
+                )
+                self.session.commit()
+
+            if self._column_exists("ChartGroupID"):
+                self.session.execute(
+                    text(
+                        """
+                        IF OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NOT NULL
+                           AND NOT EXISTS (
+                               SELECT 1 FROM sys.foreign_keys
+                               WHERE name = N'FK_JtcsBankAccountMaster_ChartGroup'
+                                 AND parent_object_id = OBJECT_ID(N'dbo.JtcsBankAccountMaster')
+                           )
+                            ALTER TABLE dbo.JtcsBankAccountMaster
+                                ADD CONSTRAINT FK_JtcsBankAccountMaster_ChartGroup
+                                FOREIGN KEY (ChartGroupID)
+                                REFERENCES dbo.ChartOfGroupMaster (GroupID);
+                        """
+                    )
+                )
+                self.session.commit()
+                # Defaults: Cash → Cash-in-Hand; others → Bank Accounts
+                self.session.execute(
+                    text(
+                        """
+                        IF OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NOT NULL
+                        BEGIN
+                            DECLARE @BankGroupID INT = (
+                                SELECT TOP 1 GroupID FROM dbo.ChartOfGroupMaster
+                                WHERE GroupName = N'Bank Accounts' AND IsActive = 1
+                                ORDER BY GroupID
+                            );
+                            DECLARE @CashGroupID INT = (
+                                SELECT TOP 1 GroupID FROM dbo.ChartOfGroupMaster
+                                WHERE GroupName = N'Cash-in-Hand' AND IsActive = 1
+                                ORDER BY GroupID
+                            );
+
+                            IF @CashGroupID IS NOT NULL
+                                UPDATE dbo.JtcsBankAccountMaster
+                                SET ChartGroupID = @CashGroupID
+                                WHERE ChartGroupID IS NULL
+                                  AND (
+                                      LOWER(LTRIM(RTRIM(ISNULL(BankName, N'')))) = N'cash'
+                                      OR LOWER(LTRIM(RTRIM(ISNULL(AccountNumber, N'')))) = N'cash'
+                                  );
+
+                            IF @BankGroupID IS NOT NULL
+                                UPDATE dbo.JtcsBankAccountMaster
+                                SET ChartGroupID = @BankGroupID
+                                WHERE ChartGroupID IS NULL
+                                  AND NOT (
+                                      LOWER(LTRIM(RTRIM(ISNULL(BankName, N'')))) = N'cash'
+                                      OR LOWER(LTRIM(RTRIM(ISNULL(AccountNumber, N'')))) = N'cash'
+                                  );
+                        END
+                        """
+                    )
+                )
+                self.session.commit()
+
+            self._schema_ready = self._column_exists("QrBillReceived") and self._column_exists(
+                "ChartGroupID"
+            )
             if not self._schema_ready:
                 raise RuntimeError(
-                    "Bank Master schema update failed: QrBillReceived column is missing."
+                    "Bank Master schema update failed: required columns are missing."
                 )
         except Exception:
             self.session.rollback()

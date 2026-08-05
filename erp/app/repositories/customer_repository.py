@@ -65,6 +65,28 @@ class CustomerRepository:
         ):
             self.session.execute(text(stmt))
             self.session.commit()
+        # Link table only — does not alter CustomerMaster columns.
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.CustomerIncomeExpenseWorkLink', N'U') IS NULL
+                BEGIN
+                    CREATE TABLE dbo.CustomerIncomeExpenseWorkLink (
+                        CustomerID INT NOT NULL,
+                        WorkID     INT NOT NULL,
+                        CONSTRAINT PK_CustomerIncomeExpenseWorkLink PRIMARY KEY (CustomerID, WorkID),
+                        CONSTRAINT FK_CustomerIEWorkLink_Customer
+                            FOREIGN KEY (CustomerID) REFERENCES dbo.CustomerMaster (CustomerID),
+                        CONSTRAINT FK_CustomerIEWorkLink_Work
+                            FOREIGN KEY (WorkID) REFERENCES dbo.WorkMaster (WorkID)
+                    );
+                    CREATE INDEX IX_CustomerIEWorkLink_WorkID
+                        ON dbo.CustomerIncomeExpenseWorkLink (WorkID);
+                END
+                """
+            )
+        )
+        self.session.commit()
         _CUSTOMER_SCHEMA_READY = True
 
     @staticmethod
@@ -376,7 +398,14 @@ class CustomerRepository:
         ob_amount = values.get("OpeningBalance")
         ob_type = values.get("OpeningBalanceDrCr")
         if ob_amount is not None and ob_amount != Decimal("0.00") and not ob_type:
+            # Fallback Dr; UI normally sends group-based Dr/Cr.
             values["OpeningBalanceDrCr"] = "Dr"
+        if (
+            ob_amount is not None
+            and ob_amount != Decimal("0.00")
+            and not values.get("OpeningBalanceDate")
+        ):
+            raise ValueError("Opening Balance Date is required when Opening Balance is entered.")
         if (ob_amount is None or ob_amount == Decimal("0.00")) and not values.get("OpeningBalanceDate"):
             if "OpeningBalance" in values:
                 values["OpeningBalance"] = None
@@ -487,3 +516,40 @@ class CustomerRepository:
             params["exclude_id"] = exclude_customer_id
         rows = self.session.execute(text(sql), params).mappings().all()
         return [self._duplicate_customer_dict(row) for row in rows]
+
+    def list_income_expense_work_ids(self, customer_id: int) -> list[int]:
+        """WorkMaster IDs linked for Income/Expense use (read-only on WorkMaster)."""
+        self.ensure_schema()
+        rows = self.session.execute(
+            text(
+                """
+                SELECT l.WorkID
+                FROM dbo.CustomerIncomeExpenseWorkLink l
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = l.WorkID
+                WHERE l.CustomerID = :cid
+                  AND ISNULL(w.ActiveStatus, 1) = 1
+                ORDER BY w.WorkName
+                """
+            ),
+            {"cid": customer_id},
+        ).all()
+        return [int(r[0]) for r in rows]
+
+    def replace_income_expense_work_ids(self, customer_id: int, work_ids: list[int]) -> None:
+        """Replace Income/Expense work links for a customer."""
+        self.ensure_schema()
+        self.session.execute(
+            text("DELETE FROM dbo.CustomerIncomeExpenseWorkLink WHERE CustomerID = :cid"),
+            {"cid": customer_id},
+        )
+        for wid in work_ids:
+            self.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.CustomerIncomeExpenseWorkLink (CustomerID, WorkID)
+                    VALUES (:cid, :wid)
+                    """
+                ),
+                {"cid": customer_id, "wid": int(wid)},
+            )
+        self.session.flush()

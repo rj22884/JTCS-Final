@@ -9,6 +9,7 @@ from app.customer_master.constants import (
     TAB_LABELS,
 )
 from app.decorators import login_required, require_delete_reauth
+from app.services.chart_group_service import ChartGroupService
 from app.services.customer_group_service import CustomerGroupService
 from app.services.customer_master_service import (
     CustomerMasterService,
@@ -16,6 +17,7 @@ from app.services.customer_master_service import (
     DuplicateMobileWarning,
 )
 from app.services.menu_service import MenuService
+from app.services.work_master_service import WorkMasterService
 
 bp = Blueprint("masters_customer", __name__, url_prefix="/masters/customer")
 MENU_PATH = "/masters/customer"
@@ -42,12 +44,29 @@ def index():
         "aadhaarEkycStatus": url_for("masters_customer.aadhaar_ekyc_status"),
         "aadhaarEkycUnlock": url_for("masters_customer.aadhaar_ekyc_unlock"),
     }
+    try:
+        chart_of_groups = ChartGroupService().list_active_for_dropdown()
+    except Exception:
+        chart_of_groups = []
+    default_chart_group_id = None
+    for g in chart_of_groups:
+        if (g.get("group_name") or "").strip().casefold() == "individual client":
+            default_chart_group_id = g.get("group_id")
+            break
+    try:
+        income_expense_works = WorkMasterService().list_records()
+    except Exception:
+        income_expense_works = []
+
     return render_template(
         "masters/customer_master.html",
         page_title="Customer Master",
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=service.list_records(),
         customer_groups=ui["groups"],
+        chart_of_groups=chart_of_groups,
+        default_chart_group_id=default_chart_group_id,
+        income_expense_works=income_expense_works,
         customer_types=CUSTOMER_TYPES,
         customer_statuses=CUSTOMER_STATUSES,
         genders=GENDERS,

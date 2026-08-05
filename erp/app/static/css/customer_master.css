@@ -154,6 +154,14 @@
   font-weight: 600;
 }
 
+.cm-chart-group-select {
+  width: 100%;
+  max-width: 100%;
+  font-weight: 600;
+  /* Keep compact height; show full option text (no multi-list box) */
+  min-height: calc(1.5em + 0.75rem + 2px);
+}
+
 .cm-tab-nav {
   gap: 0.35rem;
   border-bottom: 1px solid #e2e8f0;

@@ -375,31 +375,15 @@ ERP_CORE_TOP_LEVEL_MENUS = (
 
 
 def ensure_erp_core_nav_menus() -> None:
-    """Align VPS/local top nav to core ERP menus (same as local simplified UI).
+    """Keep legacy top modules hidden; allow Menu Customization additions.
 
-    Deactivates legacy top-level items (ITR, GST, Payroll, Others, Menu Management, …)
-    and permanently removes Admin Role → Settings (customized menu).
-    DATA safe — only MenuMaster.IsActive changes.
+    Only deactivates known legacy tops (ITR/GST/…) and old Settings/Menu Management.
+    Does NOT wipe user-added main menus created via Menu Customization.
+    DATA safe — only MenuMaster.IsActive changes for blocked names/URLs.
     """
     db.session.execute(
         text(
             """
-            UPDATE dbo.MenuMaster
-            SET IsActive = 0,
-                Description = CASE
-                    WHEN Description LIKE N'%core ERP nav%' THEN Description
-                    ELSE LEFT(CONCAT(ISNULL(Description, N''), N' (hidden from core ERP nav)'), 300)
-                END
-            WHERE ParentMenuID IS NULL
-              AND MenuName NOT IN (
-                    N'Admin Role',
-                    N'Dashboard',
-                    N'Activities',
-                    N'Reports and Analysis',
-                    N'Masters',
-                    N'Accounting'
-              );
-
             /* Explicit legacy top modules (belt-and-suspenders after VPS restore) */
             UPDATE dbo.MenuMaster
             SET IsActive = 0
@@ -410,10 +394,10 @@ def ensure_erp_core_nav_menus() -> None:
                     N'Menu Management', N'Settings', N'CRM'
               );
 
-            /* Permanently remove customized Menu Management (Admin Role → Settings) */
+            /* Keep old Menu Management page hidden (new UI is Menu Customization) */
             UPDATE dbo.MenuMaster
             SET IsActive = 0,
-                Description = N'Removed — customized menu disabled'
+                Description = N'Removed — use Admin Role → Menu Customization'
             WHERE MenuName IN (N'Settings', N'Menu Management', N'Menu Admin')
                OR LOWER(ISNULL(MenuURL, N'')) IN (N'/admin/menus', N'/admin/menus/', N'/settings', N'/settings/');
 

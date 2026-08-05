@@ -607,37 +607,141 @@ class LedgerExportService:
             ),
             prior_params,
         ).mappings().first()
+        prior_billed = self._money(prior["billed"] if prior else 0)
+        prior_received = self._money(prior["received"] if prior else 0)
+
+        # Unpaid Followup Tally bills (ITR/GST/etc.) live on FollowupEntryMaster
+        # until Payment Received creates JTCSDailyTransaction — include them so
+        # Ledger Report matches Followup billing.
+        prior_followup_billed = Decimal("0.00")
+        followup_rows: list[Any] = []
+        try:
+            fu_prior_sql = """
+                AND ISNULL(f.BillDate, f.WorkDate) < :date_from
+            """
+            fu_prior_params = {
+                "customer_id": customer_id,
+                "date_from": date_from,
+            }
+            if ob_date is not None:
+                fu_prior_sql += " AND ISNULL(f.BillDate, f.WorkDate) > :ob_date"
+                fu_prior_params["ob_date"] = ob_date
+            prior_followup_billed = self._money(
+                db.session.execute(
+                    text(
+                        f"""
+                        SELECT ISNULL(SUM(ISNULL(f.BillAmount, 0)), 0)
+                        FROM dbo.FollowupEntryMaster f
+                        WHERE f.CustomerID = :customer_id
+                          AND ISNULL(f.IsActive, 1) = 1
+                          AND f.BillNo IS NOT NULL
+                          AND LTRIM(RTRIM(f.BillNo)) <> N''
+                          AND ISNULL(f.BillAmount, 0) > 0
+                          {fu_prior_sql}
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM dbo.JTCSDailyTransaction d
+                              WHERE d.CustomerID = f.CustomerID
+                                AND d.Status = N'Posted'
+                                AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
+                                AND d.WorkType = f.ModuleCode
+                          )
+                        """
+                    ),
+                    fu_prior_params,
+                ).scalar()
+            )
+            followup_rows = list(
+                db.session.execute(
+                    text(
+                        """
+                        SELECT
+                            CAST(NULL AS INT) AS TransactionID,
+                            ISNULL(f.BillDate, f.WorkDate) AS TransactionDate,
+                            f.ModuleCode AS WorkType,
+                            CONCAT(f.ModuleCode, N' Followup') AS SubWorkType,
+                            f.BillNo AS ReferenceNo,
+                            CONCAT(
+                                f.ModuleCode, N' Followup — ',
+                                LTRIM(RTRIM(f.BillNo))
+                            ) AS Description,
+                            CAST(NULL AS NVARCHAR(500)) AS Remarks,
+                            ISNULL(f.BillAmount, 0) AS SaleAmount,
+                            CAST(0 AS DECIMAL(18, 2)) AS IncomeAmount,
+                            CAST(0 AS DECIMAL(18, 2)) AS BankDebit,
+                            CAST(0 AS DECIMAL(18, 2)) AS PaymentTotal
+                        FROM dbo.FollowupEntryMaster f
+                        WHERE f.CustomerID = :customer_id
+                          AND ISNULL(f.IsActive, 1) = 1
+                          AND f.BillNo IS NOT NULL
+                          AND LTRIM(RTRIM(f.BillNo)) <> N''
+                          AND ISNULL(f.BillAmount, 0) > 0
+                          AND ISNULL(f.BillDate, f.WorkDate) >= :date_from
+                          AND ISNULL(f.BillDate, f.WorkDate) <= :date_to
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM dbo.JTCSDailyTransaction d
+                              WHERE d.CustomerID = f.CustomerID
+                                AND d.Status = N'Posted'
+                                AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
+                                AND d.WorkType = f.ModuleCode
+                          )
+                        """
+                    ),
+                    {
+                        "customer_id": customer_id,
+                        "date_from": date_from,
+                        "date_to": date_to,
+                    },
+                ).mappings().all()
+            )
+        except Exception:
+            db.session.rollback()
+            prior_followup_billed = Decimal("0.00")
+            followup_rows = []
+
         opening = self._money(
-            opening
-            + self._money((prior["billed"] if prior else 0) - (prior["received"] if prior else 0))
+            opening + prior_billed + prior_followup_billed - prior_received
         )
 
-        rows = db.session.execute(
-            text(
-                """
-                SELECT
-                    d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
-                    d.ReferenceNo, d.Description, d.Remarks,
-                    ISNULL(d.SaleAmount, 0) AS SaleAmount,
-                    ISNULL(d.IncomeAmount, 0) AS IncomeAmount,
-                    ISNULL(b.Debit, 0) AS BankDebit,
-                    (
-                        SELECT ISNULL(SUM(p.Amount), 0)
-                        FROM dbo.JTCSDailyTransactionPayment p
-                        WHERE p.TransactionID = d.TransactionID
-                    ) AS PaymentTotal
-                FROM dbo.JTCSDailyTransaction d
-                LEFT JOIN dbo.JtcsBankTransaction b
-                    ON b.JtcsBankTransactionID = d.BankTransactionID
-                WHERE d.CustomerID = :customer_id
-                  AND d.Status = N'Posted'
-                  AND d.TransactionDate >= :date_from
-                  AND d.TransactionDate <= :date_to
-                ORDER BY d.TransactionDate ASC, d.TransactionID ASC
-                """
-            ),
-            {"customer_id": customer_id, "date_from": date_from, "date_to": date_to},
-        ).mappings().all()
+        rows = list(
+            db.session.execute(
+                text(
+                    """
+                    SELECT
+                        d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
+                        d.ReferenceNo, d.Description, d.Remarks,
+                        ISNULL(d.SaleAmount, 0) AS SaleAmount,
+                        ISNULL(d.IncomeAmount, 0) AS IncomeAmount,
+                        ISNULL(b.Debit, 0) AS BankDebit,
+                        (
+                            SELECT ISNULL(SUM(p.Amount), 0)
+                            FROM dbo.JTCSDailyTransactionPayment p
+                            WHERE p.TransactionID = d.TransactionID
+                        ) AS PaymentTotal
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.CustomerID = :customer_id
+                      AND d.Status = N'Posted'
+                      AND d.TransactionDate >= :date_from
+                      AND d.TransactionDate <= :date_to
+                    ORDER BY d.TransactionDate ASC, d.TransactionID ASC
+                    """
+                ),
+                {"customer_id": customer_id, "date_from": date_from, "date_to": date_to},
+            ).mappings().all()
+        )
+        if followup_rows:
+            rows.extend(followup_rows)
+            rows.sort(
+                key=lambda r: (
+                    r.get("TransactionDate") or date.min,
+                    int(r.get("TransactionID") or 0),
+                )
+            )
 
         name = (customer["CustomerName"] or f"Customer {customer_id}").strip()
         lines: list[dict[str, Any]] = []
@@ -665,10 +769,13 @@ class LedgerExportService:
             if sub:
                 work = f"{work} / {sub}" if work else sub
             txn_date = row["TransactionDate"]
+            ref = (row["ReferenceNo"] or "").strip()
+            if not ref and row.get("TransactionID"):
+                ref = f"TXN-{row['TransactionID']}"
             lines.append(
                 {
                     "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
-                    "bill": (row["ReferenceNo"] or "").strip() or f"TXN-{row['TransactionID']}",
+                    "bill": ref,
                     "work": work,
                     "description": (row["Description"] or row["Remarks"] or "").strip(),
                     "debit": billed,

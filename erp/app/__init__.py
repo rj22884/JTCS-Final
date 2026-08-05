@@ -14,6 +14,8 @@ from app.routes.stamp import bp as stamp_bp
 from app.routes.ecourt import bp as ecourt_bp
 from app.routes.bank_master import bp as bank_master_bp
 from app.routes.masters_account_type import bp as masters_account_type_bp
+from app.routes.masters_chart_account import bp as masters_chart_account_bp
+from app.routes.masters_chart_group import bp as masters_chart_group_bp
 from app.routes.masters_item import bp as masters_item_bp
 from app.routes.accounting_invoice import bp as accounting_invoice_bp
 from app.routes.masters_sub_work import bp as masters_sub_work_bp
@@ -41,7 +43,9 @@ from app.routes.exceptional_report import bp as exceptional_report_bp
 from app.routes.backup import bp as backup_bp
 from app.routes.admin_dashboard import bp as admin_dashboard_bp
 from app.routes.admin_import_export import bp as admin_import_export_bp
+from app.routes.menu_customization import bp as menu_customization_bp
 from app.routes.ledger_report import bp as ledger_report_bp
+from app.routes.financial_statements import bp as financial_statements_bp
 from app.routes.software_update import bp as software_update_bp
 from app.modules.crm.routes import (
     crm_api_bp,
@@ -100,6 +104,8 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(masters_work_bp)
     app.register_blueprint(masters_sub_work_bp)
     app.register_blueprint(masters_account_type_bp)
+    app.register_blueprint(masters_chart_group_bp)
+    app.register_blueprint(masters_chart_account_bp)
     app.register_blueprint(masters_item_bp)
     app.register_blueprint(accounting_invoice_bp)
     app.register_blueprint(masters_income_legacy_bp)
@@ -118,7 +124,9 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(backup_bp)
     app.register_blueprint(admin_dashboard_bp)
     app.register_blueprint(admin_import_export_bp)
+    app.register_blueprint(menu_customization_bp)
     app.register_blueprint(ledger_report_bp)
+    app.register_blueprint(financial_statements_bp)
     app.register_blueprint(software_update_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
@@ -206,6 +214,14 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("Admin Dashboard menu ensure skipped: %s", exc)
 
         try:
+            from app.routes.menu_customization import ensure_menu_customization_menu
+
+            ensure_menu_customization_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Menu Customization menu ensure skipped: %s", exc)
+
+        try:
             from app.routes.auth import ensure_admin_users_menu
 
             ensure_admin_users_menu()
@@ -230,12 +246,36 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("Work/Category Master menu ensure skipped: %s", exc)
 
         try:
+            from app.routes.masters_chart_group import _ensure_menu as ensure_chart_group_menu
+
+            ensure_chart_group_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Chart of Group Master menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.masters_chart_account import _ensure_menu as ensure_chart_account_menu
+
+            ensure_chart_account_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Chart of Account Master menu ensure skipped: %s", exc)
+
+        try:
             from app.routes.ledger_report import ensure_ledger_report_menu
 
             ensure_ledger_report_menu()
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Ledger Report menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.financial_statements import ensure_financial_statements_menus
+
+            ensure_financial_statements_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Financial Statements menus ensure skipped: %s", exc)
 
         # After Ledger Report so Stamp / e-Court Exception sit after it under Reports.
         try:

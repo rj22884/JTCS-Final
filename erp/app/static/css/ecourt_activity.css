@@ -120,11 +120,30 @@
 .ecourt-tree-table {
   color: #000;
   background: #faf6f0;
+  --ecourt-grid-line: #f0c987; /* light saffron */
+  border-color: var(--ecourt-grid-line);
+}
+
+.ecourt-tree-table > :not(caption) > * > * {
+  border-bottom-color: var(--ecourt-grid-line);
 }
 
 .ecourt-tree-table tbody td {
   background: #faf6f0;
   color: #000;
+  border-color: var(--ecourt-grid-line);
+}
+
+/* Sold rows — brown text (e-Court Activity grid only) */
+.ecourt-tree-table tr.ecourt-row-sold > td {
+  color: #8b4513;
+}
+.ecourt-tree-table tr.ecourt-row-sold > td strong,
+.ecourt-tree-table tr.ecourt-row-sold > td .text-muted {
+  color: #8b4513 !important;
+}
+.ecourt-tree-table tr.ecourt-row-sold .ecourt-tree-toggle {
+  color: #8b4513 !important;
 }
 
 .ecourt-tree-table .ecourt-tree-parent td {

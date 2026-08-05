@@ -1,0 +1,326 @@
+/* Tally-inspired Financial Statements */
+
+.fs-shell {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.fs-nav {
+  padding: 0.75rem;
+  position: sticky;
+  top: 0.5rem;
+}
+
+.fs-nav-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+  color: #1f4e79;
+  border-bottom: 2px solid #1f4e79;
+  padding-bottom: 0.35rem;
+}
+
+.fs-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.fs-nav-item {
+  display: block;
+  padding: 0.4rem 0.55rem;
+  border-radius: 0.25rem;
+  color: #243447;
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+
+.fs-nav-item:hover {
+  background: #eef4fb;
+  color: #1f4e79;
+}
+
+.fs-nav-item.active {
+  background: #1f4e79;
+  color: #fff;
+  font-weight: 600;
+}
+
+.fs-main {
+  padding: 0.85rem 1rem 1.25rem;
+  min-height: 70vh;
+}
+
+.fs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid #d9e2ec;
+  padding-bottom: 0.65rem;
+}
+
+.fs-toolbar-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1f4e79;
+}
+
+.fs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.fs-filters .form-control {
+  width: auto;
+  min-width: 9rem;
+}
+
+.fs-search {
+  min-width: 12rem !important;
+}
+
+.fs-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-bs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid #c5d0dc;
+  background: #fff;
+}
+
+.fs-bs-col {
+  min-width: 0;
+}
+
+.fs-bs-col + .fs-bs-col {
+  border-left: 1px solid #c5d0dc;
+}
+
+.fs-bs-head {
+  background: #1f4e79;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+  display: flex;
+  justify-content: space-between;
+}
+
+.fs-tree {
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-node,
+.fs-ledger {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  padding: 0.22rem 0.55rem;
+  border-bottom: 1px dotted #e2e8f0;
+  cursor: default;
+}
+
+.fs-node {
+  font-weight: 700;
+  color: #1a2b3c;
+}
+
+.fs-node.fs-toggle {
+  cursor: pointer;
+}
+
+.fs-node.fs-toggle:hover,
+.fs-ledger:hover {
+  background: #f4f8fc;
+}
+
+.fs-ledger {
+  font-weight: 400;
+  color: #334155;
+  cursor: pointer;
+}
+
+.fs-indent-1 { padding-left: 1.1rem !important; }
+.fs-indent-2 { padding-left: 1.9rem !important; }
+.fs-indent-3 { padding-left: 2.7rem !important; }
+.fs-indent-4 { padding-left: 3.5rem !important; }
+
+.fs-children.collapsed {
+  display: none;
+}
+
+.fs-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.65rem;
+  font-weight: 700;
+  background: #eef4fb;
+  border-top: 2px solid #1f4e79;
+}
+
+.fs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-table th {
+  background: #1f4e79;
+  color: #fff;
+  font-weight: 600;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.fs-table td {
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.fs-table td.num,
+.fs-table th.num {
+  text-align: right;
+}
+
+.fs-table tr.fs-clickable {
+  cursor: pointer;
+}
+
+.fs-table tr.fs-clickable:hover {
+  background: #f4f8fc;
+}
+
+.fs-table tfoot td {
+  font-weight: 700;
+  background: #eef4fb;
+  border-top: 2px solid #1f4e79;
+}
+
+.fs-ledger-preview {
+  font-size: 0.88rem;
+}
+
+.fs-ledger-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #d5d8dc;
+}
+
+.fs-ledger-entity {
+  font-weight: 700;
+  color: #1f4e79;
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.fs-ledger-meta {
+  color: #4a5568;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.fs-ledger-closing {
+  text-align: right;
+  white-space: nowrap;
+  color: #1f4e79;
+  font-size: 0.85rem;
+}
+
+.fs-ledger-closing strong {
+  font-size: 1.05rem;
+}
+
+.fs-ledger-table tr.fs-ledger-row-opening td {
+  background: #eaf2f8;
+  font-weight: 600;
+}
+
+.fs-ledger-table tr.fs-ledger-row-day_total td,
+.fs-ledger-table tr.fs-ledger-row-month_total td {
+  background: #fef9e7;
+  font-weight: 600;
+}
+
+.fs-ledger-table tr.fs-ledger-row-closing td {
+  background: #e8f6f3;
+  font-weight: 700;
+}
+
+.fs-ledger-table tr.fs-ledger-row-txn:nth-child(even) td {
+  background: #f8fbfc;
+}
+
+.fs-section-title {
+  font-weight: 700;
+  color: #1f4e79;
+  margin: 0.85rem 0 0.35rem;
+  border-bottom: 1px solid #c5d0dc;
+  padding-bottom: 0.2rem;
+}
+
+.fs-emphasis {
+  font-weight: 700;
+  background: #fff8e6;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #f0d78c;
+  margin: 0.5rem 0;
+  display: flex;
+  justify-content: space-between;
+}
+
+.fs-badge-ok {
+  color: #0f7b3a;
+  font-weight: 600;
+}
+
+.fs-badge-warn {
+  color: #b45309;
+  font-weight: 600;
+}
+
+@media (max-width: 992px) {
+  .fs-shell {
+    grid-template-columns: 1fr;
+  }
+  .fs-bs-grid {
+    grid-template-columns: 1fr;
+  }
+  .fs-bs-col + .fs-bs-col {
+    border-left: 0;
+    border-top: 1px solid #c5d0dc;
+  }
+  .fs-nav {
+    position: static;
+  }
+}
+
+@media print {
+  .fs-nav,
+  .fs-toolbar .btn,
+  .jtcs-ribbon,
+  .navbar,
+  footer {
+    display: none !important;
+  }
+  .fs-shell {
+    grid-template-columns: 1fr;
+  }
+  .fs-main {
+    border: 0;
+    box-shadow: none;
+  }
+}

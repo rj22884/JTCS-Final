@@ -15,6 +15,7 @@
     accountId: document.getElementById("bankMasterAccountId"),
     bankName: document.getElementById("bankMasterBankName"),
     accountType: document.getElementById("bankMasterAccountType"),
+    underGroup: document.getElementById("bankMasterUnderGroup"),
     upiWrap: document.getElementById("bankMasterUpiWrap"),
     upiId: document.getElementById("bankMasterUpiId"),
     accountNumber: document.getElementById("bankMasterAccountNumber"),
@@ -24,6 +25,8 @@
     holder: document.getElementById("bankMasterHolder"),
     openingBalance: document.getElementById("bankMasterOpeningBalance"),
     openingBalanceDate: document.getElementById("bankMasterOpeningBalanceDate"),
+    obDr: document.getElementById("bankMasterObDr"),
+    obCr: document.getElementById("bankMasterObCr"),
     displayOrder: document.getElementById("bankMasterDisplayOrder"),
     displayOrderHint: document.getElementById("bankMasterDisplayOrderHint"),
     description: document.getElementById("bankMasterDescription"),
@@ -52,6 +55,34 @@
       || String(accountNumber || "").trim().toLowerCase() === "cash";
   }
 
+  function defaultUnderGroupId(isCash) {
+    if (isCash) {
+      return window.BANK_MASTER_DEFAULT_CASH_GROUP_ID
+        || window.BANK_MASTER_DEFAULT_BANK_GROUP_ID
+        || "";
+    }
+    return window.BANK_MASTER_DEFAULT_BANK_GROUP_ID || "";
+  }
+
+  function applyDefaultUnderGroup(forceCash) {
+    if (!els.underGroup) return;
+    const cash = forceCash === true
+      || isCashAccount(els.bankName?.value, els.accountNumber?.value);
+    const target = String(defaultUnderGroupId(cash) || "");
+    if (!target) return;
+    // Only auto-set when empty or still on the opposite default.
+    const current = String(els.underGroup.value || "");
+    const bankDefault = String(window.BANK_MASTER_DEFAULT_BANK_GROUP_ID || "");
+    const cashDefault = String(window.BANK_MASTER_DEFAULT_CASH_GROUP_ID || "");
+    const isBlank = !current;
+    const isOtherDefault = cash
+      ? current === bankDefault
+      : current === cashDefault;
+    if (isBlank || isOtherDefault) {
+      els.underGroup.value = target;
+    }
+  }
+
   function applyCashDisplayOrderLock(forceCash) {
     const cash = forceCash === true
       || isCashAccount(els.bankName?.value, els.accountNumber?.value);
@@ -73,6 +104,7 @@
         ? "Cash is always order 1 and cannot be changed."
         : "Enter 2, 3, 4… — this order is used in Payment Received account list (Cash stays on top).";
     }
+    applyDefaultUnderGroup(cash);
   }
 
   if (!els.gridBody || !window.BANK_MASTER_API) return;
@@ -145,6 +177,7 @@
         "<td>" + escapeHtml(row.bank_name) + "</td>" +
         "<td>" + escapeHtml(row.account_number || row.masked_account_number) + "</td>" +
         "<td>" + escapeHtml(row.account_type) + "</td>" +
+        "<td>" + escapeHtml(row.under_group || "—") + "</td>" +
         "<td>" + escapeHtml(row.upi_id || "—") + "</td>" +
         "<td>" + escapeHtml(row.ifsc_code) + "</td>" +
         "<td>" + escapeHtml(row.branch_name) + "</td>" +
@@ -218,6 +251,22 @@
     return "CA-Current Asset";
   }
 
+  function defaultDrCrFromUnderType(underType) {
+    return String(underType || "").trim().toLowerCase() === "liabilities" ? "Cr" : "Dr";
+  }
+
+  function setOpeningDrCr(value) {
+    const v = value === "Cr" ? "Cr" : "Dr";
+    if (els.obDr) els.obDr.checked = v === "Dr";
+    if (els.obCr) els.obCr.checked = v === "Cr";
+  }
+
+  function applyDefaultDrCrFromUnderGroup() {
+    const opt = els.underGroup?.selectedOptions && els.underGroup.selectedOptions[0];
+    const under = (opt && opt.dataset.underType) || "";
+    setOpeningDrCr(defaultDrCrFromUnderType(under));
+  }
+
   function clearForm() {
     els.form?.reset();
     if (els.accountId) els.accountId.value = "";
@@ -226,6 +275,8 @@
     if (els.accountType) els.accountType.value = defaultAccountTypeCode();
     if (els.displayOrder) els.displayOrder.value = "100";
     if (els.upiId) els.upiId.value = "";
+    if (els.underGroup) els.underGroup.value = String(defaultUnderGroupId(false) || "");
+    applyDefaultDrCrFromUnderGroup();
     applyCashDisplayOrderLock(false);
     toggleUpiField();
   }
@@ -240,6 +291,12 @@
       ensureAccountTypeOption(code, code);
       els.accountType.value = code;
     }
+    if (els.underGroup) {
+      const gid = record.chart_group_id != null
+        ? String(record.chart_group_id)
+        : String(defaultUnderGroupId(!!record.is_cash) || "");
+      els.underGroup.value = gid;
+    }
     if (els.upiId) els.upiId.value = record.upi_id || "";
     if (els.accountNumber) els.accountNumber.value = record.account_number || "";
     if (els.maskedAccountNumber) els.maskedAccountNumber.value = record.masked_account_number || "";
@@ -248,6 +305,11 @@
     if (els.holder) els.holder.value = record.account_holder_name || "";
     if (els.openingBalance) els.openingBalance.value = record.opening_balance || "";
     if (els.openingBalanceDate) els.openingBalanceDate.value = record.opening_balance_date || "";
+    if (record.opening_balance_dr_cr) {
+      setOpeningDrCr(record.opening_balance_dr_cr);
+    } else {
+      applyDefaultDrCrFromUnderGroup();
+    }
     if (els.displayOrder) {
       els.displayOrder.value = String(
         record.display_order != null
@@ -259,6 +321,10 @@
     if (els.activeStatus) els.activeStatus.checked = !!record.active_status;
     if (els.qrBillReceived) els.qrBillReceived.checked = !!record.qr_bill_received;
     applyCashDisplayOrderLock(!!record.is_cash);
+    // Keep saved under-group (do not overwrite with default after fill).
+    if (els.underGroup && record.chart_group_id != null) {
+      els.underGroup.value = String(record.chart_group_id);
+    }
     toggleUpiField();
     if (els.upiId && record.upi_id) els.upiId.value = record.upi_id;
   }
@@ -341,6 +407,11 @@
       els.accountNumber.focus();
       return;
     }
+    if (!els.underGroup?.value) {
+      alert("Under Group is required.");
+      els.underGroup?.focus();
+      return;
+    }
     const accountId = (els.accountId?.value || "").trim();
     const body = new FormData(els.form);
     if (!els.activeStatus?.checked) {
@@ -406,6 +477,7 @@
     applyCashDisplayOrderLock();
   });
   els.accountType?.addEventListener("change", toggleUpiField);
+  els.underGroup?.addEventListener("change", applyDefaultDrCrFromUnderGroup);
 
   els.addBtn?.addEventListener("click", openAddModal);
   els.addNewBtn?.addEventListener("click", openAddModal);

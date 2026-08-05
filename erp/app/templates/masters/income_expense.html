@@ -33,12 +33,20 @@
       <input type="search" class="form-control form-control-sm" id="workMasterSearch" placeholder="Work name, income, expense...">
     </div>
     <div style="min-width: 160px; max-width: 200px;">
-      <label class="form-label" for="workMasterFilterKind">Filter</label>
+      <label class="form-label" for="workMasterFilterKind">Type</label>
       <select class="form-select form-select-sm" id="workMasterFilterKind">
-        <option value="">All</option>
+        <option value="">All types</option>
         <option value="Income">Income only</option>
         <option value="Expense">Expense only</option>
         <option value="Misc.">Misc. only</option>
+      </select>
+    </div>
+    <div style="min-width: 140px; max-width: 180px;">
+      <label class="form-label" for="workMasterFilterStatus">Status</label>
+      <select class="form-select form-select-sm" id="workMasterFilterStatus">
+        <option value="">All</option>
+        <option value="active" selected>Active</option>
+        <option value="inactive">Inactive</option>
       </select>
     </div>
     <button type="button" class="btn btn-outline-secondary btn-sm" id="workMasterRefreshBtn">
@@ -65,6 +73,7 @@
           <th>Expense</th>
           <th>Misc.</th>
           <th>Ledger Kind</th>
+          <th>Under Group</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
         </tr>
@@ -90,7 +99,7 @@
             <label class="form-label" for="workMasterName">Work Name *</label>
             <input type="text" class="form-control" id="workMasterName" maxlength="100" required placeholder="e.g. Photostat, Print &amp; Scan">
           </div>
-          <div class="mb-0" id="workMasterTypeEditWrap">
+          <div class="mb-3" id="workMasterTypeEditWrap">
             <label class="form-label">Type *</label>
             <div class="d-flex flex-wrap gap-4">
               <div class="form-check">
@@ -107,9 +116,61 @@
               </div>
             </div>
           </div>
-          <div class="mb-0 d-none" id="workMasterTypeViewWrap">
+          <div class="mb-3 d-none" id="workMasterTypeViewWrap">
             <label class="form-label">Type</label>
             <div><span class="badge text-bg-light border" id="workMasterTypeViewBadge">Income</span></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="workMasterUnderGroup">Under Group *</label>
+            <select class="form-select" id="workMasterUnderGroup" name="ChartGroupID" required>
+              <option value="">— Select group —</option>
+              {% for g in chart_groups|default([]) %}
+              <option value="{{ g.group_id }}" data-under-type="{{ g.under_type or '' }}">{{ g.label or g.group_name }}</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">From Chart of Group Master — used when adding / editing / deleting work heads.</div>
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-md-4">
+              <label class="form-label" for="workMasterOpeningBalance">Opening Balance</label>
+              <input type="number" step="0.01" min="0" class="form-control" id="workMasterOpeningBalance"
+                     name="OpeningBalance" placeholder="0.00">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="workMasterOpeningBalanceDate">Opening Balance Date</label>
+              <input type="date" class="form-control" id="workMasterOpeningBalanceDate" name="OpeningBalanceDate">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label d-block">Dr / Cr</label>
+              <div class="d-flex flex-wrap gap-3 pt-1">
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="workMasterObDrCr"
+                         id="workMasterObDr" value="Dr">
+                  <label class="form-check-label" for="workMasterObDr">Dr</label>
+                </div>
+                <div class="form-check">
+                  <input class="form-check-input" type="radio" name="workMasterObDrCr"
+                         id="workMasterObCr" value="Cr">
+                  <label class="form-check-label" for="workMasterObCr">Cr</label>
+                </div>
+              </div>
+              <div class="form-text">Default from Under Group.</div>
+            </div>
+          </div>
+          <div class="mb-0">
+            <label class="form-label d-block">Status *</label>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="workMasterActiveStatus"
+                       id="workMasterStatusActive" value="1" checked>
+                <label class="form-check-label" for="workMasterStatusActive">Active</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="radio" name="workMasterActiveStatus"
+                       id="workMasterStatusInactive" value="0">
+                <label class="form-check-label" for="workMasterStatusInactive">Inactive</label>
+              </div>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -137,7 +198,8 @@
     delete: {{ url_for('masters_work.delete_record', work_id=0) | tojson }}
   };
   window.WORK_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
+  window.WORK_MASTER_CHART_GROUPS = {{ chart_groups | tojson }};
   window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260722workcat"></script>
+<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260804activefix"></script>
 {% endblock %}
