@@ -1,0 +1,22 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/utility.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card utility-card mb-3">
+  <h3 class="h5 mb-3">App Info</h3>
+  <div class="utility-meta small">
+    <div><span class="utility-meta-label">Mode</span> {{ info.mode }} (menu: {{ info.sync_label }})</div>
+    <div><span class="utility-meta-label">App</span> {{ info.app_name }}</div>
+    <div><span class="utility-meta-label">Base URL</span> {{ info.app_base_url }}</div>
+    <div><span class="utility-meta-label">Database</span> {{ info.db_server }}\{{ info.db_name }}</div>
+    <div><span class="utility-meta-label">ERP dir</span> <code>{{ info.erp_dir }}</code></div>
+    <div><span class="utility-meta-label">Repo</span> <code>{{ info.repo_root }}</code></div>
+    <div><span class="utility-meta-label">VPS host</span> {{ info.vps_host }}</div>
+    <div><span class="utility-meta-label">VPS path</span> {{ info.vps_path }}</div>
+    <div><span class="utility-meta-label">OS</span> {{ info.os_name }}</div>
+  </div>
+</div>
+{% endblock %}

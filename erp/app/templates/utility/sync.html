@@ -1,0 +1,70 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/utility.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card utility-card mb-3">
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+    <div>
+      <h3 class="h5 mb-1">{{ sync_label }}</h3>
+      {% if is_vps %}
+      <p class="text-muted small mb-0">
+        VPS se poora application + database <code>.bak</code> ek ZIP me download hoga.
+        Is ZIP ko local pe <strong>Restore Backup</strong> se restore kar sakte ho.
+      </p>
+      {% else %}
+      <p class="text-muted small mb-0">
+        Local se GitHub push + VPS <code>deploy.sh</code> chalega.
+        Password har baar type karo (save nahi hota).
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="utility-meta small text-muted mb-3">
+    <div><span class="utility-meta-label">Mode</span> {{ 'VPS' if is_vps else 'Local PC' }}</div>
+    <div><span class="utility-meta-label">App URL</span> {{ info.app_base_url }}</div>
+    <div><span class="utility-meta-label">Database</span> {{ info.db_server }}\{{ info.db_name }}</div>
+    {% if not is_vps %}
+    <div><span class="utility-meta-label">VPS</span> {{ info.vps_host }}:{{ info.vps_path }}</div>
+    {% endif %}
+  </div>
+
+  <div id="utilityStatus" class="alert d-none mb-3" role="status"></div>
+
+  {% if is_vps %}
+  <button type="button" class="btn btn-primary" id="utilityDownloadBtn">
+    <i class="bi bi-cloud-arrow-down"></i> Create &amp; Download ZIP
+  </button>
+  {% else %}
+  <div class="row g-3 mb-3">
+    <div class="col-md-8">
+      <label class="form-label" for="utilityCommitMsg">Commit message (optional)</label>
+      <input type="text" class="form-control" id="utilityCommitMsg" placeholder="deploy from Utility">
+    </div>
+    <div class="col-md-4">
+      <label class="form-label" for="utilityVpsPass">VPS password</label>
+      <input type="password" class="form-control" id="utilityVpsPass" autocomplete="current-password">
+    </div>
+  </div>
+  <button type="button" class="btn btn-primary" id="utilityDeployBtn">
+    <i class="bi bi-cloud-arrow-up"></i> Upload / Deploy to VPS
+  </button>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.UTILITY_SYNC = {
+    isVps: {{ is_vps | tojson }},
+    deployUrl: {{ url_for('utility.api_deploy') | tojson }},
+    createDownloadUrl: {{ url_for('utility.api_download_create') | tojson }},
+    downloadBase: {{ url_for('utility.api_download_file', file_name='__FILE__') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/utility.js') }}"></script>
+{% endblock %}

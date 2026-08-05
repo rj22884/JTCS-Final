@@ -47,6 +47,7 @@ from app.routes.menu_customization import bp as menu_customization_bp
 from app.routes.ledger_report import bp as ledger_report_bp
 from app.routes.financial_statements import bp as financial_statements_bp
 from app.routes.software_update import bp as software_update_bp
+from app.routes.utility import bp as utility_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -128,6 +129,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(ledger_report_bp)
     app.register_blueprint(financial_statements_bp)
     app.register_blueprint(software_update_bp)
+    app.register_blueprint(utility_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)
@@ -204,6 +206,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Backup menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.utility import ensure_utility_menus
+
+            ensure_utility_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Utility menus ensure skipped: %s", exc)
 
         try:
             from app.routes.admin_dashboard import ensure_admin_dashboard_menu

@@ -1,0 +1,29 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/utility.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card utility-card mb-3">
+  <h3 class="h5 mb-2">Clear Cache</h3>
+  <p class="text-muted small mb-3">
+    <code>__pycache__</code>, <code>.pyc</code> aur common cache folders hataata hai.
+    <code>.venv</code> / <code>.env</code> touch nahi hota.
+  </p>
+  <div id="utilityStatus" class="alert d-none mb-3" role="status"></div>
+  <button type="button" class="btn btn-outline-danger" id="utilityClearCacheBtn">
+    <i class="bi bi-trash"></i> Clear Cache Now
+  </button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.UTILITY_CACHE = {
+    clearUrl: {{ url_for('utility.api_clear_cache') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/utility.js') }}"></script>
+{% endblock %}

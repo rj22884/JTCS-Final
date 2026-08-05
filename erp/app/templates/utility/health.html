@@ -1,0 +1,37 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/utility.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card utility-card mb-3">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h3 class="h5 mb-0">System Health</h3>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="utilityHealthRefresh">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div id="utilityStatus" class="alert d-none mb-3" role="status"></div>
+  <div class="utility-meta small" id="utilityHealthBox">
+    <div><span class="utility-meta-label">Database</span>
+      {% if health.database_ok %}<span class="text-success">OK</span>{% else %}<span class="text-danger">FAIL</span> {{ health.database_error }}{% endif %}
+    </div>
+    <div><span class="utility-meta-label">Public health</span>
+      {% if health.public_health_ok %}<span class="text-success">OK</span>{% elif health.public_health_ok is sameas false %}<span class="text-danger">FAIL</span>{% else %}<span class="text-muted">n/a</span>{% endif %}
+      <code class="ms-1">{{ health.public_health_body }}</code>
+    </div>
+    <div><span class="utility-meta-label">Mode</span> {{ health.info.mode }}</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.UTILITY_HEALTH = {
+    healthUrl: {{ url_for('utility.api_health') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/utility.js') }}"></script>
+{% endblock %}

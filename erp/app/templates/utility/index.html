@@ -1,0 +1,41 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/utility.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card utility-card mb-3">
+  <h3 class="h5 mb-2">Utility</h3>
+  <p class="text-muted small mb-3">
+    Local PC pe <strong>Upload VPS</strong> se deploy; VPS pe wahi menu
+    <strong>Download Local</strong> ban jata hai (app + database ZIP).
+  </p>
+  <div class="row g-3">
+    <div class="col-md-6 col-lg-3">
+      <a class="utility-tile" href="{{ url_for('utility.sync_page') }}">
+        <i class="bi {{ 'bi-cloud-arrow-down' if is_vps else 'bi-cloud-arrow-up' }}"></i>
+        <span>{{ sync_label }}</span>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a class="utility-tile" href="{{ url_for('utility.clear_cache_page') }}">
+        <i class="bi bi-trash"></i>
+        <span>Clear Cache</span>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a class="utility-tile" href="{{ url_for('utility.health_page') }}">
+        <i class="bi bi-heart-pulse"></i>
+        <span>System Health</span>
+      </a>
+    </div>
+    <div class="col-md-6 col-lg-3">
+      <a class="utility-tile" href="{{ url_for('utility.info_page') }}">
+        <i class="bi bi-info-circle"></i>
+        <span>App Info</span>
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock %}

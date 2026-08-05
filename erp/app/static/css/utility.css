@@ -1,0 +1,45 @@
+.utility-card .utility-meta {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+
+.utility-card .utility-meta-label {
+  display: inline-block;
+  min-width: 7rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.utility-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  background: #f8fafc;
+  text-decoration: none;
+  color: inherit;
+  min-height: 6.5rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.utility-tile:hover {
+  border-color: #94a3b8;
+  background: #fff;
+  color: inherit;
+}
+
+.utility-tile i {
+  font-size: 1.4rem;
+  color: #0f766e;
+}
+
+.utility-tile span {
+  font-weight: 600;
+}
