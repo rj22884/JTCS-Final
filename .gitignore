@@ -7,3 +7,10 @@ erp/.env.local
 
 # Local deploy console logs
 deployment/logs/
+
+# Virtualenvs / bytecode (never commit)
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/

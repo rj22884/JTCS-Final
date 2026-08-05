@@ -296,10 +296,23 @@ fi
 # ---------------------------------------------------------------------------
 # 7) Delete bytecode / pytest caches
 # ---------------------------------------------------------------------------
-log_info "Clearing __pycache__, *.pyc, *.pyo, .pytest_cache…"
-find "${APP_DIR}" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
-find "${APP_DIR}" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null || true
-find "${APP_DIR}" -type d -name '.pytest_cache' -prune -exec rm -rf {} + 2>/dev/null || true
+# Skip .venv — legacy commits may track bytecode under backend/.venv; wiping
+# those makes `git diff HEAD` fail and aborts deploy after a successful reset.
+log_info "Clearing __pycache__, *.pyc, *.pyo, .pytest_cache (excluding .venv)…"
+find "${APP_DIR}" \
+  \( -path '*/.venv' -o -path '*/.venv/*' -o -path '*/venv' -o -path '*/venv/*' \) -prune -o \
+  -type d -name '__pycache__' -print0 2>/dev/null \
+  | xargs -0 -r rm -rf 2>/dev/null || true
+find "${APP_DIR}" \
+  \( -path '*/.venv' -o -path '*/.venv/*' -o -path '*/venv' -o -path '*/venv/*' \) -prune -o \
+  -type f \( -name '*.pyc' -o -name '*.pyo' \) -print0 2>/dev/null \
+  | xargs -0 -r rm -f 2>/dev/null || true
+find "${APP_DIR}" \
+  \( -path '*/.venv' -o -path '*/.venv/*' -o -path '*/venv' -o -path '*/venv/*' \) -prune -o \
+  -type d -name '.pytest_cache' -print0 2>/dev/null \
+  | xargs -0 -r rm -rf 2>/dev/null || true
+# If anything tracked was still removed, restore from HEAD before the dirty check.
+git checkout -f HEAD -- . >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
 # 8) Delete old static / template caches (never leave stale UI assets)
