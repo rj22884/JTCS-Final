@@ -34,11 +34,41 @@
     return data;
   }
 
+  function appendLog(line, level) {
+    var log = $("utilityLog");
+    if (!log) return;
+    if (log.dataset.empty === "1" || log.textContent.indexOf("yahan live log") >= 0) {
+      log.textContent = "";
+      log.dataset.empty = "0";
+    }
+    var row = document.createElement("div");
+    if (level === "warn") row.className = "log-warn";
+    else if (level === "error") row.className = "log-error";
+    else if (level === "ok") row.className = "log-ok";
+    row.textContent = line;
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function clearLog() {
+    var log = $("utilityLog");
+    if (!log) return;
+    log.textContent = "";
+    log.dataset.empty = "1";
+  }
+
   var sync = window.UTILITY_SYNC;
   if (sync) {
     var status = $("utilityStatus");
     var deployBtn = $("utilityDeployBtn");
     var downloadBtn = $("utilityDownloadBtn");
+    var clearBtn = $("utilityLogClearBtn");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        clearLog();
+        appendLog("Log cleared.", "info");
+      });
+    }
 
     if (deployBtn) {
       deployBtn.addEventListener("click", async function () {
@@ -49,15 +79,97 @@
           return;
         }
         deployBtn.disabled = true;
-        showStatus(status, null, "Deploying to VPS… git push + remote deploy.sh (2–5 min).");
+        clearLog();
+        showStatus(status, null, "Deploying to VPS… neeche live log dekhte raho.");
+        appendLog("Starting deploy…", "info");
         try {
-          var data = await postJson(sync.deployUrl, sync.csrf, {
-            password: password,
-            commit_message: commitMessage,
+          var res = await fetch(sync.deployStreamUrl || sync.deployUrl, {
+            method: "POST",
+            headers: headers(sync.csrf),
+            body: JSON.stringify({
+              password: password,
+              commit_message: commitMessage,
+            }),
+            credentials: "same-origin",
           });
-          showStatus(status, true, data.message || "Deploy complete.");
-          if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
+          if (!res.ok) {
+            var errBody = await res.json().catch(function () {
+              return {};
+            });
+            throw new Error(errBody.error || ("HTTP " + res.status));
+          }
+
+          // Streaming NDJSON
+          if (res.body && sync.deployStreamUrl) {
+            var reader = res.body.getReader();
+            var decoder = new TextDecoder();
+            var buffer = "";
+            var finalOk = null;
+            var finalMsg = "";
+            while (true) {
+              var chunk = await reader.read();
+              if (chunk.done) break;
+              buffer += decoder.decode(chunk.value, { stream: true });
+              var parts = buffer.split("\n");
+              buffer = parts.pop() || "";
+              for (var i = 0; i < parts.length; i++) {
+                var raw = parts[i].trim();
+                if (!raw) continue;
+                var event;
+                try {
+                  event = JSON.parse(raw);
+                } catch (e) {
+                  appendLog(raw, "warn");
+                  continue;
+                }
+                if (event.type === "log") {
+                  appendLog(event.line || "", event.level || "info");
+                } else if (event.type === "done") {
+                  finalOk = true;
+                  finalMsg = event.message || "Deploy complete.";
+                  appendLog(finalMsg, "ok");
+                } else if (event.type === "error") {
+                  finalOk = false;
+                  finalMsg = event.error || "Deploy failed.";
+                  appendLog(finalMsg, "error");
+                }
+              }
+            }
+            if (buffer.trim()) {
+              try {
+                var last = JSON.parse(buffer.trim());
+                if (last.type === "done") {
+                  finalOk = true;
+                  finalMsg = last.message || "Deploy complete.";
+                  appendLog(finalMsg, "ok");
+                } else if (last.type === "error") {
+                  finalOk = false;
+                  finalMsg = last.error || "Deploy failed.";
+                  appendLog(finalMsg, "error");
+                } else if (last.type === "log") {
+                  appendLog(last.line || "", last.level || "info");
+                }
+              } catch (e2) {
+                appendLog(buffer.trim(), "warn");
+              }
+            }
+            if (finalOk === true) {
+              showStatus(status, true, finalMsg || "Deploy complete.");
+              if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
+            } else if (finalOk === false) {
+              showStatus(status, false, finalMsg || "Deploy failed.");
+            } else {
+              showStatus(status, false, "Deploy ended without SUCCESS marker — log check karo.");
+            }
+          } else {
+            var data = await res.json();
+            if (data.ok === false) throw new Error(data.error || "Deploy failed");
+            appendLog(data.message || "Deploy complete.", "ok");
+            showStatus(status, true, data.message || "Deploy complete.");
+            if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
+          }
         } catch (err) {
+          appendLog(err.message || String(err), "error");
           showStatus(status, false, err.message || String(err));
         } finally {
           deployBtn.disabled = false;
@@ -68,15 +180,19 @@
     if (downloadBtn) {
       downloadBtn.addEventListener("click", async function () {
         downloadBtn.disabled = true;
+        clearLog();
         showStatus(status, null, "Creating full ZIP (database + app)…");
+        appendLog("Creating download package on VPS…", "info");
         try {
           var data = await postJson(sync.createDownloadUrl, sync.csrf, {});
           var fileName = data.file_name;
           if (!fileName) throw new Error("ZIP file name missing.");
+          appendLog("ZIP ready: " + fileName, "ok");
           showStatus(status, true, (data.message || "ZIP ready.") + " Download starting…");
           var url = sync.downloadBase.replace("__FILE__", encodeURIComponent(fileName));
           window.location.href = url;
         } catch (err) {
+          appendLog(err.message || String(err), "error");
           showStatus(status, false, err.message || String(err));
         } finally {
           downloadBtn.disabled = false;

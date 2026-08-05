@@ -53,6 +53,14 @@
     <i class="bi bi-cloud-arrow-up"></i> Upload / Deploy to VPS
   </button>
   {% endif %}
+
+  <div class="utility-log-wrap mt-3" id="utilityLogWrap">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+      <strong class="small">Live log</strong>
+      <button type="button" class="btn btn-outline-secondary btn-sm" id="utilityLogClearBtn">Clear</button>
+    </div>
+    <pre class="utility-log" id="utilityLog" aria-live="polite">Deploy start karo — yahan live log dikhega…</pre>
+  </div>
 </div>
 {% endblock %}
 
@@ -61,6 +69,7 @@
   window.UTILITY_SYNC = {
     isVps: {{ is_vps | tojson }},
     deployUrl: {{ url_for('utility.api_deploy') | tojson }},
+    deployStreamUrl: {{ url_for('utility.api_deploy_stream') | tojson }},
     createDownloadUrl: {{ url_for('utility.api_download_create') | tojson }},
     downloadBase: {{ url_for('utility.api_download_file', file_name='__FILE__') | tojson }},
     csrf: {{ csrf_token() | tojson }}

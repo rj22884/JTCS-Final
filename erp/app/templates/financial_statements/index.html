@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/financial_statements.css') }}?v=20260805fs2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financial_statements.css') }}?v=20260805fs3">
 {% endblock %}
 
 {% block content %}
@@ -27,6 +27,16 @@
         <input type="date" class="form-control form-control-sm" id="fsDateTo" value="{{ default_to }}">
         <input type="search" class="form-control form-control-sm fs-search" id="fsSearch"
                placeholder="Search ledger / group...">
+        <div class="btn-group fs-view-toggle" role="group" aria-label="Report view mode">
+          <button type="button" class="btn btn-primary btn-sm" id="fsViewHorizontalBtn"
+                  aria-pressed="true" title="Tally-style side-by-side">
+            <i class="bi bi-layout-split"></i> Horizontal View
+          </button>
+          <button type="button" class="btn btn-outline-primary btn-sm" id="fsViewVerticalBtn"
+                  aria-pressed="false" title="Single-column stacked view">
+            <i class="bi bi-list-ul"></i> Vertical View
+          </button>
+        </div>
         <button type="button" class="btn btn-primary btn-sm" id="fsRefreshBtn">
           <i class="bi bi-arrow-clockwise"></i> Refresh
         </button>
@@ -73,5 +83,6 @@
   };
   window.FS_ACTIVE_REPORT = {{ active_report | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/financial_statements.js') }}?v=20260805fs2"></script>
+<script src="{{ url_for('static', filename='js/financial_view_manager.js') }}?v=20260805fs3"></script>
+<script src="{{ url_for('static', filename='js/financial_statements.js') }}?v=20260805fs3"></script>
 {% endblock %}

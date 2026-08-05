@@ -282,6 +282,9 @@ def api_voucher_detail():
 @login_required
 def api_export(report_key: str):
     fmt = (request.args.get("format") or "xlsx").strip().lower()
+    view = (request.args.get("view") or "horizontal").strip().lower()
+    if view not in {"horizontal", "vertical"}:
+        view = "horizontal"
     service = FinancialStatementsService()
     exporter = FinancialStatementsExport()
     try:
@@ -292,6 +295,7 @@ def api_export(report_key: str):
             search=request.args.get("search"),
         )
         data = service.to_jsonable(raw)
+        data["view"] = view
         title = (data.get("meta") or {}).get("report_title") or "report"
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in title)
         if fmt == "pdf":

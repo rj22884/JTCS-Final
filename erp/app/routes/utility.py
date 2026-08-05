@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+
 from flask import (
     Blueprint,
+    Response,
     current_app,
     jsonify,
     render_template,
     request,
     send_file,
     session,
+    stream_with_context,
 )
 from sqlalchemy import text
 
@@ -316,6 +320,7 @@ def info_page():
 @login_required
 @admin_required
 def api_deploy():
+    """Legacy JSON deploy (no live log). Prefer /api/deploy/stream."""
     if is_vps_runtime():
         return jsonify(ok=False, error="Upload VPS only works on local PC."), 400
     payload = request.get_json(silent=True) or {}
@@ -331,6 +336,41 @@ def api_deploy():
     except Exception as exc:
         current_app.logger.exception("Utility Upload VPS failed")
         return jsonify(ok=False, error=str(exc)), 500
+
+
+@bp.route("/api/deploy/stream", methods=["POST"])
+@login_required
+@admin_required
+def api_deploy_stream():
+    """NDJSON stream of deploy logs for the live panel."""
+    if is_vps_runtime():
+        return jsonify(ok=False, error="Upload VPS only works on local PC."), 400
+    payload = request.get_json(silent=True) or {}
+    password = str(payload.get("password") or "")
+    commit_message = str(payload.get("commit_message") or "").strip()
+    actor = _actor()
+
+    @stream_with_context
+    def generate():
+        try:
+            for event in UtilityService().iter_deploy_to_vps(
+                password=password,
+                commit_message=commit_message,
+                created_by=actor,
+            ):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            current_app.logger.exception("Utility Upload VPS stream failed")
+            yield json.dumps({"type": "error", "ok": False, "error": str(exc)}) + "\n"
+
+    return Response(
+        generate(),
+        mimetype="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @bp.route("/api/download", methods=["POST"])

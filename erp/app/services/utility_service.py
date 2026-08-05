@@ -135,6 +135,157 @@ class UtilityService:
     def resolve_download_package(self, file_name: str) -> Path:
         return BackupService().resolve_download("full", file_name)
 
+    def iter_deploy_to_vps(
+        self,
+        *,
+        password: str,
+        commit_message: str = "",
+        created_by: str = "System",
+    ):
+        """Yield NDJSON-friendly events while deploying (log / done / error)."""
+        def emit(line: str, *, level: str = "info"):
+            text = (line or "").rstrip("\r\n")
+            if text:
+                return {"type": "log", "level": level, "line": text}
+            return None
+
+        try:
+            if is_vps_runtime():
+                raise RuntimeError("Upload VPS is only available on the local PC.")
+            if os.name != "nt":
+                raise RuntimeError("Upload VPS deploy is intended from the Windows local PC.")
+            password = (password or "").strip()
+            if not password:
+                raise ValueError("VPS password is required.")
+
+            try:
+                import paramiko
+            except ImportError as exc:
+                raise RuntimeError(
+                    "paramiko is not installed. Run: pip install paramiko"
+                ) from exc
+
+            yield {"type": "log", "level": "info", "line": "=== JTCS Utility Deploy ==="}
+            branch = self._git_current_branch()
+            yield {"type": "log", "level": "info", "line": f"Branch: {branch}"}
+            yield {"type": "log", "level": "info", "line": "--- Git commit / push ---"}
+
+            push_info = None
+            for event in self._iter_git_commit_push(
+                commit_message=commit_message or f"deploy {created_by}"
+            ):
+                if event.get("type") == "push_done":
+                    push_info = event.get("push") or {}
+                else:
+                    yield event
+
+            host = self.vps["VPS_HOST"]
+            user = self.vps["VPS_USER"]
+            port = int(self.vps.get("VPS_PORT") or "22")
+            app_dir = self.vps["VPS_PATH"]
+            repo = self.vps.get("GIT_REPO_URL") or "https://github.com/rj22884/JTCS-Final.git"
+
+            yield {
+                "type": "log",
+                "level": "info",
+                "line": f"--- SSH {user}@{host}:{app_dir} ---",
+            }
+
+            remote_cmd = (
+                f"cd {app_dir} && "
+                f"git remote set-url origin {repo} && "
+                f"git fetch --all --prune && "
+                f"git checkout -B {branch} origin/{branch} && "
+                f"git reset --hard origin/{branch} && "
+                f"export BRANCH={branch} && "
+                f"export VPS_APP_DIR={app_dir} && "
+                f"export GIT_BRANCH={branch} && "
+                "bash deployment/deploy.sh && "
+                "echo ===DEPLOY_RESULT:SUCCESS==="
+            )
+
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            log_chunks: list[str] = []
+            try:
+                yield {"type": "log", "level": "info", "line": "Connecting to VPS…"}
+                client.connect(
+                    host,
+                    port=port,
+                    username=user,
+                    password=password,
+                    timeout=45,
+                    allow_agent=False,
+                    look_for_keys=False,
+                )
+                yield {"type": "log", "level": "info", "line": "Connected. Running deploy.sh…"}
+                _stdin, stdout, stderr = client.exec_command(remote_cmd, get_pty=True)
+                while True:
+                    line = stdout.readline()
+                    if not line:
+                        break
+                    log_chunks.append(line)
+                    evt = emit(line)
+                    if evt:
+                        yield evt
+                err = stderr.read().decode("utf-8", errors="replace")
+                if err:
+                    for part in err.splitlines():
+                        log_chunks.append(part + "\n")
+                        evt = emit(part, level="warn")
+                        if evt:
+                            yield evt
+                rc = stdout.channel.recv_exit_status()
+            finally:
+                client.close()
+
+            log_text = "".join(log_chunks)
+            log_dir = self.repo_root / "deployment" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / f"utility_deploy_{int(time.time())}.log"
+            log_path.write_text(log_text, encoding="utf-8", errors="replace")
+            yield {"type": "log", "level": "info", "line": f"Log saved: {log_path.name}"}
+
+            success = rc == 0 and (
+                "DEPLOY_RESULT:SUCCESS" in log_text or "DEPLOYMENT SUCCESS" in log_text
+            )
+            yield {"type": "log", "level": "info", "line": "Checking public health…"}
+            health_ok = self._check_public_health()
+            yield {
+                "type": "log",
+                "level": "info" if health_ok else "warn",
+                "line": f"Public health: {'OK' if health_ok else 'FAIL / pending'}",
+            }
+
+            if not success:
+                yield {
+                    "type": "error",
+                    "ok": False,
+                    "error": f"VPS deploy failed (exit {rc}). See {log_path.name}.",
+                    "remote_exit": rc,
+                    "log_file": str(log_path),
+                }
+                return
+
+            message = (
+                f"Deployed branch {branch} to VPS. "
+                f"Health={'OK' if health_ok else 'check pending'}."
+            )
+            yield {"type": "log", "level": "info", "line": message}
+            yield {
+                "type": "done",
+                "ok": True,
+                "sync_action": "upload_vps",
+                "branch": branch,
+                "push": push_info or {},
+                "remote_exit": rc,
+                "health_ok": health_ok,
+                "log_file": str(log_path),
+                "message": message,
+            }
+        except Exception as exc:
+            yield {"type": "error", "ok": False, "error": str(exc)}
+
     def deploy_to_vps(
         self,
         *,
@@ -142,98 +293,18 @@ class UtilityService:
         commit_message: str = "",
         created_by: str = "System",
     ) -> dict:
-        """Local Windows: git push current branch, then SSH run deployment/deploy.sh."""
-        if is_vps_runtime():
-            raise RuntimeError("Upload VPS is only available on the local PC.")
-        if os.name != "nt":
-            raise RuntimeError("Upload VPS deploy is intended from the Windows local PC.")
-        password = (password or "").strip()
-        if not password:
-            raise ValueError("VPS password is required.")
-
-        try:
-            import paramiko
-        except ImportError as exc:
-            raise RuntimeError(
-                "paramiko is not installed. Run: pip install paramiko"
-            ) from exc
-
-        branch = self._git_current_branch()
-        push_info = self._git_commit_push(commit_message=commit_message or f"deploy {created_by}")
-        host = self.vps["VPS_HOST"]
-        user = self.vps["VPS_USER"]
-        port = int(self.vps.get("VPS_PORT") or "22")
-        app_dir = self.vps["VPS_PATH"]
-        repo = self.vps.get("GIT_REPO_URL") or "https://github.com/rj22884/JTCS-Final.git"
-
-        remote_cmd = (
-            f"cd {app_dir} && "
-            f"git remote set-url origin {repo} && "
-            f"git fetch --all --prune && "
-            f"git checkout -B {branch} origin/{branch} && "
-            f"git reset --hard origin/{branch} && "
-            f"export BRANCH={branch} && "
-            f"export VPS_APP_DIR={app_dir} && "
-            f"export GIT_BRANCH={branch} && "
-            "bash deployment/deploy.sh && "
-            "echo ===DEPLOY_RESULT:SUCCESS==="
-        )
-
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        log_chunks: list[str] = []
-        try:
-            client.connect(
-                host,
-                port=port,
-                username=user,
-                password=password,
-                timeout=45,
-                allow_agent=False,
-                look_for_keys=False,
-            )
-            _stdin, stdout, stderr = client.exec_command(remote_cmd, get_pty=True)
-            while True:
-                line = stdout.readline()
-                if not line:
-                    break
-                log_chunks.append(line)
-            err = stderr.read().decode("utf-8", errors="replace")
-            if err:
-                log_chunks.append(err)
-            rc = stdout.channel.recv_exit_status()
-        finally:
-            client.close()
-
-        log_text = "".join(log_chunks)
-        log_dir = self.repo_root / "deployment" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"utility_deploy_{int(time.time())}.log"
-        log_path.write_text(log_text, encoding="utf-8", errors="replace")
-
-        success = rc == 0 and (
-            "DEPLOY_RESULT:SUCCESS" in log_text or "DEPLOYMENT SUCCESS" in log_text
-        )
-        health_ok = self._check_public_health()
-        if not success:
-            raise RuntimeError(
-                f"VPS deploy failed (exit {rc}). See log: {log_path.name}. "
-                f"Last lines: {log_text[-800:]}"
-            )
-
-        return {
-            "ok": True,
-            "sync_action": "upload_vps",
-            "branch": branch,
-            "push": push_info,
-            "remote_exit": rc,
-            "health_ok": health_ok,
-            "log_file": str(log_path),
-            "message": (
-                f"Deployed branch {branch} to VPS. "
-                f"Health={'OK' if health_ok else 'check pending'}."
-            ),
-        }
+        """Non-streaming wrapper (collects iter_deploy_to_vps)."""
+        final: dict = {"ok": False, "error": "Deploy produced no result."}
+        for event in self.iter_deploy_to_vps(
+            password=password,
+            commit_message=commit_message,
+            created_by=created_by,
+        ):
+            if event.get("type") in {"done", "error"}:
+                final = event
+        if final.get("type") == "error" or not final.get("ok"):
+            raise RuntimeError(final.get("error") or "Deploy failed.")
+        return final
 
     def _check_public_health(self) -> bool:
         try:
@@ -255,6 +326,27 @@ class UtilityService:
             check=False,
         )
 
+    def _iter_git(self, *args: str):
+        """Run git and yield log events for stdout/stderr lines."""
+        cmd = ["git", "-C", str(self.repo_root), *args]
+        yield {"type": "log", "level": "info", "line": "$ " + " ".join(args)}
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            text = line.rstrip("\r\n")
+            if text:
+                yield {"type": "log", "level": "info", "line": text}
+        rc = proc.wait()
+        yield {"type": "git_rc", "args": list(args), "returncode": rc}
+
     def _git_current_branch(self) -> str:
         proc = self._run_git("branch", "--show-current")
         branch = (proc.stdout or "").strip()
@@ -265,26 +357,48 @@ class UtilityService:
             raise RuntimeError("Cannot determine git branch. Checkout a branch first.")
         return branch
 
-    def _git_commit_push(self, *, commit_message: str) -> dict:
+    def _iter_git_commit_push(self, *, commit_message: str):
         status = self._run_git("status", "--porcelain")
         if status.returncode != 0:
             raise RuntimeError(status.stderr or "git status failed")
+        porcelain = (status.stdout or "").strip()
+        if porcelain:
+            yield {"type": "log", "level": "info", "line": "Changes detected — staging…"}
+            for event in self._iter_git("add", "-A"):
+                if event.get("type") == "git_rc" and event.get("returncode"):
+                    raise RuntimeError("git add failed")
+                if event.get("type") == "log":
+                    yield event
+            for event in self._iter_git("commit", "-m", commit_message):
+                if event.get("type") == "git_rc":
+                    # allow "nothing to commit" race
+                    continue
+                yield event
+        else:
+            yield {"type": "log", "level": "info", "line": "Nothing new to commit."}
 
-        if (status.stdout or "").strip():
-            add = self._run_git("add", "-A")
-            if add.returncode != 0:
-                raise RuntimeError(add.stderr or "git add failed")
-            commit = self._run_git("commit", "-m", commit_message)
-            if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr):
-                raise RuntimeError(commit.stderr or commit.stdout or "git commit failed")
-
-        push = self._run_git("push", "-u", "origin", "HEAD")
-        if push.returncode != 0:
-            raise RuntimeError(push.stderr or push.stdout or "git push failed")
+        for event in self._iter_git("push", "-u", "origin", "HEAD"):
+            if event.get("type") == "git_rc" and event.get("returncode"):
+                raise RuntimeError("git push failed — check GitHub auth / network")
+            if event.get("type") == "log":
+                yield event
 
         head = self._run_git("rev-parse", "--short", "HEAD")
-        return {
+        push = {
             "commit": (head.stdout or "").strip(),
             "pushed": True,
             "message": commit_message,
         }
+        yield {
+            "type": "log",
+            "level": "info",
+            "line": f"Push OK — commit {push['commit']}",
+        }
+        yield {"type": "push_done", "push": push}
+
+    def _git_commit_push(self, *, commit_message: str) -> dict:
+        push = {"commit": "", "pushed": True, "message": commit_message}
+        for event in self._iter_git_commit_push(commit_message=commit_message):
+            if event.get("type") == "push_done":
+                push = event.get("push") or push
+        return push

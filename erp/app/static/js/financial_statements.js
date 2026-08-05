@@ -2,7 +2,8 @@
   "use strict";
 
   const api = window.FS_API;
-  if (!api) return;
+  const ViewManager = window.FinancialViewManager;
+  if (!api || !ViewManager) return;
 
   const els = {
     title: document.getElementById("fsReportTitle"),
@@ -16,6 +17,8 @@
     printBtn: document.getElementById("fsPrintBtn"),
     pdfBtn: document.getElementById("fsPdfBtn"),
     excelBtn: document.getElementById("fsExcelBtn"),
+    viewHorizontalBtn: document.getElementById("fsViewHorizontalBtn"),
+    viewVerticalBtn: document.getElementById("fsViewVerticalBtn"),
     drillModalEl: document.getElementById("fsDrillModal"),
     drillTitle: document.getElementById("fsDrillTitle"),
     drillBody: document.getElementById("fsDrillBody"),
@@ -23,25 +26,47 @@
 
   let activeReport = window.FS_ACTIVE_REPORT || "balance-sheet";
   let searchTimer = null;
+  let lastReport = null;
   const drillModal =
     els.drillModalEl && window.bootstrap ? new bootstrap.Modal(els.drillModalEl) : null;
+
+  function updateMetaViewLabel() {
+    if (!els.meta || !lastReport) return;
+    const meta = lastReport.meta || {};
+    const base =
+      (meta.fy_label || "") +
+      "  ·  " +
+      (meta.date_from || "") +
+      " to " +
+      (meta.date_to || "");
+    els.meta.textContent =
+      base +
+      "  ·  " +
+      (ViewManager.getMode() === ViewManager.VERTICAL ? "Vertical" : "Horizontal") +
+      " view";
+  }
+
+  ViewManager.bindToggle({
+    horizontalBtn: els.viewHorizontalBtn,
+    verticalBtn: els.viewVerticalBtn,
+    onChange: function () {
+      if (lastReport) {
+        paintReport(lastReport, { preserveState: true });
+        updateMetaViewLabel();
+      }
+    },
+  });
 
   function reportUrl(template, key) {
     return String(template || "").replace("__KEY__", encodeURIComponent(key));
   }
 
   function escapeHtml(value) {
-    return String(value == null ? "" : value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    return ViewManager.escapeHtml(value);
   }
 
   function money(value) {
-    const n = Number(String(value == null ? 0 : value).replace(/,/g, ""));
-    if (Number.isNaN(n)) return "0.00";
-    return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return ViewManager.money(value);
   }
 
   function showStatus(message, type) {
@@ -62,229 +87,42 @@
     if (els.dateTo?.value) params.set("date_to", els.dateTo.value);
     const q = (els.search?.value || "").trim();
     if (q) params.set("search", q);
+    params.set("view", ViewManager.getMode());
     return params;
   }
 
-  function renderTreeNodes(nodes, depth) {
-    depth = depth || 0;
-    let html = "";
-    (nodes || []).forEach(function (node, idx) {
-      const id = "fsn-" + depth + "-" + idx + "-" + (node.group_id || "x");
-      const hasKids = (node.children && node.children.length) || (node.ledgers && node.ledgers.length);
-      html +=
-        '<div class="fs-node' +
-        (hasKids ? " fs-toggle" : "") +
-        " fs-indent-" +
-        Math.min(depth, 4) +
-        '" data-target="' +
-        id +
-        '">' +
-        "<span>" +
-        (hasKids ? "▾ " : "") +
-        escapeHtml(node.group_name) +
-        "</span>" +
-        "<span>" +
-        money(node.display_closing || node.closing) +
-        "</span></div>";
-      if (hasKids) {
-        html += '<div class="fs-children" id="' + id + '">';
-        (node.ledgers || []).forEach(function (led) {
-          html +=
-            '<div class="fs-ledger fs-indent-' +
-            Math.min(depth + 1, 4) +
-            '" data-ledger="' +
-            escapeHtml(led.ledger_key) +
-            '" data-name="' +
-            escapeHtml(led.ledger_name) +
-            '"><span>' +
-            escapeHtml(led.ledger_name) +
-            "</span><span>" +
-            money(led.display_closing || led.closing) +
-            "</span></div>";
-        });
-        html += renderTreeNodes(node.children || [], depth + 1);
-        html += "</div>";
+  function captureUiState() {
+    const collapsed = [];
+    els.body?.querySelectorAll(".fs-children.collapsed").forEach(function (el) {
+      if (el.id) collapsed.push(el.id);
+    });
+    return {
+      collapsed: collapsed,
+      scrollTop: els.body ? els.body.scrollTop : 0,
+    };
+  }
+
+  function restoreUiState(state) {
+    if (!state || !els.body) return;
+    (state.collapsed || []).forEach(function (id) {
+      const target = document.getElementById(id);
+      if (!target) return;
+      target.classList.add("collapsed");
+      const toggle = els.body.querySelector('.fs-node.fs-toggle[data-target="' + id + '"]');
+      const label = toggle && toggle.querySelector("span");
+      if (label) {
+        label.textContent = (label.textContent || "").replace(/^▾ /, "▸ ");
       }
     });
-    return html;
+    els.body.scrollTop = state.scrollTop || 0;
   }
 
-  function renderBalanceSheet(report) {
-    const left = report.left || {};
-    const right = report.right || {};
-    return (
-      '<div class="fs-bs-grid">' +
-      '<div class="fs-bs-col"><div class="fs-bs-head"><span>' +
-      escapeHtml(left.title || "Liabilities") +
-      "</span><span>Amount</span></div><div class=\"fs-tree\">" +
-      renderTreeNodes(left.nodes || []) +
-      '</div><div class="fs-total-row"><span>Total</span><span>' +
-      money(left.total) +
-      "</span></div></div>" +
-      '<div class="fs-bs-col"><div class="fs-bs-head"><span>' +
-      escapeHtml(right.title || "Assets") +
-      "</span><span>Amount</span></div><div class=\"fs-tree\">" +
-      renderTreeNodes(right.nodes || []) +
-      '</div><div class="fs-total-row"><span>Total</span><span>' +
-      money(right.total) +
-      "</span></div></div></div>" +
-      '<div class="mt-2 small">' +
-      (report.balanced
-        ? '<span class="fs-badge-ok">Balanced</span>'
-        : '<span class="fs-badge-warn">Difference: ' + money(report.difference) + "</span>") +
-      "</div>"
-    );
-  }
-
-  function renderSections(report) {
-    let html = "";
-    (report.sections || []).forEach(function (sec) {
-      if (sec.emphasis) {
-        html +=
-          '<div class="fs-emphasis"><span>' +
-          escapeHtml(sec.title) +
-          "</span><span>" +
-          money(sec.total != null ? sec.total : sec.amount) +
-          "</span></div>";
-        return;
-      }
-      html += '<div class="fs-section-title">' + escapeHtml(sec.title) + "</div>";
-      if (sec.nodes && sec.nodes.length) {
-        html += '<div class="fs-tree">' + renderTreeNodes(sec.nodes) + "</div>";
-      }
-      if (sec.total != null || sec.amount != null) {
-        html +=
-          '<div class="fs-total-row"><span>Total — ' +
-          escapeHtml(sec.title) +
-          "</span><span>" +
-          money(sec.total != null ? sec.total : sec.amount) +
-          "</span></div>";
-      }
-    });
-    return html;
-  }
-
-  function renderTrialBalance(report) {
-    let html =
-      '<table class="fs-table"><thead><tr><th>Particulars</th><th>Group</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>';
-    (report.rows || []).forEach(function (row) {
-      html +=
-        '<tr class="fs-clickable" data-ledger="' +
-        escapeHtml(row.ledger_key || "") +
-        '" data-name="' +
-        escapeHtml(row.ledger_name || "") +
-        '"><td>' +
-        escapeHtml(row.ledger_name) +
-        "</td><td>" +
-        escapeHtml(row.group_name) +
-        '</td><td class="num">' +
-        money(row.debit) +
-        '</td><td class="num">' +
-        money(row.credit) +
-        "</td></tr>";
-    });
-    html +=
-      '</tbody><tfoot><tr><td colspan="2">Total</td><td class="num">' +
-      money(report.total_debit) +
-      '</td><td class="num">' +
-      money(report.total_credit) +
-      "</td></tr></tfoot></table>";
-    html +=
-      '<div class="mt-2 small">' +
-      (report.balanced
-        ? '<span class="fs-badge-ok">Trial Balance tallies</span>'
-        : '<span class="fs-badge-warn">Out of balance</span>') +
-      "</div>";
-    return html;
-  }
-
-  function renderDepreciation(report) {
-    let html =
-      '<table class="fs-table"><thead><tr>' +
-      "<th>Asset</th><th>Purchase Date</th><th class=\"num\">Purchase Value</th><th class=\"num\">Rate %</th>" +
-      "<th class=\"num\">CY Depreciation</th><th class=\"num\">Accumulated</th><th class=\"num\">WDV</th>" +
-      "</tr></thead><tbody>";
-    (report.rows || []).forEach(function (row) {
-      html +=
-        "<tr><td>" +
-        escapeHtml(row.asset_name) +
-        "</td><td>" +
-        escapeHtml(row.purchase_date) +
-        '</td><td class="num">' +
-        money(row.purchase_value) +
-        '</td><td class="num">' +
-        money(row.depreciation_rate) +
-        '</td><td class="num">' +
-        money(row.current_year_depreciation) +
-        '</td><td class="num">' +
-        money(row.accumulated_depreciation) +
-        '</td><td class="num">' +
-        money(row.wdv) +
-        "</td></tr>";
-    });
-    const t = report.totals || {};
-    html +=
-      '</tbody><tfoot><tr><td colspan="2">Total</td><td class="num">' +
-      money(t.purchase_value) +
-      '</td><td></td><td class="num">' +
-      money(t.current_year_depreciation) +
-      '</td><td class="num">' +
-      money(t.accumulated_depreciation) +
-      '</td><td class="num">' +
-      money(t.wdv) +
-      "</td></tr></tfoot></table>";
-    if (!(report.rows || []).length) {
-      html +=
-        '<p class="small text-muted mt-2">No fixed assets yet. Add rows in <code>FixedAssetMaster</code> (Purchase Date, Value, Rate) to populate Depreciation Chart / Schedule.</p>';
-    }
-    return html;
-  }
-
-  function renderFundFlow(report) {
-    let html = '<div class="row g-3"><div class="col-md-6"><div class="fs-section-title">Sources</div><table class="fs-table"><tbody>';
-    (report.sources || []).forEach(function (r) {
-      html += "<tr><td>" + escapeHtml(r.name) + '</td><td class="num">' + money(r.amount) + "</td></tr>";
-    });
-    html +=
-      '<tr><td><strong>Total Sources</strong></td><td class="num"><strong>' +
-      money(report.sources_total) +
-      "</strong></td></tr></tbody></table></div>";
-    html += '<div class="col-md-6"><div class="fs-section-title">Applications</div><table class="fs-table"><tbody>';
-    (report.applications || []).forEach(function (r) {
-      html += "<tr><td>" + escapeHtml(r.name) + '</td><td class="num">' + money(r.amount) + "</td></tr>";
-    });
-    html +=
-      '<tr><td><strong>Total Applications</strong></td><td class="num"><strong>' +
-      money(report.applications_total) +
-      "</strong></td></tr></tbody></table></div></div>";
-    return html;
-  }
-
-  function renderRatios(report) {
-    let html =
-      '<table class="fs-table"><thead><tr><th>Ratio</th><th class="num">Value</th><th>Formula</th></tr></thead><tbody>';
-    (report.ratios || []).forEach(function (r) {
-      html +=
-        "<tr><td>" +
-        escapeHtml(r.name) +
-        '</td><td class="num">' +
-        (r.value == null ? "—" : money(r.value)) +
-        "</td><td>" +
-        escapeHtml(r.formula) +
-        "</td></tr>";
-    });
-    html += "</tbody></table>";
-    return html;
-  }
-
-  function renderReport(report) {
-    const layout = report.layout;
-    if (layout === "tally-bs") return renderBalanceSheet(report);
-    if (layout === "trial-balance") return renderTrialBalance(report);
-    if (layout === "depreciation" || layout === "fixed-assets") return renderDepreciation(report);
-    if (layout === "fund-flow") return renderFundFlow(report);
-    if (layout === "ratios") return renderRatios(report);
-    return renderSections(report);
+  function paintReport(report, opts) {
+    opts = opts || {};
+    const state = opts.preserveState ? captureUiState() : null;
+    els.body.innerHTML = ViewManager.render(report, ViewManager.getMode());
+    bindTreeToggles();
+    if (state) restoreUiState(state);
   }
 
   async function loadReport() {
@@ -299,6 +137,7 @@
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load report.");
       const report = data.report || {};
+      lastReport = report;
       const meta = report.meta || {};
       if (els.title) els.title.textContent = meta.report_title || "Financial Statements";
       if (els.meta) {
@@ -307,11 +146,14 @@
           "  ·  " +
           (meta.date_from || "") +
           " to " +
-          (meta.date_to || "");
+          (meta.date_to || "") +
+          "  ·  " +
+          (ViewManager.getMode() === ViewManager.VERTICAL ? "Vertical" : "Horizontal") +
+          " view";
       }
-      els.body.innerHTML = renderReport(report);
-      bindTreeToggles();
+      paintReport(report, { preserveState: false });
     } catch (err) {
+      lastReport = null;
       els.body.innerHTML = "";
       showStatus(err.message || String(err), "danger");
     }
@@ -352,7 +194,6 @@
   function renderLedgerStatement(data, fallbackName) {
     const title = data.title || "Ledger Statement";
     const entity = data.entity_name || fallbackName || "";
-    const kind = data.ledger_kind || "generic";
     const headers = data.headers || [];
     const lines = data.lines || data.rows || [];
     if (els.drillTitle) {
@@ -367,86 +208,37 @@
         '<div class="fs-ledger-meta"><strong>' +
         escapeHtml(m.label) +
         ":</strong> " +
-        escapeHtml(m.value || "—") +
+        escapeHtml(m.value) +
         "</div>";
     });
     html += "</div>";
     html +=
-      '<div class="fs-ledger-closing">Closing Balance<br><strong>Rs. ' +
+      '<div class="fs-ledger-closing">Closing<br><strong>' +
       money(data.closing) +
-      "</strong></div>";
-    html += "</div>";
-
-    if (!lines.length) {
-      html += '<div class="text-muted small">No ledger rows for this period.</div></div>';
-      return html;
-    }
+      "</strong></div></div>";
 
     html += '<div class="table-responsive"><table class="fs-table fs-ledger-table"><thead><tr>';
     headers.forEach(function (h) {
-      const isNum =
-        h === "Debit" ||
-        h === "Credit" ||
-        h === "Running Balance" ||
-        h === "Debit (Bill)" ||
-        h === "Credit (Receipt)";
-      html += '<th class="' + (isNum ? "num" : "") + '">' + escapeHtml(h) + "</th>";
+      html +=
+        "<th" +
+        (h.align === "right" ? ' class="num"' : "") +
+        ">" +
+        escapeHtml(h.label || h.key) +
+        "</th>";
     });
     html += "</tr></thead><tbody>";
-
-    lines.forEach(function (row) {
-      const rowKind = row.kind || "txn";
-      const clickable = row.clickable && (row.SourceRecordID || row.voucher_id);
-      const cls =
-        "fs-ledger-row fs-ledger-row-" +
-        rowKind +
-        (clickable ? " fs-clickable fs-voucher-row" : "");
-      html +=
-        '<tr class="' +
-        cls +
-        '" data-table="' +
-        escapeHtml(row.SourceTable || "") +
-        '" data-id="' +
-        escapeHtml(row.SourceRecordID || row.voucher_id || "") +
-        '">';
-
-      if (kind === "customer") {
-        html +=
-          "<td>" +
-          escapeHtml(row.voucher_date || "—") +
-          "</td><td>" +
-          escapeHtml(row.bill || row.reference || "") +
-          "</td><td>" +
-          escapeHtml(row.work || row.source || "") +
-          "</td><td>" +
-          escapeHtml(row.narration || "—") +
-          '</td><td class="num">' +
-          moneyOrDash(row.debit) +
-          '</td><td class="num">' +
-          moneyOrDash(row.credit) +
-          '</td><td class="num">' +
-          moneyOrDash(row.running_balance) +
-          "</td>";
-      } else {
-        html +=
-          "<td>" +
-          escapeHtml(row.voucher_date || "—") +
-          "</td><td>" +
-          escapeHtml(row.narration || "—") +
-          "</td><td>" +
-          escapeHtml(row.reference || "") +
-          "</td><td>" +
-          escapeHtml(row.source || "") +
-          "</td><td>" +
-          escapeHtml(row.voucher_type || "") +
-          '</td><td class="num">' +
-          moneyOrDash(row.debit) +
-          '</td><td class="num">' +
-          moneyOrDash(row.credit) +
-          '</td><td class="num">' +
-          moneyOrDash(row.running_balance) +
-          "</td>";
-      }
+    lines.forEach(function (line) {
+      const rowType = line.row_type || "txn";
+      html += '<tr class="fs-ledger-row-' + escapeHtml(rowType) + '">';
+      headers.forEach(function (h) {
+        const key = h.key;
+        let val = line[key];
+        if (h.align === "right" || key === "debit" || key === "credit" || key === "balance") {
+          html += '<td class="num">' + moneyOrDash(val) + "</td>";
+        } else {
+          html += "<td>" + escapeHtml(val == null ? "" : val) + "</td>";
+        }
+      });
       html += "</tr>";
     });
     html += "</tbody></table></div></div>";
@@ -454,10 +246,9 @@
   }
 
   async function openVouchers(ledgerKey, name) {
-    if (!els.drillBody) return;
-    if (els.drillTitle) els.drillTitle.textContent = "Ledger — " + name;
-    els.drillBody.innerHTML = '<div class="text-muted small">Loading ledger…</div>';
-    drillModal?.show();
+    if (!drillModal || !els.drillBody) return;
+    els.drillBody.innerHTML = '<div class="text-muted small">Loading…</div>';
+    drillModal.show();
     const params = queryParams();
     params.set("ledger_key", ledgerKey);
     try {
@@ -466,44 +257,34 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load ledger.");
-      els.drillBody.innerHTML = renderLedgerStatement(data, name);
-      els.drillBody.querySelectorAll(".fs-voucher-row").forEach(function (tr) {
-        tr.addEventListener("click", function () {
-          openVoucherDetail(tr.getAttribute("data-table"), tr.getAttribute("data-id"));
-        });
-      });
-    } catch (err) {
-      els.drillBody.innerHTML =
-        '<div class="text-danger small">' + escapeHtml(err.message || String(err)) + "</div>";
-    }
-  }
-
-  async function openVoucherDetail(sourceTable, sourceId) {
-    if (!sourceId) return;
-    const params = new URLSearchParams();
-    params.set("source_table", sourceTable || "");
-    params.set("source_id", sourceId);
-    try {
-      const res = await fetch(api.voucherDetail + "?" + params.toString(), {
-        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load voucher.");
-      const rec = data.record || {};
-      let html = '<div class="small mb-2 text-muted">Voucher details</div><table class="fs-table"><tbody>';
-      Object.keys(rec).forEach(function (key) {
+      if (data.format === "ledger" || data.headers) {
+        els.drillBody.innerHTML = renderLedgerStatement(data, name);
+        return;
+      }
+      let html =
+        '<table class="fs-table"><thead><tr><th>Date</th><th>Voucher</th><th>Narration</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>';
+      (data.rows || data.vouchers || []).forEach(function (row) {
         html +=
           "<tr><td>" +
-          escapeHtml(key) +
+          escapeHtml(row.date || row.voucher_date || "") +
           "</td><td>" +
-          escapeHtml(rec[key]) +
+          escapeHtml(row.voucher_no || row.source || "") +
+          "</td><td>" +
+          escapeHtml(row.narration || "") +
+          '</td><td class="num">' +
+          money(row.debit) +
+          '</td><td class="num">' +
+          money(row.credit) +
           "</td></tr>";
       });
       html += "</tbody></table>";
-      if (els.drillTitle) els.drillTitle.textContent = "Voucher #" + sourceId;
+      if (els.drillTitle) els.drillTitle.textContent = name;
       els.drillBody.innerHTML = html;
     } catch (err) {
-      alert(err.message || String(err));
+      els.drillBody.innerHTML =
+        '<div class="alert alert-danger py-2 small mb-0">' +
+        escapeHtml(err.message || String(err)) +
+        "</div>";
     }
   }
 
@@ -532,15 +313,6 @@
   els.search?.addEventListener("input", function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadReport, 300);
-  });
-
-  document.querySelectorAll(".fs-nav-item").forEach(function (link) {
-    link.addEventListener("click", function (event) {
-      // Allow normal navigation; also soft-switch if same page SPA-style
-      const key = link.getAttribute("data-report");
-      if (!key || key === activeReport) return;
-      // Let browser navigate for URL/bookmark fidelity
-    });
   });
 
   loadReport();
