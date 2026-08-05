@@ -40,18 +40,14 @@ echo  %C_CYAN%========================================%C_RESET%
 echo.
 echo   1. Run at local
 echo   2. Push and deploy
-echo   3. Full overwrite on VPS ^(fresh clone from GitHub^)
-echo   4. Fix 502 / repair VPS ^(.env + restart^)
 echo   0. Exit
 echo.
 set "choice="
-set /p choice="Select option (0-4): "
+set /p choice="Select option (0-2): "
 if defined choice set "choice=!choice: =!"
 
 if /i "!choice!"=="1" goto run_local
 if /i "!choice!"=="2" goto push_and_deploy
-if /i "!choice!"=="3" goto full_overwrite_vps
-if /i "!choice!"=="4" goto repair_vps_502
 if /i "!choice!"=="0" exit /b 0
 echo.
 echo %C_RED%[FAIL]%C_RESET% Invalid option: "!choice!"
@@ -331,175 +327,6 @@ if errorlevel 1 (
 
 call :show_deploy_summary
 call :pass "PUSH AND DEPLOY COMPLETE"
-echo Log: %DEPLOY_LOG%
-pause
-goto menu
-
-REM =============================================================================
-REM 3. Full overwrite on VPS - wipe tree, fresh clone from GitHub, keep erp/.env
-REM =============================================================================
-:full_overwrite_vps
-call :require_git
-call :require_ssh
-call :load_vps_env
-call :init_branch
-echo.
-echo %C_BOLD%[3] Full overwrite on VPS%C_RESET%
-echo.
-echo  %C_YELLOW%WARNING%C_RESET%
-echo  This will:
-echo    - Push local branch to %GIT_REPO_URL%
-echo    - STOP jtcs-erp on VPS
-echo    - MOVE old folder to %VPS_PATH%.old_*
-echo    - FRESH git clone of %GIT_REPO_URL% into %VPS_PATH%
-echo    - Keep previous erp/.env ^(secrets^)
-echo    - Run deployment/deploy.sh
-echo.
-echo  Branch : !LOCAL_BRANCH!
-echo  VPS    : %VPS_USER%@%VPS_HOST%:%VPS_PATH%
-echo.
-set "CONFIRM="
-set /p CONFIRM="Type OVERWRITE to continue: "
-if /i not "!CONFIRM!"=="OVERWRITE" (
-    call :info "Cancelled - nothing changed on VPS"
-    pause
-    goto menu
-)
-
-call :git_commit_push
-if errorlevel 1 (
-    pause
-    goto menu
-)
-
-if not exist "%ROOT%\deployment\vps_full_overwrite.sh" (
-    call :fail "deployment\vps_full_overwrite.sh missing"
-    pause
-    goto menu
-)
-
-echo %C_CYAN%Full overwrite%C_RESET% on VPS ...
-set "DEPLOY_LOG=%LOG_DIR%\overwrite_%RANDOM%.log"
-set "REMOTE_OW=/tmp/jtcs_full_overwrite.sh"
-set "REMOTE_ENV=/tmp/jtcs.env.from_windows"
-echo Enter VPS password when asked ^(scp then ssh^).
-
-REM Upload overwrite script (and local erp/.env as fallback if VPS has none).
-scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\deployment\vps_full_overwrite.sh" %VPS_USER%@%VPS_HOST%:%REMOTE_OW%
-if errorlevel 1 (
-    call :fail "scp of overwrite script failed"
-    pause
-    goto menu
-)
-if exist "%ROOT%\erp\.env" (
-    call :info "Uploading local erp\.env as VPS fallback secrets"
-    scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\erp\.env" %VPS_USER%@%VPS_HOST%:%REMOTE_ENV%
-    if errorlevel 1 (
-        call :fail "scp of erp\.env failed"
-        pause
-        goto menu
-    )
-) else (
-    call :info "No local erp\.env - VPS must already have secrets in .old_* or backups"
-)
-
-ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "sed -i 's/\r$//' %REMOTE_OW% && bash %REMOTE_OW% %VPS_PATH% %LOCAL_BRANCH% %GIT_REPO_URL%" > "%DEPLOY_LOG%" 2>&1
-set "SSH_RC=!ERRORLEVEL!"
-type "%DEPLOY_LOG%"
-echo.
-call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
-if errorlevel 1 (
-    echo.
-    echo --- last 40 lines ---
-    powershell -NoProfile -Command "Get-Content -LiteralPath '%DEPLOY_LOG%' -Tail 40"
-    echo Log: %DEPLOY_LOG%
-    pause
-    goto menu
-)
-call :pass "Full overwrite + deploy SUCCESS"
-
-call :run_public_health
-if errorlevel 1 (
-    call :fail "Health URL not HTTP 200 - overwrite deploy FAILED"
-    pause
-    goto menu
-)
-
-call :show_deploy_summary
-call :pass "FULL OVERWRITE COMPLETE"
-echo Log: %DEPLOY_LOG%
-pause
-goto menu
-
-REM =============================================================================
-REM 4. Fix 502 - upload local erp/.env, restore from .old_* if needed, restart
-REM =============================================================================
-:repair_vps_502
-call :require_ssh
-call :load_vps_env
-call :init_branch
-echo.
-echo %C_BOLD%[4] Fix 502 / repair VPS%C_RESET%
-echo  This uploads local erp\.env and restarts jtcs-erp on VPS.
-echo  VPS : %VPS_USER%@%VPS_HOST%:%VPS_PATH%
-echo  App : https://app.jtcsxpert.com
-echo.
-
-if not exist "%ROOT%\erp\.env" (
-    call :fail "Local erp\.env missing - cannot repair secrets"
-    pause
-    goto menu
-)
-if not exist "%ROOT%\deployment\vps_repair_502.sh" (
-    call :fail "deployment\vps_repair_502.sh missing"
-    pause
-    goto menu
-)
-
-set "DEPLOY_LOG=%LOG_DIR%\repair_%RANDOM%.log"
-set "REMOTE_ENV=/tmp/jtcs.env.from_windows"
-set "REMOTE_REPAIR=/tmp/jtcs_repair_502.sh"
-echo Enter VPS password when asked ^(scp then ssh^).
-
-scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\erp\.env" %VPS_USER%@%VPS_HOST%:%REMOTE_ENV%
-if errorlevel 1 (
-    call :fail "scp of erp\.env failed"
-    pause
-    goto menu
-)
-scp -P %VPS_PORT% -o StrictHostKeyChecking=accept-new "%ROOT%\deployment\vps_repair_502.sh" %VPS_USER%@%VPS_HOST%:%REMOTE_REPAIR%
-if errorlevel 1 (
-    call :fail "scp of repair script failed"
-    pause
-    goto menu
-)
-
-ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "sed -i 's/\r$//' %REMOTE_REPAIR% && bash %REMOTE_REPAIR% %VPS_PATH% %LOCAL_BRANCH% %GIT_REPO_URL%" > "%DEPLOY_LOG%" 2>&1
-set "SSH_RC=!ERRORLEVEL!"
-type "%DEPLOY_LOG%"
-echo.
-call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
-if errorlevel 1 (
-    echo.
-    echo --- last 40 lines ---
-    powershell -NoProfile -Command "Get-Content -LiteralPath '%DEPLOY_LOG%' -Tail 40"
-    echo Log: %DEPLOY_LOG%
-    echo.
-    call :info "If app tree is gone, use menu option 3 Full overwrite"
-    pause
-    goto menu
-)
-call :pass "Repair script SUCCESS"
-
-call :run_public_health
-if errorlevel 1 (
-    call :fail "Health still not HTTP 200 - try option 3 Full overwrite"
-    pause
-    goto menu
-)
-
-call :show_deploy_summary
-call :pass "502 REPAIR COMPLETE - open https://app.jtcsxpert.com"
 echo Log: %DEPLOY_LOG%
 pause
 goto menu
