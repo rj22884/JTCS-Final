@@ -1,0 +1,125 @@
+/* JTCS Customer Portal — JTCS theme, responsive, dark-mode ready */
+
+.cp-body {
+  min-height: 100vh;
+}
+
+.cp-card {
+  border-radius: 1rem;
+}
+
+.cp-help {
+  border-top: 1px solid rgba(15, 76, 129, 0.12);
+  padding-top: 1.25rem;
+}
+
+.cp-default-password {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.95rem;
+}
+
+.cp-loading {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+}
+
+.cp-loading:not(.d-none) {
+  display: flex;
+}
+
+.cp-duplicate-toast {
+  min-width: min(380px, 92vw);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.cp-duplicate-list {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.cp-duplicate-item {
+  padding: 0.55rem 0;
+  border-bottom: 1px dashed rgba(100, 116, 139, 0.35);
+}
+
+.cp-duplicate-item:last-child {
+  border-bottom: 0;
+}
+
+.cp-duplicate-item .name {
+  font-weight: 600;
+}
+
+.cp-duplicate-item .pan {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+.cp-navbar {
+  background: var(--bs-body-bg, #fff);
+  border-bottom: 1px solid rgba(15, 76, 129, 0.12);
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+}
+
+.cp-dashboard {
+  min-height: 100vh;
+  background: linear-gradient(180deg, rgba(15, 76, 129, 0.05), transparent 220px);
+}
+
+.cp-module-card {
+  background: var(--bs-body-bg, #fff);
+  border: 1px solid rgba(15, 76, 129, 0.1);
+  border-radius: 1rem;
+  padding: 1.35rem 1.25rem;
+  height: 100%;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: default;
+}
+
+.cp-module-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
+}
+
+.cp-module-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.85rem;
+  background: linear-gradient(135deg, #0f4c81, #10b981);
+  color: #fff;
+  font-size: 1.25rem;
+}
+
+[data-bs-theme="dark"] .cp-help {
+  border-top-color: rgba(148, 163, 184, 0.25);
+}
+
+[data-bs-theme="dark"] .cp-default-password {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+
+[data-bs-theme="dark"] .cp-module-card,
+[data-bs-theme="dark"] .cp-navbar {
+  background: #111827;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+[data-bs-theme="dark"] .cp-dashboard {
+  background: linear-gradient(180deg, rgba(15, 76, 129, 0.25), #0b1220 220px);
+}

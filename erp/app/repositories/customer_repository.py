@@ -62,6 +62,37 @@ class CustomerRepository:
             IF COL_LENGTH(N'dbo.CustomerMaster', N'AadhaarReferenceId') IS NULL
                 ALTER TABLE dbo.CustomerMaster ADD AadhaarReferenceId NVARCHAR(100) NULL;
             """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PortalPassword') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PortalPassword NVARCHAR(255) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PasswordChanged') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PasswordChanged BIT NOT NULL
+                    CONSTRAINT DF_CustomerMaster_PasswordChanged DEFAULT (0);
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'LastLogin') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD LastLogin DATETIME2 NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'LastPasswordChange') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD LastPasswordChange DATETIME2 NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PasswordResetDate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PasswordResetDate DATETIME2 NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'FailedLoginCount') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD FailedLoginCount INT NOT NULL
+                    CONSTRAINT DF_CustomerMaster_FailedLoginCount DEFAULT (0);
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'AccountLocked') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD AccountLocked BIT NOT NULL
+                    CONSTRAINT DF_CustomerMaster_AccountLocked DEFAULT (0);
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()
@@ -87,6 +118,61 @@ class CustomerRepository:
             )
         )
         self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.CustomerPortalLoginLog', N'U') IS NULL
+                BEGIN
+                    CREATE TABLE dbo.CustomerPortalLoginLog (
+                        LogID           BIGINT IDENTITY(1, 1) NOT NULL,
+                        CustomerID      INT NULL,
+                        UserIdInput     NVARCHAR(255) NOT NULL,
+                        DetectedType    NVARCHAR(20) NULL,
+                        AttemptResult   NVARCHAR(40) NOT NULL,
+                        IpAddress       NVARCHAR(64) NULL,
+                        UserAgent       NVARCHAR(500) NULL,
+                        CreatedDate     DATETIME2 NOT NULL
+                            CONSTRAINT DF_CustomerPortalLoginLog_CreatedDate DEFAULT (SYSUTCDATETIME()),
+                        CONSTRAINT PK_CustomerPortalLoginLog PRIMARY KEY (LogID)
+                    );
+                    CREATE INDEX IX_CustomerPortalLoginLog_CustomerID
+                        ON dbo.CustomerPortalLoginLog (CustomerID);
+                    CREATE INDEX IX_CustomerPortalLoginLog_CreatedDate
+                        ON dbo.CustomerPortalLoginLog (CreatedDate);
+                END
+                """
+            )
+        )
+        self.session.commit()
+        # Seed default portal password hash for customers that do not have one yet.
+        pending = self.session.execute(
+            text(
+                """
+                SELECT COUNT(1)
+                FROM dbo.CustomerMaster
+                WHERE PortalPassword IS NULL
+                   OR LTRIM(RTRIM(PortalPassword)) = N''
+                """
+            )
+        ).scalar()
+        if int(pending or 0) > 0:
+            from app.utils.security import hash_password
+
+            self.session.execute(
+                text(
+                    """
+                    UPDATE dbo.CustomerMaster
+                    SET PortalPassword = :pwd,
+                        PasswordChanged = ISNULL(PasswordChanged, 0),
+                        FailedLoginCount = ISNULL(FailedLoginCount, 0),
+                        AccountLocked = ISNULL(AccountLocked, 0)
+                    WHERE PortalPassword IS NULL
+                       OR LTRIM(RTRIM(PortalPassword)) = N''
+                    """
+                ),
+                {"pwd": hash_password("Admin@123")},
+            )
+            self.session.commit()
         _CUSTOMER_SCHEMA_READY = True
 
     @staticmethod
@@ -320,6 +406,7 @@ class CustomerRepository:
             },
         ).scalar_one()
         self.session.flush()
+        self.ensure_portal_password_defaults(int(result))
         return self._map_row_to_form(self.get_detail(int(result)))
 
     def update_email(self, customer_id: int, email_id: str | None) -> None:
@@ -441,7 +528,43 @@ class CustomerRepository:
             values,
         ).scalar_one()
         self.session.flush()
+        self.ensure_portal_password_defaults(int(new_id))
         return self.get_full(int(new_id))
+
+    def ensure_portal_password_defaults(self, customer_id: int) -> None:
+        """Ensure a customer has the default portal password (Admin@123) when unset."""
+        self.ensure_schema()
+        from app.utils.security import hash_password
+
+        row = self.session.execute(
+            text(
+                """
+                SELECT PortalPassword
+                FROM dbo.CustomerMaster
+                WHERE CustomerID = :id
+                """
+            ),
+            {"id": int(customer_id)},
+        ).first()
+        if not row:
+            return
+        current = (row[0] or "").strip()
+        if current:
+            return
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET PortalPassword = :pwd,
+                    PasswordChanged = 0,
+                    FailedLoginCount = ISNULL(FailedLoginCount, 0),
+                    AccountLocked = ISNULL(AccountLocked, 0)
+                WHERE CustomerID = :id
+                """
+            ),
+            {"pwd": hash_password("Admin@123"), "id": int(customer_id)},
+        )
+        self.session.flush()
 
     def deactivate(self, customer_id: int) -> None:
         self.session.execute(
@@ -516,6 +639,183 @@ class CustomerRepository:
             params["exclude_id"] = exclude_customer_id
         rows = self.session.execute(text(sql), params).mappings().all()
         return [self._duplicate_customer_dict(row) for row in rows]
+
+    def find_by_email(self, email: str, *, exclude_customer_id: int | None = None) -> list[dict]:
+        normalized = (email or "").strip().lower()
+        if not normalized:
+            return []
+        sql = """
+            SELECT CustomerID, CustomerName, MobileNumber, PANNumber, AadhaarNumber, CustomerGroup
+            FROM CustomerMaster
+            WHERE LOWER(LTRIM(RTRIM(EmailID))) = :email
+              AND CustomerStatus <> N'Inactive'
+        """
+        params = {"email": normalized}
+        if exclude_customer_id:
+            sql += " AND CustomerID <> :exclude_id"
+            params["exclude_id"] = exclude_customer_id
+        rows = self.session.execute(text(sql), params).mappings().all()
+        return [self._duplicate_customer_dict(row) for row in rows]
+
+    def get_portal_auth(self, customer_id: int) -> dict | None:
+        """Return portal auth fields for a customer (parameterized)."""
+        self.ensure_schema()
+        row = (
+            self.session.execute(
+                text(
+                    """
+                    SELECT
+                        CustomerID,
+                        CustomerName,
+                        MobileNumber,
+                        EmailID,
+                        PANNumber,
+                        AadhaarNumber,
+                        CustomerStatus,
+                        PortalPassword,
+                        PasswordChanged,
+                        LastLogin,
+                        LastPasswordChange,
+                        PasswordResetDate,
+                        FailedLoginCount,
+                        AccountLocked
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID = :id
+                    """
+                ),
+                {"id": int(customer_id)},
+            )
+            .mappings()
+            .first()
+        )
+        if not row:
+            return None
+        return {
+            "customer_id": int(row["CustomerID"]),
+            "customer_name": row.get("CustomerName") or "",
+            "mobile_number": row.get("MobileNumber") or "",
+            "email_id": row.get("EmailID") or "",
+            "pan_number": row.get("PANNumber") or "",
+            "aadhaar_number": row.get("AadhaarNumber") or "",
+            "customer_status": row.get("CustomerStatus") or "",
+            "portal_password": row.get("PortalPassword") or "",
+            "password_changed": bool(row.get("PasswordChanged")),
+            "last_login": row.get("LastLogin"),
+            "last_password_change": row.get("LastPasswordChange"),
+            "password_reset_date": row.get("PasswordResetDate"),
+            "failed_login_count": int(row.get("FailedLoginCount") or 0),
+            "account_locked": bool(row.get("AccountLocked")),
+        }
+
+    def update_portal_login_success(self, customer_id: int) -> None:
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET LastLogin = :now,
+                    FailedLoginCount = 0,
+                    AccountLocked = 0
+                WHERE CustomerID = :id
+                """
+            ),
+            {"now": datetime.utcnow(), "id": int(customer_id)},
+        )
+        self.session.flush()
+
+    def update_portal_login_failure(self, customer_id: int, *, lock: bool = False) -> None:
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET FailedLoginCount = ISNULL(FailedLoginCount, 0) + 1,
+                    AccountLocked = CASE WHEN :lock = 1 THEN 1 ELSE AccountLocked END
+                WHERE CustomerID = :id
+                """
+            ),
+            {"id": int(customer_id), "lock": 1 if lock else 0},
+        )
+        self.session.flush()
+
+    def reset_portal_password(self, customer_id: int, password_hash: str) -> None:
+        """Reset portal password to the provided hash (default Admin@123)."""
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET PortalPassword = :pwd,
+                    PasswordChanged = 0,
+                    PasswordResetDate = :now,
+                    FailedLoginCount = 0,
+                    AccountLocked = 0
+                WHERE CustomerID = :id
+                """
+            ),
+            {
+                "pwd": password_hash,
+                "now": datetime.utcnow(),
+                "id": int(customer_id),
+            },
+        )
+        self.session.flush()
+
+    def change_portal_password(self, customer_id: int, password_hash: str) -> None:
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET PortalPassword = :pwd,
+                    PasswordChanged = 1,
+                    LastPasswordChange = :now,
+                    FailedLoginCount = 0,
+                    AccountLocked = 0
+                WHERE CustomerID = :id
+                """
+            ),
+            {
+                "pwd": password_hash,
+                "now": datetime.utcnow(),
+                "id": int(customer_id),
+            },
+        )
+        self.session.flush()
+
+    def log_portal_login_attempt(
+        self,
+        *,
+        customer_id: int | None,
+        user_id_input: str,
+        detected_type: str | None,
+        attempt_result: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                INSERT INTO dbo.CustomerPortalLoginLog (
+                    CustomerID, UserIdInput, DetectedType, AttemptResult, IpAddress, UserAgent, CreatedDate
+                )
+                VALUES (
+                    :customer_id, :user_id_input, :detected_type, :attempt_result, :ip_address, :user_agent, :created
+                )
+                """
+            ),
+            {
+                "customer_id": customer_id,
+                "user_id_input": (user_id_input or "")[:255],
+                "detected_type": (detected_type or None),
+                "attempt_result": (attempt_result or "unknown")[:40],
+                "ip_address": (ip_address or None),
+                "user_agent": ((user_agent or "")[:500] or None),
+                "created": datetime.utcnow(),
+            },
+        )
+        self.session.flush()
 
     def list_income_expense_work_ids(self, customer_id: int) -> list[int]:
         """WorkMaster IDs linked for Income/Expense use (read-only on WorkMaster)."""

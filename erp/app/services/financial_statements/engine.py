@@ -403,7 +403,7 @@ class FinancialReportEngine:
         return ledgers
 
     def _bank_opening_as_of(self, bank_account_id: int, date_from: date) -> Decimal:
-        """Same opening logic as Ledger Export: master OB + prior Debit−Credit."""
+        """Master OB + prior Debit−Credit on/after OpeningBalanceDate only."""
         row = db.session.execute(
             text(
                 """
@@ -422,17 +422,17 @@ class FinancialReportEngine:
             ob_date = ob_date.date()
         if ob_date is None or ob_date <= date_from:
             opening = self.money(row.get("OpeningBalance"))
-        prior = db.session.execute(
-            text(
-                """
+        prior_sql = """
                 SELECT ISNULL(SUM(ISNULL(Debit, 0) - ISNULL(Credit, 0)), 0)
                 FROM dbo.JtcsBankTransaction
                 WHERE JtcsBankAccountID = :bid
                   AND TransactionDate < :d1
-                """
-            ),
-            {"bid": bank_account_id, "d1": date_from},
-        ).scalar()
+            """
+        prior_params = {"bid": bank_account_id, "d1": date_from}
+        if ob_date is not None:
+            prior_sql += " AND TransactionDate >= :ob_date"
+            prior_params["ob_date"] = ob_date
+        prior = db.session.execute(text(prior_sql), prior_params).scalar()
         return self.money(opening + self.money(prior))
 
     def _customer_has_opening_cols(self) -> bool:

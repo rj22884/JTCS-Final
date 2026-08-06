@@ -89,6 +89,10 @@ class AdminDashboardService:
                         FROM JtcsBankTransaction t
                         WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
                           AND t.TransactionDate <= :as_of
+                          AND (
+                                a.OpeningBalanceDate IS NULL
+                                OR t.TransactionDate >= a.OpeningBalanceDate
+                              )
                     ), 0) AS movement_net,
                     CASE
                         WHEN UPPER(LTRIM(RTRIM(ISNULL(a.AccountNumber, N'')))) = N'SHCILSTAMP'
@@ -401,9 +405,7 @@ class AdminDashboardService:
             opening = self._money(account["OpeningBalance"])
 
         lookup = self._entered_by_lookup()
-        txn_rows = db.session.execute(
-            text(
-                """
+        txn_sql = """
                 SELECT
                     JtcsBankTransactionID,
                     TransactionDate,
@@ -420,11 +422,13 @@ class AdminDashboardService:
                 FROM JtcsBankTransaction
                 WHERE JtcsBankAccountID = :account_id
                   AND TransactionDate <= :as_of
-                ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC
-                """
-            ),
-            {"account_id": account_id, "as_of": as_of},
-        ).mappings().all()
+            """
+        txn_params = {"account_id": account_id, "as_of": as_of}
+        if ob_date is not None:
+            txn_sql += " AND TransactionDate >= :ob_date"
+            txn_params["ob_date"] = ob_date
+        txn_sql += " ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC"
+        txn_rows = db.session.execute(text(txn_sql), txn_params).mappings().all()
 
         is_shcil_stamp = (
             (account["AccountNumber"] or "").strip().upper() == "SHCILSTAMP"

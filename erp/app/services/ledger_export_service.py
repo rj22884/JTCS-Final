@@ -246,22 +246,22 @@ class LedgerExportService:
         ob_date = account["OpeningBalanceDate"]
         if ob_date is None or ob_date <= date_from:
             opening = self._money(account["OpeningBalance"])
-        prior = db.session.execute(
-            text(
-                """
+        # Prior movements only on/after OpeningBalanceDate — never double-count
+        # Bank Master Opening Balance with pre-opening (or corrupt-dated) rows.
+        prior_sql = """
                 SELECT ISNULL(SUM(ISNULL(Debit, 0) - ISNULL(Credit, 0)), 0)
                 FROM dbo.JtcsBankTransaction
                 WHERE JtcsBankAccountID = :account_id
                   AND TransactionDate < :date_from
-                """
-            ),
-            {"account_id": account_id, "date_from": date_from},
-        ).scalar()
+            """
+        prior_params = {"account_id": account_id, "date_from": date_from}
+        if ob_date is not None:
+            prior_sql += " AND TransactionDate >= :ob_date"
+            prior_params["ob_date"] = ob_date
+        prior = db.session.execute(text(prior_sql), prior_params).scalar()
         opening = self._money(opening + self._money(prior))
 
-        txn_rows = db.session.execute(
-            text(
-                """
+        txn_sql = """
                 SELECT
                     JtcsBankTransactionID, TransactionDate, Description, Remarks,
                     SourceTable, SourceType, SourceRecordID, LedgerKind,
@@ -271,11 +271,21 @@ class LedgerExportService:
                 WHERE JtcsBankAccountID = :account_id
                   AND TransactionDate >= :date_from
                   AND TransactionDate <= :date_to
-                ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC
-                """
-            ),
-            {"account_id": account_id, "date_from": date_from, "date_to": date_to},
-        ).mappings().all()
+            """
+        txn_params = {
+            "account_id": account_id,
+            "date_from": date_from,
+            "date_to": date_to,
+        }
+        if ob_date is not None:
+            # Keep period rows consistent with opening-date floor.
+            txn_sql = txn_sql.replace(
+                "AND TransactionDate >= :date_from",
+                "AND TransactionDate >= :date_from AND TransactionDate >= :ob_date",
+            )
+            txn_params["ob_date"] = ob_date
+        txn_sql += " ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC"
+        txn_rows = db.session.execute(text(txn_sql), txn_params).mappings().all()
 
         lines: list[dict[str, Any]] = []
         running = opening

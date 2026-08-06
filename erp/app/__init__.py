@@ -38,6 +38,7 @@ from app.routes.followup import (
 )
 from app.routes.masters_followup import bp as masters_followup_bp
 from app.routes.masters_customer import bp as masters_customer_bp
+from app.routes.customer_portal import bp as customer_portal_bp
 from app.routes.masters_group import bp as masters_group_bp
 from app.routes.exceptional_report import bp as exceptional_report_bp
 from app.routes.backup import bp as backup_bp
@@ -78,6 +79,9 @@ SETUP_PUBLIC_ENDPOINTS = {
     "auth.verify_success",
     "dashboard.health",
     "public_intake.website_intake",
+    "customer_portal.login_page",
+    "customer_portal.login_api",
+    "customer_portal.reset_password_api",
 }
 
 
@@ -120,6 +124,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(gst_followup_bp)
     app.register_blueprint(masters_followup_bp)
     app.register_blueprint(masters_customer_bp)
+    app.register_blueprint(customer_portal_bp)
     app.register_blueprint(masters_group_bp)
     app.register_blueprint(exceptional_report_bp)
     app.register_blueprint(backup_bp)
@@ -286,6 +291,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Financial Statements menus ensure skipped: %s", exc)
+
+        try:
+            from app.repositories.customer_repository import CustomerRepository
+
+            CustomerRepository().ensure_schema()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Customer Master / portal schema ensure skipped: %s", exc)
 
         # After Ledger Report so Stamp / e-Court Exception sit after it under Reports.
         try:

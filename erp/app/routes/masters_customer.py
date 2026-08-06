@@ -9,6 +9,7 @@ from app.customer_master.constants import (
     TAB_LABELS,
 )
 from app.decorators import login_required, require_delete_reauth
+from app.utils.roles import has_admin_role
 from app.services.chart_group_service import ChartGroupService
 from app.services.customer_group_service import CustomerGroupService
 from app.services.customer_master_service import (
@@ -43,7 +44,9 @@ def index():
         "aadhaarEkycStart": url_for("masters_customer.aadhaar_ekyc_start"),
         "aadhaarEkycStatus": url_for("masters_customer.aadhaar_ekyc_status"),
         "aadhaarEkycUnlock": url_for("masters_customer.aadhaar_ekyc_unlock"),
+        "resetPortalPassword": url_for("masters_customer.reset_portal_password", customer_id=0),
     }
+    is_admin = has_admin_role(session.get("role"))
     try:
         chart_of_groups = ChartGroupService().list_active_for_dropdown()
     except Exception:
@@ -76,6 +79,7 @@ def index():
         tab_labels=TAB_LABELS,
         ui_config=ui,
         cm_api=cm_api,
+        is_admin=is_admin,
     )
 
 
@@ -267,6 +271,35 @@ def aadhaar_ekyc_unlock():
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         return jsonify({"ok": False, "error": f"Unable to process Aadhaar ZIP: {exc}"}), 500
+
+
+@bp.route("/api/records/<int:customer_id>/reset-portal-password", methods=["POST"], strict_slashes=False)
+@login_required
+def reset_portal_password(customer_id: int):
+    """Admin / Super Admin: reset Customer Portal password to Admin@123."""
+    if not has_admin_role(session.get("role")):
+        return jsonify({"ok": False, "error": "Administrator access required."}), 403
+
+    from app.services.customer_portal_service import CustomerPortalService
+
+    result = CustomerPortalService().admin_reset_password(customer_id)
+    if not result.get("ok"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": result.get("error"),
+                    "error_code": result.get("error_code"),
+                }
+            ),
+            int(result.get("status_code") or 400),
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "message": result.get("message") or "Default password reset successfully.",
+        }
+    )
 
 
 @bp.route("/exit", strict_slashes=False)

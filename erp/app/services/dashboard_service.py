@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 
 from app.extensions import db
 from app.models.transactions import JTCSDailyTransaction
+from app.utils.opening_balance import BANK_MOVEMENT_SINCE_OPENING_SQL
 
 
 METRIC_LABELS = {
@@ -276,24 +277,34 @@ class DashboardService:
         return Decimal(str(value))
 
     def _ledger_txn_net(self, *, cash_only: bool, before: date | None = None, date_from: date | None = None, date_to: date | None = None) -> Decimal:
-        bank_filter = self._ledger_bank_filter(cash_only=cash_only)
-        clauses = [bank_filter]
+        """
+        Net Debit−Credit for Cash/Bank ledgers.
+
+        Only movements on/after each account's OpeningBalanceDate are included so
+        Bank Master Opening Balance is never double-counted with pre-opening rows.
+        """
+        bank_filter = (
+            "a.BankName = N'Cash'" if cash_only else "a.BankName <> N'Cash'"
+        )
+        clauses = [bank_filter, BANK_MOVEMENT_SINCE_OPENING_SQL]
         params: dict = {}
         if before is not None:
-            clauses.append("TransactionDate < :before")
+            clauses.append("t.TransactionDate < :before")
             params["before"] = before
         if date_from is not None:
-            clauses.append("TransactionDate >= :date_from")
+            clauses.append("t.TransactionDate >= :date_from")
             params["date_from"] = date_from
         if date_to is not None:
-            clauses.append("TransactionDate <= :date_to")
+            clauses.append("t.TransactionDate <= :date_to")
             params["date_to"] = date_to
         where_sql = " AND ".join(clauses)
         value = db.session.execute(
             text(
                 f"""
-                SELECT ISNULL(SUM(ISNULL(Debit, 0)), 0) - ISNULL(SUM(ISNULL(Credit, 0)), 0)
-                FROM JtcsBankTransaction
+                SELECT ISNULL(SUM(ISNULL(t.Debit, 0)), 0) - ISNULL(SUM(ISNULL(t.Credit, 0)), 0)
+                FROM JtcsBankTransaction t
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = t.JtcsBankAccountID
                 WHERE {where_sql}
                 """
             ),
@@ -302,14 +313,19 @@ class DashboardService:
         return Decimal(str(value))
 
     def _ledger_opening_balance(self, *, cash_only: bool, date_from: date) -> Decimal:
-        """Opening for period = master OB (on/before start) + movements before period start."""
+        """
+        Period opening =
+          Bank Master Opening Balance (effective on/before period start)
+          + movements on/after each account OpeningBalanceDate and before period start.
+        When period start equals OpeningBalanceDate, this equals Bank Master OB.
+        """
         return (
             self._master_opening_balance(cash_only=cash_only, as_of=date_from)
             + self._ledger_txn_net(cash_only=cash_only, before=date_from)
         )
 
     def _ledger_closing_balance(self, *, cash_only: bool, as_of: date) -> Decimal:
-        """Closing = master OB (on/before as_of) + all movements through as_of."""
+        """Closing = master OB (on/before as_of) + post-opening movements through as_of."""
         return (
             self._master_opening_balance(cash_only=cash_only, as_of=as_of)
             + self._ledger_txn_net(cash_only=cash_only, date_to=as_of)
@@ -1178,44 +1194,49 @@ class DashboardService:
         date_from: date,
         date_to: date,
     ) -> list[dict]:
-        bank_filter = self._ledger_bank_filter(cash_only=cash_only)
+        bank_filter = (
+            "a.BankName = N'Cash'" if cash_only else "a.BankName <> N'Cash'"
+        )
         if mode == "received":
-            amount_sql = "ISNULL(Debit, 0)"
-            where_extra = "AND ISNULL(Debit, 0) <> 0"
-            date_clause = "TransactionDate >= :date_from AND TransactionDate <= :date_to"
+            amount_sql = "ISNULL(t.Debit, 0)"
+            where_extra = "AND ISNULL(t.Debit, 0) <> 0"
+            date_clause = "t.TransactionDate >= :date_from AND t.TransactionDate <= :date_to"
             params = {"date_from": date_from, "date_to": date_to}
         else:
             # Closing drill-down: period movements only (opening balance added separately).
             # Amount = Debit - Credit so Total = Opening + Debit - Credit.
-            amount_sql = "ISNULL(Debit, 0) - ISNULL(Credit, 0)"
+            amount_sql = "ISNULL(t.Debit, 0) - ISNULL(t.Credit, 0)"
             where_extra = ""
-            date_clause = "TransactionDate >= :date_from AND TransactionDate <= :date_to"
+            date_clause = "t.TransactionDate >= :date_from AND t.TransactionDate <= :date_to"
             params = {"date_from": date_from, "date_to": date_to}
 
         order_sql = (
-            "ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC"
+            "ORDER BY t.TransactionDate ASC, t.JtcsBankTransactionID ASC"
             if mode == "closing"
-            else "ORDER BY TransactionDate DESC, JtcsBankTransactionID DESC"
+            else "ORDER BY t.TransactionDate DESC, t.JtcsBankTransactionID DESC"
         )
 
         rows = db.session.execute(
             text(
                 f"""
                 SELECT
-                    JtcsBankTransactionID,
-                    TransactionDate,
-                    BankName,
-                    MaskedAccountNumber,
-                    Description,
-                    Remarks,
-                    SourceTable,
-                    SourceRecordID,
-                    ISNULL(Debit, 0) AS DebitValue,
-                    ISNULL(Credit, 0) AS CreditValue,
+                    t.JtcsBankTransactionID,
+                    t.TransactionDate,
+                    t.BankName,
+                    t.MaskedAccountNumber,
+                    t.Description,
+                    t.Remarks,
+                    t.SourceTable,
+                    t.SourceRecordID,
+                    ISNULL(t.Debit, 0) AS DebitValue,
+                    ISNULL(t.Credit, 0) AS CreditValue,
                     {amount_sql} AS AmountValue
-                FROM JtcsBankTransaction
+                FROM JtcsBankTransaction t
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = t.JtcsBankAccountID
                 WHERE {bank_filter}
                   AND {date_clause}
+                  AND {BANK_MOVEMENT_SINCE_OPENING_SQL}
                   {where_extra}
                 {order_sql}
                 """
@@ -1259,7 +1280,7 @@ class DashboardService:
             "can_edit": False,
             "can_delete": False,
             "entry_date": date_from.isoformat(),
-            "description": f"Opening Balance (as on {date_from.isoformat()})",
+            "description": f"Opening Balance (Bank Master as on {date_from.isoformat()})",
             "reference": "OPENING",
             "work": label,
             "customer": "—",

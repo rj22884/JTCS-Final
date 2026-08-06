@@ -5,6 +5,7 @@
     addBtn: document.getElementById("cmAddBtn"),
     editBtn: document.getElementById("cmEditBtn"),
     deleteBtn: document.getElementById("cmDeleteBtn"),
+    resetPortalBtn: document.getElementById("cmResetPortalBtn"),
     newBtn: document.getElementById("cmNewBtn"),
     refreshBtn: document.getElementById("cmRefreshBtn"),
     search: document.getElementById("cmSearch"),
@@ -286,9 +287,46 @@
     const has = !!selectedId;
     if (els.editBtn) els.editBtn.disabled = !has;
     if (els.deleteBtn) els.deleteBtn.disabled = !has || (row && row.customer_status === "Inactive");
+    if (els.resetPortalBtn) {
+      els.resetPortalBtn.disabled = !has || (row && row.customer_status === "Inactive");
+    }
     els.gridBody.querySelectorAll("tr").forEach(function (tr) {
       tr.classList.toggle("table-active", tr.dataset.id === String(selectedId));
     });
+  }
+
+  function resetPortalPassword(customerId) {
+    if (!customerId || !window.CM_API.resetPortalPassword) return;
+    if (!window.confirm("Reset Customer Portal password to Admin@123 for this customer?")) return;
+    const url = apiUrl(window.CM_API.resetPortalPassword, customerId);
+    fetch(url, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken(),
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: "{}",
+      credentials: "same-origin",
+    })
+      .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+      .then(function (result) {
+        if (!result.ok || !result.data || !result.data.ok) {
+          const msg = (result.data && result.data.error) || "Unable to reset portal password.";
+          if (window.JTCSDialog) JTCSDialog.alert(msg, "error");
+          else showStatus(msg, "danger");
+          return;
+        }
+        const msg = result.data.message || "Default password reset successfully.";
+        if (window.JTCSDialog) JTCSDialog.alert(msg, "success");
+        else showStatus(msg, "success");
+      })
+      .catch(function () {
+        const msg = "Unable to reset portal password.";
+        if (window.JTCSDialog) JTCSDialog.alert(msg, "error");
+        else showStatus(msg, "danger");
+      });
   }
 
   function renderGrid(data) {
@@ -1322,6 +1360,9 @@
     if (selectedId) loadRecord(selectedId);
   });
   els.deleteBtn?.addEventListener("click", function () { deleteCustomer(selectedId); });
+  els.resetPortalBtn?.addEventListener("click", function () {
+    if (selectedId) resetPortalPassword(selectedId);
+  });
   els.refreshBtn?.addEventListener("click", loadGrid);
   els.saveBtn?.addEventListener("click", function () { saveCustomer(false); });
   els.search?.addEventListener("input", function () {

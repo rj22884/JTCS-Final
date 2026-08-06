@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>{% block title %}{{ page_title | default('Customer Portal') }}{% endblock %} · {{ company_name | default(app_name) }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/erp.css') }}?v=20260803menucolor" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/customer_portal.css') }}?v=20260806cp1" rel="stylesheet">
+  {% block extra_css %}{% endblock %}
+</head>
+<body class="jtcs-auth-page cp-body">
+  <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+    <div id="cpDuplicateToast" class="toast cp-duplicate-toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
+      <div class="toast-header">
+        <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
+        <strong class="me-auto">Duplicate Customer Records Found</strong>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+      <div class="toast-body">
+        <p class="mb-2" id="cpDuplicateMessage">
+          This Mobile Number or Email Address is registered with multiple customer records.
+          Please contact JTCS.
+        </p>
+        <div id="cpDuplicateList" class="cp-duplicate-list mb-3"></div>
+        <div class="small text-muted border-top pt-2">
+          <div><strong>Phone</strong><br>+91 8477005566</div>
+          <div class="mt-1"><strong>Email</strong><br>admin@jtcsxpert.com</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="cpLoading" class="cp-loading d-none" aria-hidden="true">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading…</span>
+    </div>
+  </div>
+
+  {% block shell %}
+  <div class="jtcs-auth-shell">
+    <div class="jtcs-auth-card cp-card">
+      <div class="d-flex justify-content-between align-items-start mb-3">
+        <div class="text-center flex-grow-1">
+          {% if company_logo %}
+            <img src="{{ url_for('static', filename=company_logo) }}" alt="Company Logo" class="jtcs-company-logo mb-3">
+          {% else %}
+            <div class="jtcs-login-logo"><i class="bi bi-person-badge"></i></div>
+          {% endif %}
+          <h1 class="h3 mb-1">{{ company_display_name | default(company_name) | default(app_name) }}</h1>
+          <p class="text-muted mb-0">{% block subtitle %}Customer Portal{% endblock %}</p>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-secondary cp-theme-toggle" id="cpThemeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+          <i class="bi bi-moon-stars"></i>
+        </button>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+              {{ message }}
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <div id="cpAlert" class="alert d-none" role="alert"></div>
+
+      {% block content %}{% endblock %}
+    </div>
+    <footer class="jtcs-auth-footer">
+      JTCS Customer Portal © 2026 · Version {{ app_version }}
+    </footer>
+  </div>
+  {% endblock %}
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    window.CP_API = {
+      login: {{ url_for('customer_portal.login_api')|tojson }},
+      resetPassword: {{ url_for('customer_portal.reset_password_api')|tojson }},
+      changePassword: {{ url_for('customer_portal.change_password_api')|tojson }},
+      profile: {{ url_for('customer_portal.profile_api')|tojson }},
+      dashboard: {{ url_for('customer_portal.dashboard')|tojson }},
+      logout: {{ url_for('customer_portal.logout')|tojson }},
+      csrfToken: {{ csrf_token()|tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260806cp1"></script>
+  {% block extra_js %}{% endblock %}
+</body>
+</html>

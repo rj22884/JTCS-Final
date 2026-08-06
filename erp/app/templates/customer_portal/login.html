@@ -1,0 +1,59 @@
+{% extends 'customer_portal/base.html' %}
+
+{% block subtitle %}Client / Customer Login{% endblock %}
+
+{% block content %}
+<form id="cpLoginForm" class="vstack gap-3" autocomplete="on">
+  <div>
+    <label class="form-label" for="cpUserId">User ID</label>
+    <input
+      type="text"
+      class="form-control"
+      id="cpUserId"
+      name="user_id"
+      placeholder="Enter PAN, Aadhaar Number, Mobile Number or Email Address"
+      required
+      autofocus
+      autocomplete="username"
+    >
+    <div class="form-text" id="cpDetectedType"></div>
+  </div>
+
+  <div>
+    <label class="form-label" for="cpPassword">Password</label>
+    <div class="input-group">
+      <input
+        type="password"
+        class="form-control"
+        id="cpPassword"
+        name="password"
+        placeholder="Enter Password"
+        required
+        autocomplete="current-password"
+      >
+      <button class="btn btn-outline-secondary" type="button" data-cp-toggle-password="#cpPassword" aria-label="Show password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+
+  <div class="d-grid gap-2">
+    <button type="submit" class="btn btn-primary" id="cpLoginBtn">
+      <span class="cp-btn-label">Login</span>
+    </button>
+    <button type="button" class="btn btn-outline-primary" id="cpResetBtn">
+      Reset Password
+    </button>
+  </div>
+</form>
+
+<div class="cp-help mt-4">
+  <h2 class="h6 mb-2">New Customer?</h2>
+  <p class="mb-2">Please contact JTCS for Customer Portal Registration.</p>
+  <p class="mb-1"><strong>Phone:</strong> <a href="tel:+918477005566">+91 8477005566</a></p>
+  <p class="mb-2"><strong>Email:</strong> <a href="mailto:admin@jtcsxpert.com">admin@jtcsxpert.com</a></p>
+  <div class="cp-default-password">
+    <strong>Default Password:</strong> Admin@123
+  </div>
+</div>
+{% endblock %}

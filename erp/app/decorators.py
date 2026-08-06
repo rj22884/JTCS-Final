@@ -28,6 +28,38 @@ def admin_required(view):
     return wrapped
 
 
+def customer_login_required(view):
+    """Require an authenticated Customer Portal session."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("portal_customer_id"):
+            flash("Please sign in to the Customer Portal to continue.", "warning")
+            return redirect(url_for("customer_portal.login_page", next=request.path))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def customer_password_changed_required(view):
+    """Block dashboard access until the default portal password is changed."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not session.get("portal_customer_id"):
+            flash("Please sign in to the Customer Portal to continue.", "warning")
+            return redirect(url_for("customer_portal.login_page", next=request.path))
+        if not session.get("portal_password_changed"):
+            flash(
+                "For security reasons you must change your default password before continuing.",
+                "warning",
+            )
+            return redirect(url_for("customer_portal.change_password_page"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
 def require_delete_reauth(view):
     """Require logged-in User ID + password before a delete endpoint runs."""
 

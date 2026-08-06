@@ -1,0 +1,56 @@
+{% extends 'customer_portal/base.html' %}
+
+{% block subtitle %}Customer Dashboard{% endblock %}
+
+{% block shell %}
+<div class="cp-dashboard">
+  <nav class="navbar navbar-expand-lg cp-navbar mb-4">
+    <div class="container">
+      <a class="navbar-brand" href="{{ url_for('customer_portal.dashboard') }}">
+        <i class="bi bi-person-badge me-1"></i> JTCS Customer Portal
+      </a>
+      <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary cp-theme-toggle" id="cpThemeToggle" aria-label="Toggle dark mode">
+          <i class="bi bi-moon-stars"></i>
+        </button>
+        <span class="small text-muted d-none d-sm-inline">{{ customer_name }}</span>
+        <a href="{{ url_for('customer_portal.logout') }}" class="btn btn-sm btn-outline-danger">
+          <i class="bi bi-box-arrow-right"></i> Logout
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container pb-5">
+    <div class="mb-4">
+      <h1 class="h3 mb-1">Welcome{{ ', ' + customer_name if customer_name else '' }}</h1>
+      <p class="text-muted mb-0">Access your tax records, notices, documents and compliance services.</p>
+    </div>
+
+    <div id="cpAlert" class="alert d-none" role="alert"></div>
+
+    <div class="row g-3" id="cpDashboardModules">
+      {% set modules = [
+        ('Profile', 'bi-person-vcard', 'profile'),
+        ('Documents', 'bi-folder2-open', 'documents'),
+        ('Income Tax Returns', 'bi-file-earmark-text', 'itr'),
+        ('GST Returns', 'bi-receipt', 'gst'),
+        ('TDS', 'bi-cash-coin', 'tds'),
+        ('Notices', 'bi-bell', 'notices'),
+        ('Downloads', 'bi-download', 'downloads'),
+        ('Payments', 'bi-credit-card', 'payments'),
+        ('Support Tickets', 'bi-life-preserver', 'support')
+      ] %}
+      {% for label, icon, key in modules %}
+      <div class="col-12 col-sm-6 col-lg-4">
+        <div class="cp-module-card" data-module="{{ key }}">
+          <div class="cp-module-icon"><i class="bi {{ icon }}"></i></div>
+          <h2 class="h5 mb-1">{{ label }}</h2>
+          <p class="small text-muted mb-0">Coming soon</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

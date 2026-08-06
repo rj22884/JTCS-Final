@@ -5,6 +5,14 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+# Bank / Cash ledger rule:
+# BankMaster.OpeningBalance is the balance as on OpeningBalanceDate.
+# Movements dated BEFORE OpeningBalanceDate must never be added on top of that
+# figure (they are either already included in Opening Balance or invalid dates).
+BANK_MOVEMENT_SINCE_OPENING_SQL = (
+    "(a.OpeningBalanceDate IS NULL OR t.TransactionDate >= a.OpeningBalanceDate)"
+)
+
 
 def default_dr_cr_for_under_type(under_type: str | None) -> str:
     """Assets → Dr, Liabilities → Cr (Tally-style nature)."""
