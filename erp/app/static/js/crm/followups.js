@@ -47,12 +47,29 @@
       .join("");
   }
 
+  let dueFilter = "pending";
+
   async function loadFollowups() {
     const params = new URLSearchParams();
     if (statusFilter && statusFilter.value) params.set("status", statusFilter.value);
+    if (dueFilter) params.set("due_filter", dueFilter);
     const data = await CrmCommon.apiFetch(api.list + "?" + params.toString());
     renderRows(data.rows || []);
     if (countEl) countEl.textContent = (data.total || 0) + " follow-up(s)";
+  }
+
+  const dueFilterBar = document.getElementById("crmFollowupDueFilters");
+  if (dueFilterBar) {
+    dueFilterBar.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-due-filter]");
+      if (!btn) return;
+      dueFilterBar.querySelectorAll("button").forEach(function (b) {
+        b.classList.remove("active");
+      });
+      btn.classList.add("active");
+      dueFilter = btn.getAttribute("data-due-filter") || "";
+      loadFollowups();
+    });
   }
 
   if (document.getElementById("crmFollowupRefreshBtn")) {

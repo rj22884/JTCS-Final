@@ -37,6 +37,7 @@ class CrmFollowUpService:
         lead_id: int | None = None,
         assigned_user_id: int | None = None,
         due_before: datetime | None = None,
+        due_filter: str | None = None,
         page: int = 1,
     ) -> dict:
         ensure_crm_schema()
@@ -62,6 +63,18 @@ class CrmFollowUpService:
         if due_before:
             clauses.append("DueAt <= :due_before")
             params["due_before"] = due_before
+        # due_filter: today | overdue | pending | completed
+        filt = (due_filter or "").strip().lower()
+        if filt == "today":
+            clauses.append("Status = N'Pending'")
+            clauses.append("CAST(DueAt AS DATE) = CAST(SYSUTCDATETIME() AS DATE)")
+        elif filt == "overdue":
+            clauses.append("Status = N'Pending'")
+            clauses.append("DueAt < SYSUTCDATETIME()")
+        elif filt == "pending":
+            clauses.append("Status = N'Pending'")
+        elif filt == "completed":
+            clauses.append("Status = N'Completed'")
         where = " AND ".join(clauses)
         total = db.session.execute(
             text(f"SELECT COUNT(1) FROM dbo.CrmFollowUp WHERE {where}"),

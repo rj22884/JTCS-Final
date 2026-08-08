@@ -7,14 +7,14 @@
   <title>{% block title %}{{ page_title | default('Customer Portal') }}{% endblock %} · {{ company_name | default(app_name) }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700;900&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/erp.css') }}?v=20260803menucolor" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/customer_portal.css') }}?v=20260806cp1" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/customer_portal.css') }}?v=20260806cp3" rel="stylesheet">
   {% block extra_css %}{% endblock %}
 </head>
-<body class="jtcs-auth-page cp-body">
+<body class="{% block body_class %}jtcs-auth-page{% endblock %} cp-body">
   <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
     <div id="cpDuplicateToast" class="toast cp-duplicate-toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="false">
       <div class="toast-header">
@@ -88,12 +88,14 @@
       resetPassword: {{ url_for('customer_portal.reset_password_api')|tojson }},
       changePassword: {{ url_for('customer_portal.change_password_api')|tojson }},
       profile: {{ url_for('customer_portal.profile_api')|tojson }},
+      profileUpdate: {{ url_for('customer_portal.profile_update_api')|tojson }},
+      profilePage: {{ url_for('customer_portal.profile_page')|tojson }},
       dashboard: {{ url_for('customer_portal.dashboard')|tojson }},
       logout: {{ url_for('customer_portal.logout')|tojson }},
       csrfToken: {{ csrf_token()|tojson }}
     };
   </script>
-  <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260806cp1"></script>
+  <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260806cp2"></script>
   {% block extra_js %}{% endblock %}
 </body>
 </html>

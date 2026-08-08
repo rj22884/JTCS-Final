@@ -51,9 +51,9 @@ def main() -> int:
         print(f"OK  Created RD #{created['rd_account_id']} bank_account={created['bank_account_id']}")
 
         obc = OthersBankCashService()
-        accounts = obc.list_accounts()
+        accounts = obc.list_account_rows()
         print(f"OK  Ledger accounts available: {len(accounts)}")
-        assert any(a["account_id"] == created["bank_account_id"] for a in accounts)
+        assert any(a.get("account_id") == created["bank_account_id"] for a in accounts)
 
         message = rd_service.delete_record(created["rd_account_id"])
         print(f"OK  RD delete: {message}")

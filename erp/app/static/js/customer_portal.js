@@ -228,4 +228,63 @@
       }
     });
   }
+
+  const profileForm = document.getElementById("cpProfileForm");
+  if (profileForm) {
+    const photoInput = document.getElementById("cpPhoto");
+    photoInput?.addEventListener("change", function () {
+      const file = photoInput.files && photoInput.files[0];
+      const preview = document.getElementById("cpPhotoPreview");
+      if (!file || !preview) return;
+      const url = URL.createObjectURL(file);
+      if (preview.tagName === "IMG") {
+        preview.src = url;
+      } else {
+        preview.outerHTML =
+          '<img src="' +
+          url +
+          '" alt="Profile photo" class="cp-photo" id="cpPhotoPreview">';
+      }
+    });
+
+    profileForm.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      clearAlert();
+      // Never send locked identity fields from the client.
+      const formData = new FormData(profileForm);
+      formData.delete("customer_name");
+      formData.delete("pan_number");
+      formData.delete("customer_id");
+
+      setLoading(true);
+      try {
+        const response = await fetch(api.profileUpdate || api.profile, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "X-CSRFToken": api.csrfToken || "",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: formData,
+          credentials: "same-origin",
+        });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (err) {
+          data = { ok: false, error: "Unexpected server response." };
+        }
+        if (!data.ok) {
+          handleErrorResult(data);
+          return;
+        }
+        showAlert(data.message || "Profile updated successfully.", "success");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } catch (err) {
+        showAlert("Unable to save profile. Please try again.", "danger");
+      } finally {
+        setLoading(false);
+      }
+    });
+  }
 })();

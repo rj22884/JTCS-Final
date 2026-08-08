@@ -1,0 +1,195 @@
+/* WhatsApp Web–inspired Communication Center (extends crm.css) */
+
+.wa-inbox {
+  --wa-green: #00a884;
+  --wa-green-dark: #008069;
+  --wa-bg: #efeae2;
+  --wa-panel: #ffffff;
+  --wa-left: #f0f2f5;
+  --wa-bubble-out: #d9fdd3;
+  --wa-bubble-in: #ffffff;
+  --wa-meta: #667781;
+}
+
+.wa-channel-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+}
+
+.wa-channel-tab {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--wa-panel);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.82rem;
+  color: #54656f;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.wa-channel-tab:hover {
+  transform: translateY(-1px);
+}
+
+.wa-channel-tab.is-active {
+  background: var(--wa-green);
+  border-color: var(--wa-green);
+  color: #fff;
+}
+
+.wa-shell {
+  min-height: calc(100vh - 210px);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(11, 20, 26, 0.08);
+}
+
+.wa-panel-left {
+  background: var(--wa-left) !important;
+}
+
+.wa-brand {
+  color: var(--wa-green-dark);
+  letter-spacing: 0.02em;
+}
+
+.wa-panel-middle .crm-inbox-panel-body.wa-thread {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.2)),
+    var(--wa-bg);
+}
+
+.wa-inbox .crm-conv-item {
+  border-radius: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.wa-inbox .crm-conv-item.is-active,
+.wa-inbox .crm-conv-item:hover {
+  background: #e9edef;
+}
+
+.wa-inbox .crm-conv-item.is-unread .crm-conv-subject {
+  font-weight: 700;
+  color: #111b21;
+}
+
+.wa-unread-pill {
+  background: var(--wa-green);
+  color: #fff;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  min-width: 1.25rem;
+  padding: 0.1rem 0.4rem;
+  display: inline-block;
+  text-align: center;
+}
+
+.wa-pin {
+  color: var(--wa-green-dark);
+  font-size: 0.75rem;
+}
+
+.wa-msg {
+  display: flex;
+  margin: 0.35rem 0;
+  animation: waFadeIn 0.2s ease;
+}
+
+@keyframes waFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.wa-msg--out {
+  justify-content: flex-end;
+}
+
+.wa-msg--note {
+  justify-content: center;
+}
+
+.wa-bubble {
+  max-width: min(72%, 36rem);
+  padding: 0.45rem 0.65rem 0.3rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px rgba(11, 20, 26, 0.06);
+  background: var(--wa-bubble-in);
+  position: relative;
+  word-break: break-word;
+}
+
+.wa-msg--out .wa-bubble {
+  background: var(--wa-bubble-out);
+}
+
+.wa-msg--note .wa-bubble {
+  background: #fff5c4;
+  color: #5c4b00;
+  font-size: 0.85rem;
+}
+
+.wa-msg-time {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  color: var(--wa-meta);
+}
+
+.wa-ticks {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.wa-ticks.is-read {
+  color: #53bdeb;
+}
+
+.wa-ticks.is-failed {
+  color: #ea0038;
+}
+
+.wa-attach {
+  display: block;
+  margin-top: 0.35rem;
+  max-width: 240px;
+  border-radius: 6px;
+}
+
+.wa-composer {
+  background: #f0f2f5 !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.wa-quick-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.wa-composer .btn-success {
+  background: var(--wa-green);
+  border-color: var(--wa-green);
+}
+
+.wa-composer .btn-success:hover {
+  background: var(--wa-green-dark);
+  border-color: var(--wa-green-dark);
+}
+
+@media (max-width: 991.98px) {
+  .wa-shell {
+    min-height: auto;
+  }
+  .crm-inbox-panel--right {
+    display: none;
+  }
+}

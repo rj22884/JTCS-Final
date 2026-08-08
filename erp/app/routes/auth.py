@@ -194,6 +194,26 @@ def login():
             session["role"] = data["role"]
             session.permanent = data["remember"]
             flash(f"Welcome, {data['user_name']}!", "success")
+            # Admin login: WhatsApp token + Integration Health alerts
+            try:
+                from app.utils.roles import has_admin_role
+                from app.modules.settings.services import IntegrationSettingsService
+                from app.modules.settings.integration_health_service import IntegrationHealthService
+
+                if has_admin_role(data.get("role")):
+                    alert = IntegrationSettingsService().check_token_on_login()
+                    if alert:
+                        flash(
+                            f"WhatsApp Meta: {alert.get('status') or 'Alert'} — {alert.get('message')}",
+                            "warning",
+                        )
+                    for ha in IntegrationHealthService().login_alerts()[:3]:
+                        flash(
+                            f"Integration Health [{ha.get('provider')}]: {ha.get('title')} — {ha.get('message')}",
+                            "warning",
+                        )
+            except Exception:
+                pass
             return redirect(request.args.get("next") or url_for("dashboard.index"))
 
     return render_template(

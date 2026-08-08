@@ -90,6 +90,24 @@ def index():
         request.args.get("from") or request.args.get("to") or request.args.get("date_from") or request.args.get("date_to")
     )
 
+    integration_health_alerts = []
+    system_health_alerts = []
+    try:
+        from app.utils.roles import has_admin_role
+        from app.modules.settings.integration_health_service import IntegrationHealthService
+        from app.modules.system_health.service import SystemHealthService
+
+        if has_admin_role(session.get("role")):
+            integration_health_alerts = IntegrationHealthService().login_alerts()[:5]
+            system_health_alerts = [
+                a
+                for a in SystemHealthService()._alert_payload()
+                if str(a.get("severity") or "").lower() in {"critical", "error", "high"}
+            ][:5]
+    except Exception:
+        integration_health_alerts = []
+        system_health_alerts = []
+
     return render_template(
         "dashboard/index.html",
         page_title="Dashboard",
@@ -111,6 +129,8 @@ def index():
         prev_fy_from=prev_fy_from,
         prev_fy_to=prev_fy_to,
         whats_new=list_whats_new(limit=6),
+        integration_health_alerts=integration_health_alerts,
+        system_health_alerts=system_health_alerts,
     )
 
 

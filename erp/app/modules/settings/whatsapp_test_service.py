@@ -79,9 +79,9 @@ class WhatsAppTestService:
         checks.append(self._check_phone(client, cfg["phone_number_id"]))
         # 4 Graph reachability (reuse phone/waba success as reachability + explicit me)
         checks.append(self._check_graph_reachability(client))
-        # 5 Webhook validation (local completeness)
+        # 5 Webhook validation (local completeness + localhost warning)
         checks.append(self._check_webhook(cfg))
-        # 6 Permission / token debug
+        # 6 Permission / token debug (+ persist expiry)
         checks.append(
             self._check_permissions(
                 client,
@@ -90,6 +90,8 @@ class WhatsAppTestService:
                 access_token=cfg["access_token"],
             )
         )
+        # 7 WABA subscribed apps (webhook delivery readiness)
+        checks.append(self._check_subscribed_apps(client, cfg.get("waba_id") or ""))
         # 7 Optional test message
         if send_test_message:
             checks.append(
@@ -207,11 +209,20 @@ class WhatsAppTestService:
                 "ok": False,
                 "detail": "Webhook URL is empty.",
             }
-        if not (url.startswith("https://") or url.startswith("http://localhost")):
+        if "localhost" in url.lower() or "127.0.0.1" in url:
             return {
                 "name": "Webhook validation",
                 "ok": False,
-                "detail": "Webhook URL should be https (or localhost for development).",
+                "detail": (
+                    "Webhook URL is localhost — Meta cannot reach it. "
+                    "Use ngrok or a public APP_BASE_URL."
+                ),
+            }
+        if not url.startswith("https://"):
+            return {
+                "name": "Webhook validation",
+                "ok": False,
+                "detail": "Webhook URL should use https in production.",
             }
         if not token:
             return {
@@ -222,8 +233,42 @@ class WhatsAppTestService:
         return {
             "name": "Webhook validation",
             "ok": True,
-            "detail": "Webhook URL and verify token are present (Meta subscription is configured in Meta Dashboard).",
+            "detail": f"Webhook URL + verify token OK ({url})",
         }
+
+    def _check_subscribed_apps(self, client: WhatsAppMetaClient, waba_id: str) -> dict[str, Any]:
+        if not waba_id:
+            return {
+                "name": "Webhook subscription",
+                "ok": False,
+                "detail": "WABA ID missing — cannot check subscribed_apps.",
+            }
+        try:
+            apps = client.list_subscribed_apps(waba_id)
+            if apps:
+                labels = []
+                for a in apps[:5]:
+                    labels.append(str(a.get("id") or a.get("name") or "app"))
+                self._set_plain(
+                    "webhook_subscribed_fields",
+                    "messages, message_deliveries, message_reads, message_template_status_update",
+                )
+                return {
+                    "name": "Webhook subscription",
+                    "ok": True,
+                    "detail": f"App subscribed on WABA ({len(apps)}): {', '.join(labels)}",
+                }
+            return {
+                "name": "Webhook subscription",
+                "ok": False,
+                "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
+            }
+        except MetaGraphError as exc:
+            return {
+                "name": "Webhook subscription",
+                "ok": False,
+                "detail": str(exc),
+            }
 
     def _check_permissions(
         self,
@@ -234,13 +279,21 @@ class WhatsAppTestService:
         access_token: str,
     ) -> dict[str, Any]:
         try:
+            from datetime import datetime
+
             data = client.debug_token(app_id, app_secret, access_token)
             info = (data.get("data") or {}) if isinstance(data, dict) else {}
-            if not info.get("is_valid", True) and "is_valid" in info:
+            exp_ts = info.get("expires_at") or 0
+            if exp_ts and int(exp_ts) > 0:
+                self._set_plain(
+                    "token_expires_at",
+                    datetime.utcfromtimestamp(int(exp_ts)).strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            if info.get("is_valid") is False:
                 return {
                     "name": "Permission validation",
                     "ok": False,
-                    "detail": "Access token is invalid according to debug_token.",
+                    "detail": "Access token is invalid or expired (debug_token).",
                 }
             scopes = info.get("scopes") or info.get("granular_scopes") or []
             if isinstance(scopes, list) and scopes:
@@ -259,6 +312,14 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Permission validation", "ok": False, "detail": str(exc)}
+
+    def _set_plain(self, key: str, value: str) -> None:
+        self.repository.upsert(
+            provider=PROVIDER,
+            setting_key=key,
+            value_encrypted=encrypt_value(value or ""),
+            description=f"{PROVIDER}.{key}",
+        )
 
     def _check_send_message(
         self,

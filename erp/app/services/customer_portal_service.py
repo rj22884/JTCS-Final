@@ -1,13 +1,30 @@
-"""Customer Portal authentication: login, reset, force password change."""
+"""Customer Portal authentication, profile self-service, and related data."""
 
 from __future__ import annotations
 
 import logging
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from flask import current_app
+from sqlalchemy import text
+from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
+
+from app.customer_master.constants import FORM_TO_DB, GENDERS, GST_FILING_FREQUENCIES
+from app.customer_portal.constants import (
+    PORTAL_BLOCKED_FIELDS,
+    PORTAL_EDITABLE_FIELDS,
+    PORTAL_MODULES,
+    PORTAL_READONLY_FIELDS,
+)
 from app.extensions import db
+from app.modules.shared.audit_service import AuditService
 from app.repositories.customer_repository import CustomerRepository
 from app.utils.db_session import persist
 from app.utils.security import hash_password, verify_password
@@ -19,6 +36,9 @@ MAX_FAILED_LOGINS = 5
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PAN_RE = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+MOBILE_RE = re.compile(r"^\d{10}$")
+AADHAAR_RE = re.compile(r"^\d{12}$")
+IFSC_RE = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
 
 
 @dataclass
@@ -480,8 +500,10 @@ class CustomerPortalService:
         }
 
     def get_profile(self, customer_id: int) -> dict[str, Any]:
+        """Full Customer Master profile for the logged-in customer only."""
         self.repo.ensure_schema()
-        auth = self.repo.get_portal_auth(int(customer_id))
+        cid = int(customer_id)
+        auth = self.repo.get_portal_auth(cid)
         if not auth:
             return {
                 "ok": False,
@@ -489,23 +511,705 @@ class CustomerPortalService:
                 "error_code": "not_found",
                 "status_code": 404,
             }
-        detail = {}
         try:
-            detail = self.repo.get_detail(int(customer_id)) or {}
+            record = self.repo.get_full(cid)
         except Exception:  # noqa: BLE001
-            detail = {}
+            logger.exception("Unable to load portal profile for %s", cid)
+            return {
+                "ok": False,
+                "error": "Unable to load profile.",
+                "error_code": "server_error",
+                "status_code": 500,
+            }
+        # Never expose income-tax portal password to the customer UI.
+        record.pop("income_tax_password", None)
+        record["customer_id"] = cid
+        record["masked_pan"] = self.mask_pan(record.get("pan_number") or auth.get("pan_number"))
+        record["last_login"] = (
+            auth.get("last_login").isoformat() if auth.get("last_login") else None
+        )
+        record["password_changed"] = bool(auth.get("password_changed"))
+        record["readonly_fields"] = sorted(PORTAL_READONLY_FIELDS)
+        record["editable_fields"] = sorted(PORTAL_EDITABLE_FIELDS)
+        return {"ok": True, "profile": record}
+
+    def _validate_profile_payload(self, payload: dict, *, customer_id: int) -> dict[str, Any]:
+        cleaned: dict[str, Any] = {}
+        for key, value in (payload or {}).items():
+            if key in PORTAL_BLOCKED_FIELDS or key in PORTAL_READONLY_FIELDS:
+                continue
+            if key not in PORTAL_EDITABLE_FIELDS or key not in FORM_TO_DB:
+                continue
+            if isinstance(value, str):
+                value = value.strip()
+            cleaned[key] = value
+
+        mobile = self.repo._normalize_mobile(cleaned.get("mobile_number"))
+        if "mobile_number" in cleaned:
+            if mobile and not MOBILE_RE.match(mobile):
+                raise ValueError("Mobile Number must be a valid 10-digit number.")
+            cleaned["mobile_number"] = mobile or None
+
+        if "alternate_mobile" in cleaned:
+            alt = self.repo._normalize_mobile(cleaned.get("alternate_mobile"))
+            if alt and not MOBILE_RE.match(alt):
+                raise ValueError("Alternate Mobile must be a valid 10-digit number.")
+            cleaned["alternate_mobile"] = alt or None
+
+        if "whatsapp_number" in cleaned:
+            wa = self.repo._normalize_mobile(cleaned.get("whatsapp_number"))
+            if wa and not MOBILE_RE.match(wa):
+                raise ValueError("WhatsApp Number must be a valid 10-digit number.")
+            cleaned["whatsapp_number"] = wa or None
+
+        if "email_id" in cleaned:
+            email = (cleaned.get("email_id") or "").strip().lower()
+            if email and not EMAIL_RE.match(email):
+                raise ValueError("Email Address is invalid.")
+            cleaned["email_id"] = email or None
+
+        if "aadhaar_number" in cleaned:
+            aadhaar = re.sub(r"\D", "", cleaned.get("aadhaar_number") or "")
+            if aadhaar and not AADHAAR_RE.match(aadhaar):
+                raise ValueError("Aadhaar Number must be 12 digits.")
+            cleaned["aadhaar_number"] = aadhaar or None
+
+        if "gender" in cleaned and cleaned.get("gender"):
+            if cleaned["gender"] not in GENDERS:
+                raise ValueError("Gender is invalid.")
+
+        if "filing_frequency" in cleaned and cleaned.get("filing_frequency"):
+            if cleaned["filing_frequency"] not in GST_FILING_FREQUENCIES:
+                raise ValueError("GST Filing Frequency is invalid.")
+
+        if "ifsc_code" in cleaned and cleaned.get("ifsc_code"):
+            ifsc = str(cleaned["ifsc_code"]).upper().replace(" ", "")
+            if not IFSC_RE.match(ifsc):
+                raise ValueError("IFSC Code is invalid.")
+            cleaned["ifsc_code"] = ifsc
+
+        if "pincode" in cleaned and cleaned.get("pincode"):
+            pin = re.sub(r"\D", "", str(cleaned["pincode"]))
+            if len(pin) != 6:
+                raise ValueError("PIN Code must be 6 digits.")
+            cleaned["pincode"] = pin
+
+        for date_key in ("date_of_birth", "date_of_incorporation"):
+            if date_key in cleaned and cleaned.get(date_key):
+                raw = str(cleaned[date_key])[:10]
+                try:
+                    cleaned[date_key] = date.fromisoformat(raw)
+                except ValueError as exc:
+                    raise ValueError(f"{date_key.replace('_', ' ').title()} is invalid.") from exc
+
+        # Duplicate checks for identity/contact fields (exclude self).
+        if cleaned.get("aadhaar_number"):
+            dup = self.repo.find_by_aadhaar(
+                cleaned["aadhaar_number"], exclude_customer_id=customer_id
+            )
+            if dup:
+                raise ValueError(
+                    "This Aadhaar Number is already registered with another customer. "
+                    "Please contact JTCS."
+                )
+        if cleaned.get("mobile_number"):
+            dups = self.repo.find_by_mobile(
+                cleaned["mobile_number"], exclude_customer_id=customer_id
+            )
+            if dups:
+                raise ValueError(
+                    "This Mobile Number is registered with multiple / other customer records. "
+                    "Please contact JTCS."
+                )
+        if cleaned.get("email_id"):
+            dups = self.repo.find_by_email(
+                cleaned["email_id"], exclude_customer_id=customer_id
+            )
+            if len(dups) > 0:
+                raise ValueError(
+                    "This Email Address is registered with another customer. "
+                    "Please contact JTCS."
+                )
+        return cleaned
+
+    def _save_profile_photo(self, customer_id: int, file_storage: FileStorage) -> str:
+        if not file_storage or not file_storage.filename:
+            raise ValueError("Photo file is required.")
+        filename = secure_filename(file_storage.filename)
+        ext = Path(filename).suffix.lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+            raise ValueError("Photo must be JPG, PNG or WEBP.")
+        root = Path(current_app.root_path) / "static" / "uploads" / "customer_photos"
+        root.mkdir(parents=True, exist_ok=True)
+        name = f"portal_{int(customer_id)}_{uuid4().hex[:10]}{ext}"
+        dest = root / name
+        file_storage.save(dest)
+        return f"uploads/customer_photos/{name}"
+
+    def update_profile(
+        self,
+        customer_id: int,
+        payload: dict,
+        *,
+        photo_file: FileStorage | None = None,
+        actor_name: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Update Customer Master fields for the logged-in customer only."""
+        self.repo.ensure_schema()
+        cid = int(customer_id)
+        auth = self.repo.get_portal_auth(cid)
+        if not auth:
+            return {
+                "ok": False,
+                "error": "Customer not found.",
+                "error_code": "not_found",
+                "status_code": 404,
+            }
+        try:
+            old_record = self.repo.get_full(cid)
+        except Exception:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error": "Unable to load profile.",
+                "error_code": "server_error",
+                "status_code": 500,
+            }
+
+        try:
+            cleaned = self._validate_profile_payload(payload, customer_id=cid)
+            if photo_file and getattr(photo_file, "filename", None):
+                cleaned["photo_path"] = self._save_profile_photo(cid, photo_file)
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "error_code": "validation_error",
+                "status_code": 400,
+            }
+
+        if not cleaned:
+            return {
+                "ok": False,
+                "error": "No editable fields provided.",
+                "error_code": "empty_payload",
+                "status_code": 400,
+            }
+
+        # Force-protect identity fields even if payload tried to smuggle them.
+        cleaned.pop("customer_name", None)
+        cleaned.pop("pan_number", None)
+        # save_full() defaults missing CustomerStatus to Active — preserve admin status.
+        cleaned["customer_status"] = old_record.get("customer_status") or "Active"
+
+        try:
+            def _write() -> dict:
+                return self.repo.save_full(cleaned, customer_id=cid)
+
+            saved = persist(_write)
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+            logger.exception("Portal profile update failed for %s", cid)
+            return {
+                "ok": False,
+                "error": "Unable to save profile. Please try again.",
+                "error_code": "server_error",
+                "status_code": 500,
+            }
+
+        changed = {
+            key: {"old": old_record.get(key), "new": cleaned.get(key)}
+            for key in cleaned
+            if str(old_record.get(key) or "") != str(cleaned.get(key) or "")
+        }
+        try:
+            AuditService().log(
+                action_name="CustomerPortal.ProfileUpdate",
+                entity_type="CustomerMaster",
+                entity_id=cid,
+                old_value={k: v["old"] for k, v in changed.items()},
+                new_value={k: v["new"] for k, v in changed.items()},
+                user_id=None,
+                user_name=(actor_name or f"Customer:{cid}")[:150],
+                ip_address=ip_address,
+                browser=user_agent,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Audit log failed for portal profile update %s", cid)
+
+        result = self.get_profile(cid)
+        result["message"] = "Profile updated successfully."
+        result["changed_fields"] = sorted(changed.keys())
+        return result
+
+    # ------------------------------------------------------------------
+    # Customer-scoped related data (always filtered by CustomerID)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _table_exists(table_name: str) -> bool:
+        value = db.session.execute(
+            text(
+                """
+                SELECT CASE WHEN OBJECT_ID(:obj, N'U') IS NULL THEN 0 ELSE 1 END
+                """
+            ),
+            {"obj": f"dbo.{table_name}"},
+        ).scalar()
+        return bool(value)
+
+    @staticmethod
+    def _serialize_cell(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat(sep=" ", timespec="minutes")
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return f"{value.quantize(Decimal('0.01')):.2f}"
+        return value
+
+    def _rows(self, sql: str, params: dict) -> list[dict]:
+        rows = db.session.execute(text(sql), params).mappings().all()
+        return [{k: self._serialize_cell(v) for k, v in dict(r).items()} for r in rows]
+
+    def get_module_data(self, customer_id: int, module_key: str) -> dict[str, Any]:
+        """Return related JTCS ERP records for this customer only."""
+        cid = int(customer_id)
+        auth = self.repo.get_portal_auth(cid)
+        if not auth:
+            return {
+                "ok": False,
+                "error": "Customer not found.",
+                "error_code": "not_found",
+                "status_code": 404,
+            }
+        meta = PORTAL_MODULES.get(module_key)
+        if not meta or module_key == "profile":
+            return {
+                "ok": False,
+                "error": "Unknown module.",
+                "error_code": "unknown_module",
+                "status_code": 404,
+            }
+
+        sections: list[dict[str, Any]] = []
+        try:
+            if module_key == "documents":
+                if self._table_exists("CrmDocument"):
+                    sections.append(
+                        {
+                            "title": "Documents",
+                            "columns": [
+                                ("title", "Title"),
+                                ("folder_type", "Folder"),
+                                ("file_name", "File"),
+                                ("created_date", "Date"),
+                            ],
+                            "rows": self._rows(
+                                """
+                                SELECT TOP 200
+                                    DocumentID AS id,
+                                    Title AS title,
+                                    FolderType AS folder_type,
+                                    FileName AS file_name,
+                                    CreatedDate AS created_date
+                                FROM dbo.CrmDocument
+                                WHERE CustomerID = :cid AND ISNULL(IsActive, 1) = 1
+                                ORDER BY CreatedDate DESC, DocumentID DESC
+                                """,
+                                {"cid": cid},
+                            ),
+                        }
+                    )
+            elif module_key == "itr":
+                if self._table_exists("FollowupEntryMaster"):
+                    sections.append(
+                        {
+                            "title": "Income Tax Follow-ups",
+                            "columns": [
+                                ("entry_id", "Entry"),
+                                ("financial_year", "FY"),
+                                ("status", "Status"),
+                                ("assessment_year", "AY"),
+                                ("remarks", "Remarks"),
+                                ("created_date", "Created"),
+                            ],
+                            "rows": self._followup_rows(cid, "ITR"),
+                        }
+                    )
+                if self._table_exists("JTCSDailyTransaction"):
+                    sections.append(
+                        {
+                            "title": "ITR Related Transactions",
+                            "columns": [
+                                ("transaction_id", "Txn"),
+                                ("transaction_date", "Date"),
+                                ("description", "Description"),
+                                ("total_amount", "Amount"),
+                                ("status", "Status"),
+                            ],
+                            "rows": self._daily_rows(cid, work_like="ITR"),
+                        }
+                    )
+            elif module_key == "gst":
+                if self._table_exists("FollowupEntryMaster"):
+                    sections.append(
+                        {
+                            "title": "GST Follow-ups",
+                            "columns": [
+                                ("entry_id", "Entry"),
+                                ("financial_year", "FY"),
+                                ("status", "Status"),
+                                ("remarks", "Remarks"),
+                                ("created_date", "Created"),
+                            ],
+                            "rows": self._followup_rows(cid, "GST"),
+                        }
+                    )
+                if self._table_exists("GstInvoice"):
+                    sections.append(
+                        {
+                            "title": "GST Invoices",
+                            "columns": [
+                                ("invoice_id", "Invoice"),
+                                ("invoice_no", "Number"),
+                                ("invoice_date", "Date"),
+                                ("grand_total", "Amount"),
+                                ("status", "Status"),
+                            ],
+                            "rows": self._gst_invoice_rows(cid),
+                        }
+                    )
+            elif module_key == "tds":
+                if self._table_exists("FollowupEntryMaster"):
+                    sections.append(
+                        {
+                            "title": "TDS Follow-ups",
+                            "columns": [
+                                ("entry_id", "Entry"),
+                                ("financial_year", "FY"),
+                                ("status", "Status"),
+                                ("remarks", "Remarks"),
+                                ("created_date", "Created"),
+                            ],
+                            "rows": self._followup_rows(cid, "TDS"),
+                        }
+                    )
+            elif module_key == "notices":
+                if self._table_exists("CrmDocument"):
+                    sections.append(
+                        {
+                            "title": "Notices",
+                            "columns": [
+                                ("title", "Title"),
+                                ("folder_type", "Folder"),
+                                ("file_name", "File"),
+                                ("created_date", "Date"),
+                            ],
+                            "rows": self._rows(
+                                """
+                                SELECT TOP 200
+                                    DocumentID AS id,
+                                    Title AS title,
+                                    FolderType AS folder_type,
+                                    FileName AS file_name,
+                                    CreatedDate AS created_date
+                                FROM dbo.CrmDocument
+                                WHERE CustomerID = :cid
+                                  AND ISNULL(IsActive, 1) = 1
+                                  AND (
+                                        FolderType LIKE N'%Notice%'
+                                     OR Title LIKE N'%Notice%'
+                                     OR Title LIKE N'%Demand%'
+                                  )
+                                ORDER BY CreatedDate DESC, DocumentID DESC
+                                """,
+                                {"cid": cid},
+                            ),
+                        }
+                    )
+            elif module_key == "downloads":
+                if self._table_exists("CrmDocument"):
+                    sections.append(
+                        {
+                            "title": "Downloads",
+                            "columns": [
+                                ("title", "Title"),
+                                ("folder_type", "Folder"),
+                                ("file_name", "File"),
+                                ("created_date", "Date"),
+                            ],
+                            "rows": self._rows(
+                                """
+                                SELECT TOP 200
+                                    DocumentID AS id,
+                                    Title AS title,
+                                    FolderType AS folder_type,
+                                    FileName AS file_name,
+                                    CreatedDate AS created_date
+                                FROM dbo.CrmDocument
+                                WHERE CustomerID = :cid AND ISNULL(IsActive, 1) = 1
+                                ORDER BY CreatedDate DESC, DocumentID DESC
+                                """,
+                                {"cid": cid},
+                            ),
+                        }
+                    )
+            elif module_key == "payments":
+                if self._table_exists("JTCSDailyTransaction"):
+                    sections.append(
+                        {
+                            "title": "Payments / Receipts",
+                            "columns": [
+                                ("transaction_id", "Txn"),
+                                ("transaction_date", "Date"),
+                                ("work_type", "Work"),
+                                ("description", "Description"),
+                                ("total_amount", "Amount"),
+                                ("status", "Status"),
+                            ],
+                            "rows": self._daily_rows(cid, work_like=None),
+                        }
+                    )
+                if self._table_exists("GstInvoice"):
+                    sections.append(
+                        {
+                            "title": "GST Invoices",
+                            "columns": [
+                                ("invoice_id", "Invoice"),
+                                ("invoice_no", "Number"),
+                                ("invoice_date", "Date"),
+                                ("grand_total", "Amount"),
+                                ("status", "Status"),
+                            ],
+                            "rows": self._gst_invoice_rows(cid),
+                        }
+                    )
+            elif module_key == "support":
+                if self._table_exists("CrmTask"):
+                    sections.append(
+                        {
+                            "title": "Assigned Tasks",
+                            "columns": [
+                                ("task_id", "Task"),
+                                ("title", "Title"),
+                                ("status", "Status"),
+                                ("priority", "Priority"),
+                                ("deadline", "Deadline"),
+                            ],
+                            "rows": self._rows(
+                                """
+                                SELECT TOP 200
+                                    TaskID AS task_id,
+                                    Title AS title,
+                                    Status AS status,
+                                    Priority AS priority,
+                                    Deadline AS deadline
+                                FROM dbo.CrmTask
+                                WHERE CustomerID = :cid AND ISNULL(IsActive, 1) = 1
+                                ORDER BY CreatedDate DESC, TaskID DESC
+                                """,
+                                {"cid": cid},
+                            ),
+                        }
+                    )
+                if self._table_exists("CrmConversation"):
+                    sections.append(
+                        {
+                            "title": "Communication History",
+                            "columns": [
+                                ("conversation_id", "ID"),
+                                ("subject", "Subject"),
+                                ("channel", "Channel"),
+                                ("status", "Status"),
+                                ("created_date", "Date"),
+                            ],
+                            "rows": self._conversation_rows(cid),
+                        }
+                    )
+        except Exception:  # noqa: BLE001
+            logger.exception("Portal module %s failed for customer %s", module_key, cid)
+            return {
+                "ok": False,
+                "error": "Unable to load module data.",
+                "error_code": "server_error",
+                "status_code": 500,
+            }
+
+        if not sections:
+            sections.append(
+                {
+                    "title": meta["title"],
+                    "columns": [("message", "Message")],
+                    "rows": [
+                        {
+                            "message": (
+                                "No related records are available for your account yet, "
+                                "or this module is not configured in the current database."
+                            )
+                        }
+                    ],
+                }
+            )
+
         return {
             "ok": True,
-            "profile": {
-                "customer_id": auth["customer_id"],
-                "customer_name": auth.get("customer_name") or "",
-                "masked_pan": self.mask_pan(auth.get("pan_number")),
-                "customer_group": detail.get("CustomerGroup") or "",
-                "city": detail.get("City") or "",
-                "state": detail.get("State") or "",
-                "last_login": auth.get("last_login").isoformat()
-                if auth.get("last_login")
-                else None,
-                "password_changed": bool(auth.get("password_changed")),
-            },
+            "module": module_key,
+            "title": meta["title"],
+            "blurb": meta["blurb"],
+            "customer_id": cid,
+            "customer_name": auth.get("customer_name") or "",
+            "sections": sections,
         }
+
+    def _followup_column_map(self) -> dict[str, str]:
+        """Resolve FollowupEntryMaster column names present in this DB."""
+        cols = {
+            r[0]
+            for r in db.session.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = N'FollowupEntryMaster'
+                    """
+                )
+            ).all()
+        }
+        return {
+            "fy": "FinancialYear" if "FinancialYear" in cols else (
+                "FY" if "FY" in cols else None
+            ),
+            "ay": "AssessmentYear" if "AssessmentYear" in cols else None,
+            "status": "Status" if "Status" in cols else (
+                "CurrentStatus" if "CurrentStatus" in cols else None
+            ),
+            "remarks": "Remarks" if "Remarks" in cols else None,
+            "module": "ModuleCode" if "ModuleCode" in cols else (
+                "Module" if "Module" in cols else None
+            ),
+            "created": "CreatedDate" if "CreatedDate" in cols else None,
+        }
+
+    def _followup_rows(self, customer_id: int, module_code: str) -> list[dict]:
+        cmap = self._followup_column_map()
+        if not cmap.get("module"):
+            return []
+        select_parts = ["EntryID AS entry_id"]
+        if cmap["fy"]:
+            select_parts.append(f"{cmap['fy']} AS financial_year")
+        else:
+            select_parts.append("NULL AS financial_year")
+        if cmap["ay"]:
+            select_parts.append(f"{cmap['ay']} AS assessment_year")
+        else:
+            select_parts.append("NULL AS assessment_year")
+        if cmap["status"]:
+            select_parts.append(f"{cmap['status']} AS status")
+        else:
+            select_parts.append("NULL AS status")
+        if cmap["remarks"]:
+            select_parts.append(f"{cmap['remarks']} AS remarks")
+        else:
+            select_parts.append("NULL AS remarks")
+        if cmap["created"]:
+            select_parts.append(f"{cmap['created']} AS created_date")
+        else:
+            select_parts.append("NULL AS created_date")
+        sql = f"""
+            SELECT TOP 200 {", ".join(select_parts)}
+            FROM dbo.FollowupEntryMaster
+            WHERE CustomerID = :cid
+              AND UPPER(LTRIM(RTRIM({cmap['module']}))) = :module
+            ORDER BY EntryID DESC
+        """
+        return self._rows(sql, {"cid": customer_id, "module": module_code.upper()})
+
+    def _daily_rows(self, customer_id: int, *, work_like: str | None) -> list[dict]:
+        sql = """
+            SELECT TOP 200
+                TransactionID AS transaction_id,
+                TransactionDate AS transaction_date,
+                WorkType AS work_type,
+                Description AS description,
+                TotalAmount AS total_amount,
+                Status AS status
+            FROM dbo.JTCSDailyTransaction
+            WHERE CustomerID = :cid
+        """
+        params: dict[str, Any] = {"cid": customer_id}
+        if work_like:
+            sql += " AND UPPER(ISNULL(WorkType, N'')) LIKE :work"
+            params["work"] = f"%{work_like.upper()}%"
+        sql += " ORDER BY TransactionDate DESC, TransactionID DESC"
+        return self._rows(sql, params)
+
+    def _gst_invoice_rows(self, customer_id: int) -> list[dict]:
+        cols = {
+            r[0]
+            for r in db.session.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = N'GstInvoice'
+                    """
+                )
+            ).all()
+        }
+        inv_no = "InvoiceNo" if "InvoiceNo" in cols else (
+            "InvoiceNumber" if "InvoiceNumber" in cols else None
+        )
+        inv_date = "InvoiceDate" if "InvoiceDate" in cols else None
+        total = "GrandTotal" if "GrandTotal" in cols else (
+            "TotalAmount" if "TotalAmount" in cols else None
+        )
+        status = "Status" if "Status" in cols else None
+        select_parts = ["InvoiceID AS invoice_id"]
+        select_parts.append(f"{inv_no} AS invoice_no" if inv_no else "NULL AS invoice_no")
+        select_parts.append(f"{inv_date} AS invoice_date" if inv_date else "NULL AS invoice_date")
+        select_parts.append(f"{total} AS grand_total" if total else "NULL AS grand_total")
+        select_parts.append(f"{status} AS status" if status else "NULL AS status")
+        sql = f"""
+            SELECT TOP 200 {", ".join(select_parts)}
+            FROM dbo.GstInvoice
+            WHERE CustomerID = :cid
+            ORDER BY InvoiceID DESC
+        """
+        return self._rows(sql, {"cid": customer_id})
+
+    def _conversation_rows(self, customer_id: int) -> list[dict]:
+        cols = {
+            r[0]
+            for r in db.session.execute(
+                text(
+                    """
+                    SELECT COLUMN_NAME
+                    FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = N'CrmConversation'
+                    """
+                )
+            ).all()
+        }
+        subject = "Subject" if "Subject" in cols else ("Title" if "Title" in cols else None)
+        channel = "Channel" if "Channel" in cols else None
+        status = "Status" if "Status" in cols else None
+        created = "CreatedDate" if "CreatedDate" in cols else None
+        id_col = "ConversationID" if "ConversationID" in cols else "ID"
+        select_parts = [f"{id_col} AS conversation_id"]
+        select_parts.append(f"{subject} AS subject" if subject else "NULL AS subject")
+        select_parts.append(f"{channel} AS channel" if channel else "NULL AS channel")
+        select_parts.append(f"{status} AS status" if status else "NULL AS status")
+        select_parts.append(f"{created} AS created_date" if created else "NULL AS created_date")
+        order = created or id_col
+        sql = f"""
+            SELECT TOP 200 {", ".join(select_parts)}
+            FROM dbo.CrmConversation
+            WHERE CustomerID = :cid
+            ORDER BY {order} DESC
+        """
+        return self._rows(sql, {"cid": customer_id})
+

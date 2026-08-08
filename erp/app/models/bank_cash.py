@@ -50,12 +50,14 @@ class OthersBankCashTransaction(db.Model):
     VoucherNo: Mapped[str] = mapped_column(Unicode(50), nullable=False, unique=True)
     WorkDate: Mapped[date] = mapped_column(Date, nullable=False)
     Purpose: Mapped[str] = mapped_column(Unicode(200), nullable=False)
-    CreditBankAccountID: Mapped[int] = mapped_column(
-        Integer, db.ForeignKey("JtcsBankAccountMaster.JtcsBankAccountID"), nullable=False
+    CreditBankAccountID: Mapped[int | None] = mapped_column(
+        Integer, db.ForeignKey("JtcsBankAccountMaster.JtcsBankAccountID"), nullable=True
     )
-    DebitBankAccountID: Mapped[int] = mapped_column(
-        Integer, db.ForeignKey("JtcsBankAccountMaster.JtcsBankAccountID"), nullable=False
+    DebitBankAccountID: Mapped[int | None] = mapped_column(
+        Integer, db.ForeignKey("JtcsBankAccountMaster.JtcsBankAccountID"), nullable=True
     )
+    CreditLedgerKey: Mapped[str | None] = mapped_column(Unicode(40), nullable=True)
+    DebitLedgerKey: Mapped[str | None] = mapped_column(Unicode(40), nullable=True)
     Amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     Remarks: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     OutBankTransactionID: Mapped[int | None] = mapped_column(Integer, nullable=True)

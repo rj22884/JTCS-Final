@@ -1,0 +1,120 @@
+{% extends 'customer_portal/base.html' %}
+
+{% block body_class %}{% endblock %}
+{% block subtitle %}Customer Profile{% endblock %}
+
+{% block shell %}
+<div class="cp-dashboard">
+  {% include 'customer_portal/_app_nav.html' %}
+
+  <div class="container pb-5 pt-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <div>
+        <h1 class="h3 mb-1 cp-page-title">Customer Profile</h1>
+        <p class="text-muted mb-0">Update your details from Customer Master. PAN and Customer Name are read-only.</p>
+      </div>
+      <a href="{{ url_for('customer_portal.dashboard') }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-arrow-left"></i> Back to Dashboard
+      </a>
+    </div>
+
+    <div id="cpAlert" class="alert d-none" role="alert"></div>
+
+    <form id="cpProfileForm" class="cp-profile-form" enctype="multipart/form-data" novalidate>
+      <div class="cp-glass-panel mb-3">
+        <div class="d-flex flex-wrap align-items-center gap-3">
+          <div class="cp-photo-wrap">
+            {% if profile.photo_path %}
+              <img
+                src="{{ url_for('static', filename=profile.photo_path) }}"
+                alt="Profile photo"
+                class="cp-photo"
+                id="cpPhotoPreview"
+              >
+            {% else %}
+              <div class="cp-photo cp-photo-placeholder" id="cpPhotoPreview">
+                <i class="bi bi-person"></i>
+              </div>
+            {% endif %}
+          </div>
+          <div class="flex-grow-1">
+            <label class="form-label" for="cpPhoto">Photo</label>
+            <input type="file" class="form-control form-control-sm" id="cpPhoto" name="photo" accept=".jpg,.jpeg,.png,.webp">
+            <div class="form-text">JPG, PNG or WEBP. Optional.</div>
+          </div>
+        </div>
+      </div>
+
+      {% for section_title, fields in sections %}
+      <div class="cp-glass-panel mb-3">
+        <h2 class="h5 mb-3">{{ section_title }}</h2>
+        <div class="row g-3">
+          {% for field_key, label, readonly in fields %}
+          <div class="col-12 col-md-6">
+            <label class="form-label" for="cp_{{ field_key }}">{{ label }}</label>
+            {% set value = profile.get(field_key) or '' %}
+            {% if field_key == 'gender' %}
+              <select class="form-select" id="cp_{{ field_key }}" name="{{ field_key }}" {% if readonly %}disabled{% endif %}>
+                <option value="">Select</option>
+                {% for g in genders %}
+                  <option value="{{ g }}" {% if value == g %}selected{% endif %}>{{ g }}</option>
+                {% endfor %}
+              </select>
+            {% elif field_key == 'country' %}
+              <select class="form-select" id="cp_{{ field_key }}" name="{{ field_key }}" {% if readonly %}disabled{% endif %}>
+                <option value="">Select</option>
+                {% for c in countries %}
+                  <option value="{{ c }}" {% if value == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            {% elif field_key == 'filing_frequency' %}
+              <select class="form-select" id="cp_{{ field_key }}" name="{{ field_key }}" {% if readonly %}disabled{% endif %}>
+                <option value="">Select</option>
+                {% for f in gst_filing_frequencies %}
+                  <option value="{{ f }}" {% if value == f %}selected{% endif %}>{{ f }}</option>
+                {% endfor %}
+              </select>
+            {% elif field_key in ('date_of_birth', 'date_of_incorporation') %}
+              <input
+                type="date"
+                class="form-control"
+                id="cp_{{ field_key }}"
+                name="{{ field_key }}"
+                value="{{ value }}"
+                {% if readonly %}disabled{% endif %}
+              >
+            {% elif field_key == 'remarks' %}
+              <textarea
+                class="form-control"
+                id="cp_{{ field_key }}"
+                name="{{ field_key }}"
+                rows="3"
+                {% if readonly %}disabled{% endif %}
+              >{{ value }}</textarea>
+            {% else %}
+              <input
+                type="text"
+                class="form-control {% if readonly %}cp-readonly{% endif %}"
+                id="cp_{{ field_key }}"
+                name="{{ field_key }}"
+                value="{{ value }}"
+                {% if readonly %}readonly disabled{% endif %}
+                {% if field_key == 'pan_number' %}autocomplete="off"{% endif %}
+              >
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+
+      <div class="d-flex flex-wrap gap-2">
+        <button type="submit" class="btn btn-primary" id="cpSaveProfileBtn">
+          <i class="bi bi-check2-circle"></i> Save Profile
+        </button>
+        <a href="{{ url_for('customer_portal.dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

@@ -9,11 +9,13 @@ from flask import (
     Response,
     current_app,
     jsonify,
+    redirect,
     render_template,
     request,
     send_file,
     session,
     stream_with_context,
+    url_for,
 )
 from sqlalchemy import text
 
@@ -130,11 +132,11 @@ def ensure_utility_menus() -> None:
 
     sync_name = sync_menu_label()
     sync_desc = sync_menu_description()
+    # System Health moved to Admin → System Administration → System Health
     children = (
         (sync_name, "/admin/utility/sync", 1, "bi-cloud-arrow-up", sync_desc),
         ("Clear Cache", "/admin/utility/clear-cache", 2, "bi-trash", "Clear Python/template caches"),
-        ("System Health", "/admin/utility/health", 3, "bi-heart-pulse", "Database and public health checks"),
-        ("App Info", "/admin/utility/info", 4, "bi-info-circle", "Runtime mode, paths, VPS target"),
+        ("App Info", "/admin/utility/info", 3, "bi-info-circle", "Runtime mode, paths, VPS target"),
     )
 
     for name, url, order, icon, desc in children:
@@ -292,14 +294,8 @@ def clear_cache_page():
 @login_required
 @admin_required
 def health_page():
-    return render_template(
-        "utility/health.html",
-        page_title="System Health",
-        breadcrumb=MenuService().get_breadcrumb(
-            "/admin/utility/health", session.get("role")
-        ),
-        health=UtilityService().system_health(),
-    )
+    """Legacy URL — Mission Control lives under System Administration."""
+    return redirect(url_for("system_health.index"))
 
 
 @bp.route("/info", strict_slashes=False)

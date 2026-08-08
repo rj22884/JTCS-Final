@@ -117,6 +117,7 @@ class MenuService:
             "reports and analysis",
             "masters",
             "accounting",
+            "crm",
         }
     )
 
@@ -132,7 +133,6 @@ class MenuService:
             "transactions",
             "employee",
             "stock",
-            "crm",
             "exceptional report",
             "settings",
             "menu management",
@@ -206,15 +206,14 @@ class MenuService:
 
         # Parent "Exceptional Report" stays hidden; Stamp / e-Court Exception
         # are shown under Reports and Analysis (existing module URLs kept).
-        if name in {"crm", "exceptional report", "logout", "log out"}:
+        # CRM is an active top-level module (Communication Center).
+        if name in {"exceptional report", "logout", "log out"}:
             return True
         if name in cls.HIDDEN_MENU_NAMES:
             return True
         if url.rstrip("/") in {u.rstrip("/") for u in cls.HIDDEN_MENU_URLS} or url.startswith(
             "/admin/menus"
         ):
-            return True
-        if url.startswith("/crm/") or url == "/crm":
             return True
         allowed_exception_urls = {
             "/exceptional-report/stamp-certificate",

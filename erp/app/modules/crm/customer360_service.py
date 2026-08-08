@@ -57,9 +57,21 @@ class Customer360Service:
         invoices = self._list_invoices(customer_id)
         outstanding = self._compute_outstanding(customer_id, profile)
 
+        by_channel: dict[str, int] = {}
+        unread_total = 0
+        for c in conversations:
+            ch = c.get("Channel") or "Other"
+            by_channel[ch] = by_channel.get(ch, 0) + 1
+            unread_total += int(c.get("UnreadCount") or 0)
+
         return {
             "profile": profile,
             "conversations": conversations,
+            "communication_summary": {
+                "conversation_count": len(conversations),
+                "unread_total": unread_total,
+                "by_channel": by_channel,
+            },
             "tasks": task_list.get("rows", []),
             "followups": followup_list.get("rows", []),
             "timeline": timeline_events.get("rows", []),

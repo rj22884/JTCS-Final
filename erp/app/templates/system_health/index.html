@@ -1,0 +1,205 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/system_health.css') }}?v=20260807sh">
+{% endblock %}
+
+{% block content %}
+<div class="sh-page"
+     id="shPage"
+     data-csrf="{{ csrf_token() }}"
+     data-api-dashboard="{{ url_for('system_health.api_dashboard') }}"
+     data-api-scan="{{ url_for('system_health.api_scan') }}"
+     data-api-charts="{{ url_for('system_health.api_charts') }}"
+     data-api-logs="{{ url_for('system_health.api_logs') }}"
+     data-api-export="{{ url_for('system_health.api_export') }}"
+     data-api-clear-cache="{{ url_for('system_health.api_clear_cache') }}"
+     data-api-backup="{{ url_for('system_health.api_backup') }}"
+     data-api-refresh-config="{{ url_for('system_health.api_refresh_config') }}"
+     data-url-integration-health="{{ url_for('integration_settings.index') }}?tab=health"
+     data-url-backup="{{ url_for('backup.data_backup_page') }}">
+
+  <div class="alert d-none" data-sh-status role="status"></div>
+
+  <div class="sh-hero">
+    <div class="d-flex align-items-center gap-3">
+      <div class="sh-gauge good" data-sh-gauge>—</div>
+      <div>
+        <h1 class="h4 mb-1">System Health — Mission Control</h1>
+        <div class="text-muted small">
+          Overall: <span class="fw-semibold" data-sh-label>—</span>
+          · Live clock: <span class="sh-clock" data-sh-clock>—</span>
+          · Auto-refresh 30s
+        </div>
+      </div>
+    </div>
+    <div class="sh-actions">
+      <button type="button" class="btn btn-primary btn-sm" data-sh-action="scan">
+        <i class="bi bi-heart-pulse"></i> Run Health Scan
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-sh-action="clear-cache">
+        <i class="bi bi-trash"></i> Clear Cache
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-sh-action="backup">
+        <i class="bi bi-database-down"></i> Manual Backup
+      </button>
+      <button type="button" class="btn btn-outline-secondary btn-sm" data-sh-action="refresh-config">
+        <i class="bi bi-gear"></i> Refresh Configuration
+      </button>
+      <div class="btn-group">
+        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+          Export
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><button type="button" class="dropdown-item" data-sh-action="export" data-format="csv">CSV</button></li>
+          <li><button type="button" class="dropdown-item" data-sh-action="export" data-format="excel">Excel (CSV)</button></li>
+          <li><button type="button" class="dropdown-item" data-sh-action="export" data-format="pdf">PDF (text)</button></li>
+          <li><button type="button" class="dropdown-item" data-sh-action="export" data-format="json">JSON</button></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh-summary" data-sh-summary></div>
+
+  <div class="sh-layout">
+    <div>
+      <div class="sh-panel">
+        <h3><i class="bi bi-graph-up"></i> Live Performance</h3>
+        <div class="sh-chart-grid">
+          <div><div class="small text-muted mb-1">CPU %</div><div class="sh-chart-box"><canvas id="shChartCpu"></canvas></div></div>
+          <div><div class="small text-muted mb-1">Memory %</div><div class="sh-chart-box"><canvas id="shChartMem"></canvas></div></div>
+          <div><div class="small text-muted mb-1">Disk %</div><div class="sh-chart-box"><canvas id="shChartDisk"></canvas></div></div>
+          <div><div class="small text-muted mb-1">DB Sessions</div><div class="sh-chart-box"><canvas id="shChartDb"></canvas></div></div>
+          <div><div class="small text-muted mb-1">API Health %</div><div class="sh-chart-box"><canvas id="shChartApi"></canvas></div></div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-app-indicator"></i> Application Health</h3>
+            <div data-sh-application></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-database"></i> Database Health</h3>
+            <div data-sh-database></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-cpu"></i> Server Health</h3>
+            <div data-sh-server></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-device-hdd"></i> Storage Monitoring</h3>
+            <div data-sh-storage></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-lightning-charge"></i> Background Services</h3>
+            <div data-sh-services></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-plug"></i> API Health <span class="small text-muted">(Integration Health)</span></h3>
+            <div data-sh-api></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-shield-lock"></i> Security Monitoring</h3>
+            <div data-sh-security></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-people"></i> User Monitoring</h3>
+            <div data-sh-users></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-cloud-arrow-down"></i> Backup Center</h3>
+            <div data-sh-backups></div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="sh-panel">
+            <h3><i class="bi bi-award"></i> License Information</h3>
+            <div data-sh-license></div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="sh-panel">
+            <h3><i class="bi bi-globe"></i> Network</h3>
+            <div data-sh-network></div>
+          </div>
+        </div>
+        <div class="col-12">
+          <div class="sh-panel">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+              <h3 class="mb-0"><i class="bi bi-journal-text"></i> System Logs</h3>
+              <div class="d-flex gap-1">
+                <select class="form-select form-select-sm" style="width:auto" data-sh-log-level>
+                  <option value="">All levels</option>
+                  <option value="Critical">Critical</option>
+                  <option value="Warning">Warning</option>
+                  <option value="Information">Information</option>
+                  <option value="Error">Error</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="reload-logs">Filter</button>
+              </div>
+            </div>
+            <div data-sh-logs class="border rounded p-2" style="max-height:220px;overflow:auto"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside>
+      <div class="sh-panel">
+        <h3><i class="bi bi-bell"></i> Notification Center</h3>
+        <div data-sh-alerts></div>
+      </div>
+      <div class="sh-panel">
+        <h3><i class="bi bi-tools"></i> System Utilities</h3>
+        <p class="small text-muted mb-2">
+          Restart Scheduler / Optimize Database require external workers or DBA tools.
+          Clear Cache, Manual Backup, and Health Scan are available here.
+        </p>
+        <div class="sh-actions">
+          <button type="button" class="btn btn-sm btn-outline-primary" data-sh-action="scan">Run Health Scan</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="clear-cache">Clear Cache</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="backup">Manual Backup</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="refresh-config">Refresh Config</button>
+          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('integration_settings.index') }}?tab=health">Integration Health</a>
+          <a class="btn btn-sm btn-outline-secondary" href="/admin/backup/data">Backup Module</a>
+        </div>
+      </div>
+      <div class="sh-panel">
+        <h3><i class="bi bi-signpost-2"></i> Future Roadmap</h3>
+        <ul class="small mb-0">
+          <li>Docker / Kubernetes collectors</li>
+          <li>Redis / RabbitMQ queue depth</li>
+          <li>Azure / AWS metric adapters</li>
+          <li>Load balancer & multi-tenant scans</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/system_health.js') }}?v=20260807sh"></script>
+{% endblock %}

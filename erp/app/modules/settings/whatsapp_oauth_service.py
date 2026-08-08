@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urljoin
 
@@ -286,9 +287,17 @@ class WhatsAppOAuthService:
 
         self._upsert_plain("phone_number_id", resolved_phone_id)
 
+        display_phone = (phone.get("display_phone_number") or "").strip()
         display_name = (phone.get("verified_name") or "").strip()
         quality = (phone.get("quality_rating") or "").strip()
         phone_status = (phone.get("code_verification_status") or "").strip()
+        messaging_limit = (
+            (phone.get("messaging_limit_tier") or "").strip()
+            or str((phone.get("throughput") or {}).get("level") or "").strip()
+        )
+
+        if display_phone:
+            self._upsert_plain("phone_number", display_phone)
         if display_name:
             self._upsert_plain("display_name", display_name)
         else:
@@ -297,37 +306,146 @@ class WhatsAppOAuthService:
             self._upsert_plain("quality_rating", quality)
         else:
             self._clear_plain("quality_rating")
+        if messaging_limit:
+            self._upsert_plain("messaging_limit", messaging_limit)
         if phone_status:
             self._upsert_plain("account_status", phone_status)
 
         self._upsert_plain("graph_api_version", version)
         self._upsert_plain("webhook_url", webhook)
+        self._upsert_plain("last_sync_at", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"))
 
-        # Never auto-write Access Token or App Secret during Connect Meta.
-        self._set_status("Partial Configuration")
+        # Exchange short-lived OAuth token → long-lived (~60 days) and store encrypted.
+        token_note = self._persist_long_lived_token(cfg=cfg, version=version)
+
+        # Best-effort: subscribe app to WABA webhooks so inbound messages flow.
+        subscribe_note = ""
+        waba_id = self._as_meta_object_id(cfg.get("waba_id"))
+        if waba_id:
+            try:
+                # Re-read after token may have been upgraded
+                live_cfg = self._cfg()
+                live_token = (live_cfg.get("access_token") or session.get(SESSION_OAUTH_TOKEN) or "").strip()
+                if live_token:
+                    live_client = WhatsAppMetaClient(access_token=live_token, graph_api_version=version)
+                    live_client.subscribe_app_to_waba(waba_id)
+                    self._upsert_plain(
+                        "webhook_subscribed_fields",
+                        "messages, message_deliveries, message_reads, message_template_status_update",
+                    )
+                    subscribe_note = " Webhook app subscription requested on WABA."
+            except Exception as exc:
+                logger.warning("WABA subscribed_apps failed: %s", exc)
+                subscribe_note = " (Webhook subscribe in Meta Dashboard if inbound fails.)"
+
+        # Auto-generate verify token if empty
+        if not (cfg.get("webhook_verify_token") or "").strip():
+            try:
+                self.settings.generate_whatsapp_verify_token()
+            except Exception:
+                logger.exception("Auto verify-token generation failed")
+
+        has_token = bool((self._cfg().get("access_token") or "").strip())
+        self._set_status("Connected" if has_token else "Partial Configuration")
 
         masked = self.settings.get_provider_settings_masked(PROVIDER)
-        # Ensure UI cannot show a leaked token in ID fields even if old bad data existed.
         fv = dict(masked.get("field_values") or {})
-        if self._looks_like_access_token(fv.get("business_id")):
-            fv["business_id"] = ""
-        if self._looks_like_access_token(fv.get("phone_number_id")):
-            fv["phone_number_id"] = ""
-        if self._looks_like_access_token(fv.get("waba_id")):
-            fv["waba_id"] = ""
+        for id_key in ("business_id", "phone_number_id", "waba_id"):
+            if self._looks_like_access_token(fv.get(id_key)):
+                fv[id_key] = ""
 
         return {
             "ok": True,
             "step": "done",
             "message": (
-                "WhatsApp account details populated from Meta Graph IDs. "
-                "Enter Permanent Access Token manually, then Test Connection."
+                "WhatsApp account discovered and saved from Meta Graph."
+                + token_note
+                + subscribe_note
+                + " Run Test Connection to verify."
             ),
             "field_values": fv,
             "missing": masked.get("missing") or [],
             "missing_labels": masked.get("missing_labels") or [],
             "status_code": masked.get("status_code"),
+            "localhost_warning": self._localhost_warning(webhook),
         }
+
+    def _persist_long_lived_token(self, *, cfg: dict[str, str], version: str) -> str:
+        """Exchange session OAuth token for long-lived token and encrypt at rest."""
+        short = (session.get(SESSION_OAUTH_TOKEN) or "").strip()
+        if not short:
+            return " Access Token was not auto-saved (session expired) — paste a System User token and Save."
+
+        app_id = (cfg.get("app_id") or "").strip()
+        app_secret = (cfg.get("app_secret") or "").strip()
+        token_to_store = short
+        expires_at = ""
+        note = " Short-lived OAuth token stored."
+
+        if app_id and app_secret:
+            try:
+                client = WhatsAppMetaClient(access_token=short, graph_api_version=version)
+                exchanged = client.exchange_for_long_lived_token(
+                    app_id=app_id,
+                    app_secret=app_secret,
+                    short_lived_token=short,
+                    graph_api_version=version,
+                )
+                long_token = (exchanged.get("access_token") or "").strip()
+                if long_token and self._looks_like_access_token(long_token):
+                    token_to_store = long_token
+                    note = " Long-lived Access Token saved (encrypted)."
+                expires_in = exchanged.get("expires_in")
+                if expires_in:
+                    try:
+                        exp = datetime.utcnow() + timedelta(seconds=int(expires_in))
+                        expires_at = exp.strftime("%Y-%m-%d %H:%M:%S")
+                    except (TypeError, ValueError):
+                        expires_at = ""
+            except MetaGraphError as exc:
+                logger.warning("Long-lived token exchange failed: %s", exc)
+                note = f" Using OAuth token (long-lived exchange failed: {exc})."
+            except Exception as exc:
+                logger.warning("Long-lived token exchange error: %s", exc)
+
+        self._upsert_secret("access_token", token_to_store)
+        if expires_at:
+            self._upsert_plain("token_expires_at", expires_at)
+        else:
+            # Long-lived typically ~60 days when expires_in missing after failure
+            self._upsert_plain(
+                "token_expires_at",
+                (datetime.utcnow() + timedelta(days=60)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+
+        # Persist debug_token expiry when possible
+        try:
+            client = WhatsAppMetaClient(access_token=token_to_store, graph_api_version=version)
+            dbg = client.debug_token(app_id, app_secret, token_to_store)
+            data = (dbg.get("data") or {}) if isinstance(dbg, dict) else {}
+            exp_ts = data.get("expires_at") or data.get("data_access_expires_at")
+            if exp_ts and int(exp_ts) > 0:
+                self._upsert_plain(
+                    "token_expires_at",
+                    datetime.utcfromtimestamp(int(exp_ts)).strftime("%Y-%m-%d %H:%M:%S"),
+                )
+            if data.get("is_valid") is False:
+                self._set_status("Invalid Token")
+        except Exception:
+            logger.debug("debug_token after OAuth skipped", exc_info=True)
+
+        session.pop(SESSION_OAUTH_TOKEN, None)
+        return note
+
+    @staticmethod
+    def _localhost_warning(webhook_url: str) -> str | None:
+        url = (webhook_url or "").lower()
+        if "localhost" in url or "127.0.0.1" in url:
+            return (
+                "Meta cannot reach localhost webhooks. "
+                "Use ngrok or a public domain (APP_BASE_URL) for inbound messages."
+            )
+        return None
 
     def token_guide(self) -> dict[str, Any]:
         cfg = self._cfg()
@@ -344,8 +462,9 @@ class WhatsAppOAuthService:
                 f"Optional Webhook URL: {cfg.get('webhook_url') or self.default_webhook_url()}",
             ],
             "notes": [
-                "Connect Meta uses a temporary login token for discovery only.",
-                "ERP never auto-fills App Secret or Permanent Access Token.",
+                "Connect Meta exchanges a long-lived Access Token and saves it encrypted.",
+                "For never-expiring production use, prefer a Meta System User permanent token (paste + Save).",
+                "App Secret stays manual and is never displayed in clear text.",
                 "Credentials are encrypted at rest and masked on screen.",
             ],
         }
@@ -377,7 +496,14 @@ class WhatsAppOAuthService:
         from app.modules.settings.audit_service import IntegrationSettingsAuditService
 
         # Hard guard: never persist access tokens into ID / name settings keys.
-        if key in {"business_id", "waba_id", "phone_number_id", "business_name", "display_name"}:
+        if key in {
+            "business_id",
+            "waba_id",
+            "phone_number_id",
+            "business_name",
+            "display_name",
+            "phone_number",
+        }:
             if self._looks_like_access_token(value):
                 logger.error("Refused to store token-like value into %s", key)
                 return
@@ -386,8 +512,8 @@ class WhatsAppOAuthService:
                 logger.error("Refused to store non-Meta-id value into %s", key)
                 return
         if key == "access_token":
-            # Connect Meta must not auto-save tokens here; only explicit Save may set this.
-            logger.error("Refused automatic write to access_token from Connect Meta flow")
+            # Use _upsert_secret for tokens after long-lived exchange.
+            logger.error("Refused plain upsert for access_token — use _upsert_secret")
             return
 
         old = self.repository.get_encrypted_value(PROVIDER, key)
@@ -407,6 +533,33 @@ class WhatsAppOAuthService:
             )
         except Exception:
             logger.exception("Integration audit log failed for %s", key)
+
+    def _upsert_secret(self, key: str, value: str) -> None:
+        """Encrypt and store secrets (access_token) with audit — used after OAuth exchange."""
+        from app.modules.settings.audit_service import IntegrationSettingsAuditService
+
+        if key not in {"access_token", "webhook_verify_token"}:
+            raise ValueError(f"Unsupported secret key: {key}")
+        if key == "access_token" and not self._looks_like_access_token(value):
+            logger.error("Refused to store non-token value as access_token")
+            return
+        old = self.repository.get_encrypted_value(PROVIDER, key)
+        stored = encrypt_value(value or "")
+        self.repository.upsert(
+            provider=PROVIDER,
+            setting_key=key,
+            value_encrypted=stored,
+            description=f"{PROVIDER}.{key}",
+        )
+        try:
+            IntegrationSettingsAuditService(self.repository).log_change(
+                provider=PROVIDER,
+                setting_key=key,
+                old_cipher=old,
+                new_cipher=stored,
+            )
+        except Exception:
+            logger.exception("Integration audit log failed for secret %s", key)
 
     def _clear_plain(self, key: str) -> None:
         """Leave field blank when Graph value is unavailable — never guess."""

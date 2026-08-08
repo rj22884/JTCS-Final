@@ -289,41 +289,189 @@ _STATEMENTS: tuple[str, ...] = (
 )
 
 
-_MENU_ITEMS: tuple[tuple[str, str, str, int, str], ...] = (
+# Top-level CRM children (Communication Center is a folder; channels seeded separately).
+_MENU_ITEMS: tuple[tuple[str, str, str | None, int, str], ...] = (
     ("Dashboard", "bi-speedometer2", "/crm/dashboard", 1, "CRM dashboard"),
-    ("Leads", "bi-person-plus", "/crm/leads", 2, "CRM leads"),
-    ("Customer 360", "bi-person-bounding-box", "/crm/customer-360", 3, "Customer 360 view"),
-    ("Communication Center", "bi-chat-dots", "/crm/inbox", 4, "CRM inbox"),
-    ("Follow-up", "bi-telephone-outbound", "/crm/followups", 5, "CRM follow-ups"),
+    ("Communication Center", "bi-chat-dots", None, 2, "Unified multi-channel inbox"),
+    ("Customer Master", "bi-people", "/masters/customer", 3, "Customer Master (Masters)"),
+    ("Leads", "bi-person-plus", "/crm/leads", 4, "CRM leads"),
+    ("Opportunities", "bi-bullseye", "/crm/opportunities", 5, "Opportunities (Phase 2)"),
     ("Tasks", "bi-check2-square", "/crm/tasks", 6, "CRM tasks"),
-    ("Timeline", "bi-clock-history", "/crm/timeline", 7, "Activity timeline"),
-    ("Documents", "bi-folder2-open", "/crm/documents", 8, "Document vault"),
-    ("Notifications", "bi-bell", "/crm/notifications", 9, "Notifications"),
-    ("Workflow", "bi-diagram-3", "/crm/workflow", 10, "CRM workflow"),
-    ("Calendar", "bi-calendar-event", "/crm/calendar", 11, "CRM calendar"),
-    ("Analytics", "bi-graph-up", "/crm/analytics", 12, "CRM reports"),
-    ("Audit Log", "bi-shield-check", "/crm/audit", 13, "CRM audit log"),
+    ("Customer 360", "bi-person-bounding-box", "/crm/customer-360", 7, "Customer 360 view"),
+    ("Follow-up Manager", "bi-telephone-outbound", "/crm/followups", 8, "CRM follow-ups"),
+    ("Timeline", "bi-clock-history", "/crm/timeline", 9, "Activity timeline"),
+    ("Documents", "bi-folder2-open", "/crm/documents", 10, "Document vault"),
+    ("Notifications", "bi-bell", "/crm/notifications", 11, "Notifications"),
+    ("Workflow", "bi-diagram-3", "/crm/workflow", 12, "CRM workflow"),
+    ("Calendar", "bi-calendar-event", "/crm/calendar", 13, "CRM calendar"),
+    ("Analytics", "bi-graph-up", "/crm/analytics", 14, "CRM reports"),
+    ("Audit Log", "bi-shield-check", "/crm/audit", 15, "CRM audit log"),
 )
+
+_COMM_CENTER_CHILDREN: tuple[tuple[str, str, str, int, str], ...] = (
+    ("WhatsApp Inbox", "bi-whatsapp", "/crm/inbox?channel=WhatsApp", 1, "WhatsApp conversations"),
+    ("Email Inbox", "bi-envelope", "/crm/inbox?channel=Email", 2, "Email conversations"),
+    ("SMS Inbox", "bi-chat-square-text", "/crm/inbox?channel=SMS", 3, "SMS inbox (Phase 2)"),
+    ("Website Contact Messages", "bi-globe", "/crm/inbox?channel=Website", 4, "Website enquiries"),
+    ("AI Chatbot Conversations", "bi-robot", "/crm/inbox?channel=AI", 5, "AI chatbot (Phase 2)"),
+    ("Call Logs", "bi-telephone", "/crm/call-logs", 6, "Phone call logs"),
+    ("Follow-up Manager", "bi-alarm", "/crm/followups", 7, "Pending and overdue follow-ups"),
+    ("Customer Timeline", "bi-clock-history", "/crm/timeline", 8, "Customer activity timeline"),
+)
+
+
+_COMM_CENTER_ALTERS: tuple[str, ...] = (
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'ExternalThreadKey') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD ExternalThreadKey NVARCHAR(128) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'ContactMobile') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD ContactMobile NVARCHAR(30) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'ContactEmail') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD ContactEmail NVARCHAR(255) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'IsPinned') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD IsPinned BIT NOT NULL
+            CONSTRAINT DF_CrmConversation_IsPinned DEFAULT (0);
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'IsArchived') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD IsArchived BIT NOT NULL
+            CONSTRAINT DF_CrmConversation_IsArchived DEFAULT (0);
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'IsStarred') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD IsStarred BIT NOT NULL
+            CONSTRAINT DF_CrmConversation_IsStarred DEFAULT (0);
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'LastInboundAt') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD LastInboundAt DATETIME2 NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'LastOutboundAt') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD LastOutboundAt DATETIME2 NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'ExternalMessageID') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD ExternalMessageID NVARCHAR(128) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'DeliveryStatus') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD DeliveryStatus NVARCHAR(30) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'StatusUpdatedAt') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD StatusUpdatedAt DATETIME2 NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'AttachmentMimeType') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD AttachmentMimeType NVARCHAR(100) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'AttachmentSizeBytes') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD AttachmentSizeBytes BIGINT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'MediaType') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD MediaType NVARCHAR(30) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'IsStarred') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD IsStarred BIT NOT NULL
+            CONSTRAINT DF_CrmMessage_IsStarred DEFAULT (0);
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'ErrorDetail') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD ErrorDetail NVARCHAR(500) NULL;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmQuickReply', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmQuickReply (
+            QuickReplyID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            Title NVARCHAR(120) NOT NULL,
+            Body NVARCHAR(MAX) NOT NULL,
+            Channel NVARCHAR(50) NULL,
+            Shortcut NVARCHAR(40) NULL,
+            SortOrder INT NOT NULL CONSTRAINT DF_CrmQuickReply_Sort DEFAULT (0),
+            IsActive BIT NOT NULL CONSTRAINT DF_CrmQuickReply_IsActive DEFAULT (1),
+            CreatedByUserID INT NULL,
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmQuickReply_Created DEFAULT (SYSUTCDATETIME()),
+            ModifiedDate DATETIME2 NULL
+        );
+    END;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmMessageTemplate', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmMessageTemplate (
+            TemplateID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            Name NVARCHAR(150) NOT NULL,
+            Channel NVARCHAR(50) NOT NULL CONSTRAINT DF_CrmMessageTemplate_Channel DEFAULT (N'WhatsApp'),
+            Subject NVARCHAR(255) NULL,
+            Body NVARCHAR(MAX) NOT NULL,
+            ExternalTemplateName NVARCHAR(150) NULL,
+            LanguageCode NVARCHAR(20) NULL,
+            IsActive BIT NOT NULL CONSTRAINT DF_CrmMessageTemplate_IsActive DEFAULT (1),
+            CreatedByUserID INT NULL,
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmMessageTemplate_Created DEFAULT (SYSUTCDATETIME()),
+            ModifiedDate DATETIME2 NULL
+        );
+    END;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmCallLog', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmCallLog (
+            CallLogID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            CustomerID INT NULL,
+            LeadID INT NULL,
+            ConversationID INT NULL,
+            Direction NVARCHAR(20) NOT NULL CONSTRAINT DF_CrmCallLog_Direction DEFAULT (N'Outgoing'),
+            CallStatus NVARCHAR(30) NOT NULL CONSTRAINT DF_CrmCallLog_Status DEFAULT (N'Completed'),
+            PhoneNumber NVARCHAR(30) NULL,
+            DurationSeconds INT NULL,
+            RecordingURL NVARCHAR(500) NULL,
+            Notes NVARCHAR(MAX) NULL,
+            NextFollowUpAt DATETIME2 NULL,
+            CalledAt DATETIME2 NOT NULL CONSTRAINT DF_CrmCallLog_CalledAt DEFAULT (SYSUTCDATETIME()),
+            CreatedByUserID INT NULL,
+            CreatedByName NVARCHAR(150) NULL,
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmCallLog_Created DEFAULT (SYSUTCDATETIME()),
+            IsActive BIT NOT NULL CONSTRAINT DF_CrmCallLog_IsActive DEFAULT (1)
+        );
+        CREATE INDEX IX_CrmCallLog_Customer ON dbo.CrmCallLog (CustomerID, CalledAt DESC);
+    END;
+    """,
+)
+
+
+def ensure_communication_center_schema() -> None:
+    """ALTER/CREATE Communication Center columns and satellite tables (always safe)."""
+    for stmt in _COMM_CENTER_ALTERS:
+        db.session.execute(text(stmt))
+        db.session.commit()
 
 
 def ensure_crm_schema() -> None:
     """Create CRM tables if missing. Safe to call repeatedly."""
     global _SCHEMA_READY
-    if _SCHEMA_READY:
-        return
-    for stmt in _STATEMENTS:
-        db.session.execute(text(stmt))
-        db.session.commit()
-    _seed_default_workflow()
-    _SCHEMA_READY = True
+    if not _SCHEMA_READY:
+        for stmt in _STATEMENTS:
+            db.session.execute(text(stmt))
+            db.session.commit()
+        _seed_default_workflow()
+        _SCHEMA_READY = True
+    ensure_communication_center_schema()
 
 
 def ensure_crm_menus() -> None:
-    """Hide CRM parent + child menus from navigation (CRM moves to a separate app).
-
-    Keeps MenuMaster rows for reference but sets IsActive = 0 so they never
-    appear in the top menu / tree. Does not remove CRM module code or routes.
-    """
+    """Activate CRM top-level menu and seed Communication Center menu tree."""
     row = db.session.execute(
         text(
             """
@@ -333,7 +481,27 @@ def ensure_crm_menus() -> None:
         )
     ).first()
     if not row:
-        # No CRM menu seeded — nothing to hide.
+        db.session.execute(
+            text(
+                """
+                INSERT INTO dbo.MenuMaster
+                    (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
+                VALUES
+                    (NULL, N'CRM', N'bi-people', NULL, 25,
+                     N'Customer Relationship Management', 1, NULL)
+                """
+            )
+        )
+        db.session.commit()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 MenuID FROM dbo.MenuMaster
+                WHERE MenuName = N'CRM' AND ParentMenuID IS NULL
+                """
+            )
+        ).first()
+    if not row:
         return
 
     parent_id = int(row[0])
@@ -341,24 +509,164 @@ def ensure_crm_menus() -> None:
         text(
             """
             UPDATE dbo.MenuMaster
-            SET IsActive = 0,
-                Description = N'Customer Relationship Management (moved to separate app)'
+            SET IsActive = 1,
+                MenuIcon = N'bi-people',
+                Description = N'Customer Relationship Management',
+                DisplayOrder = 25,
+                RoleName = NULL
             WHERE MenuID = :id
             """
         ),
         {"id": parent_id},
     )
-    # Deactivate entire CRM tree (known children + any nested under CRM parent)
+
+    # Rename legacy "Follow-up" → "Follow-up Manager" when present
     db.session.execute(
         text(
             """
             UPDATE dbo.MenuMaster
-            SET IsActive = 0
-            WHERE ParentMenuID = :parent
-               OR MenuURL LIKE N'/crm/%'
+            SET MenuName = N'Follow-up Manager',
+                MenuURL = N'/crm/followups',
+                IsActive = 1
+            WHERE ParentMenuID = :parent AND MenuName = N'Follow-up'
             """
         ),
         {"parent": parent_id},
+    )
+
+    for name, icon, url, order, desc in _MENU_ITEMS:
+        existing = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 MenuID FROM dbo.MenuMaster
+                WHERE ParentMenuID = :parent AND MenuName = :name
+                """
+            ),
+            {"parent": parent_id, "name": name},
+        ).first()
+        if existing:
+            db.session.execute(
+                text(
+                    """
+                    UPDATE dbo.MenuMaster
+                    SET MenuIcon = :icon,
+                        MenuURL = :url,
+                        DisplayOrder = :ord,
+                        Description = :desc,
+                        IsActive = 1,
+                        RoleName = NULL
+                    WHERE MenuID = :id
+                    """
+                ),
+                {
+                    "icon": icon,
+                    "url": url,
+                    "ord": order,
+                    "desc": desc,
+                    "id": int(existing[0]),
+                },
+            )
+        else:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.MenuMaster
+                        (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
+                    VALUES
+                        (:parent, :name, :icon, :url, :ord, :desc, 1, NULL)
+                    """
+                ),
+                {
+                    "parent": parent_id,
+                    "name": name,
+                    "icon": icon,
+                    "url": url,
+                    "ord": order,
+                    "desc": desc,
+                },
+            )
+
+    # Communication Center folder + channel children
+    cc_row = db.session.execute(
+        text(
+            """
+            SELECT TOP 1 MenuID FROM dbo.MenuMaster
+            WHERE ParentMenuID = :parent AND MenuName = N'Communication Center'
+            """
+        ),
+        {"parent": parent_id},
+    ).first()
+    if cc_row:
+        cc_id = int(cc_row[0])
+        # Folder node: no direct URL (children carry channel links)
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.MenuMaster
+                SET MenuURL = NULL, MenuIcon = N'bi-chat-dots', IsActive = 1, DisplayOrder = 2
+                WHERE MenuID = :id
+                """
+            ),
+            {"id": cc_id},
+        )
+        for name, icon, url, order, desc in _COMM_CENTER_CHILDREN:
+            child = db.session.execute(
+                text(
+                    """
+                    SELECT TOP 1 MenuID FROM dbo.MenuMaster
+                    WHERE ParentMenuID = :parent AND MenuName = :name
+                    """
+                ),
+                {"parent": cc_id, "name": name},
+            ).first()
+            if child:
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE dbo.MenuMaster
+                        SET MenuIcon = :icon, MenuURL = :url, DisplayOrder = :ord,
+                            Description = :desc, IsActive = 1, RoleName = NULL
+                        WHERE MenuID = :id
+                        """
+                    ),
+                    {
+                        "icon": icon,
+                        "url": url,
+                        "ord": order,
+                        "desc": desc,
+                        "id": int(child[0]),
+                    },
+                )
+            else:
+                db.session.execute(
+                    text(
+                        """
+                        INSERT INTO dbo.MenuMaster
+                            (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive, RoleName)
+                        VALUES
+                            (:parent, :name, :icon, :url, :ord, :desc, 1, NULL)
+                        """
+                    ),
+                    {
+                        "parent": cc_id,
+                        "name": name,
+                        "icon": icon,
+                        "url": url,
+                        "ord": order,
+                        "desc": desc,
+                    },
+                )
+
+    # Keep any other /crm/* rows active (legacy siblings)
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET IsActive = 1
+            WHERE MenuURL LIKE N'/crm/%'
+               OR MenuURL LIKE N'/crm/inbox%'
+            """
+        )
     )
     db.session.commit()
 
@@ -371,6 +679,7 @@ ERP_CORE_TOP_LEVEL_MENUS = (
     "Reports and Analysis",
     "Masters",
     "Accounting",
+    "CRM",
 )
 
 
@@ -391,7 +700,7 @@ def ensure_erp_core_nav_menus() -> None:
               AND MenuName IN (
                     N'ITR', N'Others', N'GST', N'DSC', N'TDS',
                     N'Payroll', N'Transactions', N'Employee', N'Stock',
-                    N'Menu Management', N'Settings', N'CRM'
+                    N'Menu Management', N'Settings'
               );
 
             /* Keep old Menu Management page hidden (new UI is Menu Customization) */
@@ -410,7 +719,7 @@ def ensure_erp_core_nav_menus() -> None:
               AND p.MenuName IN (
                     N'ITR', N'Others', N'GST', N'DSC', N'TDS',
                     N'Payroll', N'Transactions', N'Employee', N'Stock',
-                    N'Menu Management', N'Settings', N'CRM'
+                    N'Menu Management', N'Settings'
               );
 
             /* Logout / orphan utility rows that should not be nav items */

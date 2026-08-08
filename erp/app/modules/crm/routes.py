@@ -19,10 +19,19 @@ from flask import (
 from app.decorators import login_required
 from app.modules.ai.providers import AiDraftService
 from app.modules.calendar.services import CalendarService
+from app.modules.communication.ai_chatbot_stub import AiChatbotStub
+from app.modules.communication.broadcast_stub import BroadcastStub
+from app.modules.communication.call_log_service import CallLogService
+from app.modules.communication.email_channel_service import EmailChannelService
 from app.modules.communication.services import CommunicationService
+from app.modules.communication.sms_provider import SmsGatewayProvider
+from app.modules.communication.template_service import TemplateService
+from app.modules.communication.whatsapp_provider import get_whatsapp_provider
 from app.modules.crm.customer360_service import Customer360Service
 from app.modules.crm.followup_service import CrmFollowUpService
 from app.modules.crm.lead_service import CrmLeadService
+from app.modules.crm.opportunity_stub import OpportunityStub
+from app.modules.crm.permissions import require_crm_capability, user_has_capability
 from app.modules.crm.task_service import CrmTaskService
 from app.modules.crm.whatsapp import wa_me_url
 from app.modules.documents.services import DocumentService
@@ -81,21 +90,58 @@ def _entity_id(result, key: str) -> int:
 @crm_bp.route("/dashboard", strict_slashes=False)
 @login_required
 def dashboard():
-    stats = CrmLeadService().dashboard_stats()
-    unread_msgs = CommunicationService().unread_message_count()
-    unread_notif = NotificationService().unread_count(_uid())
-    tasks = CrmTaskService().list_tasks(status="Pending", page=1)
-    followups = CrmFollowUpService().list_followups(status="Pending", page=1)
+    empty_comm = {
+        "today_messages": 0,
+        "unread_messages": 0,
+        "pending_replies": 0,
+        "resolved_today": 0,
+        "open_conversations": 0,
+        "today_calls": 0,
+        "today_emails": 0,
+        "website_enquiries": 0,
+        "ai_conversations": 0,
+        "total_customers": 0,
+        "avg_response_minutes": None,
+        "customer_satisfaction": None,
+        "recent_activities": [],
+    }
+    try:
+        lead_stats = CrmLeadService().dashboard_stats()
+    except Exception:
+        lead_stats = {}
+    try:
+        comm_stats = CommunicationService().dashboard_stats()
+    except Exception:
+        current_app.logger.exception("Communication dashboard_stats failed")
+        comm_stats = empty_comm
+    try:
+        unread_msgs = CommunicationService().unread_message_count()
+    except Exception:
+        unread_msgs = 0
+    try:
+        unread_notif = NotificationService().unread_count(_uid())
+    except Exception:
+        unread_notif = 0
+    try:
+        tasks = CrmTaskService().list_tasks(status="Pending", page=1)
+    except Exception:
+        tasks = {"total": 0}
+    try:
+        followups = CrmFollowUpService().list_followups(status="Pending", page=1)
+    except Exception:
+        followups = {"total": 0}
     return render_template(
         "crm/dashboard.html",
-        page_title="CRM Dashboard",
+        page_title="Communication Center Dashboard",
         breadcrumb=_menu("/crm/dashboard"),
-        stats=stats,
+        stats=lead_stats,
+        comm_stats=comm_stats,
         unread_msgs=unread_msgs,
         unread_notif=unread_notif,
         pending_tasks=tasks.get("total", 0),
         pending_followups=followups.get("total", 0),
         poll_seconds=current_app.config.get("NOTIFICATION_POLL_SECONDS", 15),
+        api={"dashboard_stats": url_for("crm_api.dashboard_stats")},
     )
 
 
@@ -158,18 +204,49 @@ def customer_360(customer_id: int | None = None):
 @crm_bp.route("/inbox", strict_slashes=False)
 @login_required
 def inbox_page():
+    channel = (request.args.get("channel") or "").strip()
     return render_template(
         "crm/inbox.html",
         page_title="Communication Center",
         breadcrumb=_menu("/crm/inbox"),
         poll_seconds=current_app.config.get("NOTIFICATION_POLL_SECONDS", 15),
+        initial_channel=channel,
+        initial_conversation_id=request.args.get("c") or "",
         api={
             "list": url_for("crm_api.conversations_list"),
             "detail": url_for("crm_api.conversation_detail", conversation_id=0),
             "messages": url_for("crm_api.conversation_messages", conversation_id=0),
             "reply": url_for("crm_api.conversation_reply", conversation_id=0),
             "update": url_for("crm_api.conversation_update", conversation_id=0),
+            "attachments": url_for("crm_api.conversation_attachments", conversation_id=0),
+            "quick_replies": url_for("crm_api.quick_replies_list"),
+            "templates": url_for("crm_api.templates_list"),
+            "email_sync": url_for("crm_api.email_sync"),
         },
+    )
+
+
+@crm_bp.route("/call-logs", strict_slashes=False)
+@login_required
+def call_logs_page():
+    return render_template(
+        "crm/call_logs.html",
+        page_title="Call Logs",
+        breadcrumb=_menu("/crm/call-logs"),
+        api={
+            "list": url_for("crm_api.call_logs_list"),
+            "create": url_for("crm_api.call_logs_create"),
+        },
+    )
+
+
+@crm_bp.route("/opportunities", strict_slashes=False)
+@login_required
+def opportunities_page():
+    return render_template(
+        "crm/opportunities.html",
+        page_title="Opportunities",
+        breadcrumb=_menu("/crm/opportunities"),
     )
 
 
@@ -371,17 +448,52 @@ def leads_assign(lead_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 400
 
 
+@crm_api_bp.route("/dashboard/stats", methods=["GET"])
+@login_required
+def dashboard_stats():
+    return jsonify({"ok": True, **CommunicationService().dashboard_stats()})
+
+
 @crm_api_bp.route("/conversations", methods=["GET"])
 @login_required
 def conversations_list():
+    date_preset = (request.args.get("date") or "").strip().lower()
+    date_from = date_to = None
+    if date_preset:
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        start_today = datetime(now.year, now.month, now.day)
+        if date_preset == "today":
+            date_from, date_to = start_today, start_today + timedelta(days=1)
+        elif date_preset == "yesterday":
+            date_from, date_to = start_today - timedelta(days=1), start_today
+        elif date_preset == "week":
+            date_from, date_to = start_today - timedelta(days=7), start_today + timedelta(days=1)
+        elif date_preset == "month":
+            date_from, date_to = start_today - timedelta(days=30), start_today + timedelta(days=1)
+
     data = CommunicationService().list_conversations(
         status=request.args.get("status"),
         priority=request.args.get("priority"),
         search=request.args.get("search"),
+        channel=request.args.get("channel") or None,
+        unread_only=request.args.get("unread") == "1",
+        archived=request.args.get("archived") == "1",
+        pinned_only=request.args.get("pinned") == "1",
+        starred_only=request.args.get("starred") == "1",
+        has_attachments=request.args.get("attachments") == "1",
+        date_from=date_from,
+        date_to=date_to,
         page=int(request.args.get("page") or 1),
     )
     for row in data.get("rows", []):
-        mobile = row.get("WhatsAppNumber") or row.get("MobileNumber") or row.get("LeadMobile")
+        mobile = (
+            row.get("ContactMobile")
+            or row.get("WhatsAppNumber")
+            or row.get("MobileNumber")
+            or row.get("LeadMobile")
+        )
         row["wa_url"] = wa_me_url(mobile)
     return jsonify({"ok": True, **data})
 
@@ -411,19 +523,71 @@ def conversation_messages(conversation_id: int):
 
 @crm_api_bp.route("/conversations/<int:conversation_id>/reply", methods=["POST"])
 @login_required
+@require_crm_capability("crm.reply")
 def conversation_reply(conversation_id: int):
     payload = request.get_json(silent=True) or {}
     body = (payload.get("body") or "").strip()
     if not body:
         return jsonify({"ok": False, "error": "Message body required"}), 400
-    channel = payload.get("channel") or "Internal"
+    conv = CommunicationService().get_conversation(conversation_id)
+    if not conv:
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
+
+    channel = payload.get("channel") or conv.get("Channel") or "Internal"
     is_note = bool(payload.get("is_internal_note"))
+    delivery_status = None
+    external_id = None
+    error_detail = None
+    send_result = None
+
+    if not is_note and channel == "WhatsApp":
+        mobile = (
+            conv.get("ContactMobile")
+            or conv.get("WhatsAppNumber")
+            or conv.get("MobileNumber")
+            or conv.get("LeadMobile")
+        )
+        provider = get_whatsapp_provider()
+        send_result = provider.send_message(mobile or "", body)
+        if send_result.get("ok"):
+            external_id = send_result.get("external_message_id")
+            delivery_status = "Sent"
+        else:
+            delivery_status = "Failed"
+            error_detail = send_result.get("error")
+            # Still store the outbound attempt for auditability
+    elif not is_note and channel == "Email":
+        to_email = conv.get("ContactEmail") or conv.get("EmailID") or conv.get("LeadEmail")
+        send_result = EmailChannelService().send_reply(
+            to_email=to_email or "",
+            body=body,
+            subject=f"Re: {conv.get('Subject') or 'JTCS'}",
+            conversation_id=conversation_id,
+        )
+        if send_result.get("ok"):
+            external_id = send_result.get("external_message_id")
+            delivery_status = "Sent"
+        else:
+            delivery_status = "Failed"
+            error_detail = send_result.get("error")
+    elif not is_note and channel == "SMS":
+        send_result = SmsGatewayProvider().send_sms(
+            conv.get("ContactMobile") or conv.get("MobileNumber") or "",
+            body,
+        )
+        delivery_status = "Failed"
+        error_detail = send_result.get("error")
+
     msg_id = CommunicationService().add_message(
         conversation_id,
         body=body,
         channel=channel,
         direction="Internal" if is_note else "Outbound",
         is_internal_note=is_note,
+        external_message_id=external_id,
+        delivery_status=delivery_status,
+        error_detail=error_detail,
+        media_type="text",
         user_id=_uid(),
         user_name=_uname(),
         bump_unread=False,
@@ -432,26 +596,140 @@ def conversation_reply(conversation_id: int):
         event_type="InternalNote" if is_note else "MessageSent",
         title="Internal note" if is_note else f"{channel} message sent",
         description=body[:500],
-        customer_id=(CommunicationService().get_conversation(conversation_id) or {}).get("CustomerID"),
-        lead_id=(CommunicationService().get_conversation(conversation_id) or {}).get("LeadID"),
+        customer_id=conv.get("CustomerID"),
+        lead_id=conv.get("LeadID"),
         entity_type="CrmMessage",
         entity_id=msg_id,
         user_id=_uid(),
         user_name=_uname(),
     )
-    return jsonify({"ok": True, "message_id": msg_id})
+    resp = {"ok": True, "message_id": msg_id, "delivery_status": delivery_status}
+    if send_result and not send_result.get("ok") and channel in {"WhatsApp", "Email"}:
+        resp["warning"] = send_result.get("error")
+    return jsonify(resp)
+
+
+@crm_api_bp.route("/conversations/<int:conversation_id>/attachments", methods=["POST"])
+@login_required
+@require_crm_capability("crm.reply")
+def conversation_attachments(conversation_id: int):
+    """Upload attachment and optionally send via WhatsApp Cloud API."""
+    from pathlib import Path
+    import mimetypes
+    import uuid
+
+    conv = CommunicationService().get_conversation(conversation_id)
+    if not conv:
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "error": "file required"}), 400
+    channel = request.form.get("channel") or conv.get("Channel") or "WhatsApp"
+    caption = (request.form.get("caption") or request.form.get("body") or "").strip()
+    folder = Path(current_app.config.get("CRM_WHATSAPP_MEDIA_FOLDER")
+                  or (Path(current_app.config["UPLOAD_FOLDER"]) / "whatsapp_media"))
+    folder.mkdir(parents=True, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in f.filename)[:180]
+    dest = folder / f"{uuid.uuid4().hex}_{safe}"
+    f.save(dest)
+    mime = mimetypes.guess_type(str(dest))[0] or f.mimetype or "application/octet-stream"
+    if mime.startswith("image/"):
+        media_type = "image"
+    elif mime.startswith("audio/"):
+        media_type = "audio"
+    elif mime.startswith("video/"):
+        media_type = "video"
+    else:
+        media_type = "document"
+    try:
+        rel = dest.relative_to(Path(current_app.config["UPLOAD_FOLDER"]))
+        store_path = f"uploads/{rel.as_posix()}"
+    except ValueError:
+        store_path = str(dest)
+
+    external_id = None
+    delivery_status = None
+    error_detail = None
+    if channel == "WhatsApp":
+        mobile = (
+            conv.get("ContactMobile")
+            or conv.get("WhatsAppNumber")
+            or conv.get("MobileNumber")
+            or conv.get("LeadMobile")
+        )
+        provider = get_whatsapp_provider()
+        # Prefer media upload + id when Cloud API
+        send_result = {"ok": False, "error": "Provider cannot send media"}
+        try:
+            from app.modules.communication.whatsapp_provider import WhatsAppCloudApiProvider
+            from app.modules.settings.services import IntegrationSettingsService
+
+            if isinstance(provider, WhatsAppCloudApiProvider):
+                cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta")
+                client = provider._client()
+                uploaded = client.upload_media(cfg["phone_number_id"], dest, mime_type=mime)
+                media_id = uploaded.get("id")
+                send_result = provider.send_media(
+                    mobile or "",
+                    media_type=media_type,
+                    media_id=media_id,
+                    caption=caption or None,
+                    filename=safe,
+                )
+        except Exception as exc:
+            send_result = {"ok": False, "error": str(exc)}
+        if send_result.get("ok"):
+            external_id = send_result.get("external_message_id")
+            delivery_status = "Sent"
+        else:
+            delivery_status = "Failed"
+            error_detail = send_result.get("error")
+
+    msg_id = CommunicationService().add_message(
+        conversation_id,
+        body=caption or f"[{media_type}] {safe}",
+        channel=channel,
+        direction="Outbound",
+        attachment_path=store_path,
+        attachment_name=safe,
+        attachment_mime_type=mime,
+        attachment_size_bytes=dest.stat().st_size,
+        media_type=media_type,
+        external_message_id=external_id,
+        delivery_status=delivery_status,
+        error_detail=error_detail,
+        user_id=_uid(),
+        user_name=_uname(),
+        bump_unread=False,
+    )
+    return jsonify(
+        {
+            "ok": True,
+            "message_id": msg_id,
+            "attachment_path": store_path,
+            "delivery_status": delivery_status,
+            "warning": error_detail,
+        }
+    )
 
 
 @crm_api_bp.route("/conversations/<int:conversation_id>", methods=["PATCH"])
 @login_required
 def conversation_update(conversation_id: int):
     payload = request.get_json(silent=True) or {}
+    if payload.get("status") == "Closed" and not user_has_capability("crm.close"):
+        return jsonify({"ok": False, "error": "Permission denied"}), 403
+    if "assigned_user_id" in payload and not user_has_capability("crm.assign"):
+        return jsonify({"ok": False, "error": "Permission denied"}), 403
     CommunicationService().update_conversation(
         conversation_id,
         status=payload.get("status"),
         priority=payload.get("priority"),
         assigned_user_id=payload.get("assigned_user_id"),
         assign_set="assigned_user_id" in payload,
+        is_pinned=payload.get("is_pinned") if "is_pinned" in payload else None,
+        is_archived=payload.get("is_archived") if "is_archived" in payload else None,
+        is_starred=payload.get("is_starred") if "is_starred" in payload else None,
     )
     return jsonify({"ok": True})
 
@@ -535,6 +813,8 @@ def followups_list():
             "ok": True,
             **CrmFollowUpService().list_followups(
                 status=request.args.get("status"),
+                followup_type=request.args.get("followup_type"),
+                due_filter=request.args.get("due_filter") or request.args.get("filter"),
                 customer_id=int(request.args["customer_id"]) if request.args.get("customer_id") else None,
                 page=int(request.args.get("page") or 1),
             ),
@@ -772,6 +1052,160 @@ def ai_draft():
 
 
 # ---------------------------------------------------------------------------
+# Quick replies / templates / call logs / email / Phase 2 stubs
+# ---------------------------------------------------------------------------
+
+
+@crm_api_bp.route("/quick-replies", methods=["GET"])
+@login_required
+def quick_replies_list():
+    return jsonify(
+        {
+            "ok": True,
+            "rows": TemplateService().list_quick_replies(channel=request.args.get("channel")),
+        }
+    )
+
+
+@crm_api_bp.route("/quick-replies", methods=["POST"])
+@login_required
+@require_crm_capability("crm.templates")
+def quick_replies_create():
+    payload = request.get_json(silent=True) or {}
+    try:
+        qid = TemplateService().create_quick_reply(
+            title=payload.get("title") or "",
+            body=payload.get("body") or "",
+            channel=payload.get("channel"),
+            shortcut=payload.get("shortcut"),
+            sort_order=int(payload.get("sort_order") or 0),
+            user_id=_uid(),
+        )
+        return jsonify({"ok": True, "quick_reply_id": qid}), 201
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@crm_api_bp.route("/templates", methods=["GET"])
+@login_required
+def templates_list():
+    return jsonify(
+        {
+            "ok": True,
+            "rows": TemplateService().list_templates(channel=request.args.get("channel")),
+        }
+    )
+
+
+@crm_api_bp.route("/templates", methods=["POST"])
+@login_required
+@require_crm_capability("crm.templates")
+def templates_create():
+    payload = request.get_json(silent=True) or {}
+    try:
+        tid = TemplateService().create_template(
+            name=payload.get("name") or "",
+            body=payload.get("body") or "",
+            channel=payload.get("channel") or "WhatsApp",
+            subject=payload.get("subject"),
+            external_template_name=payload.get("external_template_name"),
+            language_code=payload.get("language_code"),
+            user_id=_uid(),
+        )
+        return jsonify({"ok": True, "template_id": tid}), 201
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@crm_api_bp.route("/call-logs", methods=["GET"])
+@login_required
+@require_crm_capability("crm.call_logs")
+def call_logs_list():
+    return jsonify(
+        {
+            "ok": True,
+            **CallLogService().list_logs(
+                customer_id=int(request.args["customer_id"]) if request.args.get("customer_id") else None,
+                lead_id=int(request.args["lead_id"]) if request.args.get("lead_id") else None,
+                page=int(request.args.get("page") or 1),
+            ),
+        }
+    )
+
+
+@crm_api_bp.route("/call-logs", methods=["POST"])
+@login_required
+@require_crm_capability("crm.call_logs")
+def call_logs_create():
+    payload = request.get_json(silent=True) or {}
+    result = CallLogService().create(
+        direction=payload.get("direction") or "Outgoing",
+        call_status=payload.get("call_status") or "Completed",
+        phone_number=payload.get("phone_number"),
+        customer_id=payload.get("customer_id"),
+        lead_id=payload.get("lead_id"),
+        duration_seconds=payload.get("duration_seconds"),
+        recording_url=payload.get("recording_url"),
+        notes=payload.get("notes"),
+        next_follow_up_at=_parse_dt(payload.get("next_follow_up_at")),
+        called_at=_parse_dt(payload.get("called_at")),
+        user_id=_uid(),
+        user_name=_uname(),
+    )
+    return jsonify({"ok": True, **result}), 201
+
+
+@crm_api_bp.route("/email/sync", methods=["POST"])
+@login_required
+@require_crm_capability("crm.email_sync")
+def email_sync():
+    limit = int((request.get_json(silent=True) or {}).get("limit") or request.args.get("limit") or 30)
+    return jsonify(EmailChannelService().sync_inbox(limit=limit))
+
+
+@crm_api_bp.route("/sms/send", methods=["POST"])
+@login_required
+def sms_send_stub():
+    return jsonify(SmsGatewayProvider().send_sms("", ""))
+
+
+@crm_api_bp.route("/broadcast", methods=["POST"])
+@login_required
+def broadcast_stub():
+    return jsonify(BroadcastStub().create_broadcast())
+
+
+@crm_api_bp.route("/schedule", methods=["POST"])
+@login_required
+def schedule_stub():
+    return jsonify(BroadcastStub().schedule_message())
+
+
+@crm_api_bp.route("/ai/suggest", methods=["POST"])
+@login_required
+def ai_suggest_stub():
+    payload = request.get_json(silent=True) or {}
+    return jsonify(
+        AiChatbotStub().suggest_replies(
+            int(payload.get("conversation_id") or 0),
+            payload.get("last_message"),
+        )
+    )
+
+
+@crm_api_bp.route("/opportunities", methods=["GET"])
+@login_required
+def opportunities_list_stub():
+    return jsonify(OpportunityStub().list_opportunities())
+
+
+@crm_api_bp.route("/export", methods=["POST"])
+@login_required
+def export_stub():
+    return jsonify({"ok": False, "error": "Phase 2 — Export PDF/Excel not enabled"})
+
+
+# ---------------------------------------------------------------------------
 # Notifications + global search
 # ---------------------------------------------------------------------------
 
@@ -781,12 +1215,15 @@ def ai_draft():
 def notifications_unread():
     svc = NotificationService()
     uid = _uid()
+    notif_count = svc.unread_count(uid)
+    msg_count = CommunicationService().unread_message_count()
     return jsonify(
         {
             "ok": True,
-            "unread_count": svc.unread_count(uid),
+            "unread_count": int(notif_count) + int(msg_count),
+            "unread_notifications": int(notif_count),
             "rows": svc.list_for_user(uid, unread_only=False, page=1, page_size=8).get("rows", []),
-            "unread_messages": CommunicationService().unread_message_count(),
+            "unread_messages": int(msg_count),
         }
     )
 

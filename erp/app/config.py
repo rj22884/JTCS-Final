@@ -106,10 +106,20 @@ class Config:
     MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH_MB", "10")) * 1024 * 1024
     UPLOAD_FOLDER = BASE_DIR / "app" / "static" / "uploads"
     CRM_DOCUMENT_FOLDER = UPLOAD_FOLDER / "crm_documents"
+    CRM_WHATSAPP_MEDIA_FOLDER = UPLOAD_FOLDER / "whatsapp_media"
+    CRM_EMAIL_ATTACHMENTS_FOLDER = UPLOAD_FOLDER / "email_attachments"
 
     # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
     WEBSITE_INTAKE_API_KEY = (os.getenv("WEBSITE_INTAKE_API_KEY") or "").strip().strip('"').strip("'")
     NOTIFICATION_POLL_SECONDS = int(os.getenv("NOTIFICATION_POLL_SECONDS", "15"))
+
+    # IMAP inbound for Communication Center Email channel
+    IMAP_SERVER = (os.getenv("IMAP_SERVER") or "").strip().strip('"').strip("'")
+    IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+    IMAP_USE_SSL = _env_bool("IMAP_USE_SSL", "True")
+    IMAP_USERNAME = (os.getenv("IMAP_USERNAME") or os.getenv("MAIL_USERNAME") or "").strip().strip('"').strip("'")
+    IMAP_PASSWORD = (os.getenv("IMAP_PASSWORD") or os.getenv("MAIL_PASSWORD") or "").strip().strip('"').strip("'")
+    IMAP_FOLDER = (os.getenv("IMAP_FOLDER") or "INBOX").strip() or "INBOX"
 
     # Admin Role — database / full backups
     # BACKUP_ROOT = where the app stores downloadable .bak / full zip files.

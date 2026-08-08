@@ -57,6 +57,7 @@ from app.modules.crm.routes import (
     search_api_bp,
 )
 from app.modules.settings.routes import bp as integration_settings_bp
+from app.modules.system_health.routes import bp as system_health_bp
 from app.services.auth_service import AuthService
 from app.services.menu_service import MenuService
 from app.utils.date_format import (
@@ -82,6 +83,7 @@ SETUP_PUBLIC_ENDPOINTS = {
     "customer_portal.login_page",
     "customer_portal.login_api",
     "customer_portal.reset_password_api",
+    "customer_portal.profile_api_legacy",
 }
 
 
@@ -141,6 +143,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(search_api_bp)
     app.register_blueprint(public_intake_bp)
     app.register_blueprint(integration_settings_bp)
+    app.register_blueprint(system_health_bp)
     app.register_blueprint(pages_bp)
 
     # Website intake uses API key auth (no session CSRF token).
@@ -219,6 +222,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Utility menus ensure skipped: %s", exc)
+
+        try:
+            from app.modules.system_health.routes import ensure_system_health_menus
+
+            ensure_system_health_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("System Health menus ensure skipped: %s", exc)
 
         try:
             from app.routes.admin_dashboard import ensure_admin_dashboard_menu

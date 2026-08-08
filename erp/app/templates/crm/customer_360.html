@@ -46,16 +46,28 @@
 
     <div class="jtcs-card crm-c360-section">
       <h2 class="h6 mb-3"><i class="bi bi-chat-dots"></i> Communication</h2>
+      {% set summary = data.communication_summary or {} %}
+      {% if summary %}
+      <div class="d-flex flex-wrap gap-3 mb-3 small">
+        <span><strong>{{ summary.conversation_count|default(0) }}</strong> conversations</span>
+        <span><strong>{{ summary.unread_total|default(0) }}</strong> unread</span>
+        {% for ch, cnt in (summary.by_channel or {}).items() %}
+        <span class="badge text-bg-light border">{{ ch }}: {{ cnt }}</span>
+        {% endfor %}
+        <a class="ms-auto" href="{{ url_for('crm.inbox_page') }}">Open Inbox</a>
+      </div>
+      {% endif %}
       {% if data.conversations %}
       <div class="table-responsive">
         <table class="table table-sm mb-0">
-          <thead><tr><th>Subject</th><th>Channel</th><th>Status</th><th>Last Message</th></tr></thead>
+          <thead><tr><th>Subject</th><th>Channel</th><th>Status</th><th>Unread</th><th>Last Message</th></tr></thead>
           <tbody>
             {% for c in data.conversations %}
             <tr>
-              <td>{{ c.Subject or '—' }}</td>
+              <td><a href="{{ url_for('crm.inbox_page') }}?c={{ c.ConversationID }}&channel={{ c.Channel or '' }}">{{ c.Subject or '—' }}</a></td>
               <td>{{ c.Channel or '—' }}</td>
               <td>{{ c.Status or '—' }}</td>
+              <td>{{ c.UnreadCount or 0 }}</td>
               <td>{{ c.LastMessageAt | display_date if c.LastMessageAt else '—' }}</td>
             </tr>
             {% endfor %}

@@ -3,10 +3,12 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260802b">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260807wa2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
 {% block content %}
+{% set wa = whatsapp_card or {} %}
 <div class="intset-page"
      id="intsetPage"
      data-csrf="{{ csrf_token() }}"
@@ -18,9 +20,112 @@
      data-api-select-business="{{ url_for('integration_settings.api_whatsapp_select_business') }}"
      data-api-select-waba="{{ url_for('integration_settings.api_whatsapp_select_waba') }}"
      data-api-select-phone="{{ url_for('integration_settings.api_whatsapp_select_phone') }}"
-     data-api-token-guide="{{ url_for('integration_settings.api_whatsapp_token_guide') }}">
+     data-api-token-guide="{{ url_for('integration_settings.api_whatsapp_token_guide') }}"
+     data-api-refresh="{{ url_for('integration_settings.api_whatsapp_refresh_metadata') }}"
+     data-api-token-health="{{ url_for('integration_settings.api_whatsapp_token_health') }}"
+     data-api-subscribe="{{ url_for('integration_settings.api_whatsapp_subscribe_webhooks') }}"
+     data-api-unsubscribe="{{ url_for('integration_settings.api_whatsapp_unsubscribe_webhooks') }}"
+     data-api-audit="{{ url_for('integration_settings.api_whatsapp_audit') }}"
+     data-api-account-card="{{ url_for('integration_settings.api_whatsapp_account_card') }}"
+     data-api-health-dashboard="{{ url_for('integration_settings.api_health_dashboard') }}"
+     data-api-health-scan="{{ url_for('integration_settings.api_health_scan') }}"
+     data-api-health-detail="{{ url_for('integration_settings.api_health_detail', provider='__PROVIDER__') }}"
+     data-api-health-refresh="{{ url_for('integration_settings.api_health_refresh', provider='__PROVIDER__') }}"
+     data-api-health-test="{{ url_for('integration_settings.api_health_test', provider='__PROVIDER__') }}"
+     data-api-health-alerts="{{ url_for('integration_settings.api_health_alerts') }}"
+     data-api-health-history="{{ url_for('integration_settings.api_health_history') }}"
+     data-api-health-export="{{ url_for('integration_settings.api_health_export') }}">
 
   <div class="alert intset-alert" id="intsetAlert" role="alert"></div>
+
+  <ul class="nav intset-primary-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="intsetPrimaryTab-config" data-bs-toggle="tab"
+              data-bs-target="#intsetPrimaryPane-config" type="button" role="tab"
+              aria-controls="intsetPrimaryPane-config" aria-selected="true">
+        <i class="bi bi-sliders"></i> Configuration
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="intsetPrimaryTab-health" data-bs-toggle="tab"
+              data-bs-target="#intsetPrimaryPane-health" type="button" role="tab"
+              aria-controls="intsetPrimaryPane-health" aria-selected="false">
+        <i class="bi bi-heart-pulse"></i> Integration Health
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+  <div class="tab-pane fade show active" id="intsetPrimaryPane-config" role="tabpanel"
+       aria-labelledby="intsetPrimaryTab-config">
+
+  {# Meta WhatsApp health / account strip (extends existing page — not a redesign) #}
+  <div class="intset-wa-panel mb-3" id="intsetWaPanel" data-wa-panel>
+    <div class="row g-2">
+      <div class="col-lg-4">
+        <div class="intset-glass-card h-100">
+          <div class="d-flex align-items-start gap-2">
+            <div class="intset-avatar"><i class="bi bi-whatsapp"></i></div>
+            <div class="flex-grow-1">
+              <div class="fw-semibold" data-wa-business-name>{{ wa.business_name or 'Meta WhatsApp' }}</div>
+              <div class="small text-muted" data-wa-display-name>{{ wa.display_name or '—' }}</div>
+              <div class="small" data-wa-phone>{{ wa.phone_number or 'No phone selected' }}</div>
+              <div class="mt-2">
+                <span class="intset-status" data-wa-status-badge>{{ wa.connection_status or 'Not Configured' }}</span>
+              </div>
+            </div>
+          </div>
+          <dl class="intset-meta-dl mt-3 mb-0 small">
+            <div><dt>Quality</dt><dd data-wa-quality>{{ wa.quality_rating or '—' }}</dd></div>
+            <div><dt>Messaging limit</dt><dd data-wa-limit>{{ wa.messaging_limit or '—' }}</dd></div>
+            <div><dt>Account</dt><dd data-wa-account>{{ wa.account_status or '—' }}</dd></div>
+            <div><dt>Token</dt><dd data-wa-token-display>{{ wa.token_display or '—' }}</dd></div>
+            <div><dt>Expires</dt><dd data-wa-token-expires>{{ wa.token_expires_at or '—' }}</dd></div>
+            <div><dt>Last sync</dt><dd data-wa-last-sync>{{ wa.last_sync_at or '—' }}</dd></div>
+          </dl>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="intset-glass-card h-100">
+          <h3 class="h6 mb-2"><i class="bi bi-broadcast"></i> Webhook</h3>
+          <div class="small text-break mb-2" data-wa-webhook-url>{{ (wa.webhook or {}).webhook_url or '—' }}</div>
+          <div class="alert alert-warning py-1 px-2 small mb-2 {% if not (wa.webhook or {}).localhost_warning %}d-none{% endif %}" data-wa-localhost-warn>
+            {{ (wa.webhook or {}).localhost_warning or '' }}
+          </div>
+          <div class="small mb-2">
+            Verify token:
+            <span class="badge {% if (wa.webhook or {}).verify_token_configured %}text-bg-success{% else %}text-bg-danger{% endif %}" data-wa-verify-badge>
+              {{ 'Configured' if (wa.webhook or {}).verify_token_configured else 'Missing' }}
+            </span>
+          </div>
+          <div class="small mb-2">Subscribed events:</div>
+          <div class="intset-event-chips" data-wa-events>
+            {% for ev in (wa.webhook or {}).subscribed_fields or [] %}
+            <span class="badge text-bg-light border">{{ ev }}</span>
+            {% else %}
+            <span class="text-muted">None yet</span>
+            {% endfor %}
+          </div>
+          <div class="d-flex flex-wrap gap-1 mt-3">
+            <button type="button" class="btn btn-outline-primary btn-sm" data-intset-subscribe><i class="bi bi-link-45deg"></i> Resubscribe</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-unsubscribe>Unsubscribe</button>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="intset-glass-card h-100">
+          <h3 class="h6 mb-2"><i class="bi bi-heart-pulse"></i> Connection Health</h3>
+          <div class="intset-health-grid" data-test-checks></div>
+          <div class="d-flex flex-wrap gap-1 mt-3">
+            <button type="button" class="btn btn-outline-primary btn-sm" data-intset-refresh-meta><i class="bi bi-arrow-repeat"></i> Refresh Metadata</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-token-health><i class="bi bi-shield-check"></i> Check Token</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-load-audit><i class="bi bi-journal-text"></i> Audit Log</button>
+          </div>
+          <div class="mt-2 small" id="intsetAuditBox"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="intset-shell">
     <ul class="nav intset-tabs" role="tablist">
@@ -56,12 +161,19 @@
           Configure {{ p.label }} credentials for future use.
           Secrets are encrypted in the database and masked on screen.
           {% if p.code == 'whatsapp_meta' %}
-          Use <strong>Connect Meta</strong> to auto-discover Business / WABA / Phone details.
-          App Secret and Permanent Access Token remain manual.
+          Sirf <strong>App ID</strong> aur <strong>App Secret</strong> (Meta Developer App se) fill karke
+          <strong>Save &amp; Connect Facebook</strong> dabayein.
+          ERP aapko Facebook ke official login page par bhejega — <strong>password aur OTP wahan</strong> enter karein
+          (ERP kabhi Facebook password nahi maangta / store nahi karta).
+          Login ke baad Business → WABA → Phone select karke baaki fields auto-fill ho jayengi.
           {% endif %}
         </p>
 
         {% if p.code == 'whatsapp_meta' %}
+        <div class="alert alert-info py-2 small mb-3" role="note">
+          <strong>Flow:</strong> App ID + App Secret → Save → Facebook password/OTP → Business/WABA/Phone choose →
+          Token encrypted save. Baaki IDs manually type karne ki zarurat nahi.
+        </div>
         <div class="intset-missing {% if not p.get('missing_labels') %}d-none{% endif %}" data-missing-box>
           <strong>Missing:</strong> <span data-missing-list>{{ (p.get('missing_labels') or [])|join(', ') }}</span>
         </div>
@@ -69,8 +181,13 @@
 
         <div class="row g-3">
           {% for field in p.fields %}
-          <div class="col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}">
-            <label class="form-label" for="fld-{{ p.code }}-{{ field.key }}">{{ field.label }}</label>
+          <div class="col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret'] %} intset-primary-cred{% endif %}">
+            <label class="form-label" for="fld-{{ p.code }}-{{ field.key }}">
+              {{ field.label }}
+              {% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret'] %}
+              <span class="badge text-bg-primary">Required to connect</span>
+              {% endif %}
+            </label>
             {% if field.input == 'readonly' %}
               <div>
                 <span class="intset-status"
@@ -109,13 +226,19 @@
         </div>
 
         <div class="intset-actions">
+          {% if p.code == 'whatsapp_meta' %}
+          <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
+            <i class="bi bi-meta"></i> Save &amp; Connect Facebook
+          </button>
+          <button type="button" class="btn btn-success btn-sm" data-intset-connect-meta>
+            <i class="bi bi-box-arrow-up-right"></i> Connect Meta again
+          </button>
+          {% else %}
           <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
             <i class="bi bi-save"></i> Save
           </button>
+          {% endif %}
           {% if p.code == 'whatsapp_meta' %}
-          <button type="button" class="btn btn-success btn-sm" data-intset-connect-meta>
-            <i class="bi bi-meta"></i> Connect Meta
-          </button>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-token-guide>
             <i class="bi bi-journal-text"></i> Generate Access Token Guide
           </button>
@@ -140,10 +263,108 @@
         </div>
 
         {% if p.code == 'whatsapp_meta' %}
-        <div class="mt-3" data-test-checks></div>
+        <div class="mt-2 small text-muted" data-access-token-hint>
+          {% if p.get('access_token_display') %}
+          Stored token: <code>{{ p.access_token_display }}</code>
+          {% if p.get('token_expires_at') %} · expires {{ p.token_expires_at }} UTC{% endif %}
+          {% endif %}
+        </div>
+        {% if p.get('localhost_warning') %}
+        <div class="alert alert-warning py-2 small mt-2 mb-0">{{ p.localhost_warning }}</div>
+        {% endif %}
+        <div class="mt-3" data-test-checks-form></div>
         {% endif %}
       </div>
       {% endfor %}
+    </div>
+  </div>
+  </div>{# /Configuration pane #}
+
+  {# ---------- Integration Health Dashboard ---------- #}
+  <div class="tab-pane fade" id="intsetPrimaryPane-health" role="tabpanel"
+       aria-labelledby="intsetPrimaryTab-health">
+    <div class="ih-dashboard" id="ihDashboard">
+      <div class="ih-toolbar">
+        <div class="ih-global" data-ih-global>
+          <div class="ih-global-ring ih-bar-good"><span>—</span></div>
+          <div>
+            <div class="fw-semibold">Global Health Score</div>
+            <div class="text-muted small">Open this tab to run an automatic scan</div>
+          </div>
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+          <button type="button" class="btn btn-primary btn-sm" data-ih-scan>
+            <i class="bi bi-arrow-repeat"></i> Run Health Scan
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-ih-notify-enable>
+            <i class="bi bi-bell"></i> Enable Browser Alerts
+          </button>
+          <div class="btn-group">
+            <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                    data-bs-toggle="dropdown">Export</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><button type="button" class="dropdown-item" data-ih-export="csv">CSV</button></li>
+              <li><button type="button" class="dropdown-item" data-ih-export="excel">Excel (CSV)</button></li>
+              <li><button type="button" class="dropdown-item" data-ih-export="pdf">PDF (text)</button></li>
+              <li><button type="button" class="dropdown-item" data-ih-export="json">JSON</button></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="ih-summary" data-ih-summary></div>
+
+      <div class="ih-layout">
+        <div>
+          <h2 class="h6 text-uppercase text-muted mb-2">Integrations</h2>
+          <div class="ih-grid" data-ih-grid>
+            <div class="text-muted small p-3">Loading health cards…</div>
+          </div>
+        </div>
+        <aside class="ih-side">
+          <div class="ih-side-card">
+            <h3 class="h6 mb-2"><i class="bi bi-exclamation-triangle"></i> Notification Center</h3>
+            <div data-ih-alerts><div class="text-muted small">No alerts yet.</div></div>
+          </div>
+          <div class="ih-side-card">
+            <h3 class="h6 mb-2"><i class="bi bi-graph-up"></i> Availability</h3>
+            <div class="ih-chart-wrap">
+              <canvas id="ihHistoryChart" aria-label="Health history chart"></canvas>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+  </div>{# /primary tab-content #}
+</div>
+
+{# Health detail side panel #}
+<aside class="ih-panel" id="ihDetailPanel" aria-hidden="true">
+  <div class="ih-panel-header">
+    <strong>Integration details</strong>
+    <button type="button" class="btn btn-sm btn-outline-secondary" data-ih-close aria-label="Close">
+      <i class="bi bi-x-lg"></i>
+    </button>
+  </div>
+  <div class="ih-panel-body" data-ih-panel-body></div>
+</aside>
+
+{# One-time verify token copy dialog #}
+<div class="modal fade" id="intsetVerifyTokenModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Webhook Verify Token</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted">Copy this token into Meta Developer → WhatsApp → Configuration → Verify token. It is shown once.</p>
+        <div class="input-group input-group-sm">
+          <input type="text" class="form-control font-monospace" id="intsetVerifyTokenValue" readonly>
+          <button type="button" class="btn btn-outline-primary" id="intsetVerifyTokenCopy"><i class="bi bi-clipboard"></i> Copy</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -181,5 +402,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260802d"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260807wa2"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

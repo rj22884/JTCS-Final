@@ -22,12 +22,14 @@ def index():
         purposes = PurposeMasterService().list_records(active_only=True)
     except Exception:
         purposes = []
+    account_payload = service.list_accounts()
     return render_template(
         "others/bank_cash_transactions.html",
         page_title="Other Bank/Cash Transactions",
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         default_date=date.today().isoformat(),
-        accounts=service.list_accounts(),
+        accounts=account_payload.get("rows") or [],
+        account_groups=account_payload.get("groups") or [],
         purposes=purposes or [],
         next_voucher=service.next_voucher_no(),
         load_entry_id=request.args.get("load_entry", type=int),
@@ -70,7 +72,14 @@ def grid():
 @bp.route("/accounts", methods=["GET"], strict_slashes=False)
 @login_required
 def accounts():
-    return jsonify({"ok": True, "rows": OthersBankCashService().list_accounts()})
+    payload = OthersBankCashService().list_accounts()
+    return jsonify(
+        {
+            "ok": True,
+            "rows": payload.get("rows") or [],
+            "groups": payload.get("groups") or [],
+        }
+    )
 
 
 @bp.route("/next-voucher", methods=["GET"], strict_slashes=False)

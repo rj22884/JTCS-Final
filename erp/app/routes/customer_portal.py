@@ -12,6 +12,9 @@ from flask import (
     url_for,
 )
 
+from app.customer_master.constants import GENDERS, GST_FILING_FREQUENCIES
+from app.customer_master.countries import COUNTRIES
+from app.customer_portal.constants import PORTAL_MODULES, PORTAL_PROFILE_SECTIONS
 from app.decorators import customer_login_required, customer_password_changed_required
 from app.services.customer_portal_service import CustomerPortalService
 
@@ -26,19 +29,34 @@ def _client_meta() -> tuple[str | None, str | None]:
     return ip, ua
 
 
-def _wants_json() -> bool:
-    if request.is_json:
-        return True
-    accept = request.headers.get("Accept") or ""
-    return "application/json" in accept or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+def _portal_customer_id() -> int | None:
+    raw = session.get("portal_customer_id")
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _start_portal_session(result: dict) -> None:
-    # Keep staff session keys untouched; portal uses separate keys.
     session["portal_customer_id"] = result["customer_id"]
     session["portal_customer_name"] = result.get("customer_name") or ""
     session["portal_password_changed"] = bool(result.get("password_changed"))
     session.permanent = True
+
+
+def _json_error(result: dict):
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "error": result.get("error"),
+                "error_code": result.get("error_code"),
+                "duplicates": result.get("duplicates"),
+                "detected_type": result.get("detected_type"),
+            }
+        ),
+        int(result.get("status_code") or 400),
+    )
 
 
 @bp.route("/login", methods=["GET"], strict_slashes=False)
@@ -69,10 +87,58 @@ def change_password_page():
 @bp.route("/dashboard", methods=["GET"], strict_slashes=False)
 @customer_password_changed_required
 def dashboard():
+    modules = []
+    for key, meta in PORTAL_MODULES.items():
+        href = (
+            url_for("customer_portal.profile_page")
+            if key == "profile"
+            else url_for("customer_portal.module_page", module_key=key)
+        )
+        modules.append({**meta, "key": key, "href": href})
     return render_template(
         "customer_portal/dashboard.html",
         page_title="Customer Dashboard",
         customer_name=session.get("portal_customer_name") or "",
+        modules=modules,
+    )
+
+
+@bp.route("/profile", methods=["GET"], strict_slashes=False)
+@customer_password_changed_required
+def profile_page():
+    cid = _portal_customer_id()
+    result = CustomerPortalService().get_profile(cid)
+    if not result.get("ok"):
+        return redirect(url_for("customer_portal.dashboard"))
+    return render_template(
+        "customer_portal/profile.html",
+        page_title="Customer Profile",
+        customer_name=session.get("portal_customer_name") or "",
+        profile=result["profile"],
+        sections=PORTAL_PROFILE_SECTIONS,
+        genders=GENDERS,
+        countries=COUNTRIES,
+        gst_filing_frequencies=GST_FILING_FREQUENCIES,
+    )
+
+
+@bp.route("/module/<module_key>", methods=["GET"], strict_slashes=False)
+@customer_password_changed_required
+def module_page(module_key: str):
+    key = (module_key or "").strip().lower()
+    if key == "profile":
+        return redirect(url_for("customer_portal.profile_page"))
+    if key not in PORTAL_MODULES:
+        return redirect(url_for("customer_portal.dashboard"))
+    cid = _portal_customer_id()
+    result = CustomerPortalService().get_module_data(cid, key)
+    if not result.get("ok"):
+        return redirect(url_for("customer_portal.dashboard"))
+    return render_template(
+        "customer_portal/module.html",
+        page_title=result.get("title") or "Module",
+        customer_name=session.get("portal_customer_name") or "",
+        module=result,
     )
 
 
@@ -94,27 +160,15 @@ def logout():
 
 @bp.route("/login", methods=["POST"], strict_slashes=False)
 def login_api():
-    """POST /customer/login"""
     payload = request.get_json(silent=True) or request.form.to_dict()
     user_id = (payload.get("user_id") or payload.get("userid") or "").strip()
     password = payload.get("password") or ""
     ip, ua = _client_meta()
     result = CustomerPortalService().login(
-        user_id,
-        password,
-        ip_address=ip,
-        user_agent=ua,
+        user_id, password, ip_address=ip, user_agent=ua
     )
     if not result.get("ok"):
-        body = {
-            "ok": False,
-            "error": result.get("error"),
-            "error_code": result.get("error_code"),
-            "duplicates": result.get("duplicates"),
-            "detected_type": result.get("detected_type"),
-        }
-        return jsonify(body), int(result.get("status_code") or 400)
-
+        return _json_error(result)
     _start_portal_session(result)
     return jsonify(
         {
@@ -130,28 +184,14 @@ def login_api():
 
 @bp.route("/reset-password", methods=["POST"], strict_slashes=False)
 def reset_password_api():
-    """POST /customer/reset-password"""
     payload = request.get_json(silent=True) or request.form.to_dict()
     user_id = (payload.get("user_id") or payload.get("userid") or "").strip()
     ip, ua = _client_meta()
     result = CustomerPortalService().reset_password(
-        user_id,
-        ip_address=ip,
-        user_agent=ua,
+        user_id, ip_address=ip, user_agent=ua
     )
     if not result.get("ok"):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": result.get("error"),
-                    "error_code": result.get("error_code"),
-                    "duplicates": result.get("duplicates"),
-                    "detected_type": result.get("detected_type"),
-                }
-            ),
-            int(result.get("status_code") or 400),
-        )
+        return _json_error(result)
     return jsonify(
         {
             "ok": True,
@@ -165,7 +205,6 @@ def reset_password_api():
 @bp.route("/change-password", methods=["POST"], strict_slashes=False)
 @customer_login_required
 def change_password_api():
-    """POST /customer/change-password"""
     payload = request.get_json(silent=True) or request.form.to_dict()
     result = CustomerPortalService().change_password(
         int(session["portal_customer_id"]),
@@ -174,16 +213,7 @@ def change_password_api():
         payload.get("confirm_password") or "",
     )
     if not result.get("ok"):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": result.get("error"),
-                    "error_code": result.get("error_code"),
-                }
-            ),
-            int(result.get("status_code") or 400),
-        )
+        return _json_error(result)
     session["portal_password_changed"] = True
     return jsonify(
         {
@@ -194,20 +224,74 @@ def change_password_api():
     )
 
 
-@bp.route("/profile", methods=["GET"], strict_slashes=False)
+@bp.route("/api/profile", methods=["GET"], strict_slashes=False)
 @customer_login_required
 def profile_api():
-    """GET /customer/profile"""
-    result = CustomerPortalService().get_profile(int(session["portal_customer_id"]))
+    """GET /customer/api/profile — logged-in customer only."""
+    cid = _portal_customer_id()
+    result = CustomerPortalService().get_profile(cid)
     if not result.get("ok"):
-        return (
-            jsonify(
-                {
-                    "ok": False,
-                    "error": result.get("error"),
-                    "error_code": result.get("error_code"),
-                }
-            ),
-            int(result.get("status_code") or 404),
-        )
+        return _json_error(result)
     return jsonify(result)
+
+
+@bp.route("/api/profile", methods=["POST", "PUT"], strict_slashes=False)
+@customer_password_changed_required
+def profile_update_api():
+    """POST/PUT /customer/api/profile — update own Customer Master profile only."""
+    cid = _portal_customer_id()
+    if cid is None:
+        return jsonify({"ok": False, "error": "Unauthorized.", "error_code": "auth"}), 401
+
+    if request.is_json:
+        payload = request.get_json(silent=True) or {}
+        photo = None
+    else:
+        payload = request.form.to_dict()
+        photo = request.files.get("photo")
+
+    # Security: ignore any customer_id supplied by the client.
+    payload.pop("customer_id", None)
+    payload.pop("customer_name", None)
+    payload.pop("pan_number", None)
+
+    ip, ua = _client_meta()
+    result = CustomerPortalService().update_profile(
+        cid,
+        payload,
+        photo_file=photo,
+        actor_name=session.get("portal_customer_name") or f"Customer:{cid}",
+        ip_address=ip,
+        user_agent=ua,
+    )
+    if not result.get("ok"):
+        return _json_error(result)
+    if result.get("profile", {}).get("customer_name"):
+        session["portal_customer_name"] = result["profile"]["customer_name"]
+    return jsonify(
+        {
+            "ok": True,
+            "message": result.get("message") or "Profile updated successfully.",
+            "profile": result.get("profile"),
+            "changed_fields": result.get("changed_fields") or [],
+        }
+    )
+
+
+@bp.route("/api/module/<module_key>", methods=["GET"], strict_slashes=False)
+@customer_password_changed_required
+def module_api(module_key: str):
+    """GET /customer/api/module/<key> — always scoped to session CustomerID."""
+    cid = _portal_customer_id()
+    key = (module_key or "").strip().lower()
+    result = CustomerPortalService().get_module_data(cid, key)
+    if not result.get("ok"):
+        return _json_error(result)
+    return jsonify(result)
+
+
+# Back-compat alias used by older portal JS.
+@bp.route("/profile-data", methods=["GET"], strict_slashes=False)
+@customer_login_required
+def profile_api_legacy():
+    return profile_api()

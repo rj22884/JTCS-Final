@@ -71,24 +71,48 @@
     return values;
   }
 
+  function resolveStatusCode(status, statusCode) {
+    var text = status || "Not Configured";
+    var code = statusCode || "";
+    if (code) return { text: text, code: code };
+    if (/connected/i.test(text) && !/disconnect/i.test(text)) code = "connected";
+    else if (/expired/i.test(text)) code = "token_expired";
+    else if (/invalid/i.test(text)) code = "invalid_token";
+    else if (/webhook/i.test(text) && /fail/i.test(text)) code = "webhook_failed";
+    else if (/permission/i.test(text)) code = "permission_missing";
+    else if (/disconnect/i.test(text)) code = "disconnected";
+    else if (/partial/i.test(text)) code = "partial";
+    else code = "not_configured";
+    return { text: text, code: code };
+  }
+
   function setStatusBadge(pane, status, statusCode) {
     var statusEl = pane.querySelector("[data-connection-status]");
     if (!statusEl) return;
-    var text = status || "Not Configured";
-    var code = statusCode || "not_configured";
-    if (/connected/i.test(text)) code = "connected";
-    else if (/partial/i.test(text)) code = "partial";
-    else code = "not_configured";
-
-    var icon = code === "connected" ? "🟢" : code === "partial" ? "🟡" : "🔴";
+    var resolved = resolveStatusCode(status, statusCode);
+    var text = resolved.text;
+    var code = resolved.code;
+    var icon =
+      code === "connected" ? "🟢" : code === "partial" ? "🟡" : "🔴";
     statusEl.textContent = icon + " " + text;
-    statusEl.classList.remove("is-connected", "is-partial", "is-missing", "is-not-configured");
+    statusEl.className = "intset-status";
     if (code === "connected") statusEl.classList.add("is-connected");
     else if (code === "partial") statusEl.classList.add("is-partial");
+    else if (code === "token_expired" || code === "invalid_token") statusEl.classList.add("is-expired");
     else statusEl.classList.add("is-not-configured");
 
     var hidden = pane.querySelector('[data-setting-key="connection_status"]');
     if (hidden) hidden.value = text;
+
+    var waBadge = document.querySelector("[data-wa-status-badge]");
+    if (waBadge) {
+      waBadge.textContent = icon + " " + text;
+      waBadge.className = "intset-status";
+      if (code === "connected") waBadge.classList.add("is-connected");
+      else if (code === "partial") waBadge.classList.add("is-partial");
+      else if (code === "token_expired" || code === "invalid_token") waBadge.classList.add("is-expired");
+      else waBadge.classList.add("is-not-configured");
+    }
   }
 
   function setMissing(pane, labels) {
@@ -141,13 +165,22 @@
   }
 
   function showChecks(pane, checks) {
-    var wrap = pane.querySelector("[data-test-checks]");
-    if (!wrap) return;
+    var wraps = [];
+    if (pane) {
+      var a = pane.querySelector("[data-test-checks], [data-test-checks-form]");
+      if (a) wraps.push(a);
+    }
+    var panel = document.querySelector("[data-wa-panel] [data-test-checks]");
+    if (panel && wraps.indexOf(panel) < 0) wraps.push(panel);
+    if (!wraps.length) return;
+    var html = "";
     if (!checks || !checks.length) {
-      wrap.innerHTML = "";
+      wraps.forEach(function (w) {
+        w.innerHTML = "";
+      });
       return;
     }
-    var html = "<ul class='intset-checks mb-0'>";
+    html = "<ul class='intset-checks mb-0'>";
     checks.forEach(function (c) {
       var cls = c.skipped ? "skip" : c.ok ? "ok" : "bad";
       var mark = c.skipped ? "○" : c.ok ? "✓" : "✗";
@@ -163,7 +196,46 @@
         "</li>";
     });
     html += "</ul>";
-    wrap.innerHTML = html;
+    wraps.forEach(function (w) {
+      w.innerHTML = html;
+    });
+  }
+
+  function applyWaCard(card) {
+    if (!card) return;
+    function set(sel, val) {
+      var el = document.querySelector(sel);
+      if (el) el.textContent = val == null || val === "" ? "—" : String(val);
+    }
+    set("[data-wa-business-name]", card.business_name || "Meta WhatsApp");
+    set("[data-wa-display-name]", card.display_name || "—");
+    set("[data-wa-phone]", card.phone_number || "No phone selected");
+    set("[data-wa-quality]", card.quality_rating);
+    set("[data-wa-limit]", card.messaging_limit);
+    set("[data-wa-account]", card.account_status);
+    set("[data-wa-token-display]", card.token_display);
+    set("[data-wa-token-expires]", card.token_expires_at);
+    set("[data-wa-last-sync]", card.last_sync_at);
+    set("[data-wa-webhook-url]", (card.webhook && card.webhook.webhook_url) || "—");
+    var warn = document.querySelector("[data-wa-localhost-warn]");
+    if (warn) {
+      var msg = card.webhook && card.webhook.localhost_warning;
+      warn.textContent = msg || "";
+      warn.classList.toggle("d-none", !msg);
+    }
+    var events = document.querySelector("[data-wa-events]");
+    if (events) {
+      var fields = (card.webhook && card.webhook.subscribed_fields) || [];
+      events.innerHTML = fields.length
+        ? fields
+            .map(function (ev) {
+              return '<span class="badge text-bg-light border">' + ev + "</span>";
+            })
+            .join(" ")
+        : '<span class="text-muted">None yet</span>';
+    }
+    var pane = document.querySelector('[data-provider-pane="whatsapp_meta"]');
+    if (pane) setStatusBadge(pane, card.connection_status, card.status_code);
   }
 
   function openSelectModal(title, items, valueKey, labelFn, onPick) {
@@ -306,7 +378,14 @@
     );
     applyValues(pane, data.field_values || {}, data);
     setMissing(pane, data.missing_labels || []);
-    showAlert(alertEl, data.message || "Phone selected and fields populated.", "success");
+    var msg = data.message || "Phone selected and fields populated.";
+    if (data.localhost_warning) msg += " " + data.localhost_warning;
+    showAlert(alertEl, msg, data.localhost_warning ? "warning" : "success");
+    if (urls.accountCard) {
+      try {
+        applyWaCard(await api(urls.accountCard, {}, root));
+      } catch (_e) {}
+    }
   }
 
   function init() {
@@ -323,6 +402,12 @@
       selectWaba: root.getAttribute("data-api-select-waba"),
       selectPhone: root.getAttribute("data-api-select-phone"),
       tokenGuide: root.getAttribute("data-api-token-guide"),
+      refresh: root.getAttribute("data-api-refresh"),
+      tokenHealth: root.getAttribute("data-api-token-health"),
+      subscribe: root.getAttribute("data-api-subscribe"),
+      unsubscribe: root.getAttribute("data-api-unsubscribe"),
+      audit: root.getAttribute("data-api-audit"),
+      accountCard: root.getAttribute("data-api-account-card"),
     };
     var alertEl = document.getElementById("intsetAlert");
 
@@ -343,7 +428,26 @@
           );
           applyValues(pane, data.field_values || data.values || {}, data);
           setMissing(pane, data.missing_labels || []);
-          showAlert(alertEl, "Settings saved for " + provider + ".", "success");
+
+          // WhatsApp: Save → Facebook OAuth (password / OTP on Facebook, not in ERP)
+          if (provider === "whatsapp_meta" && data.auto_connect && data.authorize_url) {
+            showAlert(
+              alertEl,
+              data.message ||
+                "Saved. Facebook login page open ho rahi hai — password/OTP wahan daalein…",
+              "info"
+            );
+            window.setTimeout(function () {
+              window.location.href = data.authorize_url;
+            }, 600);
+            return;
+          }
+
+          showAlert(
+            alertEl,
+            data.message || "Settings saved for " + provider + ".",
+            "success"
+          );
         } catch (err) {
           showAlert(alertEl, err.message || "Save failed", "danger");
         } finally {
@@ -361,12 +465,111 @@
           var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
           applyValues(pane, data.field_values || {}, data);
           var input = pane && pane.querySelector('[data-setting-key="webhook_verify_token"]');
-          if (input && data.webhook_verify_token) input.value = data.webhook_verify_token;
+          if (input) input.value = "********";
           showAlert(alertEl, data.message || "Verify token generated.", "success");
+          if (data.webhook_verify_token_plain) {
+            var tokInput = document.getElementById("intsetVerifyTokenValue");
+            if (tokInput) tokInput.value = data.webhook_verify_token_plain;
+            var modalEl = document.getElementById("intsetVerifyTokenModal");
+            if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+          }
         } catch (err) {
           showAlert(alertEl, err.message || "Generate failed", "danger");
         } finally {
           genBtn.disabled = false;
+        }
+      });
+    }
+
+    var copyBtn = document.getElementById("intsetVerifyTokenCopy");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", function () {
+        var tokInput = document.getElementById("intsetVerifyTokenValue");
+        if (!tokInput || !tokInput.value) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(tokInput.value).then(function () {
+            showAlert(alertEl, "Verify token copied.", "success");
+          });
+        } else {
+          tokInput.select();
+          document.execCommand("copy");
+          showAlert(alertEl, "Verify token copied.", "success");
+        }
+      });
+    }
+
+    function bindSimplePost(selector, urlKey, okMsg) {
+      var btn = root.querySelector(selector);
+      if (!btn || !urls[urlKey]) return;
+      btn.addEventListener("click", async function () {
+        btn.disabled = true;
+        try {
+          var data = await api(urls[urlKey], { method: "POST", body: {} }, root);
+          showAlert(alertEl, data.message || okMsg, data.ok === false ? "warning" : "success");
+          if (data.field_values) {
+            var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
+            applyValues(pane, data.field_values, data);
+          }
+          if (urls.accountCard) applyWaCard(await api(urls.accountCard, {}, root));
+        } catch (err) {
+          showAlert(alertEl, err.message || "Request failed", "danger");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    }
+    bindSimplePost("[data-intset-refresh-meta]", "refresh", "Metadata refreshed.");
+    bindSimplePost("[data-intset-subscribe]", "subscribe", "Webhooks subscribed.");
+    bindSimplePost("[data-intset-unsubscribe]", "unsubscribe", "Webhooks unsubscribed.");
+
+    var healthBtn = root.querySelector("[data-intset-token-health]");
+    if (healthBtn && urls.tokenHealth) {
+      healthBtn.addEventListener("click", async function () {
+        healthBtn.disabled = true;
+        try {
+          var data = await api(urls.tokenHealth, {}, root);
+          var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
+          if (pane) setStatusBadge(pane, data.status, data.status_code);
+          showAlert(alertEl, data.message || data.status || "Token checked.", data.ok ? "success" : "warning");
+          if (urls.accountCard) applyWaCard(await api(urls.accountCard, {}, root));
+        } catch (err) {
+          showAlert(alertEl, err.message || "Token check failed", "danger");
+        } finally {
+          healthBtn.disabled = false;
+        }
+      });
+    }
+
+    var auditBtn = root.querySelector("[data-intset-load-audit]");
+    if (auditBtn && urls.audit) {
+      auditBtn.addEventListener("click", async function () {
+        try {
+          var data = await api(urls.audit + "?limit=20", {}, root);
+          var box = document.getElementById("intsetAuditBox");
+          if (!box) return;
+          var rows = data.rows || [];
+          if (!rows.length) {
+            box.innerHTML = "<span class='text-muted'>No audit entries.</span>";
+            return;
+          }
+          box.innerHTML =
+            "<div class='table-responsive'><table class='table table-sm mb-0'><thead><tr><th>When</th><th>Key</th><th>By</th></tr></thead><tbody>" +
+            rows
+              .map(function (r) {
+                return (
+                  "<tr><td>" +
+                  (r.CreatedOn || "") +
+                  "</td><td>" +
+                  (r.SettingKey || "") +
+                  "</td><td>" +
+                  (r.ChangedByUserName || r.ChangedByUserID || "") +
+                  "</td></tr>"
+                );
+              })
+              .join("") +
+            "</tbody></table></div>";
+        } catch (err) {
+          showAlert(alertEl, err.message || "Audit load failed", "danger");
         }
       });
     }

@@ -6,7 +6,10 @@
     empty: document.getElementById("obcGridEmpty"),
     count: document.getElementById("obcGridCount"),
     modalEl: document.getElementById("obcEntryModal"),
+    modalDialog: document.getElementById("obcEntryModalDialog"),
     modalTitle: document.getElementById("obcEntryModalTitle"),
+    maximizeBtn: document.getElementById("obcMaximizeBtn"),
+    maximizeIcon: document.getElementById("obcMaximizeIcon"),
     form: document.getElementById("obcEntryForm"),
     entryId: document.getElementById("obcEntryId"),
     workDate: document.getElementById("obcWorkDate"),
@@ -26,6 +29,26 @@
   let gridSortKey = "work_date";
   let gridSortDir = "desc";
   const gridFilters = {};
+  let modalMaximized = false;
+
+  function setModalMaximized(next) {
+    modalMaximized = !!next;
+    if (els.modalEl) {
+      els.modalEl.classList.toggle("obc-modal-maximized", modalMaximized);
+    }
+    if (els.maximizeBtn) {
+      els.maximizeBtn.title = modalMaximized ? "Restore" : "Maximize";
+      els.maximizeBtn.setAttribute(
+        "aria-label",
+        modalMaximized ? "Restore" : "Maximize"
+      );
+    }
+    if (els.maximizeIcon) {
+      els.maximizeIcon.className = modalMaximized
+        ? "bi bi-fullscreen-exit"
+        : "bi bi-arrows-fullscreen";
+    }
+  }
 
   function csrfToken() {
     return els.form?.querySelector('[name="csrf_token"]')?.value || "";
@@ -220,32 +243,84 @@
     refreshGridView();
   }
 
-  async function fillAccounts(selectedCredit, selectedDebit) {
-    const res = await fetch(window.OBC_API.accounts, { headers: { Accept: "application/json" } });
-    const data = await parseJsonResponse(res);
-    const options = ['<option value="">Select account...</option>']
-      .concat(
-        (data.rows || []).map(function (acc) {
-          return (
-            '<option value="' +
-            acc.account_id +
+  function buildAccountOptionsHtml(groups, rows, placeholder) {
+    const parts = ['<option value="">' + escapeHtml(placeholder) + "</option>"];
+    const groupList = Array.isArray(groups) && groups.length
+      ? groups
+      : [
+          {
+            label: "Accounts",
+            accounts: rows || [],
+          },
+        ];
+    groupList.forEach(function (group) {
+      const accounts = group.accounts || [];
+      if (!accounts.length) return;
+      parts.push(
+        '<optgroup label="' +
+          escapeHtml(group.label || group.group_name || "Group") +
+          '">'
+      );
+      accounts.forEach(function (acc) {
+        const value = acc.ledger_key || (acc.account_id != null ? "bank-" + acc.account_id : "");
+        if (!value) return;
+        parts.push(
+          '<option value="' +
+            escapeHtml(value) +
             '">' +
             escapeHtml(acc.label) +
             "</option>"
-          );
-        })
-      )
-      .join("");
+        );
+      });
+      parts.push("</optgroup>");
+    });
+    return parts.join("");
+  }
+
+  function pickLedgerSelection(sel) {
+    if (sel == null || sel === "") return { key: "", id: null };
+    if (typeof sel === "object") {
+      return {
+        key: sel.ledger_key ? String(sel.ledger_key) : "",
+        id: sel.account_id != null && sel.account_id !== "" ? sel.account_id : null,
+      };
+    }
+    return { key: String(sel), id: null };
+  }
+
+  function resolveSelectValue(selectEl, selection) {
+    if (!selectEl || !selection) return;
+    const key = selection.key || "";
+    if (key) {
+      selectEl.value = key;
+      if (selectEl.value === key) return;
+    }
+    if (selection.id != null && selection.id !== "") {
+      const bankKey = "bank-" + String(selection.id);
+      selectEl.value = bankKey;
+    }
+  }
+
+  async function fillAccounts(selectedCredit, selectedDebit) {
+    const res = await fetch(window.OBC_API.accounts, { headers: { Accept: "application/json" } });
+    const data = await parseJsonResponse(res);
+    const groups = data.groups || [];
+    const rows = data.rows || [];
     if (els.creditAccount) {
-      els.creditAccount.innerHTML = options;
-      if (selectedCredit) els.creditAccount.value = String(selectedCredit);
+      els.creditAccount.innerHTML = buildAccountOptionsHtml(
+        groups,
+        rows,
+        "Select account..."
+      );
+      resolveSelectValue(els.creditAccount, pickLedgerSelection(selectedCredit));
     }
     if (els.debitAccount) {
-      els.debitAccount.innerHTML = options.replace(
-        "Select account...",
-        "Select account (Bank / Cash / RD)..."
+      els.debitAccount.innerHTML = buildAccountOptionsHtml(
+        groups,
+        rows,
+        "Select account (all Assets / Liabilities groups)..."
       );
-      if (selectedDebit) els.debitAccount.value = String(selectedDebit);
+      resolveSelectValue(els.debitAccount, pickLedgerSelection(selectedDebit));
     }
   }
 
@@ -283,7 +358,10 @@
     if (els.entryId) els.entryId.value = "";
     if (els.workDate) els.workDate.value = window.OBC_API.defaultDate || "";
     if (els.voucherNo) els.voucherNo.readOnly = false;
-    if (els.modalTitle) els.modalTitle.textContent = "New Bank/Cash Transaction";
+    if (els.modalTitle) {
+      els.modalTitle.textContent = "New Bank/Cash Transaction/Electronic Transfer";
+    }
+    setModalMaximized(false);
     await fillAccounts();
     await fillPurposes();
     await refreshVoucher();
@@ -305,8 +383,14 @@
     }
     if (els.amount) els.amount.value = row.amount || "";
     if (els.remarks) els.remarks.value = row.remarks || "";
-    if (els.modalTitle) els.modalTitle.textContent = "Edit Bank/Cash Transaction";
-    await fillAccounts(row.credit_account_id, row.debit_account_id);
+    if (els.modalTitle) {
+      els.modalTitle.textContent = "Edit Bank/Cash Transaction/Electronic Transfer";
+    }
+    setModalMaximized(false);
+    await fillAccounts(
+      { ledger_key: row.credit_ledger_key, account_id: row.credit_account_id },
+      { ledger_key: row.debit_ledger_key, account_id: row.debit_account_id }
+    );
     await fillPurposes(row.purpose);
     if (modal) modal.show();
   }
@@ -379,6 +463,16 @@
   if (els.saveBtn) {
     els.saveBtn.addEventListener("click", function () {
       saveEntry();
+    });
+  }
+  if (els.maximizeBtn) {
+    els.maximizeBtn.addEventListener("click", function () {
+      setModalMaximized(!modalMaximized);
+    });
+  }
+  if (els.modalEl) {
+    els.modalEl.addEventListener("hidden.bs.modal", function () {
+      setModalMaximized(false);
     });
   }
   if (els.workDate) {

@@ -79,9 +79,63 @@
 }
 
 .intset-status.is-missing,
-.intset-status.is-not-configured {
+.intset-status.is-not-configured,
+.intset-status.is-expired {
   background: #fef2f2;
   color: #991b1b;
+}
+
+.intset-wa-panel .intset-glass-card {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 0.75rem;
+  padding: 1rem 1.1rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  backdrop-filter: blur(8px);
+}
+
+.intset-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 1.25rem;
+}
+
+.intset-meta-dl {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.intset-meta-dl > div {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.intset-meta-dl dt {
+  margin: 0;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.intset-meta-dl dd {
+  margin: 0;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.intset-event-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.intset-health-grid .intset-checks {
+  margin-top: 0;
 }
 
 .intset-missing {
@@ -188,4 +242,11 @@
     border-color: #1d4ed8;
     color: #e2e8f0;
   }
+}
+
+.intset-primary-cred {
+  background: rgba(11, 92, 171, 0.06);
+  border: 1px solid rgba(11, 92, 171, 0.25);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
 }

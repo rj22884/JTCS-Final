@@ -3,59 +3,133 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260807">
 {% endblock %}
 
 {% block content %}
-<div class="crm-page crm-dashboard">
-  <div class="crm-dash-widgets">
-    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
-      <span class="crm-widget-icon"><i class="bi bi-person-plus"></i></span>
-      <span class="crm-widget-label">Today's Leads</span>
-      <span class="crm-widget-value">{{ stats.today_leads|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
-      <span class="crm-widget-icon"><i class="bi bi-funnel"></i></span>
-      <span class="crm-widget-label">Open Leads</span>
-      <span class="crm-widget-value">{{ stats.open_leads|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.leads_page') }}" class="crm-widget crm-widget--success">
-      <span class="crm-widget-icon"><i class="bi bi-check-circle"></i></span>
-      <span class="crm-widget-label">Converted</span>
-      <span class="crm-widget-value">{{ stats.converted|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.inbox_page') }}" class="crm-widget crm-widget--warning">
-      <span class="crm-widget-icon"><i class="bi bi-chat-dots"></i></span>
-      <span class="crm-widget-label">Unread Messages</span>
-      <span class="crm-widget-value">{{ unread_msgs|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.notifications_page') }}" class="crm-widget crm-widget--warning">
-      <span class="crm-widget-icon"><i class="bi bi-bell"></i></span>
-      <span class="crm-widget-label">Unread Notifications</span>
-      <span class="crm-widget-value">{{ unread_notif|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.tasks_page') }}" class="crm-widget crm-widget--danger">
-      <span class="crm-widget-icon"><i class="bi bi-list-task"></i></span>
-      <span class="crm-widget-label">Pending Tasks</span>
-      <span class="crm-widget-value">{{ pending_tasks|default(0) }}</span>
-    </a>
-    <a href="{{ url_for('crm.followups_page') }}" class="crm-widget crm-widget--danger">
-      <span class="crm-widget-icon"><i class="bi bi-calendar-event"></i></span>
-      <span class="crm-widget-label">Pending Follow-ups</span>
-      <span class="crm-widget-value">{{ pending_followups|default(0) }}</span>
-    </a>
+<div class="crm-page crm-dashboard" id="crmCommDashboard"
+     data-api-stats="{{ api.dashboard_stats if api is defined else '' }}">
+  <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+      <h1 class="h4 mb-0">Communication Center</h1>
+      <p class="text-muted small mb-0">Unified view of every customer conversation</p>
+    </div>
+    <a href="{{ url_for('crm.inbox_page') }}" class="btn btn-success btn-sm"><i class="bi bi-chat-dots"></i> Open Inbox</a>
   </div>
 
-  <div class="jtcs-card">
-    <h2 class="h6 mb-3">Quick Links</h2>
-    <div class="crm-quick-links">
-      <a href="{{ url_for('crm.inbox_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-inbox"></i> Inbox</a>
-      <a href="{{ url_for('crm.customer_360') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-vcard"></i> Customer 360</a>
-      <a href="{{ url_for('crm.documents_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-folder"></i> Documents</a>
-      <a href="{{ url_for('crm.calendar_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar3"></i> Calendar</a>
-      <a href="{{ url_for('crm.analytics_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-graph-up"></i> Analytics</a>
-      <a href="{{ url_for('crm.workflow_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-diagram-3"></i> Workflow</a>
+  <div class="crm-dash-widgets">
+    <a href="{{ url_for('crm.inbox_page') }}" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-chat-left-text"></i></span>
+      <span class="crm-widget-label">Today's Messages</span>
+      <span class="crm-widget-value">{{ comm_stats.today_messages|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.inbox_page') }}?unread=1" class="crm-widget crm-widget--warning">
+      <span class="crm-widget-icon"><i class="bi bi-envelope-exclamation"></i></span>
+      <span class="crm-widget-label">Unread Messages</span>
+      <span class="crm-widget-value">{{ comm_stats.unread_messages|default(unread_msgs)|default(0) }}</span>
+    </a>
+    <div class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-hourglass-split"></i></span>
+      <span class="crm-widget-label">Pending Replies</span>
+      <span class="crm-widget-value">{{ comm_stats.pending_replies|default(0) }}</span>
+    </div>
+    <div class="crm-widget crm-widget--success">
+      <span class="crm-widget-icon"><i class="bi bi-check2-circle"></i></span>
+      <span class="crm-widget-label">Resolved Today</span>
+      <span class="crm-widget-value">{{ comm_stats.resolved_today|default(0) }}</span>
+    </div>
+    <a href="{{ url_for('crm.inbox_page') }}" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-chat-square-dots"></i></span>
+      <span class="crm-widget-label">Open Conversations</span>
+      <span class="crm-widget-value">{{ comm_stats.open_conversations|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.call_logs_page') }}" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-telephone"></i></span>
+      <span class="crm-widget-label">Today's Calls</span>
+      <span class="crm-widget-value">{{ comm_stats.today_calls|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.inbox_page') }}?channel=Email" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-envelope"></i></span>
+      <span class="crm-widget-label">Today's Emails</span>
+      <span class="crm-widget-value">{{ comm_stats.today_emails|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.inbox_page') }}?channel=Website" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-globe"></i></span>
+      <span class="crm-widget-label">Website Enquiries</span>
+      <span class="crm-widget-value">{{ comm_stats.website_enquiries|default(0) }}</span>
+    </a>
+    <a href="{{ url_for('crm.inbox_page') }}?channel=AI" class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-robot"></i></span>
+      <span class="crm-widget-label">AI Conversations</span>
+      <span class="crm-widget-value">{{ comm_stats.ai_conversations|default(0) }}</span>
+    </a>
+    <div class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-people"></i></span>
+      <span class="crm-widget-label">Total Customers</span>
+      <span class="crm-widget-value">{{ comm_stats.total_customers|default(0) }}</span>
+    </div>
+    <div class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-speedometer2"></i></span>
+      <span class="crm-widget-label">Avg Response (min)</span>
+      <span class="crm-widget-value">{{ comm_stats.avg_response_minutes if comm_stats.avg_response_minutes is not none else '—' }}</span>
+    </div>
+    <div class="crm-widget">
+      <span class="crm-widget-icon"><i class="bi bi-emoji-smile"></i></span>
+      <span class="crm-widget-label">Customer Satisfaction</span>
+      <span class="crm-widget-value">{{ comm_stats.customer_satisfaction if comm_stats.customer_satisfaction is not none else '—' }}</span>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-lg-7">
+      <div class="jtcs-card h-100">
+        <h2 class="h6 mb-3">Recent Activities</h2>
+        <ul class="crm-timeline" id="crmDashRecent">
+          {% for ev in comm_stats.recent_activities|default([]) %}
+          <li class="crm-timeline-item">
+            <div class="crm-timeline-title">{{ ev.Title or ev.EventType }}</div>
+            <div class="crm-timeline-meta">{{ ev.CreatedDate }}</div>
+            {% if ev.Description %}<div class="crm-timeline-desc">{{ ev.Description[:180] }}</div>{% endif %}
+          </li>
+          {% else %}
+          <li class="text-muted small">No recent activity.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="jtcs-card h-100">
+        <h2 class="h6 mb-3">CRM Snapshot</h2>
+        <div class="crm-dash-widgets" style="grid-template-columns:1fr 1fr">
+          <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
+            <span class="crm-widget-label">Today's Leads</span>
+            <span class="crm-widget-value">{{ stats.today_leads|default(0) }}</span>
+          </a>
+          <a href="{{ url_for('crm.leads_page') }}" class="crm-widget">
+            <span class="crm-widget-label">Open Leads</span>
+            <span class="crm-widget-value">{{ stats.open_leads|default(0) }}</span>
+          </a>
+          <a href="{{ url_for('crm.tasks_page') }}" class="crm-widget crm-widget--danger">
+            <span class="crm-widget-label">Pending Tasks</span>
+            <span class="crm-widget-value">{{ pending_tasks|default(0) }}</span>
+          </a>
+          <a href="{{ url_for('crm.followups_page') }}" class="crm-widget crm-widget--danger">
+            <span class="crm-widget-label">Pending Follow-ups</span>
+            <span class="crm-widget-value">{{ pending_followups|default(0) }}</span>
+          </a>
+        </div>
+        <div class="crm-quick-links mt-3">
+          <a href="{{ url_for('crm.inbox_page') }}?channel=WhatsApp" class="btn btn-sm btn-outline-success"><i class="bi bi-whatsapp"></i> WhatsApp</a>
+          <a href="{{ url_for('crm.inbox_page') }}?channel=Email" class="btn btn-sm btn-outline-primary"><i class="bi bi-envelope"></i> Email</a>
+          <a href="{{ url_for('crm.customer_360') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-person-vcard"></i> Customer 360</a>
+          <a href="{{ url_for('crm.calendar_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar3"></i> Calendar</a>
+        </div>
+      </div>
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/comm_dashboard.js') }}?v=20260807"></script>
 {% endblock %}

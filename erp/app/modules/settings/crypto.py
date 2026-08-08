@@ -64,6 +64,18 @@ def mask_secret(plain: str | None, *, visible_tail: int = 4) -> str:
     return f"{MASK_PLACEHOLDER}{value[-visible_tail:]}"
 
 
+def mask_access_token(plain: str | None) -> str:
+    """Display style: EAAG*******************XYZ (never full token)."""
+    if not plain:
+        return ""
+    value = str(plain).strip()
+    if len(value) <= 10:
+        return MASK_PLACEHOLDER
+    head = value[:4]
+    tail = value[-3:]
+    return f"{head}{'*' * 19}{tail}"
+
+
 def is_masked_or_unchanged(value: str | None) -> bool:
     if value is None:
         return True

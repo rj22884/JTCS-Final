@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-PROVIDERS: tuple[dict[str, str], ...] = (
-    {"code": "whatsapp_meta", "label": "Meta WhatsApp Cloud API"},
-    {"code": "smtp", "label": "Email SMTP"},
-    {"code": "google", "label": "Google"},
-    {"code": "openai", "label": "OpenAI"},
-    {"code": "gemini", "label": "Gemini"},
-    {"code": "claude", "label": "Claude"},
-    {"code": "sms", "label": "SMS"},
-    {"code": "payment", "label": "Payment Gateway"},
-    {"code": "cloud_storage", "label": "Cloud Storage"},
-    {"code": "future", "label": "Future APIs"},
+from app.modules.settings.provider_catalog import GENERIC_FIELDS, PROVIDER_CATALOG, providers_list
+
+# Backward-compatible alias — catalog is the single source of truth.
+PROVIDERS: tuple[dict[str, str], ...] = tuple(
+    {"code": p["code"], "label": p["label"]} for p in PROVIDER_CATALOG
 )
 
 # Keys that must be encrypted at rest and masked on read.
@@ -30,6 +24,9 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "private_key",
         "secret_key",
         "webhook_secret",
+        "refresh_token",
+        "certificate",
+        "private_cert",
     }
 )
 
@@ -39,16 +36,22 @@ PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
         {"key": "business_id", "label": "Business ID", "input": "text"},
         {"key": "app_id", "label": "App ID", "input": "text"},
         {"key": "app_secret", "label": "App Secret", "input": "password"},
+        {"key": "phone_number", "label": "Phone Number", "input": "text"},
         {"key": "phone_number_id", "label": "Phone Number ID", "input": "text"},
         {"key": "waba_id", "label": "WhatsApp Business Account ID", "input": "text"},
-        {"key": "display_name", "label": "Display Name", "input": "text"},
+        {"key": "display_name", "label": "Display Name / Verified Name", "input": "text"},
         {"key": "quality_rating", "label": "Quality Rating", "input": "text"},
+        {"key": "messaging_limit", "label": "Messaging Limit", "input": "text"},
         {"key": "account_status", "label": "Account Status", "input": "text"},
+        {"key": "profile_photo_url", "label": "Profile Photo URL", "input": "text"},
         {"key": "access_token", "label": "Access Token", "input": "password"},
+        {"key": "token_expires_at", "label": "Token Expires At (UTC)", "input": "readonly"},
         {"key": "graph_api_version", "label": "Graph API Version", "input": "text"},
         {"key": "webhook_verify_token", "label": "Webhook Verify Token", "input": "password"},
         {"key": "webhook_url", "label": "Webhook URL", "input": "text"},
         {"key": "oauth_redirect_uri", "label": "OAuth Redirect URI", "input": "text"},
+        {"key": "webhook_subscribed_fields", "label": "Subscribed Webhook Events", "input": "readonly"},
+        {"key": "last_sync_at", "label": "Last Sync Time (UTC)", "input": "readonly"},
         {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
     ],
     "smtp": [
@@ -113,6 +116,15 @@ PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
     ],
 }
 
+# Ensure every catalog provider has a field definition (future-ready auto UI).
+for _p in PROVIDER_CATALOG:
+    if _p["code"] not in PROVIDER_FIELDS:
+        PROVIDER_FIELDS[_p["code"]] = list(GENERIC_FIELDS)
+
 
 def is_secret_key(setting_key: str) -> bool:
     return (setting_key or "").strip().lower() in SECRET_KEYS
+
+
+def get_providers_catalog() -> list[dict[str, str]]:
+    return providers_list()

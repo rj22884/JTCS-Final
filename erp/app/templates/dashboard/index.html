@@ -8,6 +8,38 @@
 
 {% block content %}
 <div class="dash-page">
+  {% if system_health_alerts %}
+  <div class="alert alert-danger py-2 mb-3" role="alert">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div>
+        <strong><i class="bi bi-hdd-rack"></i> System Health</strong>
+        <ul class="mb-0 small mt-1">
+          {% for a in system_health_alerts %}
+          <li>{{ a.title }}{% if a.message %} — {{ a.message }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <a class="btn btn-sm btn-outline-dark"
+         href="{{ url_for('system_health.index') }}">Mission Control</a>
+    </div>
+  </div>
+  {% endif %}
+  {% if integration_health_alerts %}
+  <div class="alert alert-warning py-2 mb-3" role="alert">
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div>
+        <strong><i class="bi bi-heart-pulse"></i> Integration Health</strong>
+        <ul class="mb-0 small mt-1">
+          {% for a in integration_health_alerts %}
+          <li>{{ a.title }}{% if a.message %} — {{ a.message }}{% endif %}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <a class="btn btn-sm btn-outline-dark"
+         href="{{ url_for('integration_settings.index') }}?tab=health">Open dashboard</a>
+    </div>
+  </div>
+  {% endif %}
   <div class="dash-top-row">
     <div class="dash-today-wrap">
       <div class="jtcs-metric-card dash-today-card">

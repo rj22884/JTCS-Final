@@ -1,0 +1,150 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260807">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmCallLogsPage"
+     data-api-list="{{ api.list }}"
+     data-api-create="{{ api.create }}">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h4 mb-0">Call Logs</h1>
+    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#crmCallLogModal">
+      <i class="bi bi-plus-lg"></i> Log Call
+    </button>
+  </div>
+  <div class="jtcs-card">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Direction</th>
+            <th>Status</th>
+            <th>Phone</th>
+            <th>Customer / Lead</th>
+            <th>Duration</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="crmCallLogBody">
+          <tr><td colspan="7" class="text-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="crmCallLogModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" id="crmCallLogForm">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Log Call</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Direction</label>
+            <select class="form-select form-select-sm" name="direction">
+              <option>Outgoing</option>
+              <option>Incoming</option>
+              <option>Missed</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Status</label>
+            <select class="form-select form-select-sm" name="call_status">
+              <option>Completed</option>
+              <option>Missed</option>
+              <option>Busy</option>
+              <option>No Answer</option>
+            </select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Phone</label>
+            <input class="form-control form-control-sm" name="phone_number" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Customer ID</label>
+            <input type="number" class="form-control form-control-sm" name="customer_id" min="1">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Lead ID</label>
+            <input type="number" class="form-control form-control-sm" name="lead_id" min="1">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Duration (sec)</label>
+            <input type="number" class="form-control form-control-sm" name="duration_seconds" min="0">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Recording URL</label>
+            <input class="form-control form-control-sm" name="recording_url">
+          </div>
+          <div class="col-12">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control form-control-sm" name="notes" rows="2"></textarea>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Next follow-up</label>
+            <input type="datetime-local" class="form-control form-control-sm" name="next_follow_up_at">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260807"></script>
+<script>
+(function () {
+  const page = document.getElementById("crmCallLogsPage");
+  if (!page) return;
+  const body = document.getElementById("crmCallLogBody");
+  async function load() {
+    const data = await CrmCommon.apiFetch(page.dataset.apiList);
+    const rows = data.rows || [];
+    body.innerHTML = rows.length
+      ? rows.map(function (r) {
+          return "<tr><td>" + CrmCommon.formatDate(r.CalledAt) + "</td><td>" +
+            CrmCommon.escapeHtml(r.Direction) + "</td><td>" +
+            CrmCommon.escapeHtml(r.CallStatus) + "</td><td>" +
+            CrmCommon.escapeHtml(r.PhoneNumber || "") + "</td><td>" +
+            CrmCommon.escapeHtml(r.CustomerName || r.LeadName || "—") + "</td><td>" +
+            (r.DurationSeconds != null ? r.DurationSeconds + "s" : "—") + "</td><td>" +
+            CrmCommon.escapeHtml((r.Notes || "").slice(0, 80)) + "</td></tr>";
+        }).join("")
+      : '<tr><td colspan="7" class="text-muted">No call logs yet.</td></tr>';
+  }
+  document.getElementById("crmCallLogForm").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    ["customer_id", "lead_id", "duration_seconds"].forEach(function (k) {
+      if (payload[k]) payload[k] = parseInt(payload[k], 10);
+      else delete payload[k];
+    });
+    try {
+      await CrmCommon.apiFetch(page.dataset.apiCreate, { method: "POST", body: payload });
+      bootstrap.Modal.getInstance(document.getElementById("crmCallLogModal")).hide();
+      e.target.reset();
+      load();
+    } catch (err) {
+      CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+    }
+  });
+  load().catch(function () {
+    body.innerHTML = '<tr><td colspan="7" class="text-danger">Failed to load.</td></tr>';
+  });
+})();
+</script>
+{% endblock %}

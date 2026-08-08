@@ -1,0 +1,16 @@
+<nav class="navbar navbar-expand-lg cp-navbar">
+  <div class="container">
+    <a class="navbar-brand" href="{{ url_for('customer_portal.dashboard') }}">
+      <i class="bi bi-person-badge me-1"></i> JTCS Customer Portal
+    </a>
+    <div class="d-flex align-items-center gap-2">
+      <button type="button" class="btn btn-sm btn-outline-secondary cp-theme-toggle" id="cpThemeToggle" aria-label="Toggle dark mode">
+        <i class="bi bi-moon-stars"></i>
+      </button>
+      <span class="small d-none d-sm-inline cp-nav-name">{{ customer_name }}</span>
+      <a href="{{ url_for('customer_portal.logout') }}" class="btn btn-sm btn-outline-danger">
+        <i class="bi bi-box-arrow-right"></i> Logout
+      </a>
+    </div>
+  </div>
+</nav>

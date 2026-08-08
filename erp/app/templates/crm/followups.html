@@ -18,13 +18,21 @@
      data-api-create="{{ api.create }}"
      data-api-complete="{{ api.complete }}">
   <div class="jtcs-card mb-3">
-    <div class="crm-toolbar">
+    <div class="crm-toolbar flex-wrap gap-2">
+      <div class="btn-group btn-group-sm" role="group" id="crmFollowupDueFilters">
+        <button type="button" class="btn btn-outline-secondary active" data-due-filter="pending">Pending</button>
+        <button type="button" class="btn btn-outline-secondary" data-due-filter="today">Today</button>
+        <button type="button" class="btn btn-outline-secondary" data-due-filter="overdue">Overdue</button>
+        <button type="button" class="btn btn-outline-secondary" data-due-filter="completed">Completed</button>
+        <button type="button" class="btn btn-outline-secondary" data-due-filter="">All</button>
+      </div>
       <select class="form-select form-select-sm crm-field-md" id="crmFollowupStatusFilter">
-        <option value="">All statuses</option>
-        <option value="Pending" selected>Pending</option>
+        <option value="">Status (optional)</option>
+        <option value="Pending">Pending</option>
         <option value="Completed">Completed</option>
         <option value="Cancelled">Cancelled</option>
       </select>
+      <a href="{{ url_for('crm.calendar_page') }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-calendar3"></i> Calendar</a>
       <button type="button" class="btn btn-sm btn-outline-primary" id="crmFollowupRefreshBtn">
         <i class="bi bi-arrow-clockwise"></i> Refresh
       </button>

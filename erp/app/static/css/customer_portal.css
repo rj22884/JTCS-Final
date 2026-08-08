@@ -1,7 +1,75 @@
-/* JTCS Customer Portal — JTCS theme, responsive, dark-mode ready */
+/* JTCS Customer Portal — Gupshup colors + ClearTax-style typography */
+
+:root {
+  /* Gupshup digital primary palette */
+  --cp-purple: #5e34f1;
+  --cp-purple-deep: #4a28c7;
+  --cp-purple-soft: #5956d6;
+  --cp-purple-mist: #6667af;
+  --cp-coral: #ff3964;
+  --cp-coral-soft: #ff5d78;
+  --cp-ink: #151528;
+  --cp-muted: #5c5c78;
+  --cp-primary: #5e34f1;
+  --cp-accent: #ff3964;
+  --cp-surface: #f6f7fc;
+  --cp-glass: rgba(255, 255, 255, 0.88);
+  --cp-glass-border: rgba(255, 255, 255, 0.55);
+  --cp-card: #ffffff;
+  --cp-shadow: 0 14px 34px rgba(94, 52, 241, 0.10);
+  --cp-font: "Lato", "Segoe UI", sans-serif;
+  --cp-font-display: "Lato", "Segoe UI", sans-serif;
+}
+
+[data-bs-theme="dark"] {
+  --cp-ink: #f5f3ff;
+  --cp-muted: #c4c2e0;
+  --cp-glass: rgba(22, 18, 48, 0.78);
+  --cp-glass-border: rgba(148, 140, 210, 0.28);
+  --cp-card: #161230;
+  --cp-surface: #0f0c1d;
+  --cp-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+}
 
 .cp-body {
   min-height: 100vh;
+  font-family: var(--cp-font);
+  color: var(--cp-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Login / change-password shell — Gupshup wash over auth layout */
+.cp-body.jtcs-auth-page {
+  font-family: var(--cp-font);
+  background-color: #2a1680;
+  background-image:
+    linear-gradient(145deg, rgba(94, 52, 241, 0.92) 0%, rgba(74, 40, 199, 0.88) 45%, rgba(255, 57, 100, 0.78) 100%),
+    url("../images/portal-dashboard-bg.svg");
+  background-size: cover, cover;
+  background-position: center, center;
+  background-attachment: fixed;
+}
+
+.cp-body.jtcs-auth-page .jtcs-login-logo {
+  background: linear-gradient(135deg, #5e34f1, #ff3964);
+}
+
+.cp-body.jtcs-auth-page .jtcs-auth-card h1 {
+  font-family: var(--cp-font-display);
+  font-weight: 900;
+  color: var(--cp-ink);
+}
+
+.cp-body h1,
+.cp-body h2,
+.cp-body h3,
+.cp-body h4,
+.cp-body .navbar-brand,
+.cp-body .cp-welcome-title,
+.cp-body .cp-page-title,
+.cp-body .cp-module-card h2 {
+  font-family: var(--cp-font-display);
+  letter-spacing: -0.015em;
 }
 
 .cp-card {
@@ -9,13 +77,13 @@
 }
 
 .cp-help {
-  border-top: 1px solid rgba(15, 76, 129, 0.12);
+  border-top: 1px solid rgba(94, 52, 241, 0.12);
   padding-top: 1.25rem;
 }
 
 .cp-default-password {
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(94, 52, 241, 0.08);
+  border: 1px solid rgba(94, 52, 241, 0.22);
   border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   font-size: 0.95rem;
@@ -24,7 +92,7 @@
 .cp-loading {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.28);
+  background: rgba(21, 21, 40, 0.28);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -35,9 +103,13 @@
   display: flex;
 }
 
+.cp-loading .spinner-border {
+  color: var(--cp-purple) !important;
+}
+
 .cp-duplicate-toast {
   min-width: min(380px, 92vw);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 12px 30px rgba(21, 21, 40, 0.16);
   border-radius: 0.85rem;
   overflow: hidden;
 }
@@ -49,7 +121,7 @@
 
 .cp-duplicate-item {
   padding: 0.55rem 0;
-  border-bottom: 1px dashed rgba(100, 116, 139, 0.35);
+  border-bottom: 1px dashed rgba(102, 103, 175, 0.35);
 }
 
 .cp-duplicate-item:last-child {
@@ -57,7 +129,7 @@
 }
 
 .cp-duplicate-item .name {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .cp-duplicate-item .pan {
@@ -66,60 +138,308 @@
 }
 
 .cp-navbar {
-  background: var(--bs-body-bg, #fff);
-  border-bottom: 1px solid rgba(15, 76, 129, 0.12);
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid rgba(94, 52, 241, 0.08);
+  box-shadow: 0 2px 14px rgba(94, 52, 241, 0.05);
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+  backdrop-filter: blur(10px);
+}
+
+.cp-navbar .navbar-brand {
+  color: var(--cp-ink) !important;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+.cp-navbar .navbar-brand i {
+  color: var(--cp-purple);
+}
+
+.cp-nav-name {
+  color: var(--cp-muted);
+  font-weight: 700;
 }
 
 .cp-dashboard {
   min-height: 100vh;
-  background: linear-gradient(180deg, rgba(15, 76, 129, 0.05), transparent 220px);
+  background-color: var(--cp-surface);
+  background-image:
+    linear-gradient(180deg, rgba(94, 52, 241, 0.10), rgba(246, 247, 252, 0.94) 420px),
+    url("../images/portal-dashboard-bg.svg"),
+    linear-gradient(145deg, #f3f0ff 0%, #fff5f7 48%, #f6f7fc 100%);
+  background-size: cover, cover, cover;
+  background-position: center top, center top, center;
+  background-repeat: no-repeat;
+}
+
+.cp-page-title {
+  color: var(--cp-ink);
+  font-weight: 800;
+}
+
+.cp-welcome {
+  position: relative;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  min-height: 168px;
+  box-shadow: var(--cp-shadow);
+  background-image:
+    linear-gradient(118deg, rgba(48, 24, 120, 0.88), rgba(94, 52, 241, 0.72) 52%, rgba(255, 57, 100, 0.55)),
+    url("../images/portal-dashboard-bg.svg"),
+    linear-gradient(135deg, #5e34f1, #ff3964);
+  background-size: cover;
+  background-position: center;
+}
+
+.cp-welcome-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    rgba(30, 16, 80, 0.72) 0%,
+    rgba(94, 52, 241, 0.42) 55%,
+    rgba(255, 57, 100, 0.28) 100%
+  );
+  pointer-events: none;
+}
+
+.cp-welcome-glass {
+  position: relative;
+  z-index: 1;
+  margin: 1.15rem;
+  padding: 1.4rem 1.5rem;
+  border-radius: 1rem;
+  background: var(--cp-glass);
+  border: 1px solid var(--cp-glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 12px 30px rgba(30, 16, 80, 0.18);
+}
+
+.cp-welcome-eyebrow {
+  color: var(--cp-coral);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.cp-welcome-title {
+  color: var(--cp-ink);
+  font-weight: 900;
+  letter-spacing: -0.025em;
+  margin: 0;
+}
+
+.cp-welcome-text {
+  color: var(--cp-muted);
+  font-size: 1.02rem;
+  font-weight: 400;
+  line-height: 1.55;
+  max-width: 46rem;
 }
 
 .cp-module-card {
-  background: var(--bs-body-bg, #fff);
-  border: 1px solid rgba(15, 76, 129, 0.1);
-  border-radius: 1rem;
-  padding: 1.35rem 1.25rem;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--cp-card);
+  border: 1px solid rgba(94, 52, 241, 0.08);
+  border-radius: 1.1rem;
+  padding: 1.45rem 1.3rem 1.2rem;
   height: 100%;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  cursor: default;
+  box-shadow: 0 10px 26px rgba(94, 52, 241, 0.06);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  cursor: pointer;
 }
 
-.cp-module-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.1);
+.cp-module-card:hover,
+.cp-module-card:focus-visible {
+  transform: translateY(-6px);
+  box-shadow: 0 18px 36px rgba(94, 52, 241, 0.14);
+  border-color: rgba(255, 57, 100, 0.28);
+  color: inherit;
 }
 
 .cp-module-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
+  width: 52px;
+  height: 52px;
+  border-radius: 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 0.85rem;
-  background: linear-gradient(135deg, #0f4c81, #10b981);
+  margin-bottom: 0.95rem;
+  background: linear-gradient(135deg, #5e34f1, #ff3964);
   color: #fff;
-  font-size: 1.25rem;
+  font-size: 1.28rem;
+  box-shadow: 0 8px 18px rgba(94, 52, 241, 0.28);
+}
+
+.cp-module-card h2 {
+  color: var(--cp-ink);
+  font-weight: 800;
+  font-size: 1.12rem;
+}
+
+.cp-module-blurb {
+  color: var(--cp-muted);
+  min-height: 2.5rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.cp-module-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--cp-purple);
+}
+
+.cp-module-card:hover .cp-module-cta {
+  gap: 0.55rem;
+  color: var(--cp-coral);
+}
+
+.cp-glass-panel {
+  background: var(--cp-glass);
+  border: 1px solid var(--cp-glass-border);
+  border-radius: 1.1rem;
+  padding: 1.25rem 1.3rem;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--cp-shadow);
+}
+
+.cp-glass-panel h2 {
+  font-weight: 800;
+  color: var(--cp-ink);
+}
+
+.cp-readonly,
+.cp-profile-form input[readonly],
+.cp-profile-form input:disabled,
+.cp-profile-form select:disabled,
+.cp-profile-form textarea:disabled {
+  background: rgba(102, 103, 175, 0.12) !important;
+  cursor: not-allowed;
+}
+
+.cp-photo-wrap {
+  width: 88px;
+  height: 88px;
+  flex: 0 0 88px;
+}
+
+.cp-photo {
+  width: 88px;
+  height: 88px;
+  border-radius: 1rem;
+  object-fit: cover;
+  border: 2px solid rgba(94, 52, 241, 0.22);
+  background: #ece9ff;
+}
+
+.cp-photo-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cp-purple-mist);
+  font-size: 2rem;
+}
+
+.cp-data-table thead th {
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cp-muted);
+}
+
+/* Portal buttons — Gupshup purple / coral */
+.cp-body .btn-primary,
+.cp-dashboard .btn-primary {
+  --bs-btn-bg: #5e34f1;
+  --bs-btn-border-color: #5e34f1;
+  --bs-btn-hover-bg: #4a28c7;
+  --bs-btn-hover-border-color: #4a28c7;
+  --bs-btn-active-bg: #3f22ad;
+  --bs-btn-active-border-color: #3f22ad;
+  font-weight: 700;
+}
+
+.cp-body .btn-outline-primary,
+.cp-dashboard .btn-outline-primary {
+  --bs-btn-color: #5e34f1;
+  --bs-btn-border-color: #5e34f1;
+  --bs-btn-hover-bg: #5e34f1;
+  --bs-btn-hover-border-color: #5e34f1;
+  font-weight: 700;
+}
+
+.cp-dashboard .btn-outline-danger {
+  font-weight: 700;
+}
+
+.cp-body .form-control:focus,
+.cp-body .form-select:focus,
+.cp-dashboard .form-control:focus,
+.cp-dashboard .form-select:focus {
+  border-color: rgba(94, 52, 241, 0.55);
+  box-shadow: 0 0 0 0.2rem rgba(94, 52, 241, 0.15);
 }
 
 [data-bs-theme="dark"] .cp-help {
-  border-top-color: rgba(148, 163, 184, 0.25);
+  border-top-color: rgba(148, 140, 210, 0.25);
 }
 
 [data-bs-theme="dark"] .cp-default-password {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(94, 52, 241, 0.18);
+  border-color: rgba(255, 57, 100, 0.3);
 }
 
 [data-bs-theme="dark"] .cp-module-card,
 [data-bs-theme="dark"] .cp-navbar {
-  background: #111827;
-  border-color: rgba(148, 163, 184, 0.2);
+  background: #161230;
+  border-color: rgba(148, 140, 210, 0.2);
+}
+
+[data-bs-theme="dark"] .cp-navbar .navbar-brand {
+  color: #f5f3ff !important;
 }
 
 [data-bs-theme="dark"] .cp-dashboard {
-  background: linear-gradient(180deg, rgba(15, 76, 129, 0.25), #0b1220 220px);
+  background-color: #0f0c1d;
+  background-image:
+    linear-gradient(180deg, rgba(30, 16, 80, 0.75), rgba(15, 12, 29, 0.95) 420px),
+    url("../images/portal-dashboard-bg.svg"),
+    linear-gradient(135deg, #0f0c1d, #161230);
+}
+
+[data-bs-theme="dark"] .cp-welcome-title,
+[data-bs-theme="dark"] .cp-page-title,
+[data-bs-theme="dark"] .cp-module-card h2 {
+  color: #f5f3ff;
+}
+
+[data-bs-theme="dark"] .cp-welcome-text,
+[data-bs-theme="dark"] .cp-module-blurb,
+[data-bs-theme="dark"] .cp-nav-name {
+  color: #d2ceef;
+}
+
+@media (max-width: 575.98px) {
+  .cp-welcome-glass {
+    margin: 0.85rem;
+    padding: 1.1rem 1rem;
+  }
+
+  .cp-welcome-title {
+    font-size: 1.45rem;
+  }
 }

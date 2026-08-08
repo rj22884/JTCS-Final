@@ -51,12 +51,46 @@
       .join("");
   }
 
+  let lastBadgeTotal = null;
+
+  function playSoftChime() {
+    try {
+      const ctx = window.AudioContext || window.webkitAudioContext;
+      if (!ctx) return;
+      const ac = new ctx();
+      const o = ac.createOscillator();
+      const g = ac.createGain();
+      o.connect(g);
+      g.connect(ac.destination);
+      o.frequency.value = 880;
+      g.gain.value = 0.03;
+      o.start();
+      setTimeout(function () {
+        o.stop();
+        ac.close();
+      }, 120);
+    } catch (_e) {}
+  }
+
   async function poll() {
     try {
       const data = await CrmCommon.apiFetch(pollUrl);
       const crmUnread = parseInt(data.unread_count, 10) || 0;
       const adminPending = pendingUserCount;
-      setBadge(crmUnread + adminPending);
+      const total = crmUnread + adminPending;
+      if (lastBadgeTotal != null && total > lastBadgeTotal) {
+        playSoftChime();
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          try {
+            new Notification("JTCS ERP", {
+              body: "New notification or unread message",
+              tag: "jtcs-notify",
+            });
+          } catch (_e) {}
+        }
+      }
+      lastBadgeTotal = total;
+      setBadge(total);
       renderCrmNotifications(data.rows || []);
     } catch (_err) {
       /* silent */
@@ -64,4 +98,5 @@
   }
 
   setInterval(poll, pollSeconds * 1000);
+  poll();
 })();

@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    Flask,
+    Response,
+    current_app,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from flask_wtf.csrf import CSRFError
 
 from app.decorators import admin_required, login_required
@@ -20,6 +32,7 @@ def ensure_integration_settings_bootstrap() -> None:
     repo = IntegrationSettingsRepository()
     repo.ensure_schema()
     repo.ensure_audit_schema()
+    repo.ensure_health_schema()
     repo.ensure_menu()
 
 
@@ -65,6 +78,7 @@ def index():
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         providers=ctx["providers"],
         catalog=ctx["catalog"],
+        whatsapp_card=ctx.get("whatsapp_card"),
     )
 
 
@@ -267,13 +281,76 @@ def api_whatsapp_audit():
     return jsonify(IntegrationSettingsController().whatsapp_audit(limit=limit))
 
 
+@bp.route("/api/whatsapp/refresh-metadata", methods=["POST"])
+@login_required
+@admin_required
+def api_whatsapp_refresh_metadata():
+    try:
+        return jsonify(IntegrationSettingsController().refresh_metadata())
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/whatsapp/token-health", methods=["GET"])
+@login_required
+@admin_required
+def api_whatsapp_token_health():
+    try:
+        return jsonify(IntegrationSettingsController().token_health())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/whatsapp/account-card", methods=["GET"])
+@login_required
+@admin_required
+def api_whatsapp_account_card():
+    try:
+        return jsonify(IntegrationSettingsController().account_card())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/whatsapp/webhook-info", methods=["GET"])
+@login_required
+@admin_required
+def api_whatsapp_webhook_info():
+    try:
+        return jsonify(IntegrationSettingsController().webhook_info())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/whatsapp/subscribe-webhooks", methods=["POST"])
+@login_required
+@admin_required
+def api_whatsapp_subscribe_webhooks():
+    try:
+        return jsonify(IntegrationSettingsController().subscribe_webhooks())
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/whatsapp/unsubscribe-webhooks", methods=["POST"])
+@login_required
+@admin_required
+def api_whatsapp_unsubscribe_webhooks():
+    try:
+        return jsonify(IntegrationSettingsController().unsubscribe_webhooks())
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/api/whatsapp/webhook", methods=["GET", "POST"])
 @csrf.exempt
 def api_whatsapp_webhook():
-    """
-    Placeholder webhook endpoint for Meta verification / future inbound events.
-    Does not modify CRM. GET supports hub.challenge verification.
-    """
+    """Meta WhatsApp Cloud API webhook — verify (GET) and persist inbound (POST)."""
     if request.method == "GET":
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
@@ -288,4 +365,123 @@ def api_whatsapp_webhook():
         except Exception:
             pass
         return jsonify({"ok": False, "error": "Webhook verification failed"}), 403
-    return jsonify({"ok": True, "received": True})
+
+    raw = request.get_data(cache=True, as_text=False) or b""
+    try:
+        from app.modules.settings.services import IntegrationSettingsService
+        from app.modules.settings.whatsapp_meta_client import WhatsAppMetaClient
+
+        cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta")
+        app_secret = (cfg.get("app_secret") or "").strip()
+        sig = request.headers.get("X-Hub-Signature-256")
+        # Enforce signature when app_secret is configured
+        if app_secret and sig and not WhatsAppMetaClient.verify_signature(app_secret, raw, sig):
+            return jsonify({"ok": False, "error": "Invalid signature"}), 403
+    except Exception:
+        pass
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        from app.modules.communication.webhook_service import WhatsAppWebhookService
+
+        result = WhatsAppWebhookService().process_payload(payload, raw_body=raw)
+        return jsonify(result)
+    except Exception as exc:
+        # Always ACK to Meta to avoid retry storms; log server-side
+        current_app.logger.exception("WhatsApp webhook processing failed: %s", exc)
+        return jsonify({"ok": True, "received": True, "error": str(exc)})
+
+
+# ---------------------------------------------------------------------------
+# Integration Health Dashboard (tab inside Integration Settings)
+# ---------------------------------------------------------------------------
+
+
+@bp.route("/api/health/dashboard", methods=["GET"])
+@login_required
+@admin_required
+def api_health_dashboard():
+    force = request.args.get("force") in {"1", "true", "yes"}
+    try:
+        return jsonify(IntegrationSettingsController().health_dashboard(force=force))
+    except Exception as exc:
+        current_app.logger.exception("Integration health dashboard failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/scan", methods=["POST"])
+@login_required
+@admin_required
+def api_health_scan():
+    try:
+        return jsonify(IntegrationSettingsController().health_scan())
+    except Exception as exc:
+        current_app.logger.exception("Integration health scan failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/<provider>/detail", methods=["GET"])
+@login_required
+@admin_required
+def api_health_detail(provider: str):
+    try:
+        return jsonify(IntegrationSettingsController().health_detail(provider))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/<provider>/refresh", methods=["POST"])
+@login_required
+@admin_required
+def api_health_refresh(provider: str):
+    try:
+        return jsonify(IntegrationSettingsController().health_refresh(provider))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/<provider>/test", methods=["POST"])
+@login_required
+@admin_required
+def api_health_test(provider: str):
+    try:
+        return jsonify(IntegrationSettingsController().health_test(provider))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/alerts", methods=["GET"])
+@login_required
+@admin_required
+def api_health_alerts():
+    try:
+        return jsonify(IntegrationSettingsController().health_alerts())
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/history", methods=["GET"])
+@login_required
+@admin_required
+def api_health_history():
+    period = (request.args.get("period") or "daily").strip()
+    try:
+        return jsonify(IntegrationSettingsController().health_history(period))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/health/export", methods=["GET"])
+@login_required
+@admin_required
+def api_health_export():
+    fmt = (request.args.get("format") or "csv").strip().lower()
+    try:
+        filename, mimetype, body = IntegrationSettingsController().health_export(fmt)
+        return Response(
+            body,
+            mimetype=mimetype,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
