@@ -166,6 +166,70 @@ class LedgerExportService:
                 OR UPPER(LTRIM(RTRIM(ISNULL(c.PANNumber, N'')))) LIKE :like_upper
               )
             """
+
+        # Daily txns + unpaid followup bills + Bank/Cash electronic transfers on customer CoA.
+        obc_count_sql = "0"
+        followup_count_sql = "0"
+        try:
+            has_obc_keys = bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
+                        "N'CreditLedgerKey') IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+            has_coa_customer = bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.ChartOfAccountMaster', "
+                        "N'CustomerID') IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+            if has_obc_keys and has_coa_customer:
+                obc_count_sql = """
+                    (
+                        SELECT COUNT(1)
+                        FROM dbo.OthersBankCashTransaction e
+                        INNER JOIN dbo.ChartOfAccountMaster a
+                            ON a.CustomerID = c.CustomerID
+                           AND ISNULL(a.IsActive, 1) = 1
+                        WHERE ISNULL(e.IsActive, 1) = 1
+                          AND (
+                                e.CreditLedgerKey = CONCAT(N'coa-', a.AccountID)
+                             OR e.DebitLedgerKey = CONCAT(N'coa-', a.AccountID)
+                          )
+                    )
+                """
+            if db.session.execute(
+                text("SELECT OBJECT_ID(N'dbo.FollowupEntryMaster', N'U')")
+            ).scalar():
+                followup_count_sql = """
+                    (
+                        SELECT COUNT(1)
+                        FROM dbo.FollowupEntryMaster f
+                        WHERE f.CustomerID = c.CustomerID
+                          AND ISNULL(f.IsActive, 1) = 1
+                          AND f.BillNo IS NOT NULL
+                          AND LTRIM(RTRIM(f.BillNo)) <> N''
+                          AND ISNULL(f.BillAmount, 0) > 0
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM dbo.JTCSDailyTransaction d2
+                              WHERE d2.CustomerID = f.CustomerID
+                                AND d2.Status = N'Posted'
+                                AND UPPER(LTRIM(RTRIM(ISNULL(d2.ReferenceNo, N''))))
+                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
+                                AND d2.WorkType = f.ModuleCode
+                          )
+                    )
+                """
+        except Exception:
+            db.session.rollback()
+            obc_count_sql = "0"
+            followup_count_sql = "0"
+
         rows = db.session.execute(
             text(
                 f"""
@@ -180,7 +244,10 @@ class LedgerExportService:
                         FROM dbo.JTCSDailyTransaction d
                         WHERE d.CustomerID = c.CustomerID
                           AND d.Status = N'Posted'
-                    ) AS txn_count
+                    )
+                    + {obc_count_sql}
+                    + {followup_count_sql}
+                    AS txn_count
                 FROM dbo.CustomerMaster c
                 WHERE ISNULL(c.CustomerStatus, N'Active') <> N'Rejected'
                   {search_sql}
@@ -547,6 +614,205 @@ class LedgerExportService:
             )
         return lines
 
+    def _customer_coa_ledger_key(self, customer_id: int) -> str | None:
+        """Chart of Account ledger key for a customer (used by Bank/Cash Electronic Transfer)."""
+        if not db.session.execute(
+            text("SELECT OBJECT_ID(N'dbo.ChartOfAccountMaster', N'U')")
+        ).scalar():
+            return None
+        if not db.session.execute(
+            text(
+                "SELECT CASE WHEN COL_LENGTH(N'dbo.ChartOfAccountMaster', N'CustomerID') "
+                "IS NULL THEN 0 ELSE 1 END"
+            )
+        ).scalar():
+            return None
+        account_id = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 AccountID
+                FROM dbo.ChartOfAccountMaster
+                WHERE CustomerID = :customer_id
+                  AND ISNULL(IsActive, 1) = 1
+                ORDER BY AccountID ASC
+                """
+            ),
+            {"customer_id": customer_id},
+        ).scalar()
+        if not account_id:
+            return None
+        return f"coa-{int(account_id)}"
+
+    def _customer_obc_ledger_parts(
+        self,
+        customer_id: int,
+        *,
+        date_from: date,
+        date_to: date,
+        ob_date: date | None,
+    ) -> tuple[Decimal, Decimal, list[dict[str, Any]]]:
+        """Include Other Bank/Cash Electronic Transfer legs on the customer CoA."""
+        empty = (Decimal("0.00"), Decimal("0.00"), [])
+        if not db.session.execute(
+            text("SELECT OBJECT_ID(N'dbo.OthersBankCashTransaction', N'U')")
+        ).scalar():
+            return empty
+        has_keys = bool(
+            db.session.execute(
+                text(
+                    "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
+                    "N'CreditLedgerKey') IS NULL THEN 0 ELSE 1 END"
+                )
+            ).scalar()
+        )
+        if not has_keys:
+            return empty
+
+        coa_key = self._customer_coa_ledger_key(customer_id)
+        if not coa_key:
+            return empty
+
+        prior_date_sql = "AND e.WorkDate < :date_from"
+        prior_params: dict[str, Any] = {
+            "coa_key": coa_key,
+            "date_from": date_from,
+        }
+        if ob_date is not None:
+            prior_date_sql += " AND e.WorkDate > :ob_date"
+            prior_params["ob_date"] = ob_date
+
+        prior = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    ISNULL(SUM(CASE
+                        WHEN e.DebitLedgerKey = :coa_key THEN e.Amount ELSE 0 END), 0) AS billed,
+                    ISNULL(SUM(CASE
+                        WHEN e.CreditLedgerKey = :coa_key THEN e.Amount ELSE 0 END), 0) AS received
+                FROM dbo.OthersBankCashTransaction e
+                WHERE ISNULL(e.IsActive, 1) = 1
+                  AND (
+                        e.CreditLedgerKey = :coa_key
+                     OR e.DebitLedgerKey = :coa_key
+                  )
+                  {prior_date_sql}
+                """
+            ),
+            prior_params,
+        ).mappings().first()
+        prior_billed = self._money(prior["billed"] if prior else 0)
+        prior_received = self._money(prior["received"] if prior else 0)
+
+        raw_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    e.EntryID,
+                    e.WorkDate,
+                    e.VoucherNo,
+                    e.Purpose,
+                    e.Remarks,
+                    e.Amount,
+                    e.CreditLedgerKey,
+                    e.DebitLedgerKey
+                FROM dbo.OthersBankCashTransaction e
+                WHERE ISNULL(e.IsActive, 1) = 1
+                  AND (
+                        e.CreditLedgerKey = :coa_key
+                     OR e.DebitLedgerKey = :coa_key
+                  )
+                  AND e.WorkDate >= :date_from
+                  AND e.WorkDate <= :date_to
+                ORDER BY e.WorkDate ASC, e.EntryID ASC
+                """
+            ),
+            {
+                "coa_key": coa_key,
+                "date_from": date_from,
+                "date_to": date_to,
+            },
+        ).mappings().all()
+
+        rows: list[dict[str, Any]] = []
+        for r in raw_rows:
+            amount = self._money(r["Amount"])
+            debit_key = (r.get("DebitLedgerKey") or "").strip()
+            credit_key = (r.get("CreditLedgerKey") or "").strip()
+            # Debit leg (Money In) → customer Debit column; Credit leg (Money Out) → Credit.
+            is_debit_side = debit_key == coa_key
+            is_credit_side = credit_key == coa_key
+            if not is_debit_side and not is_credit_side:
+                continue
+            purpose = (r.get("Purpose") or "").strip() or "Electronic Transfer"
+            voucher = (r.get("VoucherNo") or "").strip()
+            direction = "Money In" if is_debit_side else "Money Out"
+            counter_key = credit_key if is_debit_side else debit_key
+            counter_label = self._obc_ledger_key_label(counter_key)
+            desc = f"Other Bank/Cash — {purpose} ({direction})"
+            if counter_label:
+                desc = f"{desc} · {counter_label}"
+            rows.append(
+                {
+                    "TransactionID": -int(r["EntryID"] or 0),
+                    "TransactionDate": r.get("WorkDate"),
+                    "WorkType": "Others",
+                    "SubWorkType": f"Other Bank/Cash Transactions - {purpose}",
+                    "ReferenceNo": voucher,
+                    "Description": desc,
+                    "Remarks": (r.get("Remarks") or "").strip(),
+                    "SaleAmount": amount if is_debit_side else Decimal("0.00"),
+                    "IncomeAmount": Decimal("0.00"),
+                    "BankDebit": amount if is_credit_side else Decimal("0.00"),
+                    "PaymentTotal": Decimal("0.00"),
+                }
+            )
+
+        return prior_billed, prior_received, rows
+
+    def _obc_ledger_key_label(self, ledger_key: str) -> str:
+        key = (ledger_key or "").strip()
+        if not key:
+            return ""
+        if key.startswith("bank-"):
+            try:
+                bank_id = int(key.split("-", 1)[1])
+            except (TypeError, ValueError):
+                return key
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT BankName, ISNULL(MaskedAccountNumber, AccountNumber) AS AccRef
+                    FROM dbo.JtcsBankAccountMaster
+                    WHERE JtcsBankAccountID = :bid
+                    """
+                ),
+                {"bid": bank_id},
+            ).mappings().first()
+            if not row:
+                return key
+            name = (row.get("BankName") or "").strip()
+            ref = (row.get("AccRef") or "").strip()
+            return f"{name} {ref}".strip() or key
+        if key.startswith("coa-"):
+            try:
+                aid = int(key.split("-", 1)[1])
+            except (TypeError, ValueError):
+                return key
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT AccountName
+                    FROM dbo.ChartOfAccountMaster
+                    WHERE AccountID = :aid
+                    """
+                ),
+                {"aid": aid},
+            ).mappings().first()
+            if not row:
+                return key
+            return (row.get("AccountName") or "").strip() or key
+        return key
+
     def _customer_ledger_data(
         self,
         customer_id: int,
@@ -712,8 +978,30 @@ class LedgerExportService:
             prior_followup_billed = Decimal("0.00")
             followup_rows = []
 
+        # Other Bank/Cash / Electronic Transfer legs posted to this customer's CoA.
+        prior_obc_billed = Decimal("0.00")
+        prior_obc_received = Decimal("0.00")
+        obc_rows: list[Any] = []
+        try:
+            prior_obc_billed, prior_obc_received, obc_rows = self._customer_obc_ledger_parts(
+                customer_id,
+                date_from=date_from,
+                date_to=date_to,
+                ob_date=ob_date,
+            )
+        except Exception:
+            db.session.rollback()
+            prior_obc_billed = Decimal("0.00")
+            prior_obc_received = Decimal("0.00")
+            obc_rows = []
+
         opening = self._money(
-            opening + prior_billed + prior_followup_billed - prior_received
+            opening
+            + prior_billed
+            + prior_followup_billed
+            + prior_obc_billed
+            - prior_received
+            - prior_obc_received
         )
 
         rows = list(
@@ -746,6 +1034,9 @@ class LedgerExportService:
         )
         if followup_rows:
             rows.extend(followup_rows)
+        if obc_rows:
+            rows.extend(obc_rows)
+        if followup_rows or obc_rows:
             rows.sort(
                 key=lambda r: (
                     r.get("TransactionDate") or date.min,
