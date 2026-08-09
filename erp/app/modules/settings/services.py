@@ -6,6 +6,8 @@ import logging
 import secrets
 from typing import Any
 
+from flask import current_app, has_app_context
+
 from app.modules.settings.audit_service import IntegrationSettingsAuditService
 from app.modules.settings.crypto import (
     UNCHANGED_SENTINEL,
@@ -18,6 +20,8 @@ from app.modules.settings.crypto import (
 )
 from app.modules.settings.models import PROVIDER_FIELDS, PROVIDERS, get_providers_catalog, is_secret_key
 from app.modules.settings.repositories import IntegrationSettingsRepository
+from app.modules.shared.audit_service import AuditService
+from app.utils.smtp_health import check_smtp_connection, mask_email
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,7 @@ STATUS_INVALID_TOKEN = "Invalid Token"
 STATUS_WEBHOOK_FAILED = "Webhook Failed"
 STATUS_DISCONNECTED = "Disconnected"
 STATUS_PERMISSION_MISSING = "Permission Missing"
+STATUS_FAILED = "Connection Failed"
 
 
 class IntegrationSettingsService:
@@ -55,13 +60,15 @@ class IntegrationSettingsService:
             for row in self.repository.list_by_provider(provider)
         }
         values: dict[str, Any] = {}
+        secret_configured: dict[str, bool] = {}
         for field in fields:
             key = field["key"]
             cipher = stored.get(key)
             plain = decrypt_value(cipher) if cipher not in (None, "") else ""
             if is_secret_key(key):
-                # Full mask in forms — never echo password tails into inputs.
-                values[key] = MASK_PLACEHOLDER if plain else ""
+                # NEVER send decrypted or masked secrets into password inputs.
+                values[key] = ""
+                secret_configured[key] = bool((plain or "").strip())
             else:
                 # Never surface token-like values in non-secret ID fields.
                 if key in {"business_id", "waba_id", "phone_number_id"} and self._looks_like_token(plain):
@@ -69,28 +76,24 @@ class IntegrationSettingsService:
                 else:
                     values[key] = plain or ""
         missing = []
-        extras: dict[str, Any] = {}
+        extras: dict[str, Any] = {"secret_configured": secret_configured}
         if provider == "whatsapp_meta":
             plain_cfg = self.get_provider_config_decrypted(provider)
             missing = self.whatsapp_missing_fields(plain_cfg)
-            # Access token shown as EAAG***XYZ hint (input still fully masked)
+            # Display hint only (never put into the password input value)
             extras["access_token_display"] = mask_access_token(plain_cfg.get("access_token"))
             extras["token_expires_at"] = (plain_cfg.get("token_expires_at") or "").strip()
             extras["localhost_warning"] = self._localhost_warning(plain_cfg.get("webhook_url") or "")
-            # Keep password input fully masked; never put partial token in the input value
-            if values.get("access_token"):
-                values["access_token"] = MASK_PLACEHOLDER
-            if values.get("app_secret"):
-                values["app_secret"] = MASK_PLACEHOLDER
-            if values.get("webhook_verify_token"):
-                values["webhook_verify_token"] = MASK_PLACEHOLDER
+        elif provider == "smtp":
+            missing = self.smtp_missing_fields(self.get_provider_config_decrypted(provider))
+            extras["missing_labels"] = self._smtp_missing_labels(missing)
         return {
             "provider": provider,
             "fields": fields,
             "field_values": values,
             "values": values,
             "missing": missing,
-            "missing_labels": self._missing_labels(missing),
+            "missing_labels": extras.get("missing_labels") or self._missing_labels(missing),
             "status_code": self._status_code(values.get("connection_status") or ""),
             **extras,
         }
@@ -124,24 +127,44 @@ class IntegrationSettingsService:
         readonly_keys = {
             f["key"] for f in PROVIDER_FIELDS[provider] if f.get("input") == "readonly"
         }
+        field_inputs = {f["key"]: f.get("input") for f in PROVIDER_FIELDS[provider]}
 
         if provider == "whatsapp_meta":
             errors = self.validate_whatsapp_payload(payload, allowed_keys=allowed_keys)
             if errors:
                 raise ValueError("; ".join(errors))
+        elif provider == "smtp":
+            errors = self.validate_smtp_payload(payload)
+            if errors:
+                raise ValueError("; ".join(errors))
 
-        for key, raw_value in (payload or {}).items():
-            if key not in allowed_keys:
-                continue
+        password_updated = False
+        # Iterate catalog keys so SMTP checkboxes are always persisted.
+        keys_to_save = [f["key"] for f in PROVIDER_FIELDS[provider] if f["key"] in allowed_keys]
+        for key in keys_to_save:
             if key in readonly_keys or key == "connection_status":
                 continue
+            if key not in (payload or {}) and field_inputs.get(key) != "checkbox":
+                continue
 
-            value = "" if raw_value is None else str(raw_value)
+            raw_value = (payload or {}).get(key)
+            if field_inputs.get(key) == "checkbox":
+                value = "true" if self._as_bool(raw_value) else "false"
+            else:
+                value = "" if raw_value is None else str(raw_value)
 
             if is_secret_key(key):
-                if is_masked_or_unchanged(value) or value == UNCHANGED_SENTINEL:
+                text = value.strip()
+                # Blank / placeholder → keep existing encrypted secret (never clear it).
+                if not text or text in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL}:
                     continue
-                stored = encrypt_value(value)
+                if set(text) <= {"*"}:
+                    # Browser/UI mask autofill — do not overwrite the real secret.
+                    logger.info("Secret %s.%s skipped (mask autofill)", provider, key)
+                    continue
+                stored = encrypt_value(text)
+                if key == "smtp_password":
+                    password_updated = True
             else:
                 stored = encrypt_value(value)
 
@@ -166,9 +189,34 @@ class IntegrationSettingsService:
             self.refresh_whatsapp_status_from_fields()
         elif provider == "smtp":
             self.refresh_smtp_status_from_fields()
+            self._log_smtp_audit(
+                "Updated SMTP Settings",
+                detail={
+                    "password_updated": password_updated,
+                    "host": (payload or {}).get("host"),
+                    "username": mask_email((payload or {}).get("username")),
+                },
+            )
 
-        logger.info("Integration settings saved for provider=%s", provider)
+        logger.info(
+            "Integration settings saved for provider=%s password_updated=%s",
+            provider,
+            password_updated,
+        )
         result = self.get_provider_settings_masked(provider)
+        if provider == "smtp":
+            if password_updated:
+                result["message"] = (
+                    "Settings saved successfully. Password encrypted and stored "
+                    "(field cleared for security)."
+                )
+            else:
+                result["message"] = (
+                    "Settings saved successfully. Existing password kept "
+                    "(enter a new password only to replace it)."
+                )
+            result["clear_secrets"] = True
+            result["password_updated"] = password_updated
 
         # WhatsApp: after App ID + App Secret are saved, start Meta OAuth so the
         # admin enters Facebook password / OTP on Facebook's page (never in ERP).
@@ -266,18 +314,279 @@ class IntegrationSettingsService:
                     errors.append(f"{label} is required")
         return errors
 
-    def refresh_smtp_status_from_fields(self) -> str:
+    def validate_smtp_payload(self, payload: dict[str, Any]) -> list[str]:
+        """Validate SMTP form fields (password may be blank to keep existing)."""
         cfg = self.get_provider_config_decrypted("smtp")
+        merged = dict(cfg)
+        for key in ("host", "port", "username", "from_email", "use_tls", "use_ssl", "smtp_password"):
+            raw = (payload or {}).get(key)
+            if key == "smtp_password":
+                # Only blank / exact mask means "keep existing". Do not treat other
+                # asterisk strings as masked — that blocked real password saves.
+                if raw is None:
+                    continue
+                text = str(raw).strip()
+                if text and text not in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL}:
+                    merged[key] = text
+                continue
+            if raw is None:
+                continue
+            if key in {"use_tls", "use_ssl"}:
+                merged[key] = "true" if self._as_bool(raw) else "false"
+            else:
+                text = str(raw).strip()
+                if text:
+                    merged[key] = text
+
+        errors: list[str] = []
+        if not (merged.get("host") or "").strip():
+            errors.append("SMTP Host is required")
+        port_raw = (merged.get("port") or "").strip()
+        if not port_raw:
+            errors.append("Port is required")
+        else:
+            try:
+                port = int(port_raw)
+                if port < 1 or port > 65535:
+                    errors.append("Port must be between 1 and 65535")
+            except ValueError:
+                errors.append("Port must be a valid number")
+        username = (merged.get("username") or "").strip()
+        if not username:
+            errors.append("Username is required")
+        elif "@" not in username:
+            errors.append("Username must be the full mailbox email (e.g. admin@jtcsxpert.com)")
+        from_email = (merged.get("from_email") or "").strip()
+        if not from_email:
+            errors.append("From Email is required")
+        elif "@" not in from_email or " " in from_email:
+            errors.append(
+                "From Email must be a real email like admin@jtcsxpert.com "
+                "(not the company display name)"
+            )
+        if not (merged.get("smtp_password") or "").strip():
+            errors.append("Password is required (enter a new password — none is stored yet)")
+        return errors
+
+    @staticmethod
+    def smtp_missing_fields(cfg: dict[str, str]) -> list[str]:
         required = ["host", "port", "username", "from_email", "smtp_password"]
-        missing = [k for k in required if not (cfg.get(k) or "").strip()]
-        status = STATUS_PARTIAL if not missing else STATUS_NOT_CONFIGURED
+        return [k for k in required if not (cfg.get(k) or "").strip()]
+
+    @staticmethod
+    def _smtp_missing_labels(keys: list[str]) -> list[str]:
+        labels = {
+            "host": "SMTP Host",
+            "port": "Port",
+            "username": "Username",
+            "from_email": "From Email",
+            "smtp_password": "Password",
+        }
+        return [labels.get(k, k) for k in keys]
+
+    def _set_smtp_connection_status(self, status: str) -> None:
         self.repository.upsert(
             provider="smtp",
             setting_key="connection_status",
             value_encrypted=encrypt_value(status),
             description="smtp.connection_status",
         )
+
+    def refresh_smtp_status_from_fields(self) -> str:
+        cfg = self.get_provider_config_decrypted("smtp")
+        missing = self.smtp_missing_fields(cfg)
+        current = (cfg.get("connection_status") or "").strip()
+        if missing:
+            status = STATUS_NOT_CONFIGURED
+        elif current == STATUS_CONNECTED:
+            status = STATUS_CONNECTED
+        else:
+            status = STATUS_PARTIAL
+        self._set_smtp_connection_status(status)
         return status
+
+    def smtp_runtime_config(self) -> dict[str, Any] | None:
+        """Return Flask-style MAIL_* mapping from Integration Settings when complete.
+
+        Used by EmailService so Admin → Integration Settings SMTP can drive outbound mail
+        without putting the password in the frontend or requiring a process restart.
+        """
+        cfg = self.get_provider_config_decrypted("smtp")
+        if self.smtp_missing_fields(cfg):
+            return None
+        try:
+            port = int((cfg.get("port") or "465").strip())
+        except ValueError:
+            port = 465
+        use_tls = self._as_bool(cfg.get("use_tls"))
+        use_ssl = self._as_bool(cfg.get("use_ssl"))
+        if not use_tls and not use_ssl:
+            use_ssl = True
+        return {
+            "MAIL_SERVER": (cfg.get("host") or "").strip(),
+            "MAIL_PORT": port,
+            "MAIL_USERNAME": (cfg.get("username") or "").strip(),
+            "MAIL_PASSWORD": (cfg.get("smtp_password") or "").strip(),
+            "MAIL_DEFAULT_SENDER": (cfg.get("from_email") or "").strip(),
+            "MAIL_USE_TLS": use_tls,
+            "MAIL_USE_SSL": use_ssl,
+            "MAIL_TIMEOUT": float(current_app.config.get("MAIL_TIMEOUT", 30))
+            if has_app_context()
+            else 30.0,
+        }
+
+    def test_smtp_connection(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Live SMTP probe using form overrides + stored encrypted password when blank."""
+        try:
+            return self._test_smtp_connection_inner(overrides or {})
+        except Exception as exc:
+            logger.exception("SMTP test connection failed: %s", exc.__class__.__name__)
+            try:
+                masked = self.get_provider_settings_masked("smtp")
+            except Exception:
+                masked = {"provider": "smtp", "field_values": {}, "values": {}, "secret_configured": {}}
+            return {
+                "ok": False,
+                "message": (
+                    "Unable to test SMTP connection. "
+                    "Confirm Host/Port/SSL, enter the Titan mailbox password, "
+                    "and set From Email to admin@jtcsxpert.com (not the company name)."
+                ),
+                "clear_secrets": True,
+                **masked,
+            }
+
+    def _test_smtp_connection_inner(self, payload: dict[str, Any]) -> dict[str, Any]:
+        cfg = self.get_provider_config_decrypted("smtp")
+
+        host = (str(payload.get("host") if payload.get("host") is not None else cfg.get("host") or "")).strip()
+        port_raw = (str(payload.get("port") if payload.get("port") is not None else cfg.get("port") or "")).strip()
+        username = (
+            str(payload.get("username") if payload.get("username") is not None else cfg.get("username") or "")
+        ).strip()
+        from_email = (
+            str(payload.get("from_email") if payload.get("from_email") is not None else cfg.get("from_email") or "")
+        ).strip()
+
+        posted_password = payload.get("smtp_password")
+        posted_text = "" if posted_password is None else str(posted_password).strip()
+        if posted_text and posted_text not in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL} and not (
+            set(posted_text) <= {"*"}
+        ):
+            password = posted_text
+        else:
+            password = (cfg.get("smtp_password") or "").strip()
+
+        use_tls = self._as_bool(payload["use_tls"]) if "use_tls" in payload else self._as_bool(cfg.get("use_tls"))
+        use_ssl = self._as_bool(payload["use_ssl"]) if "use_ssl" in payload else self._as_bool(cfg.get("use_ssl"))
+        if not use_tls and not use_ssl:
+            # Titan/GoDaddy default
+            use_ssl = True
+
+        errors: list[str] = []
+        if not host:
+            errors.append("SMTP Host is required")
+        if not port_raw:
+            errors.append("Port is required")
+        if not username:
+            errors.append("Username is required")
+        if not password:
+            errors.append(
+                "Password is required to test — type the Titan mailbox password "
+                "(or Save it first, then test with a blank password field)"
+            )
+        port = 0
+        if port_raw:
+            try:
+                port = int(float(str(port_raw).strip()))
+                if port < 1 or port > 65535:
+                    errors.append("Port must be between 1 and 65535")
+            except ValueError:
+                errors.append("Port must be a valid number")
+        if errors:
+            return {
+                "ok": False,
+                "message": "; ".join(errors),
+                "clear_secrets": True,
+                **self.get_provider_settings_masked("smtp"),
+            }
+
+        try:
+            ok, detail = check_smtp_connection(
+                server=host,
+                port=port,
+                username=username,
+                password=password,
+                use_ssl=use_ssl,
+                use_tls=use_tls,
+                timeout=20,
+                prefer_vps=True,
+            )
+        except Exception as exc:
+            logger.exception("check_smtp_connection raised")
+            ok, detail = False, f"SMTP probe error: {exc.__class__.__name__}"
+
+        if ok:
+            message = "Connection Successful"
+            try:
+                self._set_smtp_connection_status(STATUS_CONNECTED)
+            except Exception:
+                logger.exception("Failed to persist SMTP Connected status")
+        else:
+            message = self._safe_smtp_error(detail)
+            try:
+                self._set_smtp_connection_status(STATUS_FAILED)
+            except Exception:
+                logger.exception("Failed to persist SMTP Failed status")
+
+        try:
+            self._log_smtp_audit(
+                "Tested SMTP Connection",
+                detail={
+                    "ok": ok,
+                    "host": host,
+                    "port": port,
+                    "username": mask_email(username),
+                    "from_email": mask_email(from_email) if from_email and "@" in from_email else None,
+                },
+            )
+        except Exception:
+            logger.exception("SMTP test audit failed")
+
+        result = self.get_provider_settings_masked("smtp")
+        result.update({"ok": ok, "message": message, "clear_secrets": True})
+        return result
+
+    def _log_smtp_audit(self, action: str, *, detail: dict[str, Any] | None = None) -> None:
+        try:
+            AuditService().log(
+                action_name=action[:100],
+                entity_type="IntegrationSettings",
+                entity_id=None,
+                old_value=None,
+                new_value=detail,
+            )
+        except Exception:
+            logger.exception("AuditLog write failed for SMTP action=%s", action)
+
+    @staticmethod
+    def _safe_smtp_error(detail: str | None) -> str:
+        text = (detail or "Connection failed").strip()
+        # Strip any accidental credential fragments from library messages.
+        lowered = text.lower()
+        for needle in ("password", "passwd", "secret"):
+            if needle in lowered and "@" not in text:
+                return "Connection failed. Check host, port, username, and password."
+        if len(text) > 220:
+            text = text[:217] + "..."
+        return text or "Connection failed"
+
+    @staticmethod
+    def _as_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        text = str(value or "").strip().lower()
+        return text in {"1", "true", "yes", "on", "y"}
 
     def generate_whatsapp_verify_token(self) -> dict[str, Any]:
         # >= 64 characters for Meta webhook verify token
@@ -382,6 +691,8 @@ class IntegrationSettingsService:
             return "invalid_token"
         if "webhook" in s and "fail" in s:
             return "webhook_failed"
+        if "fail" in s:
+            return "failed"
         if "permission" in s:
             return "permission_missing"
         if "disconnect" in s:

@@ -50,7 +50,9 @@
       );
     }
     if (!resp.ok) {
-      throw new Error((data && data.error) || "Request failed (" + resp.status + ")");
+      throw new Error(
+        (data && (data.error || data.message)) || "Request failed (" + resp.status + ")"
+      );
     }
     return data;
   }
@@ -61,14 +63,57 @@
     el.textContent = message;
   }
 
+  function showToast(message, type) {
+    var toastEl = document.getElementById("intsetToast");
+    var body = document.getElementById("intsetToastBody");
+    if (!toastEl || !body || typeof bootstrap === "undefined" || !bootstrap.Toast) {
+      return false;
+    }
+    body.textContent = message || "Settings saved successfully";
+    toastEl.classList.remove("text-bg-success", "text-bg-danger", "text-bg-warning", "text-bg-info");
+    toastEl.classList.add(
+      "text-bg-" +
+        (type === "danger" ? "danger" : type === "warning" ? "warning" : type === "info" ? "info" : "success")
+    );
+    bootstrap.Toast.getOrCreateInstance(toastEl, { delay: 3200 }).show();
+    return true;
+  }
+
   function collectValues(pane) {
     var values = {};
     pane.querySelectorAll("[data-setting-key]").forEach(function (input) {
       var key = input.getAttribute("data-setting-key");
       if (!key) return;
+      if (input.getAttribute("data-input-type") === "checkbox" || input.type === "checkbox") {
+        values[key] = input.checked ? "true" : "false";
+        return;
+      }
       values[key] = input.value;
     });
     return values;
+  }
+
+  function clearSecretInputs(pane, secretConfigured) {
+    if (!pane) return;
+    pane.querySelectorAll("[data-secret='1']").forEach(function (input) {
+      input.value = "";
+      input.type = "password";
+      var key = input.getAttribute("data-setting-key");
+      var configured =
+        secretConfigured && key && Object.prototype.hasOwnProperty.call(secretConfigured, key)
+          ? !!secretConfigured[key]
+          : input.getAttribute("data-has-secret") === "1";
+      input.setAttribute("data-has-secret", configured ? "1" : "0");
+      var badge = pane.querySelector('[data-secret-badge="' + key + '"]');
+      if (badge) badge.classList.toggle("d-none", !configured);
+      var toggleBtn = pane.querySelector(
+        '[data-intset-toggle-secret][data-target="#' + input.id + '"]'
+      );
+      if (toggleBtn) {
+        var icon = toggleBtn.querySelector("i");
+        if (icon) icon.className = "bi bi-eye";
+      }
+    });
   }
 
   function resolveStatusCode(status, statusCode) {
@@ -79,6 +124,7 @@
     else if (/expired/i.test(text)) code = "token_expired";
     else if (/invalid/i.test(text)) code = "invalid_token";
     else if (/webhook/i.test(text) && /fail/i.test(text)) code = "webhook_failed";
+    else if (/fail/i.test(text)) code = "failed";
     else if (/permission/i.test(text)) code = "permission_missing";
     else if (/disconnect/i.test(text)) code = "disconnected";
     else if (/partial/i.test(text)) code = "partial";
@@ -98,7 +144,8 @@
     statusEl.className = "intset-status";
     if (code === "connected") statusEl.classList.add("is-connected");
     else if (code === "partial") statusEl.classList.add("is-partial");
-    else if (code === "token_expired" || code === "invalid_token") statusEl.classList.add("is-expired");
+    else if (code === "token_expired" || code === "invalid_token" || code === "failed")
+      statusEl.classList.add("is-expired");
     else statusEl.classList.add("is-not-configured");
 
     var hidden = pane.querySelector('[data-setting-key="connection_status"]');
@@ -158,8 +205,22 @@
         // Do not put Graph object ids into Access Token.
         return;
       }
+      if (input.getAttribute("data-secret") === "1") {
+        // Never prefill secrets from server (including masked placeholders).
+        input.value = "";
+        return;
+      }
+      if (input.getAttribute("data-input-type") === "checkbox" || input.type === "checkbox") {
+        input.checked = /^(1|true|yes|on)$/i.test(raw);
+        return;
+      }
       input.value = raw;
     });
+    if (meta && meta.secret_configured) {
+      clearSecretInputs(pane, meta.secret_configured);
+    } else if (meta && meta.clear_secrets) {
+      clearSecretInputs(pane, meta.secret_configured || null);
+    }
     setStatusBadge(pane, values.connection_status, meta && meta.status_code);
     if (meta && meta.missing_labels) setMissing(pane, meta.missing_labels);
   }
@@ -396,6 +457,8 @@
       settings: root.getAttribute("data-api-settings"),
       generate: root.getAttribute("data-api-generate-token"),
       test: root.getAttribute("data-api-test-whatsapp"),
+      testSmtp: root.getAttribute("data-api-test-smtp"),
+      smtpAudit: root.getAttribute("data-api-smtp-audit"),
       connect: root.getAttribute("data-api-connect"),
       pendingStep: root.getAttribute("data-api-pending-step"),
       selectBusiness: root.getAttribute("data-api-select-business"),
@@ -411,49 +474,99 @@
     };
     var alertEl = document.getElementById("intsetAlert");
 
-    root.querySelectorAll("[data-intset-save]").forEach(function (btn) {
-      btn.addEventListener("click", async function () {
-        var provider = btn.getAttribute("data-intset-save");
-        var pane = root.querySelector('[data-provider-pane="' + provider + '"]');
-        if (!pane) return;
-        btn.disabled = true;
-        try {
-          var data = await api(
-            urls.settings,
-            {
-              method: "POST",
-              body: { provider: provider, values: collectValues(pane) },
-            },
-            root
-          );
-          applyValues(pane, data.field_values || data.values || {}, data);
-          setMissing(pane, data.missing_labels || []);
+    root.addEventListener("click", function (ev) {
+      var toggleBtn = ev.target.closest("[data-intset-toggle-secret]");
+      if (toggleBtn) {
+        var toggleTarget = document.querySelector(toggleBtn.getAttribute("data-target") || "");
+        if (!toggleTarget) return;
+        var show = toggleTarget.type === "password";
+        toggleTarget.type = show ? "text" : "password";
+        var tIcon = toggleBtn.querySelector("i");
+        if (tIcon) tIcon.className = show ? "bi bi-eye-slash" : "bi bi-eye";
+        return;
+      }
+      var copyBtnSecret = ev.target.closest("[data-intset-copy-secret]");
+      if (copyBtnSecret) {
+        var copyTarget = document.querySelector(copyBtnSecret.getAttribute("data-target") || "");
+        if (!copyTarget) return;
+        var typed = copyTarget.value || "";
+        if (!typed) {
+          showAlert(alertEl, "Nothing to copy — type a value first.", "warning");
+          return;
+        }
+        var done = function () {
+          showToast("Copied typed value", "success");
+          showAlert(alertEl, "Copied typed value only (stored secret was not used).", "success");
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(typed).then(done).catch(function () {
+            showAlert(alertEl, "Unable to copy.", "danger");
+          });
+        } else {
+          copyTarget.type = "text";
+          copyTarget.select();
+          document.execCommand("copy");
+          copyTarget.type = "password";
+          done();
+        }
+      }
+    });
 
-          // WhatsApp: Save → Facebook OAuth (password / OTP on Facebook, not in ERP)
-          if (provider === "whatsapp_meta" && data.auto_connect && data.authorize_url) {
-            showAlert(
-              alertEl,
-              data.message ||
-                "Saved. Facebook login page open ho rahi hai — password/OTP wahan daalein…",
-              "info"
-            );
-            window.setTimeout(function () {
-              window.location.href = data.authorize_url;
-            }, 600);
-            return;
-          }
+    async function saveProvider(provider, btn) {
+      var pane = root.querySelector('[data-provider-pane="' + provider + '"]');
+      if (!pane) return;
+      if (btn) btn.disabled = true;
+      try {
+        var data = await api(
+          urls.settings,
+          {
+            method: "POST",
+            body: { provider: provider, values: collectValues(pane) },
+          },
+          root
+        );
+        applyValues(pane, data.field_values || data.values || {}, data);
+        setMissing(pane, data.missing_labels || []);
+        clearSecretInputs(pane, data.secret_configured || null);
 
+        // WhatsApp: Save → Facebook OAuth (password / OTP on Facebook, not in ERP)
+        if (provider === "whatsapp_meta" && data.auto_connect && data.authorize_url) {
           showAlert(
             alertEl,
-            data.message || "Settings saved for " + provider + ".",
-            "success"
+            data.message ||
+              "Saved. Facebook login page open ho rahi hai — password/OTP wahan daalein…",
+            "info"
           );
-        } catch (err) {
-          showAlert(alertEl, err.message || "Save failed", "danger");
-        } finally {
-          btn.disabled = false;
+          window.setTimeout(function () {
+            window.location.href = data.authorize_url;
+          }, 600);
+          return;
         }
+
+        var msg = data.message || "Settings saved successfully";
+        showToast(msg, "success");
+        showAlert(alertEl, msg, "success");
+      } catch (err) {
+        showAlert(alertEl, err.message || "Save failed", "danger");
+        showToast(err.message || "Save failed", "danger");
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    root.querySelectorAll("[data-intset-save]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        saveProvider(btn.getAttribute("data-intset-save"), btn);
       });
+    });
+
+    document.addEventListener("keydown", function (ev) {
+      if (!(ev.ctrlKey || ev.metaKey) || String(ev.key).toLowerCase() !== "s") return;
+      var smtpPane = root.querySelector('[data-provider-pane="smtp"]');
+      if (!smtpPane || !smtpPane.classList.contains("active")) return;
+      ev.preventDefault();
+      var saveBtn = smtpPane.querySelector('[data-intset-save="smtp"]');
+      saveProvider("smtp", saveBtn);
     });
 
     var genBtn = root.querySelector("[data-intset-generate-token]");
@@ -465,7 +578,11 @@
           var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
           applyValues(pane, data.field_values || {}, data);
           var input = pane && pane.querySelector('[data-setting-key="webhook_verify_token"]');
-          if (input) input.value = "********";
+          if (input) {
+            input.value = "";
+            input.setAttribute("data-has-secret", "1");
+          }
+          clearSecretInputs(pane, data.secret_configured || { webhook_verify_token: true });
           showAlert(alertEl, data.message || "Verify token generated.", "success");
           if (data.webhook_verify_token_plain) {
             var tokInput = document.getElementById("intsetVerifyTokenValue");
@@ -605,6 +722,86 @@
           showAlert(alertEl, err.message || "Test failed", "danger");
         } finally {
           testBtn.disabled = false;
+        }
+      });
+    }
+
+    var smtpTestBtn = root.querySelector("[data-intset-test-smtp]");
+    if (smtpTestBtn && urls.testSmtp) {
+      smtpTestBtn.addEventListener("click", async function () {
+        var pane = root.querySelector('[data-provider-pane="smtp"]');
+        if (!pane) return;
+        smtpTestBtn.disabled = true;
+        var resultBox = pane.querySelector("[data-smtp-test-result]");
+        if (resultBox) resultBox.innerHTML = '<div class="text-muted small">Testing SMTP connection…</div>';
+        try {
+          var data = await api(
+            urls.testSmtp,
+            { method: "POST", body: { values: collectValues(pane) } },
+            root
+          );
+          applyValues(pane, data.field_values || data.values || {}, data);
+          setMissing(pane, data.missing_labels || []);
+          clearSecretInputs(pane, data.secret_configured || null);
+          var ok = !!data.ok;
+          var msg = data.message || (ok ? "Connection Successful" : "Connection failed");
+          if (resultBox) {
+            resultBox.innerHTML =
+              '<div class="alert alert-' +
+              (ok ? "success" : "danger") +
+              ' py-2 small mb-0">' +
+              (ok ? "✔ " : "❌ ") +
+              msg +
+              "</div>";
+          }
+          showToast(msg, ok ? "success" : "danger");
+          showAlert(alertEl, msg, ok ? "success" : "danger");
+        } catch (err) {
+          var failMsg = err.message || "Connection failed";
+          if (resultBox) {
+            resultBox.innerHTML =
+              '<div class="alert alert-danger py-2 small mb-0">❌ ' + failMsg + "</div>";
+          }
+          showToast(failMsg, "danger");
+          showAlert(alertEl, failMsg, "danger");
+        } finally {
+          smtpTestBtn.disabled = false;
+        }
+      });
+    }
+
+    var smtpAuditBtn = root.querySelector("[data-intset-load-smtp-audit]");
+    if (smtpAuditBtn && urls.smtpAudit) {
+      smtpAuditBtn.addEventListener("click", async function () {
+        try {
+          var data = await api(urls.smtpAudit + "?limit=20", {}, root);
+          var box = document.getElementById("intsetSmtpAuditBox");
+          if (!box) return;
+          var rows = data.rows || [];
+          if (!rows.length) {
+            box.innerHTML = "<span class='text-muted small'>No SMTP audit entries yet.</span>";
+            return;
+          }
+          box.innerHTML =
+            "<div class='table-responsive'><table class='table table-sm mb-0'><thead><tr><th>When</th><th>Key</th><th>By</th><th>IP</th></tr></thead><tbody>" +
+            rows
+              .map(function (r) {
+                return (
+                  "<tr><td>" +
+                  (r.CreatedOn || "") +
+                  "</td><td>" +
+                  (r.SettingKey || "") +
+                  "</td><td>" +
+                  (r.ChangedByUserName || r.ChangedByUserID || "") +
+                  "</td><td>" +
+                  (r.IPAddress || "—") +
+                  "</td></tr>"
+                );
+              })
+              .join("") +
+            "</tbody></table></div>";
+        } catch (err) {
+          showAlert(alertEl, err.message || "Audit load failed", "danger");
         }
       });
     }

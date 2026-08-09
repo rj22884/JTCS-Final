@@ -169,6 +169,16 @@ def login():
         )
         if not success:
             reason = data.get("reason")
+            if reason == "password_not_set":
+                show_unverified = True
+                flash(message, "warning")
+                return render_template(
+                    "auth/login.html",
+                    email=data.get("email", email),
+                    show_unverified=True,
+                    verification_sent=False,
+                    show_pending_approval=False,
+                )
             if reason == "email_not_verified":
                 show_unverified = True
                 return render_template(
@@ -192,6 +202,8 @@ def login():
             session["user_id"] = data["user_id"]
             session["user_name"] = data["user_name"]
             session["role"] = data["role"]
+            if data.get("login_session_id"):
+                session["login_session_id"] = data["login_session_id"]
             session.permanent = data["remember"]
             flash(f"Welcome, {data['user_name']}!", "success")
             # Admin login: WhatsApp token + Integration Health alerts
@@ -239,7 +251,7 @@ def register():
             flash(message, "danger")
         else:
             flash(
-                message or "Registration submitted. Check your email for the verification link.",
+                message or "Registration submitted. Check your email for the password setup link.",
                 "success" if "saved, but" not in (message or "").lower() else "warning",
             )
             return redirect(url_for("auth.verify_email", email=data.get("email", "")))
@@ -351,6 +363,13 @@ def forgot_user_id():
 @bp.route("/logout")
 @login_required
 def logout():
+    login_session_id = session.get("login_session_id")
+    try:
+        from app.services.login_activity_service import LoginActivityService
+
+        LoginActivityService().mark_logout(login_session_id)
+    except Exception:
+        logger.exception("Logout activity update skipped")
     session.clear()
     flash("Logged out successfully.", "info")
     return redirect(url_for("auth.login"))

@@ -1,4 +1,9 @@
-"""Encrypt / decrypt / mask integration secrets (Fernet via existing SECRET_KEY)."""
+"""Encrypt / decrypt / mask integration secrets.
+
+Uses Fernet (AES-128-CBC + HMAC) derived from Flask SECRET_KEY.
+Plaintext secrets are NEVER returned to the frontend — only empty fields
+or a boolean "configured" flag. Decryption is server-side only.
+"""
 
 from __future__ import annotations
 

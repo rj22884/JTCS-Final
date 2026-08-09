@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 import smtplib
 from datetime import datetime
 from pathlib import Path
@@ -15,8 +16,16 @@ from app.models.auth import AuthToken
 from app.repositories.user_repository import AuthTokenRepository, CompanyRepository, UserRepository
 from app.services.auth_result import AuthResult
 from app.services.email_service import EmailService, SMTP_NOT_CONFIGURED, SMTP_USER_MESSAGE
+from app.services.login_activity_service import (
+    EVENT_FIRST_SET,
+    EVENT_RESET,
+    LoginActivityService,
+    STATUS_FAILED,
+    STATUS_SUCCESS,
+)
 from app.utils.date_format import format_display_date
 from app.utils.db_session import map_db_exception, persist, reset_session
+from app.utils.smtp_health import mask_email, mask_mobile
 from app.utils.url_helpers import external_url_for
 from app.utils.security import (
     hash_password,
@@ -43,6 +52,7 @@ class AuthService:
         self.company = CompanyRepository()
         self.tokens = AuthTokenRepository()
         self.email = EmailService()
+        self.login_activity = LoginActivityService()
 
     def _token_expiry_minutes(self) -> int:
         return int(current_app.config.get("AUTH_TOKEN_EXPIRY_MINUTES", 30))
@@ -62,11 +72,12 @@ class AuthService:
             return None
 
         created = format_display_date(user.CreatedDate, empty="an earlier date")
+        masked_mobile = mask_mobile(user.MobileNumber)
 
         if user.UserStatus == "Rejected":
             return (
                 f"This email was previously registered and rejected "
-                f"({user.FullName}, {created}). Contact the administrator."
+                f"(mobile {masked_mobile}, {created}). Contact the administrator."
             )
 
         from app.utils.roles import has_admin_role
@@ -74,24 +85,26 @@ class AuthService:
         if has_admin_role(user.Role):
             return (
                 f"This email is already registered as the Administrator account "
-                f"({user.FullName}, created {created}). "
+                f"(mobile {masked_mobile}, created {created}). "
                 f"Use Login or Forgot Password — do not register again."
             )
 
         if user.UserStatus == "Pending":
             if user.EmailVerified:
                 return (
-                    f"This email already has a pending registration for {user.FullName} "
-                    f"(submitted {created}). Await administrator approval or contact support."
+                    f"This email already has a pending registration "
+                    f"(mobile {masked_mobile}, submitted {created}). "
+                    f"Await administrator approval or contact support."
                 )
             return (
-                f"This email already has a pending registration for {user.FullName} "
-                f"(submitted {created}). Check your inbox for the verification link."
+                f"This email already has a pending registration "
+                f"(mobile {masked_mobile}, submitted {created}). "
+                f"Check your inbox for the password setup link."
             )
 
         return (
-            f"This email is already registered to {user.FullName} "
-            f"({user.Role}, {user.UserStatus}, created {created}). Use Login instead."
+            f"This email is already registered "
+            f"(mobile {masked_mobile}, {user.UserStatus}, created {created}). Use Login instead."
         )
 
     def _mobile_conflict(self, mobile: str, *, exclude_user_id: int | None = None) -> str | None:
@@ -101,14 +114,15 @@ class AuthService:
         if not users:
             return None
         user = users[0]
+        masked = mask_email(user.EmailID)
         if user.UserStatus == "Rejected":
             return (
                 f"This mobile number was previously registered and rejected "
-                f"({user.FullName}). Contact the administrator."
+                f"({masked}). Contact the administrator."
             )
         return (
-            f"This mobile number is already registered to {user.FullName} "
-            f"({user.EmailID}). Use Login or Forgot User ID."
+            f"This mobile number is already registered to an account "
+            f"({masked}). Use Login or Forgot User ID."
         )
 
     def administrator_exists(self) -> bool:
@@ -197,6 +211,7 @@ class AuthService:
                         "EmailID": email,
                         "MobileNumber": mobile,
                         "PasswordHash": hash_password(password),
+                        "IsPasswordSet": True,
                         "Role": "Administrator",
                         "IsActive": True,
                         "UserStatus": "Active",
@@ -209,6 +224,12 @@ class AuthService:
                 return user
 
             user = persist(_write)
+            try:
+                self.login_activity.log_password_event(
+                    email, EVENT_FIRST_SET, user_pk=user.UserID
+                )
+            except Exception:
+                logger.exception("Password event log skipped after setup")
             return AuthResult.ok({"user_id": user.UserID, "email": email}, "Setup completed successfully.").as_tuple()
         except (IntegrityError, OperationalError, InvalidRequestError) as exc:
             return self._handle_db_error(exc, "complete_setup").as_tuple()
@@ -219,29 +240,51 @@ class AuthService:
     def login(self, email: str, password: str, remember: bool = False) -> tuple[bool, str | None, dict]:
         email = (email or "").strip().lower()
         user = self.users.get_by_email(email)
-        if user is None or not verify_password(user.PasswordHash, password):
-            return AuthResult.fail("Invalid email or password.").as_tuple()
+
+        def _fail(message: str, data: dict | None = None) -> tuple[bool, str | None, dict]:
+            try:
+                self.login_activity.log_login_activity(
+                    email or "unknown",
+                    STATUS_FAILED,
+                    user_pk=getattr(user, "UserID", None) if user is not None else None,
+                )
+            except Exception:
+                logger.exception("Failed login activity log skipped")
+            return AuthResult.fail(message, data or {}).as_tuple()
+
+        if user is None:
+            return _fail("Invalid email or password.")
+
+        # First-time password not set yet — force emailed set-password flow.
+        if not bool(getattr(user, "IsPasswordSet", True)):
+            return _fail(
+                "Please set your password using the link emailed to you, then sign in.",
+                {"reason": "password_not_set", "email": email},
+            )
+
+        if not verify_password(user.PasswordHash, password):
+            return _fail("Invalid email or password.")
 
         from app.utils.roles import has_admin_role
 
         if not has_admin_role(user.Role):
             if not user.EmailVerified:
-                return AuthResult.fail(
+                return _fail(
                     "Your email is not verified.",
                     {"reason": "email_not_verified", "email": email},
-                ).as_tuple()
+                )
             if not user.AdminApproved or user.UserStatus == "Pending":
-                return AuthResult.fail(
+                return _fail(
                     "Your registration is pending administrator approval.",
                     {"reason": "pending_approval", "email": email},
-                ).as_tuple()
+                )
             if not user.IsActive or user.UserStatus != "Active":
-                return AuthResult.fail(
+                return _fail(
                     "Your account is not active. Contact the administrator.",
                     {"reason": "inactive", "email": email},
-                ).as_tuple()
+                )
         elif not user.IsActive or user.UserStatus != "Active":
-            return AuthResult.fail("Your account is not active. Contact the administrator.").as_tuple()
+            return _fail("Your account is not active. Contact the administrator.")
 
         user_id = user.UserID
         user_name = user.FullName
@@ -254,12 +297,20 @@ class AuthService:
                 return True
 
             persist(_write)
+            session_id = None
+            try:
+                session_id = self.login_activity.log_login_activity(
+                    email, STATUS_SUCCESS, user_pk=user_id
+                )
+            except Exception:
+                logger.exception("Success login activity log skipped")
             return AuthResult.ok(
                 {
                     "user_id": user_id,
                     "user_name": user_name,
                     "role": role,
                     "remember": remember,
+                    "login_session_id": session_id,
                 }
             ).as_tuple()
         except (IntegrityError, OperationalError, InvalidRequestError) as exc:
@@ -272,10 +323,6 @@ class AuthService:
         full_name = (form.get("full_name") or "").strip()
         email = (form.get("email") or "").strip().lower()
         mobile = (form.get("mobile") or "").strip()
-        department = (form.get("department") or "").strip() or None
-        designation = (form.get("designation") or "").strip() or None
-        password = form.get("password") or ""
-        confirm = form.get("confirm_password") or ""
 
         if not all([full_name, email, mobile]):
             return AuthResult.fail("Full name, email, and mobile are required.").as_tuple()
@@ -288,10 +335,6 @@ class AuthService:
             if error:
                 return AuthResult.fail(error).as_tuple()
 
-        error = self.validate_password(password, confirm)
-        if error:
-            return AuthResult.fail(error).as_tuple()
-
         conflict = self._registration_conflict(email)
         if conflict:
             return AuthResult.fail(conflict).as_tuple()
@@ -300,8 +343,7 @@ class AuthService:
         if mobile_conflict:
             return AuthResult.fail(mobile_conflict).as_tuple()
 
-        verify_token = ""
-        user = None
+        reset_token = ""
         try:
             def _create_user():
                 new_user = self.users.create(
@@ -309,11 +351,11 @@ class AuthService:
                         "FullName": full_name,
                         "EmailID": email,
                         "MobileNumber": mobile,
-                        "PasswordHash": hash_password(password),
+                        # Placeholder until the user sets a password via emailed link.
+                        "PasswordHash": hash_password(secrets.token_urlsafe(32)),
+                        "IsPasswordSet": False,
                         "Role": "Operator",
                         "IsActive": False,
-                        "Department": department,
-                        "Designation": designation,
                         "UserStatus": "Pending",
                         "EmailVerified": False,
                         "AdminApproved": False,
@@ -323,11 +365,11 @@ class AuthService:
                 return new_user.UserID
 
             user_id = persist(_create_user)
-            verify_token = create_signed_token(user_id, email, "email_verify")
+            reset_token = create_signed_token(user_id, email, "password_reset")
 
             def _create_token():
                 self.tokens.invalidate_active(
-                    self.TOKEN_TYPES["email_verify_link"],
+                    self.TOKEN_TYPES["password_reset_link"],
                     user_id=user_id,
                     email=email,
                 )
@@ -335,8 +377,8 @@ class AuthService:
                     {
                         "UserID": user_id,
                         "Email": email,
-                        "TokenType": self.TOKEN_TYPES["email_verify_link"],
-                        "TokenHash": hash_token(verify_token),
+                        "TokenType": self.TOKEN_TYPES["password_reset_link"],
+                        "TokenHash": hash_token(reset_token),
                         "ExpiresAt": token_expiry(self._token_expiry_minutes()),
                         "CreatedDate": datetime.utcnow(),
                     }
@@ -349,20 +391,19 @@ class AuthService:
             reset_session()
             return self._handle_unknown_error(exc, "register").as_tuple()
 
-        verify_url = external_url_for("auth.verify_token", token=verify_token)
+        reset_url = external_url_for("auth.reset_password", token=reset_token)
         logger.info("[REGISTER] User registered user_id=%s email=%s", user_id, email)
-        logger.info("[REGISTER] Verification token created")
-        logger.info("[REGISTER] Verification URL generated: %s", verify_url)
-        if "localhost" in verify_url.lower() or "127.0.0.1" in verify_url:
+        logger.info("[REGISTER] Password setup URL generated: %s", reset_url)
+        if "localhost" in reset_url.lower() or "127.0.0.1" in reset_url:
             logger.error(
                 "[REGISTER] APP_BASE_URL looks local on a public host — "
-                "set APP_BASE_URL in erp/.env to the VPS public URL before users can verify."
+                "set APP_BASE_URL in erp/.env to the VPS public URL before users can set a password."
             )
         try:
-            sent, mail_error = self.email.send_verification_email(email, full_name, verify_url)
+            sent, mail_error = self.email.send_set_password_email(email, full_name, reset_url)
         except Exception as exc:
             logger.error(
-                "[REGISTER] Verification email failed for %s: %s",
+                "[REGISTER] Password setup email failed for %s: %s",
                 email,
                 exc,
                 exc_info=True,
@@ -370,13 +411,13 @@ class AuthService:
             return AuthResult.ok(
                 {"email": email, "user_id": user_id},
                 f"Registration saved, but {SMTP_USER_MESSAGE} "
-                "Open the verification page and click Resend. "
+                "Open the next page and click Resend. "
                 "On VPS also confirm MAIL_PASSWORD and APP_BASE_URL in erp/.env.",
             ).as_tuple()
 
         if not sent:
             logger.error(
-                "[REGISTER] Verification email not sent for %s: %s",
+                "[REGISTER] Password setup email not sent for %s: %s",
                 email,
                 mail_error or SMTP_USER_MESSAGE,
             )
@@ -391,11 +432,11 @@ class AuthService:
                 f"Registration saved, but {detail}",
             ).as_tuple()
 
-        logger.info("[REGISTER] Verification email sent successfully to %s", email)
+        logger.info("[REGISTER] Password setup email sent successfully to %s", email)
 
         return AuthResult.ok(
             {"email": email, "user_id": user_id},
-            "Registration submitted. Check your email (and Spam/Junk) for the verification link.",
+            "Registration submitted. Check your email (and Spam/Junk) for the password setup link.",
         ).as_tuple()
 
     def verify_email_link(self, token: str, client_ip: str | None = None) -> tuple[bool, str | None, dict]:
@@ -457,51 +498,58 @@ class AuthService:
         ).as_tuple()
 
     def resend_verification_email(self, email: str) -> tuple[bool, str | None, dict]:
+        """Resend the registration password-setup link for pending unverified users."""
         email = (email or "").strip().lower()
         user = self.users.get_by_email(email)
         if user is None or user.UserStatus != "Pending" or user.EmailVerified:
-            return AuthResult.ok({}, "If the account is pending verification, a new link has been sent.").as_tuple()
+            return AuthResult.ok(
+                {},
+                "If the account is pending setup, a new password link has been sent.",
+            ).as_tuple()
 
+        user_id = user.UserID
         user_full_name = user.FullName
+        reset_token = ""
 
         try:
             def _write():
-                verify_token = create_signed_token(user.UserID, email, "email_verify")
+                nonlocal reset_token
+                reset_token = create_signed_token(user_id, email, "password_reset")
                 self.tokens.invalidate_active(
-                    self.TOKEN_TYPES["email_verify_link"],
-                    user_id=user.UserID,
+                    self.TOKEN_TYPES["password_reset_link"],
+                    user_id=user_id,
                     email=email,
                 )
                 self.tokens.create(
                     {
-                        "UserID": user.UserID,
+                        "UserID": user_id,
                         "Email": email,
-                        "TokenType": self.TOKEN_TYPES["email_verify_link"],
-                        "TokenHash": hash_token(verify_token),
+                        "TokenType": self.TOKEN_TYPES["password_reset_link"],
+                        "TokenHash": hash_token(reset_token),
                         "ExpiresAt": token_expiry(self._token_expiry_minutes()),
                         "CreatedDate": datetime.utcnow(),
                     }
                 )
-                return verify_token
+                return reset_token
 
-            verify_token = persist(_write)
+            persist(_write)
         except (IntegrityError, OperationalError, InvalidRequestError) as exc:
             return self._handle_db_error(exc, "resend_verification_email").as_tuple()
         except Exception as exc:
             reset_session()
             return self._handle_unknown_error(exc, "resend_verification_email").as_tuple()
 
-        verify_url = external_url_for("auth.verify_token", token=verify_token)
+        reset_url = external_url_for("auth.reset_password", token=reset_token)
         try:
-            sent, mail_error = self.email.send_verification_email(email, user_full_name, verify_url)
+            sent, mail_error = self.email.send_set_password_email(email, user_full_name, reset_url)
         except smtplib.SMTPException as exc:
-            logger.error("Resend verification SMTP failure for %s: %s", email, exc, exc_info=True)
+            logger.error("Resend password-setup SMTP failure for %s: %s", email, exc, exc_info=True)
             return AuthResult.fail(SMTP_USER_MESSAGE).as_tuple()
 
         if not sent:
             return AuthResult.fail(mail_error or SMTP_USER_MESSAGE).as_tuple()
 
-        return AuthResult.ok({"email": email}, "Verification email sent.").as_tuple()
+        return AuthResult.ok({"email": email}, "Password setup email sent.").as_tuple()
 
     def request_password_reset(self, email: str) -> tuple[bool, str | None, dict]:
         email = (email or "").strip().lower()
@@ -586,20 +634,58 @@ class AuthService:
         if token_row is None:
             return AuthResult.fail("Invalid or expired password reset link.").as_tuple()
 
+        was_unverified = not user.EmailVerified
+        was_first_password = not bool(getattr(user, "IsPasswordSet", False))
+        user_full_name = user.FullName
+        user_email = user.EmailID
+        user_pk = user.UserID
+
         try:
             def _write():
                 user.PasswordHash = hash_password(password)
+                user.IsPasswordSet = True
                 user.ModifiedDate = datetime.utcnow()
+                if was_unverified:
+                    user.EmailVerified = True
+                    user.VerificationDate = datetime.utcnow()
                 self.tokens.mark_used(token_row)
                 return user
 
             persist(_write)
-            return AuthResult.ok({"email": email}, "Password updated successfully. Please sign in.").as_tuple()
         except (IntegrityError, OperationalError, InvalidRequestError) as exc:
             return self._handle_db_error(exc, "reset_password_with_token").as_tuple()
         except Exception as exc:
             reset_session()
             return self._handle_unknown_error(exc, "reset_password_with_token").as_tuple()
+
+        try:
+            self.login_activity.log_password_event(
+                user_email,
+                EVENT_FIRST_SET if was_first_password else EVENT_RESET,
+                user_pk=user_pk,
+            )
+        except Exception:
+            logger.exception("Password event log skipped after reset")
+
+        if was_unverified:
+            admin = self.users.get_primary_administrator()
+            if admin and admin.EmailID.lower() != email:
+                pending_url = external_url_for("auth.users_index")
+                try:
+                    self.email.send_admin_new_user_notification(
+                        admin.EmailID,
+                        user_full_name,
+                        user_email,
+                        pending_url,
+                    )
+                except smtplib.SMTPException as exc:
+                    logger.error("Admin notification SMTP failure: %s", exc, exc_info=True)
+            return AuthResult.ok(
+                {"email": email},
+                "Password set and email verified. Await administrator approval before login.",
+            ).as_tuple()
+
+        return AuthResult.ok({"email": email}, "Password updated successfully. Please sign in.").as_tuple()
 
     def request_forgot_user_id(self, email: str = "", mobile: str = "") -> tuple[bool, str | None, dict]:
         email = (email or "").strip().lower()

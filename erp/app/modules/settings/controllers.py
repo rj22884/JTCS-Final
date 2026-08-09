@@ -44,11 +44,18 @@ class IntegrationSettingsController:
             test_to_number=test_to_number,
         )
 
+    def test_smtp(self, payload: dict | None = None) -> dict:
+        return self.service.test_smtp_connection(payload or {})
+
     def status(self) -> dict:
         return self.service.status_summary()
 
     def whatsapp_audit(self, limit: int = 50) -> dict:
         rows = IntegrationSettingsAuditService().list_recent(provider="whatsapp_meta", limit=limit)
+        return {"ok": True, "rows": rows}
+
+    def smtp_audit(self, limit: int = 50) -> dict:
+        rows = IntegrationSettingsAuditService().list_recent(provider="smtp", limit=limit)
         return {"ok": True, "rows": rows}
 
     def token_guide(self) -> dict:

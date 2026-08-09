@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from datetime import date
 
-from flask import Blueprint, jsonify, render_template, request, session
+from flask import Blueprint, Response, jsonify, render_template, request, session
 from sqlalchemy import text
 
 from app.decorators import admin_required, login_required
 from app.extensions import db
 from app.services.admin_dashboard_service import AdminDashboardService
+from app.services.login_activity_service import LoginActivityService
 from app.services.menu_service import MenuService
 
 bp = Blueprint("admin_dashboard", __name__, url_prefix="/admin/dashboard")
+# Product aliases: /admin/recent-logins and /admin/password-events
+activity_bp = Blueprint("admin_activity_api", __name__, url_prefix="/admin")
 
 MENU_PATH = "/admin/dashboard"
 _MENU_ENSURED = False
@@ -162,6 +165,14 @@ def index():
 
     date_from, date_to, period_preset = _resolve_period()
     data = AdminDashboardService().get_page_data(date_from=date_from, date_to=date_to)
+    activity = LoginActivityService()
+    try:
+        recent_logins = activity.recent_logins(limit=10, period="today")
+        password_events = activity.recent_password_events(limit=10, period="7d")
+    except Exception:
+        db.session.rollback()
+        recent_logins = []
+        password_events = []
     menu_service = MenuService()
     return render_template(
         "admin_dashboard/index.html",
@@ -176,7 +187,79 @@ def index():
         banks=data["banks"],
         banks_total=data["banks_total"],
         cards=data["cards"],
+        recent_logins=recent_logins,
+        password_events=password_events,
     )
+
+
+@bp.route("/api/recent-logins", methods=["GET"], strict_slashes=False)
+@login_required
+@admin_required
+def recent_logins():
+    """Top recent staff login rows for Admin Dashboard."""
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    period = (request.args.get("period") or "all").strip().lower()
+    search = (request.args.get("q") or "").strip()
+    try:
+        rows = LoginActivityService().recent_logins(limit=limit, period=period, search=search)
+        return jsonify({"ok": True, "rows": rows})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to load login activity: {exc}"}), 500
+
+
+@bp.route("/api/password-events", methods=["GET"], strict_slashes=False)
+@login_required
+@admin_required
+def password_events():
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    period = (request.args.get("period") or "all").strip().lower()
+    search = (request.args.get("q") or "").strip()
+    try:
+        rows = LoginActivityService().recent_password_events(
+            limit=limit, period=period, search=search
+        )
+        return jsonify({"ok": True, "rows": rows})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to load password events: {exc}"}), 500
+
+
+@bp.route("/api/recent-logins/export", methods=["GET"], strict_slashes=False)
+@login_required
+@admin_required
+def recent_logins_export():
+    period = (request.args.get("period") or "all").strip().lower()
+    search = (request.args.get("q") or "").strip()
+    try:
+        csv_text = LoginActivityService().export_logins_csv(period=period, search=search)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to export: {exc}"}), 500
+    return Response(
+        csv_text,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=recent_login_activity.csv",
+        },
+    )
+
+
+@activity_bp.route("/recent-logins", methods=["GET"], strict_slashes=False)
+@login_required
+@admin_required
+def admin_recent_logins_alias():
+    return recent_logins()
+
+
+@activity_bp.route("/password-events", methods=["GET"], strict_slashes=False)
+@login_required
+@admin_required
+def admin_password_events_alias():
+    return password_events()
 
 
 @bp.route("/api/bank-source/<int:account_id>", methods=["GET"], strict_slashes=False)

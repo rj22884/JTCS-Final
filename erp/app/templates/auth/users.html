@@ -64,7 +64,6 @@
             data-name="{{ user.FullName }}"
             data-email="{{ user.EmailID }}"
             data-mobile="{{ user.MobileNumber }}"
-            data-department="{{ user.Department or '' }}"
             data-role="{{ user.Role or 'Operator' }}"
             data-verified="{{ '1' if user.EmailVerified else '0' }}"
             data-status="{{ status_label }}">
@@ -141,8 +140,6 @@
           <dd class="col-8" id="auModalEmail">—</dd>
           <dt class="col-4">Mobile</dt>
           <dd class="col-8" id="auModalMobile">—</dd>
-          <dt class="col-4">Department</dt>
-          <dd class="col-8" id="auModalDepartment">—</dd>
           <dt class="col-4">Email Verified</dt>
           <dd class="col-8" id="auModalVerified">—</dd>
           <dt class="col-4">Status</dt>
@@ -150,7 +147,7 @@
         </dl>
 
         <div class="alert alert-warning py-2 small mt-3 mb-0 d-none" id="auModalVerifyWarn">
-          Email is not verified yet. Approve is disabled until the user verifies email.
+          Email is not verified yet. Approve is disabled until the user sets a password from the emailed link.
         </div>
         <div class="alert alert-danger py-2 small mt-3 mb-0 d-none" id="auModalRoleWarn">
           Please select at least one user role before approving.
@@ -274,7 +271,6 @@
     document.getElementById("auModalName").textContent = tr.getAttribute("data-name") || "—";
     document.getElementById("auModalEmail").textContent = tr.getAttribute("data-email") || "—";
     document.getElementById("auModalMobile").textContent = tr.getAttribute("data-mobile") || "—";
-    document.getElementById("auModalDepartment").textContent = tr.getAttribute("data-department") || "—";
     document.getElementById("auModalVerified").textContent = verified ? "Yes" : "Pending";
     document.getElementById("auModalStatus").textContent = tr.getAttribute("data-status") || "Pending Approval";
     document.getElementById("auModalVerifyWarn").classList.toggle("d-none", verified);

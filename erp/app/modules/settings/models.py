@@ -56,12 +56,12 @@ PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
     ],
     "smtp": [
         {"key": "host", "label": "SMTP Host", "input": "text"},
-        {"key": "port", "label": "Port", "input": "text"},
+        {"key": "port", "label": "Port", "input": "number"},
         {"key": "username", "label": "Username", "input": "text"},
         {"key": "smtp_password", "label": "Password", "input": "password"},
-        {"key": "use_tls", "label": "Use TLS", "input": "text"},
-        {"key": "use_ssl", "label": "Use SSL", "input": "text"},
         {"key": "from_email", "label": "From Email", "input": "text"},
+        {"key": "use_tls", "label": "Use TLS (STARTTLS)", "input": "checkbox"},
+        {"key": "use_ssl", "label": "Use SSL", "input": "checkbox"},
         {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
     ],
     "google": [

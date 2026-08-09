@@ -133,6 +133,58 @@ def api_test_whatsapp_connection():
         return jsonify({"ok": False, "error": "Unable to run connection check."}), 500
 
 
+@bp.route("/api/smtp/test-connection", methods=["POST"])
+@login_required
+@admin_required
+def api_test_smtp_connection():
+    """Live SMTP probe — never returns decrypted passwords."""
+    payload = request.get_json(silent=True) or {}
+    values = payload.get("values") if isinstance(payload.get("values"), dict) else payload
+    try:
+        # Always HTTP 200 with ok true/false so UI can refresh status without treating
+        # a failed probe as a transport/API error.
+        result = IntegrationSettingsController().test_smtp(values)
+        # Ensure JSON-safe primitives only (avoid 500 from jsonify).
+        safe = {
+            "ok": bool(result.get("ok")),
+            "message": str(result.get("message") or ""),
+            "error": str(result.get("error") or result.get("message") or ""),
+            "provider": "smtp",
+            "field_values": result.get("field_values") or result.get("values") or {},
+            "values": result.get("values") or result.get("field_values") or {},
+            "secret_configured": result.get("secret_configured") or {},
+            "missing_labels": result.get("missing_labels") or [],
+            "status_code": result.get("status_code") or "",
+            "clear_secrets": True,
+        }
+        # connection_status lives inside field_values
+        return jsonify(safe)
+    except Exception:
+        current_app.logger.exception("SMTP test connection failed")
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Unable to test SMTP connection.",
+                "message": (
+                    "Unable to test SMTP connection. "
+                    "Set From Email to admin@jtcsxpert.com, enter the Titan password, then try again."
+                ),
+                "clear_secrets": True,
+            }
+        )
+
+
+@bp.route("/api/smtp/audit", methods=["GET"])
+@login_required
+@admin_required
+def api_smtp_audit():
+    try:
+        limit = int(request.args.get("limit") or 20)
+    except (TypeError, ValueError):
+        limit = 20
+    return jsonify(IntegrationSettingsController().smtp_audit(limit=min(max(limit, 1), 100)))
+
+
 @bp.route("/api/status", methods=["GET"])
 @login_required
 @admin_required

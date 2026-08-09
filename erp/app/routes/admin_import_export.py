@@ -1,17 +1,20 @@
-"""Admin Role → Import/Export (Ledger Export — bank & customer transaction ledgers)."""
+"""Admin Role → Import/Export (legacy Ledger Export APIs).
+
+Ledger Preview / PDF / Excel lives under Reports and Analysis → Ledger Report.
+Duplicate Admin menu entries are deactivated and the page redirects there.
+"""
 
 from __future__ import annotations
 
 import io
 from datetime import date
 
-from flask import Blueprint, jsonify, render_template, request, send_file, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, send_file, url_for
 from sqlalchemy import text
 
 from app.decorators import admin_required, login_required
 from app.extensions import db
 from app.services.ledger_export_service import LedgerExportService
-from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
 
 bp = Blueprint("admin_import_export", __name__, url_prefix="/admin/import-export")
@@ -21,7 +24,7 @@ MENU_PATH = "/admin/import-export/ledger"
 
 
 def _ensure_import_export_menus() -> None:
-    """Admin Role → Import/Export → Export → Ledger Export (idempotent)."""
+    """Retire duplicate Admin Ledger Export menus (merged into Reports and Analysis)."""
     global _MENU_ENSURED
     if _MENU_ENSURED:
         return
@@ -30,7 +33,8 @@ def _ensure_import_export_menus() -> None:
             """
             DECLARE @AdminRoleID INT;
             DECLARE @ImportExportID INT;
-            DECLARE @AdminRoles NVARCHAR(50) = N'Administrator,Admin';
+            DECLARE @ExportID INT;
+            DECLARE @ReportsID INT;
 
             SELECT TOP 1 @AdminRoleID = MenuID
             FROM dbo.MenuMaster
@@ -38,136 +42,101 @@ def _ensure_import_export_menus() -> None:
               AND ParentMenuID IS NULL
             ORDER BY MenuID;
 
-            IF @AdminRoleID IS NULL
-            BEGIN
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    NULL,
-                    N'Admin Role',
-                    N'bi-archive',
-                    NULL,
-                    1,
-                    N'Administrator tools',
-                    1,
-                    @AdminRoles
-                );
-                SET @AdminRoleID = SCOPE_IDENTITY();
-            END;
-
-            IF EXISTS (
-                SELECT 1 FROM dbo.MenuMaster
-                WHERE ParentMenuID = @AdminRoleID AND MenuName = N'Import/Export'
-            )
-                UPDATE dbo.MenuMaster
-                SET MenuURL = NULL,
-                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-arrow-left-right'),
-                    DisplayOrder = 40,
-                    Description = N'Import and Export tools',
-                    IsActive = 1,
-                    RoleName = @AdminRoles
-                WHERE ParentMenuID = @AdminRoleID AND MenuName = N'Import/Export';
-            ELSE
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    @AdminRoleID,
-                    N'Import/Export',
-                    N'bi-arrow-left-right',
-                    NULL,
-                    40,
-                    N'Import and Export tools',
-                    1,
-                    @AdminRoles
-                );
-
-            SELECT TOP 1 @ImportExportID = MenuID
+            SELECT TOP 1 @ReportsID = MenuID
             FROM dbo.MenuMaster
-            WHERE ParentMenuID = @AdminRoleID AND MenuName = N'Import/Export'
-            ORDER BY MenuID;
+            WHERE ParentMenuID IS NULL
+              AND MenuName IN (N'Reports and Analysis', N'Reports & Analysis', N'Reports')
+            ORDER BY
+                CASE MenuName
+                    WHEN N'Reports and Analysis' THEN 0
+                    WHEN N'Reports & Analysis' THEN 1
+                    ELSE 2
+                END,
+                MenuID;
 
-            IF @ImportExportID IS NOT NULL
-               AND NOT EXISTS (
-                    SELECT 1 FROM dbo.MenuMaster
-                    WHERE ParentMenuID = @ImportExportID AND MenuName = N'Export'
-               )
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    @ImportExportID,
-                    N'Export',
-                    N'bi-upload',
-                    NULL,
-                    1,
-                    N'Export transaction ledgers to Excel',
-                    1,
-                    @AdminRoles
-                );
-            ELSE IF @ImportExportID IS NOT NULL
-                UPDATE dbo.MenuMaster
-                SET MenuURL = NULL,
-                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-upload'),
-                    DisplayOrder = 1,
-                    Description = N'Export transaction ledgers to Excel',
-                    IsActive = 1,
-                    RoleName = @AdminRoles
-                WHERE ParentMenuID = @ImportExportID AND MenuName = N'Export';
-
-            DECLARE @ExportID INT;
-            SELECT TOP 1 @ExportID = MenuID
-            FROM dbo.MenuMaster
-            WHERE ParentMenuID = @ImportExportID AND MenuName = N'Export'
-            ORDER BY MenuID;
-
-            IF @ExportID IS NOT NULL
+            -- Keep / restore the canonical Ledger Report under Reports and Analysis.
+            IF @ReportsID IS NOT NULL
             BEGIN
+                UPDATE dbo.MenuMaster
+                SET MenuName = N'Reports and Analysis',
+                    IsActive = 1,
+                    MenuURL = NULL
+                WHERE MenuID = @ReportsID;
+
                 IF EXISTS (
                     SELECT 1 FROM dbo.MenuMaster
-                    WHERE ParentMenuID = @ExportID AND MenuName = N'Ledger Export'
+                    WHERE ParentMenuID = @ReportsID AND MenuName = N'Ledger Report'
                 )
                     UPDATE dbo.MenuMaster
-                    SET MenuURL = N'/admin/import-export/ledger',
-                        MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-file-earmark-excel'),
-                        DisplayOrder = 1,
-                        Description = N'Export bank account and customer transaction ledgers to Excel',
-                        IsActive = 1,
-                        RoleName = @AdminRoles
-                    WHERE ParentMenuID = @ExportID AND MenuName = N'Ledger Export';
-                ELSE IF EXISTS (
-                    SELECT 1 FROM dbo.MenuMaster
-                    WHERE MenuURL = N'/admin/import-export/ledger'
-                )
-                    UPDATE dbo.MenuMaster
-                    SET ParentMenuID = @ExportID,
-                        MenuName = N'Ledger Export',
-                        MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-file-earmark-excel'),
-                        DisplayOrder = 1,
-                        Description = N'Export bank account and customer transaction ledgers to Excel',
-                        IsActive = 1,
-                        RoleName = @AdminRoles
-                    WHERE MenuURL = N'/admin/import-export/ledger';
+                    SET MenuURL = N'/Reports_and_analysis/ledger_report',
+                        MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-text'),
+                        Description = N'Search and preview bank, customer, work/category and item ledgers',
+                        IsActive = 1
+                    WHERE ParentMenuID = @ReportsID AND MenuName = N'Ledger Report';
                 ELSE
                     INSERT INTO dbo.MenuMaster (
                         ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
                         Description, IsActive, RoleName
                     )
                     VALUES (
-                        @ExportID,
-                        N'Ledger Export',
-                        N'bi-file-earmark-excel',
-                        N'/admin/import-export/ledger',
+                        @ReportsID,
+                        N'Ledger Report',
+                        N'bi-journal-text',
+                        N'/Reports_and_analysis/ledger_report',
                         1,
-                        N'Export bank account and customer transaction ledgers to Excel',
+                        N'Search and preview bank, customer, work/category and item ledgers',
                         1,
-                        @AdminRoles
+                        NULL
                     );
             END;
+
+            SELECT TOP 1 @ImportExportID = MenuID
+            FROM dbo.MenuMaster
+            WHERE @AdminRoleID IS NOT NULL
+              AND ParentMenuID = @AdminRoleID
+              AND MenuName = N'Import/Export'
+            ORDER BY MenuID;
+
+            SELECT TOP 1 @ExportID = MenuID
+            FROM dbo.MenuMaster
+            WHERE @ImportExportID IS NOT NULL
+              AND ParentMenuID = @ImportExportID
+              AND MenuName = N'Export'
+            ORDER BY MenuID;
+
+            -- Hide duplicate Admin → Import/Export → Export → Ledger Export tree.
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0,
+                Description = N'Merged into Reports and Analysis → Ledger Report'
+            WHERE MenuURL = N'/admin/import-export/ledger'
+               OR (
+                    @ExportID IS NOT NULL
+                    AND ParentMenuID = @ExportID
+                    AND MenuName = N'Ledger Export'
+               );
+
+            IF @ExportID IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM dbo.MenuMaster
+                    WHERE ParentMenuID = @ExportID
+                      AND ISNULL(IsActive, 0) = 1
+                      AND MenuName <> N'Ledger Export'
+               )
+                UPDATE dbo.MenuMaster
+                SET IsActive = 0,
+                    Description = N'Merged into Reports and Analysis → Ledger Report'
+                WHERE MenuID = @ExportID;
+
+            IF @ImportExportID IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM dbo.MenuMaster
+                    WHERE ParentMenuID = @ImportExportID
+                      AND ISNULL(IsActive, 0) = 1
+               )
+                UPDATE dbo.MenuMaster
+                SET IsActive = 0,
+                    Description = N'Merged into Reports and Analysis → Ledger Report'
+                WHERE MenuID = @ImportExportID;
             """
         )
     )
@@ -190,19 +159,12 @@ def _parse_date_arg(name: str) -> date | None:
 @login_required
 @admin_required
 def ledger_export_page():
+    """Legacy URL — redirect to Reports and Analysis → Ledger Report."""
     try:
         _ensure_import_export_menus()
     except Exception:
         db.session.rollback()
-    service = LedgerExportService()
-    return render_template(
-        "admin_import_export/ledger.html",
-        page_title="Ledger Export",
-        breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
-        bank_accounts=service.list_bank_accounts(),
-        today=date.today().isoformat(),
-        fy_start=f"{date.today().year if date.today().month >= 4 else date.today().year - 1}-04-01",
-    )
+    return redirect(url_for("ledger_report.index"))
 
 
 @bp.route("/ledger/api/banks", methods=["GET"], strict_slashes=False)

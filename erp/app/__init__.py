@@ -131,6 +131,9 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(exceptional_report_bp)
     app.register_blueprint(backup_bp)
     app.register_blueprint(admin_dashboard_bp)
+    from app.routes.admin_dashboard import activity_bp as admin_activity_bp
+
+    app.register_blueprint(admin_activity_bp)
     app.register_blueprint(admin_import_export_bp)
     app.register_blueprint(menu_customization_bp)
     app.register_blueprint(ledger_report_bp)
@@ -182,6 +185,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Integration Settings bootstrap skipped: %s", exc)
+
+        try:
+            from app.services.login_activity_service import LoginActivityService
+
+            LoginActivityService().ensure_schema()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Login activity schema ensure skipped: %s", exc)
 
         from app.utils.smtp_health import check_smtp_from_config, log_mail_config
 
@@ -413,6 +424,7 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception:
             display_version = app.config["APP_VERSION"]
 
+        now = datetime.now()
         return {
             "app_name": app.config["APP_NAME"],
             "app_version": display_version,
@@ -423,7 +435,8 @@ def create_app(config_class: type = Config) -> Flask:
             "navigation": navigation,
             "financial_year": financial_year,
             "current_date": format_display_date(today, empty=""),
-            "server_time": format_display_datetime(datetime.now(), empty=""),
+            "server_time": format_display_datetime(now, empty=""),
+            "server_time_iso": now.isoformat(timespec="seconds"),
             "display_date_format": DISPLAY_DATE_FORMAT,
             "display_date_format_label": "dd/mm/yyyy",
             "db_server_display": db_server,

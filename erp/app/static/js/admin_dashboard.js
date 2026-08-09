@@ -426,4 +426,110 @@
       }
     });
   }
+
+  function statusBadge(status) {
+    const s = String(status || "").toUpperCase();
+    if (s === "SUCCESS") return '<span class="badge text-bg-success">SUCCESS</span>';
+    if (s === "FIRST_SET") return '<span class="badge text-bg-success">FIRST_SET</span>';
+    if (s === "RESET") return '<span class="badge text-bg-warning">RESET</span>';
+    return '<span class="badge text-bg-danger">' + escapeHtml(s || "FAILED") + "</span>";
+  }
+
+  async function refreshActivityCard(card) {
+    if (!card) return;
+    const kind = card.getAttribute("data-adash-activity");
+    const api = card.getAttribute("data-api-url");
+    const body = card.querySelector("[data-adash-activity-body]");
+    if (!api || !body) return;
+    const periodEl = card.querySelector(".adash-activity-period");
+    const searchEl = card.querySelector(".adash-activity-search");
+    const period = periodEl ? periodEl.value : "all";
+    const q = searchEl ? searchEl.value.trim() : "";
+    const url = new URL(api, window.location.origin);
+    url.searchParams.set("limit", "10");
+    url.searchParams.set("period", period);
+    if (q) url.searchParams.set("q", q);
+    try {
+      const res = await fetch(url.toString(), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await parseJsonResponse(res);
+      const rows = data.rows || [];
+      if (!rows.length) {
+        const cols = kind === "password-events" ? 3 : 4;
+        body.innerHTML =
+          '<tr class="adash-activity-empty"><td colspan="' +
+          cols +
+          '" class="text-muted small">No records for this filter.</td></tr>';
+        return;
+      }
+      if (kind === "password-events") {
+        body.innerHTML = rows
+          .map(function (r) {
+            return (
+              "<tr><td>" +
+              escapeHtml(r.user_id) +
+              "</td><td>" +
+              statusBadge(r.event_type) +
+              "</td><td>" +
+              escapeHtml(r.event_time) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+      } else {
+        body.innerHTML = rows
+          .map(function (r) {
+            return (
+              "<tr><td>" +
+              escapeHtml(r.user_id) +
+              "</td><td>" +
+              escapeHtml(r.login_time) +
+              "</td><td>" +
+              escapeHtml(r.ip_address) +
+              "</td><td>" +
+              statusBadge(r.status) +
+              "</td></tr>"
+            );
+          })
+          .join("");
+      }
+      const exportBtn = card.querySelector("[data-adash-export]");
+      if (exportBtn && cfg.loginsExportUrl) {
+        const exp = new URL(cfg.loginsExportUrl, window.location.origin);
+        exp.searchParams.set("period", period);
+        if (q) exp.searchParams.set("q", q);
+        exportBtn.setAttribute("href", exp.pathname + exp.search);
+      }
+    } catch (err) {
+      body.innerHTML =
+        '<tr><td colspan="4" class="text-danger small">' +
+        escapeHtml(err.message || "Unable to refresh") +
+        "</td></tr>";
+    }
+  }
+
+  function initActivityCards() {
+    const cards = document.querySelectorAll("[data-adash-activity]");
+    if (!cards.length) return;
+    function refreshAll() {
+      cards.forEach(refreshActivityCard);
+    }
+    cards.forEach(function (card) {
+      const periodEl = card.querySelector(".adash-activity-period");
+      const searchEl = card.querySelector(".adash-activity-search");
+      if (periodEl) periodEl.addEventListener("change", function () { refreshActivityCard(card); });
+      if (searchEl) {
+        let t = null;
+        searchEl.addEventListener("input", function () {
+          window.clearTimeout(t);
+          t = window.setTimeout(function () { refreshActivityCard(card); }, 300);
+        });
+      }
+    });
+    window.setInterval(refreshAll, 30000);
+  }
+
+  initActivityCards();
 })();

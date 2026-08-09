@@ -1043,9 +1043,17 @@ class DashboardService:
             amount = Decimal(str(row.TotalAmount or 0))
             if is_expense:
                 amount = -abs(amount)
+            created = getattr(row, "CreatedDate", None)
+            if created is not None:
+                entry_datetime = created.isoformat(sep=" ", timespec="seconds")
+            elif row.TransactionDate:
+                entry_datetime = f"{row.TransactionDate.isoformat()} 00:00:00"
+            else:
+                entry_datetime = ""
             item = {
                 "transaction_id": row.TransactionID,
                 "entry_date": row.TransactionDate.isoformat() if row.TransactionDate else "",
+                "entry_datetime": entry_datetime,
                 "work": work,
                 "customer": row.CustomerName or "—",
                 "reference": row.ReferenceNo or "",

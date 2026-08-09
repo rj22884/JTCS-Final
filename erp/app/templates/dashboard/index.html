@@ -47,7 +47,8 @@
           <div class="dash-today-title-wrap">
             <span class="jtcs-metric-label dash-today-title mb-0">Today's Activity Summary</span>
             <div class="small text-muted dash-today-subtitle">
-              System date · Recent Daily Transactions · {{ today_activity.system_date | display_date }}
+              System date · Recent Daily Transactions ·
+              <span class="jtcs-live-clock" data-server-iso="{{ server_time_iso }}">{{ server_time }}</span>
             </div>
           </div>
           <strong class="jtcs-metric-value dash-today-txn mb-0">{{ today_activity.transaction_count }} txn</strong>
@@ -194,7 +195,7 @@
           <table class="table table-sm align-middle mb-0">
             <thead>
               <tr>
-                <th>Date</th>
+                <th>Date / Time</th>
                 <th>Work</th>
                 <th>Customer</th>
                 <th class="text-end">Amount</th>
@@ -214,7 +215,7 @@
                     data-amount="{{ row.amount or '' }}"
                     data-is-expense="{{ '1' if row.is_expense else '0' }}"
                     {% if row.can_open %}role="button" tabindex="0" title="Open source entry form"{% endif %}>
-                  <td>{{ row.entry_date | display_date }}</td>
+                  <td class="text-nowrap">{{ (row.entry_datetime or row.entry_date) | display_datetime }}</td>
                   <td>{{ row.work }}</td>
                   <td>{{ row.customer or '—' }}</td>
                   <td class="text-end{% if row.is_expense %} dash-recent-amt-expense{% endif %}">

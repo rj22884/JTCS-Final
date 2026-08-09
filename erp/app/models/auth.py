@@ -14,6 +14,7 @@ class User(db.Model):
     EmailID: Mapped[str] = mapped_column(Unicode(254), nullable=False)
     MobileNumber: Mapped[str] = mapped_column(Unicode(15), nullable=False)
     PasswordHash: Mapped[str] = mapped_column(Unicode(255), nullable=False)
+    IsPasswordSet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     Role: Mapped[str] = mapped_column(Unicode(200), nullable=False, default="Operator")
     IsActive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     Department: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)

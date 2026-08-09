@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260807wa2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260809smtp2">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
@@ -15,6 +15,8 @@
      data-api-settings="{{ url_for('integration_settings.api_save_settings') }}"
      data-api-generate-token="{{ url_for('integration_settings.api_generate_verify_token') }}"
      data-api-test-whatsapp="{{ url_for('integration_settings.api_test_whatsapp_connection') }}"
+     data-api-test-smtp="{{ url_for('integration_settings.api_test_smtp_connection') }}"
+     data-api-smtp-audit="{{ url_for('integration_settings.api_smtp_audit') }}"
      data-api-connect="{{ url_for('integration_settings.api_whatsapp_connect') }}"
      data-api-pending-step="{{ url_for('integration_settings.api_whatsapp_pending_step') }}"
      data-api-select-business="{{ url_for('integration_settings.api_whatsapp_select_business') }}"
@@ -37,6 +39,14 @@
      data-api-health-export="{{ url_for('integration_settings.api_health_export') }}">
 
   <div class="alert intset-alert" id="intsetAlert" role="alert"></div>
+  <div class="toast-container position-fixed top-0 end-0 p-3 intset-toast-host" style="z-index: 1080;">
+    <div id="intsetToast" class="toast align-items-center text-bg-success border-0" role="status" aria-live="polite" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body" id="intsetToastBody">Settings saved successfully</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
 
   <ul class="nav intset-primary-tabs" role="tablist">
     <li class="nav-item" role="presentation">
@@ -157,9 +167,18 @@
            role="tabpanel"
            aria-labelledby="tab-{{ p.code }}">
 
+        {% set secret_cfg = p.get('secret_configured') or {} %}
         <p class="intset-help">
+          {% if p.code == 'smtp' %}
+          Configure SMTP Email credentials. Passwords are encrypted at rest and
+          <strong>never shown</strong> after save. Leave the password blank to keep the existing secret.
+          <br><strong>From Email</strong> must be the mailbox address
+          (e.g. <code>admin@jtcsxpert.com</code>) — not the company display name.
+          Titan defaults: Host <code>smtpout.secureserver.net</code>, Port <code>465</code>, SSL on.
+          {% else %}
           Configure {{ p.label }} credentials for future use.
-          Secrets are encrypted in the database and masked on screen.
+          Secrets are encrypted in the database and never displayed after save.
+          {% endif %}
           {% if p.code == 'whatsapp_meta' %}
           Sirf <strong>App ID</strong> aur <strong>App Secret</strong> (Meta Developer App se) fill karke
           <strong>Save &amp; Connect Facebook</strong> dabayein.
@@ -174,6 +193,8 @@
           <strong>Flow:</strong> App ID + App Secret → Save → Facebook password/OTP → Business/WABA/Phone choose →
           Token encrypted save. Baaki IDs manually type karne ki zarurat nahi.
         </div>
+        {% endif %}
+        {% if p.code in ('whatsapp_meta', 'smtp') %}
         <div class="intset-missing {% if not p.get('missing_labels') %}d-none{% endif %}" data-missing-box>
           <strong>Missing:</strong> <span data-missing-list>{{ (p.get('missing_labels') or [])|join(', ') }}</span>
         </div>
@@ -181,13 +202,18 @@
 
         <div class="row g-3">
           {% for field in p.fields %}
-          <div class="col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret'] %} intset-primary-cred{% endif %}">
+          <div class="col-12 col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}{% if field.input == 'checkbox' %}col-sm-6 col-md-3{% endif %}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret'] %} intset-primary-cred{% endif %}">
+            {% if field.input != 'checkbox' %}
             <label class="form-label" for="fld-{{ p.code }}-{{ field.key }}">
               {{ field.label }}
               {% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret'] %}
               <span class="badge text-bg-primary">Required to connect</span>
               {% endif %}
+              {% if field.input == 'password' and secret_cfg.get(field.key) %}
+              <span class="badge text-bg-secondary intset-secret-badge" data-secret-badge="{{ field.key }}">Saved (encrypted)</span>
+              {% endif %}
             </label>
+            {% endif %}
             {% if field.input == 'readonly' %}
               <div>
                 <span class="intset-status"
@@ -205,21 +231,72 @@
                         data-setting-key="{{ field.key }}"
                         rows="3">{{ fv.get(field.key) or '' }}</textarea>
             {% elif field.input == 'password' %}
-              <input type="password"
+              <div class="intset-secret-field">
+                <div class="input-group input-group-sm">
+                  <input type="password"
+                         class="form-control"
+                         id="fld-{{ p.code }}-{{ field.key }}"
+                         data-setting-key="{{ field.key }}"
+                         data-secret="1"
+                         data-has-secret="{{ '1' if secret_cfg.get(field.key) else '0' }}"
+                         value=""
+                         autocomplete="new-password"
+                         spellcheck="false"
+                         placeholder="Enter new password">
+                  <button type="button"
+                          class="btn btn-outline-secondary intset-secret-toggle"
+                          data-intset-toggle-secret
+                          data-target="#fld-{{ p.code }}-{{ field.key }}"
+                          title="Show / hide typed value"
+                          aria-label="Show or hide typed password">
+                    <i class="bi bi-eye"></i>
+                  </button>
+                  <button type="button"
+                          class="btn btn-outline-secondary intset-secret-copy"
+                          data-intset-copy-secret
+                          data-target="#fld-{{ p.code }}-{{ field.key }}"
+                          title="Copy typed value"
+                          aria-label="Copy typed password">
+                    <i class="bi bi-clipboard"></i>
+                  </button>
+                </div>
+                <div class="intset-secret-hint">
+                  Leave blank to keep existing password.
+                  Show/Hide and Copy apply only to what you type here — stored secrets are never revealed.
+                </div>
+              </div>
+            {% elif field.input == 'checkbox' %}
+              <div class="form-check intset-check mt-4">
+                <input class="form-check-input"
+                       type="checkbox"
+                       id="fld-{{ p.code }}-{{ field.key }}"
+                       data-setting-key="{{ field.key }}"
+                       data-input-type="checkbox"
+                       {% if (fv.get(field.key) or '')|string|lower in ['1', 'true', 'yes', 'on'] %}checked{% endif %}>
+                <label class="form-check-label" for="fld-{{ p.code }}-{{ field.key }}">{{ field.label }}</label>
+              </div>
+            {% elif field.input == 'number' %}
+              <input type="number"
                      class="form-control form-control-sm"
                      id="fld-{{ p.code }}-{{ field.key }}"
                      data-setting-key="{{ field.key }}"
                      value="{{ fv.get(field.key) or '' }}"
-                     autocomplete="new-password"
-                     placeholder="Leave unchanged to keep existing secret">
-              <div class="intset-secret-hint">Masked value shown. Enter a new value only to replace.</div>
-            {% else %}
-              <input type="text"
-                     class="form-control form-control-sm"
-                     id="fld-{{ p.code }}-{{ field.key }}"
-                     data-setting-key="{{ field.key }}"
-                     value="{{ fv.get(field.key) or '' }}"
+                     inputmode="numeric"
+                     min="1"
+                     max="65535"
                      autocomplete="off">
+            {% else %}
+              <input type="{% if p.code == 'smtp' and field.key in ['username', 'from_email'] %}email{% else %}text{% endif %}"
+                     class="form-control form-control-sm"
+                     id="fld-{{ p.code }}-{{ field.key }}"
+                     data-setting-key="{{ field.key }}"
+                     value="{{ fv.get(field.key) or '' }}"
+                     {% if p.code == 'smtp' and field.key == 'from_email' %}placeholder="admin@jtcsxpert.com"{% endif %}
+                     {% if p.code == 'smtp' and field.key == 'username' %}placeholder="admin@jtcsxpert.com"{% endif %}
+                     autocomplete="off">
+              {% if p.code == 'smtp' and field.key == 'from_email' %}
+              <div class="intset-secret-hint">Must be a real email address, usually the same as Username.</div>
+              {% endif %}
             {% endif %}
           </div>
           {% endfor %}
@@ -235,7 +312,15 @@
           </button>
           {% else %}
           <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
-            <i class="bi bi-save"></i> Save
+            <i class="bi bi-save"></i> Save{% if p.code == 'smtp' %} (Ctrl+S){% endif %}
+          </button>
+          {% endif %}
+          {% if p.code == 'smtp' %}
+          <button type="button" class="btn btn-outline-primary btn-sm" data-intset-test-smtp>
+            <i class="bi bi-plug"></i> Test Connection
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-load-smtp-audit>
+            <i class="bi bi-clock-history"></i> Audit Log
           </button>
           {% endif %}
           {% if p.code == 'whatsapp_meta' %}
@@ -261,6 +346,12 @@
           </div>
           {% endif %}
         </div>
+        {% if p.code == 'smtp' %}
+        <div class="mt-3" data-smtp-test-result></div>
+        <div class="mt-3 intset-audit-box" id="intsetSmtpAuditBox">
+          <div class="text-muted small">Click Audit Log to view recent SMTP changes.</div>
+        </div>
+        {% endif %}
 
         {% if p.code == 'whatsapp_meta' %}
         <div class="mt-2 small text-muted" data-access-token-hint>
@@ -403,6 +494,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260807wa2"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260809smtp2"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

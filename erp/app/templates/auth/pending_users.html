@@ -14,7 +14,6 @@
           <th>Name</th>
           <th>Email</th>
           <th>Mobile</th>
-          <th>Department</th>
           <th>Email Verified</th>
           <th class="text-end">Actions</th>
         </tr>
@@ -25,7 +24,6 @@
           <td>{{ user.FullName }}</td>
           <td>{{ user.EmailID }}</td>
           <td>{{ user.MobileNumber }}</td>
-          <td>{{ user.Department or '—' }}</td>
           <td>
             {% if user.EmailVerified %}
               <span class="badge text-bg-success">Yes</span>
@@ -46,7 +44,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6" class="text-center text-muted py-4">No pending registrations.</td>
+          <td colspan="5" class="text-center text-muted py-4">No pending registrations.</td>
         </tr>
         {% endfor %}
       </tbody>

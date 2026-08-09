@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dashboard.css') }}?v=20260722metricentries">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin_dashboard.css') }}?v=20260809loginact">
 {% endblock %}
 
 {% block content %}
@@ -75,6 +75,106 @@
         <strong class="jtcs-metric-value">₹ {{ '%.2f'|format(card.value) }}</strong>
       </button>
       {% endfor %}
+    </section>
+  </div>
+
+  <div class="adash-activity-grid mt-3">
+    <section class="jtcs-metric-card adash-activity-card" aria-labelledby="adashLoginTitle"
+             data-adash-activity="logins"
+             data-api-url="{{ url_for('admin_dashboard.recent_logins') }}">
+      <div class="adash-activity-head">
+        <div>
+          <div class="jtcs-metric-label mb-0" id="adashLoginTitle">Recent Login Activity</div>
+          <div class="small text-muted">Staff ERP logins · auto-refresh 30s</div>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <select class="form-select form-select-sm adash-activity-period" aria-label="Login period filter">
+            <option value="today" selected>Today</option>
+            <option value="7d">Last 7 Days</option>
+            <option value="all">All</option>
+          </select>
+          <input type="search" class="form-control form-control-sm adash-activity-search" placeholder="Search user…" aria-label="Search login user">
+          <a class="btn btn-sm btn-outline-secondary" data-adash-export
+             href="{{ url_for('admin_dashboard.recent_logins_export') }}">Excel/CSV</a>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Time</th>
+              <th>IP Address</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody data-adash-activity-body>
+            {% for row in recent_logins %}
+            <tr>
+              <td>{{ row.user_id }}</td>
+              <td>{{ row.login_time }}</td>
+              <td>{{ row.ip_address }}</td>
+              <td>
+                {% if row.status == 'SUCCESS' %}
+                <span class="badge text-bg-success">SUCCESS</span>
+                {% else %}
+                <span class="badge text-bg-danger">FAILED</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr class="adash-activity-empty"><td colspan="4" class="text-muted small">No login activity yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="jtcs-metric-card adash-activity-card" aria-labelledby="adashPasswordTitle"
+             data-adash-activity="password-events"
+             data-api-url="{{ url_for('admin_dashboard.password_events') }}">
+      <div class="adash-activity-head">
+        <div>
+          <div class="jtcs-metric-label mb-0" id="adashPasswordTitle">Password Events</div>
+          <div class="small text-muted">First-time set vs reset · auto-refresh 30s</div>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <select class="form-select form-select-sm adash-activity-period" aria-label="Password event period filter">
+            <option value="today">Today</option>
+            <option value="7d" selected>Last 7 Days</option>
+            <option value="all">All</option>
+          </select>
+          <input type="search" class="form-control form-control-sm adash-activity-search" placeholder="Search user…" aria-label="Search password event user">
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Event</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody data-adash-activity-body>
+            {% for row in password_events %}
+            <tr>
+              <td>{{ row.user_id }}</td>
+              <td>
+                {% if row.event_type == 'FIRST_SET' %}
+                <span class="badge text-bg-success">FIRST_SET</span>
+                {% else %}
+                <span class="badge text-bg-warning">RESET</span>
+                {% endif %}
+              </td>
+              <td>{{ row.event_time }}</td>
+            </tr>
+            {% else %}
+            <tr class="adash-activity-empty"><td colspan="3" class="text-muted small">No password events yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 </div>
@@ -191,10 +291,13 @@
   window.ADMIN_DASHBOARD = {
     bankSourceUrl: {{ url_for('admin_dashboard.bank_source', account_id=0) | tojson }},
     metricDetailsUrl: {{ url_for('admin_dashboard.metric_details') | tojson }},
+    recentLoginsUrl: {{ url_for('admin_dashboard.recent_logins') | tojson }},
+    passwordEventsUrl: {{ url_for('admin_dashboard.password_events') | tojson }},
+    loginsExportUrl: {{ url_for('admin_dashboard.recent_logins_export') | tojson }},
     asOf: {{ date_to.isoformat() | tojson }},
     dateFrom: {{ date_from.isoformat() | tojson }},
     dateTo: {{ date_to.isoformat() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}?v=20260722metricentries"></script>
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}?v=20260809loginact"></script>
 {% endblock %}

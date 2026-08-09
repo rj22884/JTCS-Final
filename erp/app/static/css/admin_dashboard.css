@@ -218,3 +218,44 @@
   color: #dc2626;
   font-weight: 600;
 }
+
+.adash-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 991.98px) {
+  .adash-activity-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.adash-activity-card {
+  padding: 0.9rem 1rem;
+}
+
+.adash-activity-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid #d6e4f5;
+}
+
+.adash-activity-period {
+  width: auto;
+  min-width: 7.5rem;
+}
+
+.adash-activity-search {
+  width: 9.5rem;
+}
+
+.adash-activity-card .table {
+  font-size: 0.85rem;
+}

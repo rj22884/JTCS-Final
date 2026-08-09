@@ -9,8 +9,13 @@ DISPLAY_DATETIME_FORMAT = "%d/%m/%Y %H:%M:%S"
 DISPLAY_DATETIME_SHORT_FORMAT = "%d/%m/%Y %H:%M"
 
 _ISO_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
-_ISO_DATETIME_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})")
+_ISO_DATETIME_RE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?"
+)
 _DISPLAY_DATE_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
+_DISPLAY_DATETIME_RE = re.compile(
+    r"^(\d{1,2})/(\d{1,2})/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?"
+)
 
 
 def _coerce_date(value: Any) -> date | None:
@@ -57,6 +62,20 @@ def _coerce_datetime(value: Any) -> datetime | None:
                 int(match.group(3)),
                 int(match.group(4)),
                 int(match.group(5)),
+                int(match.group(6) or 0),
+            )
+        except ValueError:
+            return None
+    match = _DISPLAY_DATETIME_RE.match(raw)
+    if match:
+        try:
+            return datetime(
+                int(match.group(3)),
+                int(match.group(2)),
+                int(match.group(1)),
+                int(match.group(4)),
+                int(match.group(5)),
+                int(match.group(6) or 0),
             )
         except ValueError:
             return None

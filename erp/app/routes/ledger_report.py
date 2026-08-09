@@ -128,6 +128,12 @@ def _ensure_ledger_report_menu() -> None:
 
 def ensure_ledger_report_menu() -> None:
     _ensure_ledger_report_menu()
+    try:
+        from app.routes.admin_import_export import ensure_import_export_menus
+
+        ensure_import_export_menus()
+    except Exception:
+        db.session.rollback()
 
 
 def _parse_date_arg(name: str) -> date | None:

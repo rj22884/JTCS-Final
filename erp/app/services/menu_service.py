@@ -161,6 +161,14 @@ class MenuService:
     )
 
     def get_navigation(self, role: str | None) -> list[MenuNode]:
+        try:
+            from app.routes.admin_import_export import ensure_import_export_menus
+
+            ensure_import_export_menus()
+        except Exception:
+            from app.extensions import db
+
+            db.session.rollback()
         menus = self.repository.get_active_for_role(role)
         # Hidden from app nav (CRM / Exceptional / Settings / non-core modules).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]

@@ -1,44 +1,22 @@
 {% extends 'layouts/auth_base.html' %}
 
-
-
-{% block title %}Verify Email{% endblock %}
-
-{% block subtitle %}Check your inbox for the verification link{% endblock %}
-
-
+{% block title %}Set Password{% endblock %}
+{% block subtitle %}Check your inbox for the password setup link{% endblock %}
 
 {% block content %}
-
 <div class="vstack gap-3">
-
-  <p class="mb-0">We sent a verification link to <strong>{{ email or 'your email address' }}</strong>.</p>
-
-  <p class="text-muted small mb-0">The link expires in 30 minutes. After verifying, your account will await administrator approval.</p>
-
-
+  <p class="mb-0">We sent a password setup link to <strong>{{ email or 'your email address' }}</strong>.</p>
+  <p class="text-muted small mb-0">The link expires in 30 minutes. After you set a password, your account will await administrator approval.</p>
 
   {% if email %}
-
   <form method="post" class="vstack gap-2">
-
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
     <input type="hidden" name="email" value="{{ email }}">
-
     <input type="hidden" name="action" value="resend">
-
-    <button type="submit" class="btn btn-outline-primary">Resend verification email</button>
-
+    <button type="submit" class="btn btn-outline-primary">Resend password setup email</button>
   </form>
-
   {% endif %}
 
-
-
   <a href="{{ url_for('auth.login') }}" class="text-center small">Back to Login</a>
-
 </div>
-
 {% endblock %}
-

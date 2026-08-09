@@ -215,6 +215,12 @@ class IntegrationHealthService:
                 probe = WhatsAppHealthService(self.settings, self.repository).token_health()
             except Exception as exc:
                 probe = {"ok": False, "message": str(exc)}
+        elif provider == "smtp":
+            try:
+                probe = self.settings.test_smtp_connection({})
+            except Exception as exc:
+                probe = {"ok": False, "message": "SMTP test failed."}
+                logger.exception("Health SMTP probe failed: %s", exc)
         else:
             cfg = self.settings.get_provider_config_decrypted(provider)
             configured = self._is_configured(cfg)

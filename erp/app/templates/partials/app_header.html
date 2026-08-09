@@ -109,9 +109,9 @@
       <i class="bi bi-calendar3"></i>
       {{ financial_year }}
     </span>
-    <span class="jtcs-header-pill hide-sm">
+    <span class="jtcs-header-pill hide-sm" title="System date &amp; time">
       <i class="bi bi-clock"></i>
-      {{ current_date }}
+      <span class="jtcs-live-clock" data-server-iso="{{ server_time_iso }}">{{ server_time }}</span>
     </span>
     <a href="{{ url_for('dashboard.index') }}" class="jtcs-header-btn" title="Profile">
       <i class="bi bi-person-gear"></i>

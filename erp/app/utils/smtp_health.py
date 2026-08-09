@@ -24,7 +24,7 @@ SMTP_FALLBACK_PORT = 587
 
 
 def mask_email(address: str | None) -> str:
-    """Mask an email address for safe logging."""
+    """Mask an email address for safe logging / user-facing conflict messages."""
     if not address:
         return "(not set)"
     value = address.strip()
@@ -36,6 +36,18 @@ def mask_email(address: str | None) -> str:
     else:
         masked_local = f"{local[0]}***{local[-1]}"
     return f"{masked_local}@{domain}"
+
+
+def mask_mobile(number: str | None) -> str:
+    """Mask a mobile number for user-facing conflict messages (e.g. 98****3210)."""
+    if not number:
+        return "***"
+    digits = "".join(ch for ch in str(number).strip() if ch.isdigit())
+    if len(digits) < 4:
+        return "***"
+    if len(digits) <= 6:
+        return f"{digits[:1]}***{digits[-1]}"
+    return f"{digits[:2]}****{digits[-4:]}"
 
 
 def smtp_settings_from_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -290,23 +302,25 @@ def check_smtp_connection(
     use_ssl: bool = True,
     use_tls: bool = False,
     timeout: float = 15,
+    prefer_vps: bool = False,
 ) -> tuple[bool, str | None]:
     """Connect to SMTP and authenticate. Never logs passwords."""
     if not server:
-        return False, "MAIL_SERVER is not configured."
+        return False, "SMTP Host is not configured."
     if not username:
-        return False, "MAIL_USERNAME is not configured."
+        return False, "SMTP Username is not configured."
     if not password:
-        return False, "MAIL_PASSWORD is not configured."
+        return False, "SMTP Password is not configured."
 
     masked_user = mask_email(username)
     logger.debug(
-        "SMTP health check: server=%s port=%s ssl=%s tls=%s user=%s",
+        "SMTP health check: server=%s port=%s ssl=%s tls=%s user=%s prefer_vps=%s",
         server,
         port,
         use_ssl,
         use_tls,
         masked_user,
+        prefer_vps,
     )
 
     try:
@@ -318,18 +332,26 @@ def check_smtp_connection(
             use_ssl=use_ssl,
             use_tls=use_tls,
             timeout=timeout,
+            prefer_vps=prefer_vps,
         ):
             return True, f"SMTP login succeeded for {masked_user} via {server}:{port}"
     except smtplib.SMTPAuthenticationError as exc:
-        return False, f"SMTP authentication failed for {masked_user}: {exc}"
+        return (
+            False,
+            f"SMTP authentication failed for {masked_user}. "
+            "Check the Titan mailbox password (same as webmail login).",
+        )
     except smtplib.SMTPException as exc:
         return False, f"SMTP error for {server}:{port}: {exc}"
     except TRANSIENT_SMTP_ERRORS as exc:
         return (
             False,
             f"SMTP connection error for {server}:{port}: {exc}. "
-            "On VPS, allow outbound TCP 465 and 587, and confirm MAIL_* in erp/.env.",
+            "Try port 587 with TLS if 465/SSL is blocked.",
         )
+    except Exception as exc:
+        logger.exception("Unexpected SMTP check failure for %s", masked_user)
+        return False, f"SMTP check failed ({exc.__class__.__name__})."
 
 
 def check_smtp_from_config(config: dict[str, Any] | None = None) -> tuple[bool, str | None]:

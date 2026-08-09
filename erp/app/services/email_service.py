@@ -27,12 +27,25 @@ REGISTRATION_SMTP_TIMEOUT = 15.0
 
 
 class EmailService:
+    def _mail_config(self) -> dict:
+        """Prefer Integration Settings SMTP (encrypted DB) when fully configured; else .env."""
+        try:
+            from app.modules.settings.services import IntegrationSettingsService
+
+            overlay = IntegrationSettingsService().smtp_runtime_config()
+            if overlay:
+                return overlay
+        except Exception:
+            logger.debug("[EMAIL] Integration Settings SMTP unavailable; using .env MAIL_*", exc_info=True)
+        return current_app.config
+
     def is_configured(self) -> bool:
+        cfg = self._mail_config()
         return bool(
-            current_app.config.get("MAIL_SERVER")
-            and current_app.config.get("MAIL_USERNAME")
-            and current_app.config.get("MAIL_PASSWORD")
-            and current_app.config.get("MAIL_DEFAULT_SENDER")
+            cfg.get("MAIL_SERVER")
+            and cfg.get("MAIL_USERNAME")
+            and cfg.get("MAIL_PASSWORD")
+            and cfg.get("MAIL_DEFAULT_SENDER")
         )
 
     def _context(self) -> dict:
@@ -60,13 +73,14 @@ class EmailService:
         }
 
     def _log_smtp_config(self) -> None:
+        cfg = self._mail_config()
         logger.info(
             "[EMAIL] Connecting SMTP server=%s port=%s ssl=%s tls=%s sender=%s",
-            current_app.config.get("MAIL_SERVER"),
-            current_app.config.get("MAIL_PORT"),
-            current_app.config.get("MAIL_USE_SSL"),
-            current_app.config.get("MAIL_USE_TLS"),
-            current_app.config.get("MAIL_DEFAULT_SENDER"),
+            cfg.get("MAIL_SERVER"),
+            cfg.get("MAIL_PORT"),
+            cfg.get("MAIL_USE_SSL"),
+            cfg.get("MAIL_USE_TLS"),
+            cfg.get("MAIL_DEFAULT_SENDER"),
         )
 
     def _send_message(self, message: Message) -> None:
@@ -83,7 +97,8 @@ class EmailService:
         """Primary SMTP send with VPS-friendly SSL/port fallbacks."""
         from flask_mail import sanitize_address, sanitize_addresses
 
-        settings = smtp_settings_from_config(current_app.config)
+        cfg = self._mail_config()
+        settings = smtp_settings_from_config(cfg)
         if timeout is not None:
             settings["timeout"] = float(timeout)
         settings["prefer_vps"] = prefer_vps
@@ -131,17 +146,18 @@ class EmailService:
         timeout: float | None = None,
         reply_to: str | None = None,
     ) -> tuple[bool, str | None]:
+        cfg = self._mail_config()
         logger.info(
             "[EMAIL] Preparing email to=%s subject=%s sender=%s prefer_vps=%s",
             mask_email(to_email),
             subject,
-            current_app.config.get("MAIL_DEFAULT_SENDER"),
+            cfg.get("MAIL_DEFAULT_SENDER"),
             prefer_vps,
         )
 
-        if not current_app.config.get("MAIL_PASSWORD"):
+        if not cfg.get("MAIL_PASSWORD"):
             logger.error(
-                "[EMAIL] MAIL_PASSWORD missing in .env — cannot send email to %s",
+                "[EMAIL] SMTP password missing — cannot send email to %s",
                 mask_email(to_email),
             )
             return False, SMTP_NOT_CONFIGURED
@@ -152,8 +168,8 @@ class EmailService:
             )
             return False, SMTP_NOT_CONFIGURED
 
-        sender = current_app.config["MAIL_DEFAULT_SENDER"]
-        username = (current_app.config.get("MAIL_USERNAME") or "").strip()
+        sender = cfg["MAIL_DEFAULT_SENDER"]
+        username = (cfg.get("MAIL_USERNAME") or "").strip()
         # Keep display name, but force mailbox address = authenticated user (GoDaddy).
         if username and "<" not in str(sender) and str(sender).lower() != username.lower():
             sender = f"Joshi Tax Consultancy & Services <{username}>"
@@ -201,7 +217,7 @@ class EmailService:
             except smtplib.SMTPAuthenticationError as exc:
                 logger.error(
                     "[EMAIL] SMTP authentication failed for %s: %s",
-                    mask_email(current_app.config.get("MAIL_USERNAME")),
+                    mask_email(cfg.get("MAIL_USERNAME")),
                     exc,
                     exc_info=True,
                 )
@@ -308,6 +324,42 @@ class EmailService:
             f"Support: {ctx['support_email']}"
         )
         return self.send_html(to_email, "Reset your Password", html, text)
+
+    def send_set_password_email(self, to_email: str, full_name: str, reset_url: str) -> tuple[bool, str | None]:
+        """Registration invite — user sets password via emailed link (also verifies email)."""
+        logger.info("[EMAIL] Preparing set-password email for %s", mask_email(to_email))
+        logger.info("[EMAIL] Set-password URL: %s", reset_url)
+        if "localhost" in (reset_url or "").lower() or "127.0.0.1" in (reset_url or ""):
+            logger.error(
+                "[EMAIL] Set-password URL still points at localhost — set APP_BASE_URL on VPS "
+                "to the public site URL (e.g. http://app.jtcsexpert.com)."
+            )
+        ctx = self._context()
+        html = render_template(
+            "email/set_password.html",
+            full_name=full_name,
+            reset_url=reset_url,
+            expiry_minutes=current_app.config.get("AUTH_TOKEN_EXPIRY_MINUTES", 30),
+            **ctx,
+        )
+        text = (
+            f"Hello {full_name},\n\n"
+            f"Set your password and verify your email:\n{reset_url}\n\n"
+            f"Password must be at least 8 characters with uppercase, lowercase, and a number.\n"
+            f"This link expires in {current_app.config.get('AUTH_TOKEN_EXPIRY_MINUTES', 30)} minutes.\n\n"
+            f"Support: {ctx['support_email']}"
+        )
+        support = (ctx.get("support_email") or current_app.config.get("MAIL_USERNAME") or "").strip()
+        return self.send_html(
+            to_email,
+            "Set your Password",
+            html,
+            text,
+            prefer_vps=True,
+            max_attempts=REGISTRATION_SMTP_MAX_ATTEMPTS,
+            timeout=REGISTRATION_SMTP_TIMEOUT,
+            reply_to=support or None,
+        )
 
     def send_user_id_recovery_email(self, to_email: str, user_ids: list[str]) -> tuple[bool, str | None]:
         ctx = self._context()
