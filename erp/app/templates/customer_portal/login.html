@@ -4,7 +4,8 @@
 
 {% block content %}
 <form id="cpLoginForm" class="vstack gap-3" autocomplete="on">
-  <div>
+  {# Step 1: User ID #}
+  <div id="cpStepUserId">
     <label class="form-label" for="cpUserId">User ID</label>
     <input
       type="text"
@@ -19,7 +20,8 @@
     <div class="form-text" id="cpDetectedType"></div>
   </div>
 
-  <div>
+  {# Step 2a: Password (returning customers) #}
+  <div id="cpStepPassword" class="d-none">
     <label class="form-label" for="cpPassword">Password</label>
     <div class="input-group">
       <input
@@ -28,7 +30,6 @@
         id="cpPassword"
         name="password"
         placeholder="Enter Password"
-        required
         autocomplete="current-password"
       >
       <button class="btn btn-outline-secondary" type="button" data-cp-toggle-password="#cpPassword" aria-label="Show password">
@@ -37,12 +38,59 @@
     </div>
   </div>
 
+  {# Step 2b: Identity verify (first login / reset) #}
+  <div id="cpStepVerify" class="d-none">
+    <div class="cp-verify-box">
+      <div class="small text-muted mb-1" id="cpVerifyIntro">Confirm your identity</div>
+      <div class="cp-masked-value" id="cpMaskedValue">XXXXXXXX</div>
+      <label class="form-label mt-2" for="cpVerifyValue" id="cpVerifyLabel">Enter full value</label>
+      <input
+        type="text"
+        class="form-control"
+        id="cpVerifyValue"
+        name="verify_value"
+        autocomplete="off"
+        inputmode="text"
+      >
+      <div class="form-text" id="cpVerifyHint"></div>
+    </div>
+  </div>
+
+  {# Step 3: Create password #}
+  <div id="cpStepSetPassword" class="d-none">
+    <div class="alert alert-info py-2 small mb-0" role="status">
+      Identity verified. Create your new portal password.
+    </div>
+    <div>
+      <label class="form-label" for="cpNewPassword">New Password</label>
+      <div class="input-group">
+        <input type="password" class="form-control" id="cpNewPassword" minlength="8" autocomplete="new-password">
+        <button class="btn btn-outline-secondary" type="button" data-cp-toggle-password="#cpNewPassword" aria-label="Show password">
+          <i class="bi bi-eye"></i>
+        </button>
+      </div>
+      <div class="form-text">Minimum 8 characters.</div>
+    </div>
+    <div>
+      <label class="form-label" for="cpConfirmPassword">Confirm Password</label>
+      <div class="input-group">
+        <input type="password" class="form-control" id="cpConfirmPassword" minlength="8" autocomplete="new-password">
+        <button class="btn btn-outline-secondary" type="button" data-cp-toggle-password="#cpConfirmPassword" aria-label="Show password">
+          <i class="bi bi-eye"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="d-grid gap-2">
     <button type="submit" class="btn btn-primary" id="cpLoginBtn">
-      <span class="cp-btn-label">Login</span>
+      <span class="cp-btn-label" id="cpLoginBtnLabel">Continue</span>
     </button>
     <button type="button" class="btn btn-outline-primary" id="cpResetBtn">
       Reset Password
+    </button>
+    <button type="button" class="btn btn-link btn-sm text-decoration-none d-none" id="cpBackBtn">
+      ← Back / Change User ID
     </button>
   </div>
 </form>
@@ -52,6 +100,9 @@
   <p class="mb-2">Please contact JTCS for Customer Portal Registration.</p>
   <p class="mb-1"><strong>Phone:</strong> <a href="tel:+918477005566">+91 8477005566</a></p>
   <p class="mb-2"><strong>Email:</strong> <a href="mailto:admin@jtcsxpert.com">admin@jtcsxpert.com</a></p>
-  <p class="mb-0 small text-muted">After registration, set your password using the link sent by JTCS. Passwords are never shown on this page.</p>
+  <p class="mb-0 small text-muted">
+    Existing customers: first login needs identity check (PAN/Aadhaar), then create your own password.
+    Passwords are never shown on this page.
+  </p>
 </div>
 {% endblock %}

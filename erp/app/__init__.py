@@ -83,6 +83,9 @@ SETUP_PUBLIC_ENDPOINTS = {
     "public_intake.website_intake",
     "customer_portal.login_page",
     "customer_portal.login_api",
+    "customer_portal.login_start_api",
+    "customer_portal.login_verify_api",
+    "customer_portal.login_set_password_api",
     "customer_portal.reset_password_api",
     "customer_portal.profile_api_legacy",
 }

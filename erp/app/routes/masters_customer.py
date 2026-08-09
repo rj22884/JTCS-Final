@@ -276,7 +276,7 @@ def aadhaar_ekyc_unlock():
 @bp.route("/api/records/<int:customer_id>/reset-portal-password", methods=["POST"], strict_slashes=False)
 @login_required
 def reset_portal_password(customer_id: int):
-    """Admin / Super Admin: reset Customer Portal password to Admin@123."""
+    """Admin / Super Admin: clear Customer Portal password (identity verify + new password)."""
     if not has_admin_role(session.get("role")):
         return jsonify({"ok": False, "error": "Administrator access required."}), 403
 

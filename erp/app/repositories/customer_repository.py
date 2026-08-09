@@ -161,35 +161,22 @@ class CustomerRepository:
             )
         )
         self.session.commit()
-        # Seed default portal password hash for customers that do not have one yet.
-        pending = self.session.execute(
+        # No default Admin@123 — customers create a password after identity verify.
+        self.session.execute(
             text(
                 """
-                SELECT COUNT(1)
-                FROM dbo.CustomerMaster
-                WHERE PortalPassword IS NULL
-                   OR LTRIM(RTRIM(PortalPassword)) = N''
+                UPDATE dbo.CustomerMaster
+                SET PasswordChanged = ISNULL(PasswordChanged, 0),
+                    FailedLoginCount = ISNULL(FailedLoginCount, 0),
+                    AccountLocked = ISNULL(AccountLocked, 0),
+                    Logged = ISNULL(Logged, 0)
+                WHERE PasswordChanged IS NULL
+                   OR FailedLoginCount IS NULL
+                   OR AccountLocked IS NULL
                 """
             )
-        ).scalar()
-        if int(pending or 0) > 0:
-            from app.utils.security import hash_password
-
-            self.session.execute(
-                text(
-                    """
-                    UPDATE dbo.CustomerMaster
-                    SET PortalPassword = :pwd,
-                        PasswordChanged = ISNULL(PasswordChanged, 0),
-                        FailedLoginCount = ISNULL(FailedLoginCount, 0),
-                        AccountLocked = ISNULL(AccountLocked, 0)
-                    WHERE PortalPassword IS NULL
-                       OR LTRIM(RTRIM(PortalPassword)) = N''
-                    """
-                ),
-                {"pwd": hash_password("Admin@123")},
-            )
-            self.session.commit()
+        )
+        self.session.commit()
         _CUSTOMER_SCHEMA_READY = True
 
     @staticmethod
@@ -557,37 +544,20 @@ class CustomerRepository:
         return self.get_full(int(new_id))
 
     def ensure_portal_password_defaults(self, customer_id: int) -> None:
-        """Ensure a customer has the default portal password (Admin@123) when unset."""
+        """Ensure portal auth flags exist; password is created on first verified login."""
         self.ensure_schema()
-        from app.utils.security import hash_password
-
-        row = self.session.execute(
-            text(
-                """
-                SELECT PortalPassword
-                FROM dbo.CustomerMaster
-                WHERE CustomerID = :id
-                """
-            ),
-            {"id": int(customer_id)},
-        ).first()
-        if not row:
-            return
-        current = (row[0] or "").strip()
-        if current:
-            return
         self.session.execute(
             text(
                 """
                 UPDATE dbo.CustomerMaster
-                SET PortalPassword = :pwd,
-                    PasswordChanged = 0,
+                SET PasswordChanged = ISNULL(PasswordChanged, 0),
                     FailedLoginCount = ISNULL(FailedLoginCount, 0),
-                    AccountLocked = ISNULL(AccountLocked, 0)
+                    AccountLocked = ISNULL(AccountLocked, 0),
+                    Logged = ISNULL(Logged, 0)
                 WHERE CustomerID = :id
                 """
             ),
-            {"pwd": hash_password("Admin@123"), "id": int(customer_id)},
+            {"id": int(customer_id)},
         )
         self.session.flush()
 
@@ -782,7 +752,7 @@ class CustomerRepository:
         self.session.flush()
 
     def reset_portal_password(self, customer_id: int, password_hash: str) -> None:
-        """Reset portal password to the provided hash (default Admin@123)."""
+        """Legacy helper: set a portal password hash and force re-setup (PasswordChanged=0)."""
         self.ensure_schema()
         self.session.execute(
             text(
@@ -801,6 +771,25 @@ class CustomerRepository:
                 "now": datetime.utcnow(),
                 "id": int(customer_id),
             },
+        )
+        self.session.flush()
+
+    def clear_portal_password(self, customer_id: int) -> None:
+        """Clear portal password — customer must verify identity and create a new one."""
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET PortalPassword = NULL,
+                    PasswordChanged = 0,
+                    PasswordResetDate = :now,
+                    FailedLoginCount = 0,
+                    AccountLocked = 0
+                WHERE CustomerID = :id
+                """
+            ),
+            {"now": datetime.utcnow(), "id": int(customer_id)},
         )
         self.session.flush()
 

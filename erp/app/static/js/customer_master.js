@@ -297,7 +297,7 @@
 
   function resetPortalPassword(customerId) {
     if (!customerId || !window.CM_API.resetPortalPassword) return;
-    if (!window.confirm("Reset Customer Portal password to Admin@123 for this customer?")) return;
+    if (!window.confirm("Clear Customer Portal password? Customer must verify PAN/Aadhaar and create a new password on next login.")) return;
     const url = apiUrl(window.CM_API.resetPortalPassword, customerId);
     fetch(url, {
       method: "POST",

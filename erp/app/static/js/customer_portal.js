@@ -143,27 +143,175 @@
     updateDetectedType();
   }
 
+  // Multi-step login: userId → (password | verify → set password)
+  let loginStep = "userId"; // userId | password | verify | setPassword
+
+  const stepEls = {
+    userId: document.getElementById("cpStepUserId"),
+    password: document.getElementById("cpStepPassword"),
+    verify: document.getElementById("cpStepVerify"),
+    setPassword: document.getElementById("cpStepSetPassword"),
+    btnLabel: document.getElementById("cpLoginBtnLabel"),
+    backBtn: document.getElementById("cpBackBtn"),
+    resetBtn: document.getElementById("cpResetBtn"),
+    masked: document.getElementById("cpMaskedValue"),
+    verifyLabel: document.getElementById("cpVerifyLabel"),
+    verifyHint: document.getElementById("cpVerifyHint"),
+    verifyIntro: document.getElementById("cpVerifyIntro"),
+  };
+
+  function showStep(step) {
+    loginStep = step;
+    if (stepEls.userId) stepEls.userId.classList.remove("d-none");
+    if (stepEls.password) stepEls.password.classList.toggle("d-none", step !== "password");
+    if (stepEls.verify) stepEls.verify.classList.toggle("d-none", step !== "verify");
+    if (stepEls.setPassword) stepEls.setPassword.classList.toggle("d-none", step !== "setPassword");
+    if (stepEls.backBtn) stepEls.backBtn.classList.toggle("d-none", step === "userId");
+    if (stepEls.resetBtn) stepEls.resetBtn.classList.toggle("d-none", step === "setPassword" || step === "verify");
+    if (userIdInput) userIdInput.readOnly = step !== "userId";
+    if (stepEls.btnLabel) {
+      if (step === "userId") stepEls.btnLabel.textContent = "Continue";
+      else if (step === "password") stepEls.btnLabel.textContent = "Login";
+      else if (step === "verify") stepEls.btnLabel.textContent = "Verify & Continue";
+      else stepEls.btnLabel.textContent = "Create Password";
+    }
+  }
+
+  function applyVerifyChallenge(data) {
+    if (stepEls.masked) stepEls.masked.textContent = data.masked_value || "XXXXXXXX";
+    if (stepEls.verifyLabel) {
+      stepEls.verifyLabel.textContent = data.field_label || "Enter full value";
+    }
+    if (stepEls.verifyHint) stepEls.verifyHint.textContent = data.field_hint || "";
+    if (stepEls.verifyIntro) {
+      const name = data.customer_name ? (" for " + data.customer_name) : "";
+      stepEls.verifyIntro.textContent =
+        "Confirm your identity" + name + " — enter the full value matching the masked ID below.";
+    }
+    const verifyInput = document.getElementById("cpVerifyValue");
+    if (verifyInput) {
+      verifyInput.value = "";
+      verifyInput.placeholder =
+        (data.verify_field || "").toUpperCase() === "PAN"
+          ? "Enter full PAN (e.g. ABCDE1234F)"
+          : "Enter full 12-digit Aadhaar";
+      verifyInput.inputMode =
+        (data.verify_field || "").toUpperCase() === "AADHAAR" ? "numeric" : "text";
+    }
+    showStep("verify");
+  }
+
+  function resetToUserIdStep() {
+    clearAlert();
+    showStep("userId");
+    const pwd = document.getElementById("cpPassword");
+    const verify = document.getElementById("cpVerifyValue");
+    const np = document.getElementById("cpNewPassword");
+    const cp = document.getElementById("cpConfirmPassword");
+    if (pwd) pwd.value = "";
+    if (verify) verify.value = "";
+    if (np) np.value = "";
+    if (cp) cp.value = "";
+    if (userIdInput) {
+      userIdInput.readOnly = false;
+      userIdInput.focus();
+    }
+  }
+
+  stepEls.backBtn?.addEventListener("click", resetToUserIdStep);
+
   const loginForm = document.getElementById("cpLoginForm");
   if (loginForm) {
+    showStep("userId");
     loginForm.addEventListener("submit", async function (event) {
       event.preventDefault();
       clearAlert();
       const userId = (document.getElementById("cpUserId")?.value || "").trim();
-      const password = document.getElementById("cpPassword")?.value || "";
-      if (!userId || !password) {
-        showAlert("User ID and Password are required.", "warning");
+      if (!userId) {
+        showAlert("Enter your User ID (PAN, Aadhaar, Mobile or Email).", "warning");
         return;
       }
+
       setLoading(true);
       try {
-        const data = await postJson(api.login, { user_id: userId, password: password });
-        if (!data.ok) {
-          handleErrorResult(data);
+        if (loginStep === "userId") {
+          const data = await postJson(api.loginStart || api.login, { user_id: userId });
+          if (!data.ok) {
+            handleErrorResult(data);
+            return;
+          }
+          if (data.next === "verify_identity") {
+            applyVerifyChallenge(data);
+            showAlert("First-time login: verify your identity to create a password.", "info");
+            return;
+          }
+          showStep("password");
+          document.getElementById("cpPassword")?.focus();
           return;
         }
-        window.location.href = data.redirect || api.dashboard;
+
+        if (loginStep === "password") {
+          const password = document.getElementById("cpPassword")?.value || "";
+          if (!password) {
+            showAlert("Password is required.", "warning");
+            return;
+          }
+          const data = await postJson(api.login, { user_id: userId, password: password });
+          if (!data.ok) {
+            if (data.error_code === "needs_setup" && data.masked_value) {
+              applyVerifyChallenge(data);
+              showAlert(data.error || "Please verify your identity first.", "info");
+              return;
+            }
+            handleErrorResult(data);
+            return;
+          }
+          window.location.href = data.redirect || api.dashboard;
+          return;
+        }
+
+        if (loginStep === "verify") {
+          const verifyValue = (document.getElementById("cpVerifyValue")?.value || "").trim();
+          if (!verifyValue) {
+            showAlert("Please enter the full verification value.", "warning");
+            return;
+          }
+          const data = await postJson(api.loginVerify, {
+            user_id: userId,
+            verify_value: verifyValue,
+          });
+          if (!data.ok) {
+            handleErrorResult(data);
+            return;
+          }
+          showStep("setPassword");
+          document.getElementById("cpNewPassword")?.focus();
+          return;
+        }
+
+        if (loginStep === "setPassword") {
+          const newPassword = document.getElementById("cpNewPassword")?.value || "";
+          const confirmPassword = document.getElementById("cpConfirmPassword")?.value || "";
+          if (newPassword.length < 8) {
+            showAlert("New Password must be at least 8 characters.", "warning");
+            return;
+          }
+          if (newPassword !== confirmPassword) {
+            showAlert("New Password and Confirm Password must match.", "warning");
+            return;
+          }
+          const data = await postJson(api.loginSetPassword, {
+            new_password: newPassword,
+            confirm_password: confirmPassword,
+          });
+          if (!data.ok) {
+            handleErrorResult(data);
+            return;
+          }
+          window.location.href = data.redirect || api.dashboard;
+        }
       } catch (err) {
-        showAlert("Unable to login. Please try again.", "danger");
+        showAlert("Unable to continue. Please try again.", "danger");
       } finally {
         setLoading(false);
       }
@@ -186,7 +334,12 @@
           handleErrorResult(data);
           return;
         }
-        showAlert(data.message || "Default password reset successfully.", "success");
+        if (data.next === "verify_identity" || data.masked_value) {
+          applyVerifyChallenge(data);
+          showAlert(data.message || "Verify your identity to create a new password.", "info");
+          return;
+        }
+        showAlert(data.message || "Password reset started.", "success");
       } catch (err) {
         showAlert("Unable to reset password. Please try again.", "danger");
       } finally {

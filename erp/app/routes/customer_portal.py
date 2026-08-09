@@ -44,19 +44,40 @@ def _start_portal_session(result: dict) -> None:
     session.permanent = True
 
 
+_SETUP_SESSION_KEYS = (
+    "portal_setup_customer_id",
+    "portal_setup_user_id",
+    "portal_setup_detected",
+    "portal_setup_verify_field",
+    "portal_setup_verified",
+    "portal_setup_for_reset",
+)
+
+
+def _clear_setup_session() -> None:
+    for key in _SETUP_SESSION_KEYS:
+        session.pop(key, None)
+
+
 def _json_error(result: dict):
-    return (
-        jsonify(
-            {
-                "ok": False,
-                "error": result.get("error"),
-                "error_code": result.get("error_code"),
-                "duplicates": result.get("duplicates"),
-                "detected_type": result.get("detected_type"),
-            }
-        ),
-        int(result.get("status_code") or 400),
-    )
+    payload = {
+        "ok": False,
+        "error": result.get("error"),
+        "error_code": result.get("error_code"),
+        "duplicates": result.get("duplicates"),
+        "detected_type": result.get("detected_type"),
+    }
+    for key in (
+        "next",
+        "verify_field",
+        "masked_value",
+        "field_label",
+        "field_hint",
+        "customer_name",
+    ):
+        if key in result:
+            payload[key] = result.get(key)
+    return jsonify(payload), int(result.get("status_code") or 400)
 
 
 @bp.route("/login", methods=["GET"], strict_slashes=False)
@@ -150,12 +171,140 @@ def logout():
         "portal_password_changed",
     ):
         session.pop(key, None)
+    _clear_setup_session()
     return redirect(url_for("customer_portal.login_page"))
 
 
 # ---------------------------------------------------------------------------
 # JSON APIs
 # ---------------------------------------------------------------------------
+
+
+@bp.route("/login/start", methods=["POST"], strict_slashes=False)
+def login_start_api():
+    """Step 1 — User ID lookup: password login OR identity verify for first setup."""
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    user_id = (payload.get("user_id") or payload.get("userid") or "").strip()
+    for_reset = bool(payload.get("for_reset"))
+    ip, ua = _client_meta()
+    result = CustomerPortalService().begin_login(
+        user_id, ip_address=ip, user_agent=ua, for_reset=for_reset
+    )
+    if not result.get("ok"):
+        _clear_setup_session()
+        return _json_error(result)
+
+    _clear_setup_session()
+    if result.get("next") == "verify_identity":
+        session["portal_setup_customer_id"] = result["customer_id"]
+        session["portal_setup_user_id"] = user_id
+        session["portal_setup_detected"] = result.get("detected_type")
+        session["portal_setup_verify_field"] = result.get("verify_field")
+        session["portal_setup_verified"] = False
+        session["portal_setup_for_reset"] = bool(result.get("for_reset"))
+        return jsonify(
+            {
+                "ok": True,
+                "next": "verify_identity",
+                "customer_name": result.get("customer_name"),
+                "detected_type": result.get("detected_type"),
+                "verify_field": result.get("verify_field"),
+                "masked_value": result.get("masked_value"),
+                "field_label": result.get("field_label"),
+                "field_hint": result.get("field_hint"),
+                "for_reset": bool(result.get("for_reset")),
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "next": "password",
+            "customer_name": result.get("customer_name"),
+            "detected_type": result.get("detected_type"),
+        }
+    )
+
+
+@bp.route("/login/verify", methods=["POST"], strict_slashes=False)
+def login_verify_api():
+    """Step 2 — confirm masked PAN/Aadhaar before first password create / reset."""
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    user_id = (
+        (payload.get("user_id") or payload.get("userid") or "").strip()
+        or (session.get("portal_setup_user_id") or "")
+    )
+    verify_value = (
+        payload.get("verify_value")
+        or payload.get("pan")
+        or payload.get("aadhaar")
+        or ""
+    )
+    setup_cid = session.get("portal_setup_customer_id")
+    ip, ua = _client_meta()
+    result = CustomerPortalService().verify_identity(
+        user_id,
+        str(verify_value),
+        customer_id=int(setup_cid) if setup_cid is not None else None,
+        ip_address=ip,
+        user_agent=ua,
+    )
+    if not result.get("ok"):
+        session["portal_setup_verified"] = False
+        return _json_error(result)
+
+    session["portal_setup_customer_id"] = result["customer_id"]
+    session["portal_setup_user_id"] = user_id
+    session["portal_setup_detected"] = result.get("detected_type")
+    session["portal_setup_verify_field"] = result.get("verify_field")
+    session["portal_setup_verified"] = True
+    return jsonify(
+        {
+            "ok": True,
+            "next": "set_password",
+            "customer_name": result.get("customer_name"),
+            "detected_type": result.get("detected_type"),
+        }
+    )
+
+
+@bp.route("/login/set-password", methods=["POST"], strict_slashes=False)
+def login_set_password_api():
+    """Step 3 — create password after successful identity verification."""
+    if not session.get("portal_setup_verified") or not session.get("portal_setup_customer_id"):
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Please verify your identity first.",
+                    "error_code": "not_verified",
+                }
+            ),
+            403,
+        )
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    ip, ua = _client_meta()
+    result = CustomerPortalService().set_first_password(
+        int(session["portal_setup_customer_id"]),
+        payload.get("new_password") or "",
+        payload.get("confirm_password") or "",
+        user_id_input=session.get("portal_setup_user_id"),
+        detected_type=session.get("portal_setup_detected"),
+        ip_address=ip,
+        user_agent=ua,
+    )
+    if not result.get("ok"):
+        return _json_error(result)
+    _clear_setup_session()
+    _start_portal_session(result)
+    return jsonify(
+        {
+            "ok": True,
+            "message": result.get("message"),
+            "redirect": result.get("redirect") or url_for("customer_portal.dashboard"),
+            "customer_name": result.get("customer_name"),
+        }
+    )
 
 
 @bp.route("/login", methods=["POST"], strict_slashes=False)
@@ -168,14 +317,22 @@ def login_api():
         user_id, password, ip_address=ip, user_agent=ua
     )
     if not result.get("ok"):
+        if result.get("error_code") == "needs_setup":
+            _clear_setup_session()
+            session["portal_setup_customer_id"] = result.get("customer_id")
+            session["portal_setup_user_id"] = user_id
+            session["portal_setup_detected"] = result.get("detected_type")
+            session["portal_setup_verify_field"] = result.get("verify_field")
+            session["portal_setup_verified"] = False
         return _json_error(result)
+    _clear_setup_session()
     _start_portal_session(result)
     return jsonify(
         {
             "ok": True,
             "customer_id": result["customer_id"],
             "customer_name": result.get("customer_name"),
-            "must_change_password": result.get("must_change_password"),
+            "must_change_password": False,
             "redirect": result.get("redirect"),
             "detected_type": result.get("detected_type"),
         }
@@ -184,6 +341,7 @@ def login_api():
 
 @bp.route("/reset-password", methods=["POST"], strict_slashes=False)
 def reset_password_api():
+    """Starts identity-verify + create-password flow (no Admin@123)."""
     payload = request.get_json(silent=True) or request.form.to_dict()
     user_id = (payload.get("user_id") or payload.get("userid") or "").strip()
     ip, ua = _client_meta()
@@ -191,13 +349,27 @@ def reset_password_api():
         user_id, ip_address=ip, user_agent=ua
     )
     if not result.get("ok"):
+        _clear_setup_session()
         return _json_error(result)
+
+    _clear_setup_session()
+    session["portal_setup_customer_id"] = result["customer_id"]
+    session["portal_setup_user_id"] = user_id
+    session["portal_setup_detected"] = result.get("detected_type")
+    session["portal_setup_verify_field"] = result.get("verify_field")
+    session["portal_setup_verified"] = False
+    session["portal_setup_for_reset"] = True
     return jsonify(
         {
             "ok": True,
-            "message": result.get("message"),
-            "temporary_password": result.get("temporary_password"),
+            "next": "verify_identity",
+            "message": "Verify your identity to create a new password.",
+            "customer_name": result.get("customer_name"),
             "detected_type": result.get("detected_type"),
+            "verify_field": result.get("verify_field"),
+            "masked_value": result.get("masked_value"),
+            "field_label": result.get("field_label"),
+            "field_hint": result.get("field_hint"),
         }
     )
 
@@ -211,6 +383,7 @@ def change_password_api():
         payload.get("old_password") or "",
         payload.get("new_password") or "",
         payload.get("confirm_password") or "",
+        skip_old_password=not bool(session.get("portal_password_changed")),
     )
     if not result.get("ok"):
         return _json_error(result)

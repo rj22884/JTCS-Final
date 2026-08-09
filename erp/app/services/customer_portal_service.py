@@ -65,6 +65,94 @@ class CustomerPortalService:
         return f"{value[:5]}XXX{value[8:]}"
 
     @staticmethod
+    def mask_aadhaar(aadhaar: str | None) -> str:
+        """Mask Aadhaar: show last 4 only. Never return full Aadhaar."""
+        digits = re.sub(r"\D", "", aadhaar or "")
+        if len(digits) != 12:
+            return "XXXXXXXXXXXX"
+        return f"XXXXXXXX{digits[-4:]}"
+
+    @staticmethod
+    def normalize_pan(value: str | None) -> str:
+        return (value or "").strip().upper().replace(" ", "")
+
+    @staticmethod
+    def normalize_aadhaar(value: str | None) -> str:
+        return re.sub(r"\D", "", value or "")
+
+    @staticmethod
+    def verify_field_for(detected_type: str | None) -> str:
+        """Second-factor field after User ID.
+        Aadhaar login → verify PAN; PAN/Mobile/Email → verify Aadhaar.
+        """
+        if (detected_type or "").upper() == "AADHAAR":
+            return "PAN"
+        return "AADHAAR"
+
+    @classmethod
+    def needs_first_setup(cls, customer: dict | None) -> bool:
+        """True until customer creates their own portal password (no Admin@123)."""
+        if not customer:
+            return True
+        if not customer.get("password_changed"):
+            return True
+        stored = (customer.get("portal_password") or "").strip()
+        if not stored or stored == DEFAULT_PORTAL_PASSWORD:
+            return True
+        return False
+
+    def _identity_challenge(self, customer: dict, detected_type: str | None) -> dict[str, Any]:
+        verify_field = self.verify_field_for(detected_type)
+        if verify_field == "PAN":
+            pan = self.normalize_pan(customer.get("pan_number"))
+            if not PAN_RE.match(pan):
+                return {
+                    "ok": False,
+                    "error": (
+                        "PAN is not available on your customer record.\n"
+                        "Please contact JTCS to complete registration."
+                    ),
+                    "error_code": "missing_pan",
+                    "status_code": 400,
+                    "detected_type": detected_type,
+                }
+            return {
+                "ok": True,
+                "verify_field": "PAN",
+                "masked_value": self.mask_pan(pan),
+                "field_label": "PAN Number",
+                "field_hint": "Enter your full PAN to continue",
+            }
+        aadhaar = self.normalize_aadhaar(customer.get("aadhaar_number"))
+        if not AADHAAR_RE.match(aadhaar):
+            return {
+                "ok": False,
+                "error": (
+                    "Aadhaar Number is not available on your customer record.\n"
+                    "Please contact JTCS to complete registration."
+                ),
+                "error_code": "missing_aadhaar",
+                "status_code": 400,
+                "detected_type": detected_type,
+            }
+        return {
+            "ok": True,
+            "verify_field": "AADHAAR",
+            "masked_value": self.mask_aadhaar(aadhaar),
+            "field_label": "Aadhaar Number",
+            "field_hint": "Enter your full 12-digit Aadhaar to continue",
+        }
+
+    def _match_verify_value(self, customer: dict, verify_field: str, verify_value: str) -> bool:
+        if verify_field == "PAN":
+            expected = self.normalize_pan(customer.get("pan_number"))
+            provided = self.normalize_pan(verify_value)
+            return bool(PAN_RE.match(provided) and provided == expected)
+        expected = self.normalize_aadhaar(customer.get("aadhaar_number"))
+        provided = self.normalize_aadhaar(verify_value)
+        return bool(AADHAAR_RE.match(provided) and provided == expected)
+
+    @staticmethod
     def detect_user_id_type(user_id: str) -> str | None:
         raw = (user_id or "").strip()
         if not raw:
@@ -200,14 +288,15 @@ class CustomerPortalService:
             db.session.rollback()
             logger.exception("Failed to write customer portal login log")
 
-    def login(
+    def begin_login(
         self,
         user_id: str,
-        password: str,
         *,
         ip_address: str | None = None,
         user_agent: str | None = None,
+        for_reset: bool = False,
     ) -> dict[str, Any]:
+        """Step 1: resolve User ID → password login OR identity verify + set password."""
         lookup = self.find_customers_by_user_id(user_id)
         if not lookup.ok:
             self._commit_log(
@@ -247,11 +336,277 @@ class CustomerPortalService:
                 "detected_type": lookup.detected_type,
             }
 
+        needs_setup = self.needs_first_setup(customer) or for_reset
+        if needs_setup:
+            challenge = self._identity_challenge(customer, lookup.detected_type)
+            if not challenge.get("ok"):
+                self._commit_log(
+                    customer_id=customer_id,
+                    user_id_input=user_id,
+                    detected_type=lookup.detected_type,
+                    attempt_result=challenge.get("error_code") or "missing_id",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+                return challenge
+            self._commit_log(
+                customer_id=customer_id,
+                user_id_input=user_id,
+                detected_type=lookup.detected_type,
+                attempt_result="needs_identity_verify",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            return {
+                "ok": True,
+                "next": "verify_identity",
+                "customer_id": customer_id,
+                "customer_name": customer.get("customer_name") or "",
+                "detected_type": lookup.detected_type,
+                "verify_field": challenge["verify_field"],
+                "masked_value": challenge["masked_value"],
+                "field_label": challenge["field_label"],
+                "field_hint": challenge["field_hint"],
+                "for_reset": bool(for_reset),
+            }
+
+        return {
+            "ok": True,
+            "next": "password",
+            "customer_id": customer_id,
+            "customer_name": customer.get("customer_name") or "",
+            "detected_type": lookup.detected_type,
+        }
+
+    def verify_identity(
+        self,
+        user_id: str,
+        verify_value: str,
+        *,
+        customer_id: int | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Step 2 (first login / reset): confirm masked second ID (PAN or Aadhaar)."""
+        lookup = self.find_customers_by_user_id(user_id)
+        if not lookup.ok:
+            return {
+                "ok": False,
+                "error": lookup.error,
+                "error_code": lookup.error_code,
+                "status_code": lookup.status_code,
+                "duplicates": lookup.duplicates,
+                "detected_type": lookup.detected_type,
+            }
+
+        customer = lookup.customer or {}
+        resolved_id = int(customer["customer_id"])
+        if customer_id is not None and int(customer_id) != resolved_id:
+            return {
+                "ok": False,
+                "error": "Identity check failed. Please start again.",
+                "error_code": "session_mismatch",
+                "status_code": 400,
+            }
+
+        verify_field = self.verify_field_for(lookup.detected_type)
+        if not self._match_verify_value(customer, verify_field, verify_value):
+            try:
+                def _fail() -> None:
+                    self.repo.update_portal_login_failure(resolved_id, lock=False)
+                    self._log_write(
+                        customer_id=resolved_id,
+                        user_id_input=user_id,
+                        detected_type=lookup.detected_type,
+                        attempt_result="bad_identity",
+                        ip_address=ip_address,
+                        user_agent=user_agent,
+                    )
+
+                persist(_fail)
+            except Exception:  # noqa: BLE001
+                db.session.rollback()
+            label = "PAN" if verify_field == "PAN" else "Aadhaar Number"
+            return {
+                "ok": False,
+                "error": f"{label} does not match our records.",
+                "error_code": "bad_identity",
+                "status_code": 401,
+                "detected_type": lookup.detected_type,
+                "verify_field": verify_field,
+            }
+
+        self._commit_log(
+            customer_id=resolved_id,
+            user_id_input=user_id,
+            detected_type=lookup.detected_type,
+            attempt_result="identity_verified",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        return {
+            "ok": True,
+            "next": "set_password",
+            "customer_id": resolved_id,
+            "customer_name": customer.get("customer_name") or "",
+            "detected_type": lookup.detected_type,
+            "verify_field": verify_field,
+        }
+
+    def set_first_password(
+        self,
+        customer_id: int,
+        new_password: str,
+        confirm_password: str,
+        *,
+        user_id_input: str | None = None,
+        detected_type: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Step 3: create portal password after identity verification (no Admin@123)."""
+        self.repo.ensure_schema()
+        auth = self.repo.get_portal_auth(int(customer_id))
+        if not auth:
+            return {
+                "ok": False,
+                "error": "Customer not found.\nPlease contact JTCS.",
+                "error_code": "not_found",
+                "status_code": 404,
+            }
+
+        pwd_check = self._validate_new_password(new_password, confirm_password)
+        if pwd_check:
+            return pwd_check
+
+        try:
+            def _set() -> None:
+                self.repo.change_portal_password(int(customer_id), hash_password(new_password))
+                self.repo.update_portal_login_success(int(customer_id))
+                self._log_write(
+                    customer_id=int(customer_id),
+                    user_id_input=user_id_input or str(customer_id),
+                    detected_type=detected_type,
+                    attempt_result="password_set",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+
+            persist(_set)
+        except Exception:  # noqa: BLE001
+            db.session.rollback()
+            logger.exception("Portal first password set failed for %s", customer_id)
+            return {
+                "ok": False,
+                "error": "Unable to save password. Please try again.",
+                "error_code": "server_error",
+                "status_code": 500,
+            }
+
+        return {
+            "ok": True,
+            "customer_id": int(customer_id),
+            "customer_name": auth.get("customer_name") or "",
+            "password_changed": True,
+            "must_change_password": False,
+            "redirect": "/customer/dashboard",
+            "message": "Password created successfully.",
+        }
+
+    @staticmethod
+    def _validate_new_password(new_password: str, confirm_password: str) -> dict[str, Any] | None:
+        if len(new_password or "") < 8:
+            return {
+                "ok": False,
+                "error": "New Password must be at least 8 characters.",
+                "error_code": "weak_password",
+                "status_code": 400,
+            }
+        if new_password != confirm_password:
+            return {
+                "ok": False,
+                "error": "New Password and Confirm Password must match.",
+                "error_code": "confirm_mismatch",
+                "status_code": 400,
+            }
+        if (new_password or "").strip() == DEFAULT_PORTAL_PASSWORD:
+            return {
+                "ok": False,
+                "error": "Please choose a different password.",
+                "error_code": "default_password",
+                "status_code": 400,
+            }
+        return None
+
+    def login(
+        self,
+        user_id: str,
+        password: str,
+        *,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """Password login for customers who already created a portal password."""
+        lookup = self.find_customers_by_user_id(user_id)
+        if not lookup.ok:
+            self._commit_log(
+                customer_id=None,
+                user_id_input=user_id,
+                detected_type=lookup.detected_type,
+                attempt_result=lookup.error_code or "failed",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            return {
+                "ok": False,
+                "error": lookup.error,
+                "error_code": lookup.error_code,
+                "status_code": lookup.status_code,
+                "duplicates": lookup.duplicates,
+                "detected_type": lookup.detected_type,
+            }
+
+        customer = lookup.customer or {}
+        customer_id = int(customer["customer_id"])
+
+        if customer.get("account_locked"):
+            self._commit_log(
+                customer_id=customer_id,
+                user_id_input=user_id,
+                detected_type=lookup.detected_type,
+                attempt_result="locked",
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            return {
+                "ok": False,
+                "error": "Your account is locked.\nPlease contact JTCS.",
+                "error_code": "locked",
+                "status_code": 403,
+                "detected_type": lookup.detected_type,
+            }
+
+        if self.needs_first_setup(customer):
+            challenge = self._identity_challenge(customer, lookup.detected_type)
+            if not challenge.get("ok"):
+                return challenge
+            return {
+                "ok": False,
+                "error": "Please verify your identity and create a password first.",
+                "error_code": "needs_setup",
+                "status_code": 403,
+                "detected_type": lookup.detected_type,
+                "next": "verify_identity",
+                "customer_id": customer_id,
+                "customer_name": customer.get("customer_name") or "",
+                "verify_field": challenge["verify_field"],
+                "masked_value": challenge["masked_value"],
+                "field_label": challenge["field_label"],
+                "field_hint": challenge["field_hint"],
+            }
+
         stored = customer.get("portal_password") or ""
-        if stored == DEFAULT_PORTAL_PASSWORD:
-            password_ok = password == DEFAULT_PORTAL_PASSWORD
-        else:
-            password_ok = verify_password(stored, password)
+        password_ok = verify_password(stored, password) if stored else False
 
         if not password_ok:
             failed = int(customer.get("failed_login_count") or 0) + 1
@@ -289,20 +644,14 @@ class CustomerPortalService:
                 "detected_type": lookup.detected_type,
             }
 
-        must_change = (not customer.get("password_changed")) or password == DEFAULT_PORTAL_PASSWORD
         try:
             def _success() -> None:
-                # Migrate legacy plaintext default to bcrypt hash.
-                if stored == DEFAULT_PORTAL_PASSWORD:
-                    self.repo.reset_portal_password(
-                        customer_id, hash_password(DEFAULT_PORTAL_PASSWORD)
-                    )
                 self.repo.update_portal_login_success(customer_id)
                 self._log_write(
                     customer_id=customer_id,
                     user_id_input=user_id,
                     detected_type=lookup.detected_type,
-                    attempt_result="must_change_password" if must_change else "success",
+                    attempt_result="success",
                     ip_address=ip_address,
                     user_agent=user_agent,
                 )
@@ -322,12 +671,10 @@ class CustomerPortalService:
             "ok": True,
             "customer_id": customer_id,
             "customer_name": customer.get("customer_name") or "",
-            "password_changed": not must_change,
-            "must_change_password": must_change,
+            "password_changed": True,
+            "must_change_password": False,
             "detected_type": lookup.detected_type,
-            "redirect": (
-                "/customer/change-password" if must_change else "/customer/dashboard"
-            ),
+            "redirect": "/customer/dashboard",
         }
 
     def reset_password(
@@ -337,64 +684,16 @@ class CustomerPortalService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> dict[str, Any]:
-        lookup = self.find_customers_by_user_id(user_id)
-        if not lookup.ok:
-            self._commit_log(
-                customer_id=None,
-                user_id_input=user_id,
-                detected_type=lookup.detected_type,
-                attempt_result=f"reset_{lookup.error_code or 'failed'}",
-                ip_address=ip_address,
-                user_agent=user_agent,
-            )
-            return {
-                "ok": False,
-                "error": lookup.error,
-                "error_code": lookup.error_code,
-                "status_code": lookup.status_code,
-                "duplicates": lookup.duplicates,
-                "detected_type": lookup.detected_type,
-            }
-
-        customer = lookup.customer or {}
-        customer_id = int(customer["customer_id"])
-        try:
-            def _reset() -> None:
-                self.repo.reset_portal_password(
-                    customer_id, hash_password(DEFAULT_PORTAL_PASSWORD)
-                )
-                self._log_write(
-                    customer_id=customer_id,
-                    user_id_input=user_id,
-                    detected_type=lookup.detected_type,
-                    attempt_result="reset_success",
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                )
-
-            persist(_reset)
-        except Exception:  # noqa: BLE001
-            db.session.rollback()
-            logger.exception("Portal password reset failed for customer %s", customer_id)
-            return {
-                "ok": False,
-                "error": "Unable to reset password. Please try again.",
-                "error_code": "server_error",
-                "status_code": 500,
-            }
-
-        return {
-            "ok": True,
-            "message": (
-                "Default password reset successfully.\n"
-                f"Your temporary password is\n{DEFAULT_PORTAL_PASSWORD}\n"
-                "Please login and change your password immediately."
-            ),
-            "temporary_password": DEFAULT_PORTAL_PASSWORD,
-            "detected_type": lookup.detected_type,
-        }
+        """Public reset starts the same identity-verify + create-password flow."""
+        return self.begin_login(
+            user_id,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            for_reset=True,
+        )
 
     def admin_reset_password(self, customer_id: int) -> dict[str, Any]:
+        """Clear portal password so customer must verify identity and create a new one."""
         self.repo.ensure_schema()
         auth = self.repo.get_portal_auth(int(customer_id))
         if not auth:
@@ -406,9 +705,7 @@ class CustomerPortalService:
             }
         try:
             def _reset() -> None:
-                self.repo.reset_portal_password(
-                    int(customer_id), hash_password(DEFAULT_PORTAL_PASSWORD)
-                )
+                self.repo.clear_portal_password(int(customer_id))
 
             persist(_reset)
         except Exception:  # noqa: BLE001
@@ -422,8 +719,10 @@ class CustomerPortalService:
             }
         return {
             "ok": True,
-            "message": "Default password reset successfully.",
-            "temporary_password": DEFAULT_PORTAL_PASSWORD,
+            "message": (
+                "Portal password cleared. Customer must verify identity "
+                "(PAN/Aadhaar) and create a new password on next login."
+            ),
         }
 
     def change_password(
@@ -432,6 +731,8 @@ class CustomerPortalService:
         old_password: str,
         new_password: str,
         confirm_password: str,
+        *,
+        skip_old_password: bool = False,
     ) -> dict[str, Any]:
         self.repo.ensure_schema()
         auth = self.repo.get_portal_auth(int(customer_id))
@@ -443,40 +744,20 @@ class CustomerPortalService:
                 "status_code": 404,
             }
 
-        stored = auth.get("portal_password") or ""
-        if stored == DEFAULT_PORTAL_PASSWORD:
-            old_ok = old_password == DEFAULT_PORTAL_PASSWORD
-        else:
-            old_ok = verify_password(stored, old_password)
-        if not old_ok:
-            return {
-                "ok": False,
-                "error": "Old Password does not match.",
-                "error_code": "bad_old_password",
-                "status_code": 400,
-            }
+        if not skip_old_password and not self.needs_first_setup(auth):
+            stored = auth.get("portal_password") or ""
+            old_ok = verify_password(stored, old_password) if stored else False
+            if not old_ok:
+                return {
+                    "ok": False,
+                    "error": "Old Password does not match.",
+                    "error_code": "bad_old_password",
+                    "status_code": 400,
+                }
 
-        if len(new_password or "") < 8:
-            return {
-                "ok": False,
-                "error": "New Password must be at least 8 characters.",
-                "error_code": "weak_password",
-                "status_code": 400,
-            }
-        if new_password != confirm_password:
-            return {
-                "ok": False,
-                "error": "New Password and Confirm Password must match.",
-                "error_code": "confirm_mismatch",
-                "status_code": 400,
-            }
-        if new_password == DEFAULT_PORTAL_PASSWORD:
-            return {
-                "ok": False,
-                "error": "Please choose a password different from the default password.",
-                "error_code": "default_password",
-                "status_code": 400,
-            }
+        pwd_check = self._validate_new_password(new_password, confirm_password)
+        if pwd_check:
+            return pwd_check
 
         try:
             def _change() -> None:
