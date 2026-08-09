@@ -1,0 +1,120 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_activity.css') }}?v=20260809ca1">
+{% endblock %}
+
+{% block content %}
+<div class="ca-page">
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <div>
+      <div class="ca-title mb-0">Client / Customer Activity</div>
+      <div class="small text-muted">Customer Portal login, password set, and activation (Logged)</div>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary" id="caRefreshBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+
+  <div class="ca-summary-row mb-3">
+    <div class="ca-summary-card">
+      <span class="ca-summary-label">Portal Logged</span>
+      <strong class="ca-summary-value" id="caLoggedCount">{{ summary.logged_count }}</strong>
+    </div>
+    <div class="ca-summary-card">
+      <span class="ca-summary-label">Password Set</span>
+      <strong class="ca-summary-value" id="caPasswordCount">{{ summary.password_set_count }}</strong>
+    </div>
+    <div class="ca-summary-card">
+      <span class="ca-summary-label">Active Customers</span>
+      <strong class="ca-summary-value" id="caTotalCount">{{ summary.total_customers }}</strong>
+    </div>
+  </div>
+
+  <div class="ca-grid-layout">
+    <section class="ca-card" aria-labelledby="caCustomersTitle">
+      <div class="ca-card-head">
+        <div>
+          <div class="ca-card-title" id="caCustomersTitle">Customers</div>
+          <div class="small text-muted">Green light = Logged (first password set)</div>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <select class="form-select form-select-sm" id="caCustomerFilter" aria-label="Logged filter">
+            <option value="logged" selected>Logged only</option>
+            <option value="pending">Not logged</option>
+            <option value="all">All</option>
+          </select>
+          <input type="search" class="form-control form-control-sm" id="caCustomerSearch"
+                 placeholder="Name, PAN, Aadhaar, mobile…" aria-label="Search customers">
+        </div>
+      </div>
+      <div class="table-responsive ca-table-wrap">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>Logged</th>
+              <th>ID</th>
+              <th>Name</th>
+              <th>PAN</th>
+              <th>Aadhaar</th>
+              <th>Mobile</th>
+              <th>Last Login</th>
+            </tr>
+          </thead>
+          <tbody id="caCustomersBody">
+            <tr><td colspan="7" class="text-muted small py-3">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="ca-card" aria-labelledby="caAttemptsTitle">
+      <div class="ca-card-head">
+        <div>
+          <div class="ca-card-title" id="caAttemptsTitle">Login Attempts</div>
+          <div class="small text-muted">Customer Portal audit log</div>
+        </div>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+          <select class="form-select form-select-sm" id="caAttemptPeriod" aria-label="Period">
+            <option value="today">Today</option>
+            <option value="7d" selected>Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="all">All</option>
+          </select>
+          <input type="search" class="form-control form-control-sm" id="caAttemptSearch"
+                 placeholder="Search user id…" aria-label="Search attempts">
+        </div>
+      </div>
+      <div class="table-responsive ca-table-wrap">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Customer</th>
+              <th>User ID</th>
+              <th>Type</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="caAttemptsBody">
+            <tr><td colspan="5" class="text-muted small py-3">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.CUSTOMER_ACTIVITY = {
+    summaryUrl: {{ url_for('customer_activity.api_summary') | tojson }},
+    customersUrl: {{ url_for('customer_activity.api_logged_customers') | tojson }},
+    attemptsUrl: {{ url_for('customer_activity.api_login_attempts') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/customer_activity.js') }}?v=20260809ca1"></script>
+{% endblock %}

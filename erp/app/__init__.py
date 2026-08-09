@@ -43,6 +43,7 @@ from app.routes.masters_group import bp as masters_group_bp
 from app.routes.exceptional_report import bp as exceptional_report_bp
 from app.routes.backup import bp as backup_bp
 from app.routes.admin_dashboard import bp as admin_dashboard_bp
+from app.routes.customer_activity import bp as customer_activity_bp
 from app.routes.admin_import_export import bp as admin_import_export_bp
 from app.routes.menu_customization import bp as menu_customization_bp
 from app.routes.ledger_report import bp as ledger_report_bp
@@ -134,6 +135,7 @@ def create_app(config_class: type = Config) -> Flask:
     from app.routes.admin_dashboard import activity_bp as admin_activity_bp
 
     app.register_blueprint(admin_activity_bp)
+    app.register_blueprint(customer_activity_bp)
     app.register_blueprint(admin_import_export_bp)
     app.register_blueprint(menu_customization_bp)
     app.register_blueprint(ledger_report_bp)
@@ -249,6 +251,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Admin Dashboard menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.customer_activity import ensure_customer_activity_menu
+
+            ensure_customer_activity_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Client/Customer Activity menu ensure skipped: %s", exc)
 
         try:
             from app.routes.menu_customization import ensure_menu_customization_menu

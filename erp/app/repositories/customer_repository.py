@@ -93,9 +93,26 @@ class CustomerRepository:
                 ALTER TABLE dbo.CustomerMaster ADD AccountLocked BIT NOT NULL
                     CONSTRAINT DF_CustomerMaster_AccountLocked DEFAULT (0);
             """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'Logged') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD Logged BIT NOT NULL
+                    CONSTRAINT DF_CustomerMaster_Logged DEFAULT (0);
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()
+        # Backfill: already-activated portal customers (password changed).
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET Logged = 1
+                WHERE ISNULL(PasswordChanged, 0) = 1
+                  AND ISNULL(Logged, 0) = 0
+                """
+            )
+        )
+        self.session.commit()
         # Link table only — does not alter CustomerMaster columns.
         self.session.execute(
             text(
@@ -280,10 +297,14 @@ class CustomerRepository:
         status: str | None = None,
         limit: int = 500,
     ) -> list[dict]:
+        self.ensure_schema()
         sql = """
             SELECT TOP (:lim)
                 CustomerID, CustomerGroup, CustomerType, CustomerName, MobileNumber,
-                PANNumber, EmailID, City, CustomerStatus, CreatedDate
+                PANNumber, EmailID, City, CustomerStatus, CreatedDate,
+                ISNULL(Logged, 0) AS Logged,
+                ISNULL(PasswordChanged, 0) AS PasswordChanged,
+                LastLogin
             FROM CustomerMaster
             WHERE 1 = 1
         """
@@ -295,6 +316,7 @@ class CustomerRepository:
                 OR MobileNumber LIKE :search
                 OR PANNumber LIKE :search_upper
                 OR EmailID LIKE :search
+                OR AadhaarNumber LIKE :search
               )
             """
             params["search"] = f"%{search.strip()}%"
@@ -318,6 +340,9 @@ class CustomerRepository:
                 "email_id": row.get("EmailID") or "",
                 "city": row.get("City") or "",
                 "customer_status": row.get("CustomerStatus") or "Active",
+                "logged": bool(row.get("Logged")),
+                "password_changed": bool(row.get("PasswordChanged")),
+                "last_login": self._serialize_value(row.get("LastLogin")),
                 "created_date": self._serialize_value(row.get("CreatedDate")),
             }
             for row in rows
@@ -678,7 +703,8 @@ class CustomerRepository:
                         LastPasswordChange,
                         PasswordResetDate,
                         FailedLoginCount,
-                        AccountLocked
+                        AccountLocked,
+                        ISNULL(Logged, 0) AS Logged
                     FROM dbo.CustomerMaster
                     WHERE CustomerID = :id
                     """
@@ -700,6 +726,7 @@ class CustomerRepository:
             "customer_status": row.get("CustomerStatus") or "",
             "portal_password": row.get("PortalPassword") or "",
             "password_changed": bool(row.get("PasswordChanged")),
+            "logged": bool(row.get("Logged")),
             "last_login": row.get("LastLogin"),
             "last_password_change": row.get("LastPasswordChange"),
             "password_reset_date": row.get("PasswordResetDate"),
@@ -715,11 +742,27 @@ class CustomerRepository:
                 UPDATE dbo.CustomerMaster
                 SET LastLogin = :now,
                     FailedLoginCount = 0,
-                    AccountLocked = 0
+                    AccountLocked = 0,
+                    Logged = CASE WHEN ISNULL(PasswordChanged, 0) = 1 THEN 1 ELSE Logged END
                 WHERE CustomerID = :id
                 """
             ),
             {"now": datetime.utcnow(), "id": int(customer_id)},
+        )
+        self.session.flush()
+
+    def mark_portal_logged(self, customer_id: int) -> None:
+        """Set Logged=1 after customer sets their own portal password."""
+        self.ensure_schema()
+        self.session.execute(
+            text(
+                """
+                UPDATE dbo.CustomerMaster
+                SET Logged = 1
+                WHERE CustomerID = :id
+                """
+            ),
+            {"id": int(customer_id)},
         )
         self.session.flush()
 
@@ -769,6 +812,7 @@ class CustomerRepository:
                 UPDATE dbo.CustomerMaster
                 SET PortalPassword = :pwd,
                     PasswordChanged = 1,
+                    Logged = 1,
                     LastPasswordChange = :now,
                     FailedLoginCount = 0,
                     AccountLocked = 0

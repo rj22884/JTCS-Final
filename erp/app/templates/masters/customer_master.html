@@ -28,7 +28,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260805coadd1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260809logged1">
 {% endblock %}
 
 {% block content %}
@@ -81,6 +81,7 @@
             <th>Email</th>
             <th>City</th>
             <th>Status</th>
+            <th class="text-center" title="Customer Portal logged (password set)">Logged</th>
             <th class="text-end">Actions</th>
           </tr>
         </thead>
@@ -412,5 +413,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260805indcli1"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260809logged1"></script>
 {% endblock %}

@@ -25,6 +25,16 @@ call :load_vps_env
 call :init_branch
 call :ensure_git_remote
 
+REM CLI: JTCS_ERP.bat 1|2|local|deploy
+if not "%~1"=="" (
+  set "choice=%~1"
+  if /i "!choice!"=="local" set "choice=1"
+  if /i "!choice!"=="deploy" set "choice=2"
+  if /i "!choice!"=="1" goto run_local
+  if /i "!choice!"=="2" goto push_and_deploy
+  if /i "!choice!"=="0" exit /b 0
+)
+
 :menu
 cls
 echo.

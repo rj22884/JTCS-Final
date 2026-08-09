@@ -348,6 +348,10 @@
       const badge = inactive
         ? '<span class="badge bg-secondary">Inactive</span>'
         : '<span class="badge bg-success">Active</span>';
+      const logged = !!row.logged;
+      const loggedLight = logged
+        ? '<span class="cm-logged-light is-on" title="Portal login active (password set)" aria-label="Logged"></span>'
+        : '<span class="cm-logged-light is-off" title="Not yet logged in / password not set" aria-label="Not logged"></span>';
       return (
         "<tr data-id=\"" + row.customer_id + "\">" +
         "<td>" + row.customer_id + "</td>" +
@@ -358,6 +362,7 @@
         "<td>" + escapeHtml(row.email_id || "—") + "</td>" +
         "<td>" + escapeHtml(row.city || "—") + "</td>" +
         "<td>" + badge + "</td>" +
+        '<td class="text-center">' + loggedLight + "</td>" +
         '<td class="text-end cm-actions">' +
         '<button type="button" class="btn btn-outline-primary btn-sm cm-row-edit" data-id="' + row.customer_id + '"><i class="bi bi-pencil"></i></button> ' +
         delBtn +
