@@ -73,6 +73,30 @@ class CustomerPortalService:
         return f"XXXXXXXX{digits[-4:]}"
 
     @staticmethod
+    def mask_mobile(mobile: str | None) -> str:
+        """Mask mobile: 9876543210 → XXXXXX3210. Never return full mobile."""
+        digits = re.sub(r"\D", "", mobile or "")
+        if len(digits) < 10:
+            return "XXXXXX0000"
+        digits = digits[-10:]
+        return f"XXXXXX{digits[-4:]}"
+
+    @staticmethod
+    def mask_email(email: str | None) -> str:
+        """Mask email: john@gmail.com → j****@gmail.com. Never return full local part."""
+        value = (email or "").strip()
+        if "@" not in value:
+            return "****@****.***"
+        local, domain = value.split("@", 1)
+        if not local:
+            masked_local = "****"
+        elif len(local) == 1:
+            masked_local = "*"
+        else:
+            masked_local = f"{local[0]}****"
+        return f"{masked_local}@{domain}"
+
+    @staticmethod
     def normalize_pan(value: str | None) -> str:
         return (value or "").strip().upper().replace(" ", "")
 
@@ -81,13 +105,32 @@ class CustomerPortalService:
         return re.sub(r"\D", "", value or "")
 
     @staticmethod
+    def normalize_mobile(value: str | None) -> str:
+        digits = re.sub(r"\D", "", value or "")
+        if len(digits) > 10 and digits.startswith("91"):
+            digits = digits[-10:]
+        return digits[-10:] if len(digits) >= 10 else digits
+
+    @staticmethod
+    def normalize_email(value: str | None) -> str:
+        return (value or "").strip().lower()
+
+    @staticmethod
     def verify_field_for(detected_type: str | None) -> str:
-        """Second-factor field after User ID.
-        Aadhaar login → verify PAN; PAN/Mobile/Email → verify Aadhaar.
+        """Second-factor field after User ID (Aadhaar is never asked as verify checkpoint).
+
+        EMAIL  → verify MOBILE
+        MOBILE → verify EMAIL
+        PAN    → verify MOBILE
+        AADHAAR → verify PAN
         """
-        if (detected_type or "").upper() == "AADHAAR":
-            return "PAN"
-        return "AADHAAR"
+        mapping = {
+            "EMAIL": "MOBILE",
+            "MOBILE": "EMAIL",
+            "PAN": "MOBILE",
+            "AADHAAR": "PAN",
+        }
+        return mapping.get((detected_type or "").upper(), "MOBILE")
 
     @classmethod
     def needs_first_setup(cls, customer: dict | None) -> bool:
@@ -103,54 +146,85 @@ class CustomerPortalService:
 
     def _identity_challenge(self, customer: dict, detected_type: str | None) -> dict[str, Any]:
         verify_field = self.verify_field_for(detected_type)
-        if verify_field == "PAN":
-            pan = self.normalize_pan(customer.get("pan_number"))
-            if not PAN_RE.match(pan):
+
+        if verify_field == "MOBILE":
+            mobile = self.normalize_mobile(customer.get("mobile_number"))
+            if not MOBILE_RE.match(mobile):
                 return {
                     "ok": False,
                     "error": (
-                        "PAN is not available on your customer record.\n"
+                        "Mobile Number is not available on your customer record.\n"
                         "Please contact JTCS to complete registration."
                     ),
-                    "error_code": "missing_pan",
+                    "error_code": "missing_mobile",
                     "status_code": 400,
                     "detected_type": detected_type,
                 }
             return {
                 "ok": True,
-                "verify_field": "PAN",
-                "masked_value": self.mask_pan(pan),
-                "field_label": "PAN Number",
-                "field_hint": "Enter your full PAN to continue",
+                "verify_field": "MOBILE",
+                "masked_value": self.mask_mobile(mobile),
+                "field_label": "Mobile Number",
+                "field_hint": "Enter your full 10-digit mobile number to continue",
             }
-        aadhaar = self.normalize_aadhaar(customer.get("aadhaar_number"))
-        if not AADHAAR_RE.match(aadhaar):
+
+        if verify_field == "EMAIL":
+            email = self.normalize_email(customer.get("email_id"))
+            if not EMAIL_RE.match(email):
+                return {
+                    "ok": False,
+                    "error": (
+                        "Email Address is not available on your customer record.\n"
+                        "Please contact JTCS to complete registration."
+                    ),
+                    "error_code": "missing_email",
+                    "status_code": 400,
+                    "detected_type": detected_type,
+                }
+            return {
+                "ok": True,
+                "verify_field": "EMAIL",
+                "masked_value": self.mask_email(email),
+                "field_label": "Email Address",
+                "field_hint": "Enter your full email address to continue",
+            }
+
+        # Aadhaar login → verify PAN
+        pan = self.normalize_pan(customer.get("pan_number"))
+        if not PAN_RE.match(pan):
             return {
                 "ok": False,
                 "error": (
-                    "Aadhaar Number is not available on your customer record.\n"
+                    "PAN is not available on your customer record.\n"
                     "Please contact JTCS to complete registration."
                 ),
-                "error_code": "missing_aadhaar",
+                "error_code": "missing_pan",
                 "status_code": 400,
                 "detected_type": detected_type,
             }
         return {
             "ok": True,
-            "verify_field": "AADHAAR",
-            "masked_value": self.mask_aadhaar(aadhaar),
-            "field_label": "Aadhaar Number",
-            "field_hint": "Enter your full 12-digit Aadhaar to continue",
+            "verify_field": "PAN",
+            "masked_value": self.mask_pan(pan),
+            "field_label": "PAN Number",
+            "field_hint": "Enter your full PAN to continue",
         }
 
     def _match_verify_value(self, customer: dict, verify_field: str, verify_value: str) -> bool:
-        if verify_field == "PAN":
+        field = (verify_field or "").upper()
+        if field == "PAN":
             expected = self.normalize_pan(customer.get("pan_number"))
             provided = self.normalize_pan(verify_value)
             return bool(PAN_RE.match(provided) and provided == expected)
-        expected = self.normalize_aadhaar(customer.get("aadhaar_number"))
-        provided = self.normalize_aadhaar(verify_value)
-        return bool(AADHAAR_RE.match(provided) and provided == expected)
+        if field == "MOBILE":
+            expected = self.normalize_mobile(customer.get("mobile_number"))
+            provided = self.normalize_mobile(verify_value)
+            return bool(MOBILE_RE.match(provided) and provided == expected)
+        if field == "EMAIL":
+            expected = self.normalize_email(customer.get("email_id"))
+            provided = self.normalize_email(verify_value)
+            return bool(EMAIL_RE.match(provided) and provided == expected)
+        return False
 
     @staticmethod
     def detect_user_id_type(user_id: str) -> str | None:
@@ -387,7 +461,7 @@ class CustomerPortalService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> dict[str, Any]:
-        """Step 2 (first login / reset): confirm masked second ID (PAN or Aadhaar)."""
+        """Step 2 (first login / reset): confirm masked second ID (Mobile / Email / PAN)."""
         lookup = self.find_customers_by_user_id(user_id)
         if not lookup.ok:
             return {
@@ -426,7 +500,12 @@ class CustomerPortalService:
                 persist(_fail)
             except Exception:  # noqa: BLE001
                 db.session.rollback()
-            label = "PAN" if verify_field == "PAN" else "Aadhaar Number"
+            labels = {
+                "PAN": "PAN",
+                "MOBILE": "Mobile Number",
+                "EMAIL": "Email Address",
+            }
+            label = labels.get((verify_field or "").upper(), "Identity value")
             return {
                 "ok": False,
                 "error": f"{label} does not match our records.",
@@ -721,7 +800,7 @@ class CustomerPortalService:
             "ok": True,
             "message": (
                 "Portal password cleared. Customer must verify identity "
-                "(PAN/Aadhaar) and create a new password on next login."
+                "(Mobile/Email/PAN checkpoint) and create a new password on next login."
             ),
         }
 

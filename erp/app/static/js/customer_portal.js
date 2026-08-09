@@ -191,12 +191,24 @@
     const verifyInput = document.getElementById("cpVerifyValue");
     if (verifyInput) {
       verifyInput.value = "";
-      verifyInput.placeholder =
-        (data.verify_field || "").toUpperCase() === "PAN"
-          ? "Enter full PAN (e.g. ABCDE1234F)"
-          : "Enter full 12-digit Aadhaar";
-      verifyInput.inputMode =
-        (data.verify_field || "").toUpperCase() === "AADHAAR" ? "numeric" : "text";
+      const field = (data.verify_field || "").toUpperCase();
+      if (field === "PAN") {
+        verifyInput.placeholder = "Enter full PAN (e.g. ABCDE1234F)";
+        verifyInput.inputMode = "text";
+        verifyInput.autocomplete = "off";
+      } else if (field === "MOBILE") {
+        verifyInput.placeholder = "Enter full 10-digit mobile number";
+        verifyInput.inputMode = "numeric";
+        verifyInput.autocomplete = "tel";
+      } else if (field === "EMAIL") {
+        verifyInput.placeholder = "Enter full email address";
+        verifyInput.inputMode = "email";
+        verifyInput.autocomplete = "email";
+      } else {
+        verifyInput.placeholder = "Enter full value";
+        verifyInput.inputMode = "text";
+        verifyInput.autocomplete = "off";
+      }
     }
     showStep("verify");
   }

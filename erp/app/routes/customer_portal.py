@@ -228,7 +228,7 @@ def login_start_api():
 
 @bp.route("/login/verify", methods=["POST"], strict_slashes=False)
 def login_verify_api():
-    """Step 2 — confirm masked PAN/Aadhaar before first password create / reset."""
+    """Step 2 — confirm masked Mobile / Email / PAN before first password create / reset."""
     payload = request.get_json(silent=True) or request.form.to_dict()
     user_id = (
         (payload.get("user_id") or payload.get("userid") or "").strip()
@@ -237,6 +237,8 @@ def login_verify_api():
     verify_value = (
         payload.get("verify_value")
         or payload.get("pan")
+        or payload.get("mobile")
+        or payload.get("email")
         or payload.get("aadhaar")
         or ""
     )
