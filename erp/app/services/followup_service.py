@@ -48,7 +48,7 @@ MODULE_META = {
         "subtitle": "GST return follow-up",
         "menu_path": "/gst/followup",
         "has_return_type": False,
-        "has_gst_fields": True,
+        "has_gst_fields": False,  # Filing Frequency / Return Type removed from GST Followup
         "work_type_label": "GST",
     },
 }
@@ -174,6 +174,11 @@ class FollowupService:
         }
 
     def list_stages(self, *, active_only: bool = True) -> list[dict]:
+        if self.module_code == "GST":
+            try:
+                self.followup_repo.ensure_gst_return_filed_stage()
+            except Exception:
+                self.followup_repo.session.rollback()
         rows = self.followup_repo.list_stages(self.module_code, active_only=active_only)
         return [self._stage_dict(row) for row in rows]
 
@@ -1146,7 +1151,7 @@ class FollowupService:
                 payment_lines = payment_service.parse_payment_lines(payload, Decimal(str(amount_value)))
                 if not payment_lines:
                     raise ValueError("Add at least one payment mode with amount.")
-                if self.module_code in ("ITR", "DSC"):
+                if self.module_code in ("ITR", "DSC", "GST"):
                     for line in payment_lines:
                         if not line.get("payment_date"):
                             raise ValueError("Each payment line must have a date.")

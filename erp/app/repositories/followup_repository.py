@@ -218,6 +218,100 @@ class FollowupRepository:
         """Ensure Location / IntroducedBy exist for DSC entry form."""
         self.ensure_application_number_column()
 
+    def ensure_gst_return_filed_stage(self) -> None:
+        """
+        GST only: merge gstr1_filed + gstr3b_filed into return_filed (idempotent).
+        Does not touch ITR / DSC / TDS stages.
+        """
+        self.session.execute(
+            text(
+                """
+                DECLARE @ReturnFiledID INT;
+                DECLARE @OldGstr1ID INT;
+                DECLARE @OldGstr3bID INT;
+
+                SELECT TOP 1 @ReturnFiledID = StageID
+                FROM dbo.FollowupWorkflowStage
+                WHERE ModuleCode = N'GST' AND StageCode = N'return_filed'
+                ORDER BY StageID;
+
+                SELECT TOP 1 @OldGstr1ID = StageID
+                FROM dbo.FollowupWorkflowStage
+                WHERE ModuleCode = N'GST' AND StageCode = N'gstr1_filed'
+                ORDER BY StageID;
+
+                SELECT TOP 1 @OldGstr3bID = StageID
+                FROM dbo.FollowupWorkflowStage
+                WHERE ModuleCode = N'GST' AND StageCode = N'gstr3b_filed'
+                ORDER BY StageID;
+
+                IF @ReturnFiledID IS NULL
+                BEGIN
+                    INSERT INTO dbo.FollowupWorkflowStage (
+                        ModuleCode, StageCode, StageName, DisplayOrder, ActiveStatus
+                    )
+                    VALUES (N'GST', N'return_filed', N'Return Filed', 2, 1);
+                    SET @ReturnFiledID = SCOPE_IDENTITY();
+                END
+                ELSE
+                BEGIN
+                    UPDATE dbo.FollowupWorkflowStage
+                    SET StageName = N'Return Filed',
+                        DisplayOrder = 2,
+                        ActiveStatus = 1
+                    WHERE StageID = @ReturnFiledID;
+                END;
+
+                IF @ReturnFiledID IS NOT NULL AND (@OldGstr1ID IS NOT NULL OR @OldGstr3bID IS NOT NULL)
+                BEGIN
+                    ;WITH migrated AS (
+                        SELECT
+                            es.EntryID,
+                            MAX(es.CompletedDate) AS CompletedDate
+                        FROM dbo.FollowupEntryStage es
+                        WHERE es.StageID IN (@OldGstr1ID, @OldGstr3bID)
+                        GROUP BY es.EntryID
+                    )
+                    INSERT INTO dbo.FollowupEntryStage (EntryID, StageID, CompletedDate)
+                    SELECT m.EntryID, @ReturnFiledID, m.CompletedDate
+                    FROM migrated m
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.FollowupEntryStage x
+                        WHERE x.EntryID = m.EntryID
+                          AND x.StageID = @ReturnFiledID
+                    );
+
+                    DELETE FROM dbo.FollowupEntryStage
+                    WHERE StageID IN (@OldGstr1ID, @OldGstr3bID);
+                END;
+
+                UPDATE dbo.FollowupWorkflowStage
+                SET ActiveStatus = 0,
+                    StageName = CASE StageCode
+                        WHEN N'gstr1_filed' THEN N'GSTR-1 Filed (merged)'
+                        WHEN N'gstr3b_filed' THEN N'GSTR-3B Filed (merged)'
+                        ELSE StageName
+                    END
+                WHERE ModuleCode = N'GST'
+                  AND StageCode IN (N'gstr1_filed', N'gstr3b_filed');
+
+                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 1, ActiveStatus = 1
+                WHERE ModuleCode = N'GST' AND StageCode = N'documents_received';
+
+                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 2, ActiveStatus = 1
+                WHERE ModuleCode = N'GST' AND StageCode = N'return_filed';
+
+                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 3, ActiveStatus = 1
+                WHERE ModuleCode = N'GST' AND StageCode = N'tally_bill_generated';
+
+                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 4, ActiveStatus = 1
+                WHERE ModuleCode = N'GST' AND StageCode = N'payment_received';
+                """
+            )
+        )
+        self.session.commit()
+
     def list_stages(self, module_code: str, *, active_only: bool = True) -> list[FollowupWorkflowStage]:
         stmt = select(FollowupWorkflowStage).where(FollowupWorkflowStage.ModuleCode == module_code)
         if active_only:

@@ -131,7 +131,7 @@ class FollowupPaymentService:
         if len(payment_dates) < len(bank_ids):
             payment_dates.extend([""] * (len(bank_ids) - len(payment_dates)))
 
-        if self.module_code in ("ITR", "DSC"):
+        if self.module_code in ("ITR", "DSC", "GST"):
             fallback_date = self._parse_date(payload.get("work_date") or payload.get("WorkDate"))
             if fallback_date is None:
                 fallback_date = self._parse_date(payload.get("bill_date") or payload.get("BillDate"))

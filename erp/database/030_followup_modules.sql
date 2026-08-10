@@ -78,10 +78,9 @@ USING (
         (N'TDS', N'tally_bill_generated', N'Tally Bill Generated', 3),
         (N'TDS', N'payment_received', N'Payment Received', 4),
         (N'GST', N'documents_received', N'Documents Received', 1),
-        (N'GST', N'gstr1_filed', N'GSTR-1 Filed', 2),
-        (N'GST', N'gstr3b_filed', N'GSTR-3B Filed', 3),
-        (N'GST', N'tally_bill_generated', N'Tally Bill Generated', 4),
-        (N'GST', N'payment_received', N'Payment Received', 5)
+        (N'GST', N'return_filed', N'Return Filed', 2),
+        (N'GST', N'tally_bill_generated', N'Tally Bill Generated', 3),
+        (N'GST', N'payment_received', N'Payment Received', 4)
 ) AS s (ModuleCode, StageCode, StageName, DisplayOrder)
 ON t.ModuleCode = s.ModuleCode AND t.StageCode = s.StageCode
 WHEN NOT MATCHED THEN

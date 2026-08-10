@@ -12,7 +12,7 @@
   const isItrModule = workTypeLabel === "ITR";
   const isTdsModule = workTypeLabel === "TDS" || hasTdsPeriodSplit;
   const isGstModule = workTypeLabel === "GST" || hasGstFields;
-  const paymentLineHasDate = isItrModule || isDscModule;
+  const paymentLineHasDate = isItrModule || isDscModule || isGstModule;
 
   const els = {
     newEntryBtn: document.getElementById("fuNewEntryBtn"),
@@ -1052,7 +1052,7 @@
         ? ("<td>" + escapeHtml(row.form_type || "—") + "</td>" +
            "<td>" + escapeHtml(row.quarter || "—") + "</td>")
         : "";
-      const gstFieldCols = isGstModule
+      const gstFieldCols = hasGstFields
         ? ("<td>" + escapeHtml(row.filing_frequency || "—") + "</td>" +
            "<td>" + escapeHtml(row.return_type || "—") + "</td>")
         : "";

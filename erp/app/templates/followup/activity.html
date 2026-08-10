@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260728dsccopy2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260810gst1">
 {% endblock %}
 
 {% block content %}
@@ -173,7 +173,7 @@
             <thead>
               <tr>
                 <th>Date</th>
-                {% if module_code == 'ITR' or module_meta.get('has_tds_period_split') or module_meta.get('has_gst_fields') %}
+                {% if module_code == 'ITR' or module_code == 'GST' or module_meta.get('has_tds_period_split') or module_meta.get('has_gst_fields') %}
                 <th>Period</th>
                 {% endif %}
                 {% if module_meta.get('has_tds_period_split') %}
@@ -558,5 +558,5 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260803paydate"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260810gst1"></script>
 {% endblock %}
