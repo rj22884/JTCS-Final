@@ -60,6 +60,16 @@ class TodayActivityBankLine:
 
 
 @dataclass
+class BankAccountClosingLine:
+    """Per-bank closing balance for dashboard Bank Closing Balance hover."""
+
+    account_id: int
+    account_number: str
+    bank_name: str
+    closing_balance: Decimal
+
+
+@dataclass
 class TodayActivitySummary:
     """Always based on the permanent system date (independent of Period)."""
 
@@ -330,6 +340,70 @@ class DashboardService:
             self._master_opening_balance(cash_only=cash_only, as_of=as_of)
             + self._ledger_txn_net(cash_only=cash_only, date_to=as_of)
         )
+
+    def get_bank_closing_hover(self, *, as_of: date) -> dict:
+        """Hover payload for Bank Closing Balance (respects dashboard period end)."""
+        return {
+            "accounts": self.list_bank_account_closings(as_of=as_of),
+            "manual": self._manual_sum("bank_closing_balance", through_date=as_of),
+            "as_of": as_of,
+        }
+
+    def list_bank_account_closings(self, *, as_of: date) -> list[BankAccountClosingLine]:
+        """
+        Non-cash bank accounts with closing balance as of date_to (dashboard period end).
+
+        Uses the same OB + post-opening movement rule as bank_closing_balance.
+        """
+        rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    a.JtcsBankAccountID AS account_id,
+                    a.BankName,
+                    a.AccountNumber,
+                    a.MaskedAccountNumber,
+                    CASE
+                        WHEN a.OpeningBalanceDate IS NULL OR a.OpeningBalanceDate <= :as_of
+                        THEN ISNULL(a.OpeningBalance, 0)
+                        ELSE 0
+                    END AS opening_balance,
+                    ISNULL((
+                        SELECT SUM(ISNULL(t.Debit, 0) - ISNULL(t.Credit, 0))
+                        FROM JtcsBankTransaction t
+                        WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
+                          AND t.TransactionDate <= :as_of
+                          AND {BANK_MOVEMENT_SINCE_OPENING_SQL}
+                    ), 0) AS movement_net
+                FROM JtcsBankAccountMaster a
+                WHERE a.BankName <> N'Cash'
+                ORDER BY
+                    ISNULL(a.DisplayOrder, 2147483647),
+                    a.BankName,
+                    a.JtcsBankAccountID
+                """
+            ),
+            {"as_of": as_of},
+        ).mappings().all()
+
+        result: list[BankAccountClosingLine] = []
+        for row in rows:
+            bank_name = (row["BankName"] or "Bank").strip() or "Bank"
+            account_number = (
+                (row["MaskedAccountNumber"] or row["AccountNumber"] or "").strip()
+                or bank_name
+            )
+            opening = Decimal(str(row["opening_balance"] or 0))
+            movement = Decimal(str(row["movement_net"] or 0))
+            result.append(
+                BankAccountClosingLine(
+                    account_id=int(row["account_id"]),
+                    account_number=account_number,
+                    bank_name=bank_name,
+                    closing_balance=opening + movement,
+                )
+            )
+        return result
 
     @staticmethod
     def _last4_account(masked: str | None, account_number: str | None) -> str:

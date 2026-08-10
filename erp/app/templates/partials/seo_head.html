@@ -1,0 +1,6 @@
+{% if seo_meta_keywords %}
+<meta name="keywords" content="{{ seo_meta_keywords }}">
+{% endif %}
+{% if seo_schema_payload %}
+<script type="application/ld+json">{{ seo_schema_payload | tojson }}</script>
+{% endif %}

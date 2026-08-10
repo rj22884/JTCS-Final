@@ -1,0 +1,137 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('dashboard.index') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="row g-3">
+    <div class="col-lg-5">
+      <h3 class="h6 mb-2">Add keyword</h3>
+      <form method="post" action="{{ url_for('seo_keywords.add') }}" class="d-flex flex-wrap gap-2 align-items-end" id="seoAddForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="flex-grow-1" style="min-width: 200px;">
+          <label class="form-label" for="seoKeyword">Keyword</label>
+          <input type="text" class="form-control form-control-sm" id="seoKeyword" name="keyword" maxlength="255" required placeholder="e.g. GST filing Haldwani">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">
+          <i class="bi bi-plus-lg"></i> Add
+        </button>
+      </form>
+    </div>
+    <div class="col-lg-7">
+      <h3 class="h6 mb-2">Bulk paste</h3>
+      <form method="post" action="{{ url_for('seo_keywords.bulk_add') }}" id="seoBulkForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="form-label" for="seoBulkKeywords">Comma-separated keywords</label>
+        <textarea class="form-control form-control-sm" id="seoBulkKeywords" name="keywords" rows="3" placeholder="keyword one, keyword two, keyword three"></textarea>
+        <div class="mt-2">
+          <button type="submit" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-list-check"></i> Bulk add
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="jtcs-card">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h3 class="h6 mb-0">Keyword list</h3>
+    <span class="small text-muted ms-auto">{{ keywords|length }} keyword{% if keywords|length != 1 %}s{% endif %}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0" id="seoKeywordTable">
+      <thead>
+        <tr>
+          <th style="width: 4rem;">ID</th>
+          <th>Keyword</th>
+          <th style="width: 8rem;">Status</th>
+          <th style="width: 7rem;" class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in keywords %}
+        <tr data-id="{{ row.id }}">
+          <td class="text-muted">{{ row.id }}</td>
+          <td>{{ row.keyword }}</td>
+          <td>
+            <form method="post" action="{{ url_for('seo_keywords.toggle') }}" class="seo-toggle-form m-0">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="id" value="{{ row.id }}">
+              <input type="hidden" name="is_active" value="{{ 0 if row.is_active else 1 }}">
+              <div class="form-check form-switch m-0">
+                <input class="form-check-input seo-toggle" type="checkbox" role="switch"
+                       id="seoActive{{ row.id }}" {% if row.is_active %}checked{% endif %}
+                       title="Toggle active">
+                <label class="form-check-label small" for="seoActive{{ row.id }}">
+                  {{ 'Active' if row.is_active else 'Inactive' }}
+                </label>
+              </div>
+            </form>
+          </td>
+          <td class="text-end">
+            <button type="button" class="btn btn-outline-danger btn-sm seo-delete-btn"
+                    data-id="{{ row.id }}" data-keyword="{{ row.keyword }}" title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="4" class="text-muted small py-3">No keywords yet. Add one above or run the preload seed.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var csrf = {{ csrf_token() | tojson }};
+  var deleteUrlTpl = {{ url_for('seo_keywords.delete', keyword_id=999999) | tojson }};
+
+  document.querySelectorAll('.seo-toggle').forEach(function (input) {
+    input.addEventListener('change', function () {
+      var form = input.closest('form');
+      if (form) form.submit();
+    });
+  });
+
+  document.querySelectorAll('.seo-delete-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-id');
+      var keyword = btn.getAttribute('data-keyword') || '';
+      if (!id) return;
+      if (!window.confirm('Delete keyword "' + keyword + '"?')) return;
+      var url = deleteUrlTpl.replace('999999', String(id));
+      fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Accept': 'application/json',
+          'X-CSRFToken': csrf,
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      }).then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (result.ok && result.data && result.data.ok) {
+            window.location.reload();
+            return;
+          }
+          alert((result.data && (result.data.error || result.data.message)) || 'Delete failed.');
+        })
+        .catch(function () { alert('Delete failed.'); });
+    });
+  });
+})();
+</script>
+{% endblock %}

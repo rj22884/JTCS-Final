@@ -13,6 +13,74 @@
   transform: translateY(-1px);
 }
 
+.dash-bank-closing-wrap {
+  position: relative;
+}
+
+.dash-bank-closing-hover {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 40;
+  min-width: 16.5rem;
+  max-width: 22rem;
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.55rem 0.65rem 0.6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.45rem;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  color: #0f172a;
+  text-align: left;
+}
+
+.dash-bank-closing-wrap:hover .dash-bank-closing-hover,
+.dash-bank-closing-wrap:focus-within .dash-bank-closing-hover {
+  display: block;
+}
+
+.dash-bank-closing-hover-title {
+  font-size: 0.72rem;
+  color: #64748b;
+  margin-bottom: 0.35rem;
+}
+
+.dash-bank-closing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.dash-bank-closing-table th {
+  font-weight: 600;
+  color: #334155;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.2rem 0.25rem 0.35rem;
+  white-space: nowrap;
+}
+
+.dash-bank-closing-table td {
+  padding: 0.28rem 0.25rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.dash-bank-closing-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.dash-bank-closing-table .dash-bank-closing-manual td {
+  color: #b45309;
+}
+
+.dash-bank-closing-table .is-negative {
+  color: #b91c1c;
+}
+
 /* Dashboard-only chrome cleanup */
 .jtcs-app-shell:has(.dash-page) .jtcs-quick-toolbar {
   display: none !important;

@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}{{ page_title | default('Sign In') }}{% endblock %} · {{ company_name | default(app_name) }}</title>
+  {% include 'partials/seo_head.html' %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -55,7 +56,8 @@
     </div>
 
     <footer class="jtcs-auth-footer">
-      JTCS ERP © 2026 · Version {{ app_version }}
+      {% include 'partials/seo_services_footer.html' %}
+      <div class="mt-1">JTCS ERP © 2026 · Version {{ app_version }}</div>
     </footer>
   </div>
 

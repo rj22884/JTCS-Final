@@ -91,17 +91,17 @@
 
   <div class="cm-tab-panel d-none" data-tab="contact">
     <div class="row g-2">
-      {{ cm_field('mobile_number', 'Mobile Number', master_required=true, col='col-md-3', maxlength='20') }}
+      {{ cm_field('mobile_number', 'Mobile Number', col='col-md-3', maxlength='20') }}
       {{ cm_field('alternate_mobile', 'Alternate Mobile', col='col-md-3', maxlength='20') }}
       {{ cm_field('whatsapp_number', 'WhatsApp Number', col='col-md-3', maxlength='20') }}
-      {{ cm_field('email_id', 'Email ID', 'email', master_required=true, col='col-md-3', maxlength='200') }}
+      {{ cm_field('email_id', 'Email ID', 'email', col='col-md-3', maxlength='200') }}
       {{ cm_field('website', 'Website', col='col-md-6', maxlength='300') }}
     </div>
   </div>
 
   <div class="cm-tab-panel d-none" data-tab="address">
     <div class="row g-2">
-      {{ cm_field('pincode', 'Pincode', master_required=true, col='col-md-3', maxlength='6') }}
+      {{ cm_field('pincode', 'Pincode', col='col-md-3', maxlength='6') }}
       <div class="col-md-3 cm-field-wrap" data-field="country">
         <label class="form-label" for="cm_country">Country</label>
         <select class="form-control form-select" id="cm_country" name="country" data-cm-field="country">
@@ -114,12 +114,12 @@
       {{ cm_field('state_gst_code', 'State GST Code', col='col-md-2', maxlength='2') }}
       {{ cm_field('district', 'District', col='col-md-3', maxlength='100') }}
       {{ cm_field('city', 'City', col='col-md-3', maxlength='100') }}
-      {{ cm_field('address_line1', 'Address Line 1', master_required=true, col='col-md-6', maxlength='300') }}
+      {{ cm_field('address_line1', 'Address Line 1', col='col-md-6', maxlength='300') }}
       {{ cm_field('address_line2', 'Address Line 2', col='col-md-6', maxlength='300') }}
       {{ cm_field('village', 'Village', col='col-md-3', maxlength='100') }}
       {{ cm_field('area', 'Area', col='col-md-3', maxlength='100') }}
-      {{ cm_field('pan_number', 'PAN Number', master_required=true, col='col-md-4', maxlength='10') }}
-      {{ cm_field('aadhaar_number', 'Aadhaar Number', master_required=true, col='col-md-4', maxlength='12') }}
+      {{ cm_field('pan_number', 'PAN Number', col='col-md-4', maxlength='10') }}
+      {{ cm_field('aadhaar_number', 'Aadhaar Number', col='col-md-4', maxlength='12') }}
     </div>
   </div>
 

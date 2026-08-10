@@ -1193,38 +1193,35 @@
   function validateClient(payload) {
     const errors = [];
     const required = activeMandatoryFields();
-    const otherMode = isOtherCustomerType();
     if (!payload.customer_group) errors.push("Select customer group.");
     const chartIds = Array.isArray(payload.chart_group_ids) ? payload.chart_group_ids : [];
     if (payload.customer_group && !chartIds.length) {
       errors.push("Select Chart of Account group.");
-    }
-    const workIds = Array.isArray(payload.income_expense_work_ids)
-      ? payload.income_expense_work_ids
-      : [];
-    if (needsIncomeExpenseWorks() && !workIds.length) {
-      errors.push("Select at least one Income/Expense work type.");
-    }
-    if (otherMode && !(payload.customer_type || "").trim()) {
-      errors.push("Customer type is required.");
     }
     required.forEach(function (key) {
       if (!(payload[key] || "").trim()) {
         errors.push(key.replace(/_/g, " ") + " is required.");
       }
     });
-    if (otherMode) {
-      const pan = (payload.pan_number || "").trim().toUpperCase();
-      if (pan && pan.length !== 10) {
-        errors.push("Valid 10-character PAN is required.");
-      }
-      const mobile = (payload.mobile_number || "").replace(/\D/g, "");
-      if (mobile && mobile.length !== 10) {
-        errors.push("Valid 10-digit mobile number is required.");
-      }
-      const aadhaar = (payload.aadhaar_number || "").replace(/\D/g, "");
-      if (aadhaar && aadhaar.length !== 12) {
-        errors.push("Valid 12-digit Aadhaar is required.");
+    // Format checks only when optional fields are filled.
+    const pan = (payload.pan_number || "").trim().toUpperCase();
+    if (pan && pan.length !== 10) {
+      errors.push("Valid 10-character PAN is required.");
+    }
+    const mobile = (payload.mobile_number || "").replace(/\D/g, "");
+    if (mobile && mobile.length !== 10) {
+      errors.push("Valid 10-digit mobile number is required.");
+    }
+    const aadhaar = (payload.aadhaar_number || "").replace(/\D/g, "");
+    if (aadhaar && aadhaar.length !== 12) {
+      errors.push("Valid 12-digit Aadhaar is required.");
+    }
+    const email = (payload.email_id || "").trim();
+    if (email) {
+      const at = email.indexOf("@");
+      const domain = at >= 0 ? email.slice(at + 1) : "";
+      if (at < 1 || !domain || domain.indexOf(".") < 1) {
+        errors.push("Valid email ID is required.");
       }
     }
     els.form?.querySelectorAll("[data-cm-field]").forEach(function (f) {
@@ -1244,9 +1241,6 @@
       }
       if (payload.customer_group && !chartIds.length && els.chartGroups) {
         els.chartGroups.classList.add("cm-field-error");
-      }
-      if (needsIncomeExpenseWorks() && !workIds.length && els.ieWorks) {
-        els.ieWorks.classList.add("cm-field-error");
       }
     }
     return errors;

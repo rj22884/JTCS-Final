@@ -744,6 +744,25 @@ body.jtcs-body .navbar {
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
+.jtcs-seo-services {
+  line-height: 1.45;
+  font-size: 0.82rem;
+  max-width: 56rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.jtcs-seo-footer-strip {
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 0.82rem;
+}
+
+.jtcs-seo-footer-strip .jtcs-seo-services {
+  color: #334155;
+}
+
 /* ========== MOBILE MENU ========== */
 .jtcs-mobile-menu-toggle {
   display: none;

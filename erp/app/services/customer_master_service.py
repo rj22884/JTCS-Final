@@ -212,10 +212,8 @@ class CustomerMasterService:
             chart_ids,
             customer_group=(payload.get("customer_group") or ""),
         )
-        if requires and not work_ids:
-            raise ValueError("Select at least one Income/Expense work type.")
-        if not requires:
-            # Clear links when no longer applicable.
+        if not requires or not work_ids:
+            # Optional: clear links when not applicable or none selected.
             self.repository.replace_income_expense_work_ids(int(customer_id), [])
             return
         # Validate against active WorkMaster (read-only).
@@ -270,48 +268,32 @@ class CustomerMasterService:
         elif filing_frequency and filing_frequency not in ("Monthly", "Quarterly", "Yearly"):
             raise ValueError("Filing Frequency must be Monthly, Quarterly, or Yearly.")
 
-        is_other = self._is_other_customer_type(payload)
-        if is_other:
+        if self._is_other_customer_type(payload):
             self._apply_other_type_defaults(payload)
-            for field in OTHER_TYPE_MANDATORY_FIELDS:
-                value = (payload.get(field) or "").strip()
-                if not value:
-                    label = field.replace("_", " ").title()
-                    raise ValueError(f"{label} is required.")
-            pan = (payload.get("pan_number") or "").strip().upper()
-            if pan and len(pan) != 10:
-                raise ValueError("Valid 10-character PAN is required.")
-            mobile = self.repository._normalize_mobile(payload.get("mobile_number"))
-            if mobile and len(mobile) != 10:
-                raise ValueError("Valid 10-digit mobile number is required.")
-            aadhaar = re.sub(r"\D", "", payload.get("aadhaar_number") or "")
-            if aadhaar and len(aadhaar) != 12:
-                raise ValueError("Valid 12-digit Aadhaar is required.")
-            email = self._normalize_email(payload.get("email_id"))
-            if email and ("@" not in email or "." not in email.split("@")[-1]):
-                raise ValueError("Valid email ID is required.")
-            return
 
-        for field in MASTER_MANDATORY_FIELDS:
+        required_fields = (
+            OTHER_TYPE_MANDATORY_FIELDS
+            if self._is_other_customer_type(payload)
+            else MASTER_MANDATORY_FIELDS
+        )
+        for field in required_fields:
             value = (payload.get(field) or "").strip()
             if not value:
                 label = field.replace("_", " ").title()
                 raise ValueError(f"{label} is required.")
 
-        mobile = self.repository._normalize_mobile(payload.get("mobile_number"))
-        if not mobile or len(mobile) != 10:
-            raise ValueError("Valid 10-digit mobile number is required.")
-
-        aadhaar = re.sub(r"\D", "", payload.get("aadhaar_number") or "")
-        if len(aadhaar) != 12:
-            raise ValueError("Valid 12-digit Aadhaar is required.")
-
+        # Format checks only when optional fields are filled (not mandatory).
         pan = (payload.get("pan_number") or "").strip().upper()
-        if len(pan) != 10:
+        if pan and len(pan) != 10:
             raise ValueError("Valid 10-character PAN is required.")
-
+        mobile = self.repository._normalize_mobile(payload.get("mobile_number"))
+        if mobile and len(mobile) != 10:
+            raise ValueError("Valid 10-digit mobile number is required.")
+        aadhaar = re.sub(r"\D", "", payload.get("aadhaar_number") or "")
+        if aadhaar and len(aadhaar) != 12:
+            raise ValueError("Valid 12-digit Aadhaar is required.")
         email = self._normalize_email(payload.get("email_id"))
-        if "@" not in email or "." not in email.split("@")[-1]:
+        if email and ("@" not in email or "." not in email.split("@")[-1]):
             raise ValueError("Valid email ID is required.")
 
     def _check_blocking_duplicates(self, payload: dict, customer_id: int | None) -> None:
@@ -374,29 +356,13 @@ class CustomerMasterService:
         def _write() -> dict:
             return self.repository.save_full(payload, customer_id=entry_id)
 
-        # Validate Income/Expense work requirement before write (when chart groups imply it).
-        chart_ids = self._parse_id_list(
-            payload.get("chart_group_ids")
-            if payload.get("chart_group_ids") is not None
-            else payload.get("group_ids")
-        )
-        if self._requires_income_expense_works(
-            chart_ids, customer_group=(payload.get("customer_group") or "")
-        ):
-            work_ids = self._parse_id_list(
-                payload.get("income_expense_work_ids")
-                if "income_expense_work_ids" in payload
-                else payload.get("work_ids")
-            )
-            if not work_ids:
-                raise ValueError("Select at least one Income/Expense work type.")
-
+        # Income/Expense work types are optional — sync when provided, never block save.
         saved = persist(_write)
         cid = saved.get("customer_id") or entry_id
         if not cid:
             raise ValueError("Customer saved but ID is missing — cannot assign chart groups.")
         self._sync_chart_groups(int(cid), payload)
-        # Work links need their own transaction after customer exists.
+
         def _sync_works() -> None:
             self._sync_income_expense_works(int(cid), payload)
 

@@ -29,17 +29,12 @@ CUSTOMER_STATUSES = ["Active", "Inactive", "Blocked"]
 GENDERS = ["Male", "Female", "Other"]
 GST_FILING_FREQUENCIES = ["Monthly", "Quarterly", "Yearly"]
 
+# Form-field mandatories only. Customer Group + Chart of Account Group are validated separately.
 MASTER_MANDATORY_FIELDS = frozenset({
     "customer_name",
-    "mobile_number",
-    "pan_number",
-    "aadhaar_number",
-    "address_line1",
-    "pincode",
-    "email_id",
 })
 
-# Customer Type "Other": only name is mandatory. PAN defaults to placeholder when blank.
+# Customer Type "Other": same form mandatories. PAN defaults to placeholder when blank.
 OTHER_CUSTOMER_TYPE = "Other"
 OTHER_TYPE_MANDATORY_FIELDS = frozenset({
     "customer_name",

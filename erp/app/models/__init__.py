@@ -18,6 +18,7 @@ from app.models.others import (
 )
 from app.models.bank_cash import OthersBankCashTransaction, PurposeMaster, RdAccountMaster
 from app.models.credentials_master import CredentialsMaster
+from app.models.seo_keyword import SeoKeyword
 from app.models.whats_new import WhatsNewEntry
 from app.models.app_version import AppVersionHistory
 from app.models.transactions import (
@@ -63,6 +64,7 @@ __all__ = [
     "OthersBankCashTransaction",
     "PurposeMaster",
     "CredentialsMaster",
+    "SeoKeyword",
     "WhatsNewEntry",
     "AppVersionHistory",
     "RdAccountMaster",

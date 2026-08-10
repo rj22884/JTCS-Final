@@ -147,17 +147,17 @@
           </div>
 
           <div class="cm-ie-work-bar mb-3 d-none" id="cmIeWorkBar">
-            <label class="form-label cm-required mb-1" for="cm_ie_works">
+            <label class="form-label mb-1" for="cm_ie_works">
               Income / Expense Work Types
               <span class="text-muted fw-normal">(from Income/Expense Master)</span>
             </label>
-            <select class="form-select" id="cm_ie_works" multiple size="8" aria-required="true">
+            <select class="form-select" id="cm_ie_works" multiple size="8">
               {% for w in income_expense_works %}
               <option value="{{ w.work_id }}">{{ w.work_name }} ({{ w.ledger_kind }})</option>
               {% endfor %}
             </select>
             <div class="form-text">
-              Required when Chart of Account groups include Sale / Purchase / Income / Expense / Contra related groups.
+              Optional. Shown when Chart of Account groups include Sale / Purchase / Income / Expense / Contra related groups.
               Hold Ctrl (Windows) or Cmd (Mac) to select multiple.
             </div>
           </div>
@@ -413,5 +413,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260809logged1"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260810mand3"></script>
 {% endblock %}

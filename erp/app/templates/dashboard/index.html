@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260803nocrm">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260810bankhover">
 {% endblock %}
 
 {% block content %}
@@ -163,11 +163,47 @@
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
-              data-metric="bank_closing_balance" data-label="Bank Closing Balance">
-        <span class="jtcs-metric-label">Bank Closing Balance</span>
-        <strong class="jtcs-metric-value" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
-      </button>
+      <div class="dash-bank-closing-wrap">
+        <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+                data-metric="bank_closing_balance" data-label="Bank Closing Balance"
+                aria-describedby="dashBankClosingHover">
+          <span class="jtcs-metric-label">Bank Closing Balance</span>
+          <strong class="jtcs-metric-value" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
+        </button>
+        <div class="dash-bank-closing-hover" id="dashBankClosingHover" role="tooltip">
+          <div class="dash-bank-closing-hover-title">As of {{ date_to|display_date }}</div>
+          <table class="dash-bank-closing-table">
+            <thead>
+              <tr>
+                <th>Account number</th>
+                <th class="text-end">Closing balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in bank_account_closings %}
+              <tr>
+                <td title="{{ row.bank_name }}">{{ row.account_number }}</td>
+                <td class="text-end{% if row.closing_balance < 0 %} is-negative{% endif %}">
+                  ₹ {{ '%.2f'|format(row.closing_balance) }}
+                </td>
+              </tr>
+              {% else %}
+              <tr>
+                <td colspan="2" class="text-muted">No bank accounts found.</td>
+              </tr>
+              {% endfor %}
+              {% if bank_closing_manual and bank_closing_manual != 0 %}
+              <tr class="dash-bank-closing-manual">
+                <td>Manual adjustments</td>
+                <td class="text-end{% if bank_closing_manual < 0 %} is-negative{% endif %}">
+                  ₹ {{ '%.2f'|format(bank_closing_manual) }}
+                </td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
     <div class="col-6 col-md-4 col-xl">
       <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"

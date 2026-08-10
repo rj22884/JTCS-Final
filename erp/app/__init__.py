@@ -50,6 +50,7 @@ from app.routes.ledger_report import bp as ledger_report_bp
 from app.routes.financial_statements import bp as financial_statements_bp
 from app.routes.software_update import bp as software_update_bp
 from app.routes.utility import bp as utility_bp
+from app.routes.seo_keywords import bp as seo_keywords_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -145,6 +146,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(financial_statements_bp)
     app.register_blueprint(software_update_bp)
     app.register_blueprint(utility_bp)
+    app.register_blueprint(seo_keywords_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)
@@ -238,6 +240,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Utility menus ensure skipped: %s", exc)
+
+        try:
+            from app.routes.seo_keywords import ensure_seo_keywords_bootstrap
+
+            ensure_seo_keywords_bootstrap()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("SEO keywords bootstrap skipped: %s", exc)
 
         try:
             from app.modules.system_health.routes import ensure_system_health_menus
@@ -437,6 +447,24 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception:
             display_version = app.config["APP_VERSION"]
 
+        seo_active_keywords: list[str] = []
+        seo_meta_keywords = ""
+        seo_schema_payload: dict | None = None
+        try:
+            from app.services.seo_keyword_service import (
+                build_meta_keywords,
+                build_schema_payload,
+                get_active_keywords,
+            )
+
+            seo_active_keywords = get_active_keywords()
+            seo_meta_keywords = build_meta_keywords(seo_active_keywords)
+            seo_schema_payload = build_schema_payload(seo_active_keywords)
+        except Exception:
+            seo_active_keywords = []
+            seo_meta_keywords = ""
+            seo_schema_payload = None
+
         now = datetime.now()
         return {
             "app_name": app.config["APP_NAME"],
@@ -462,6 +490,9 @@ def create_app(config_class: type = Config) -> Flask:
             "notification_poll_seconds": app.config.get("NOTIFICATION_POLL_SECONDS", 15),
             "is_admin_user": is_admin_user,
             "current_login_id": login_id,
+            "seo_active_keywords": seo_active_keywords,
+            "seo_meta_keywords": seo_meta_keywords,
+            "seo_schema_payload": seo_schema_payload,
         }
     @app.template_filter("menu_active")
     def menu_active(menu_url: str | None) -> bool:

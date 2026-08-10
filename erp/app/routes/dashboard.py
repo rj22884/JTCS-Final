@@ -78,6 +78,9 @@ def index():
     date_from, date_to, period_preset = _resolve_period(dashboard_service)
 
     metrics = dashboard_service.get_metrics(date_from, date_to)
+    bank_closing_hover = dashboard_service.get_bank_closing_hover(as_of=date_to)
+    bank_account_closings = bank_closing_hover["accounts"]
+    bank_closing_manual = bank_closing_hover["manual"]
     today_activity = dashboard_service.get_today_activity_summary(today)
     recent = dashboard_service.recent_daily_transactions()
     fy_from, fy_to = dashboard_service.fiscal_year_bounds(today)
@@ -113,6 +116,8 @@ def index():
         page_title="Dashboard",
         breadcrumb=menu_service.get_breadcrumb("/dashboard", session.get("role")),
         metrics=metrics,
+        bank_account_closings=bank_account_closings,
+        bank_closing_manual=bank_closing_manual,
         today_activity=today_activity,
         recent=recent,
         date_from=date_from,
