@@ -51,6 +51,7 @@ from app.routes.financial_statements import bp as financial_statements_bp
 from app.routes.software_update import bp as software_update_bp
 from app.routes.utility import bp as utility_bp
 from app.routes.seo_keywords import bp as seo_keywords_bp
+from app.routes.seo_api import bp as seo_api_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -82,6 +83,7 @@ SETUP_PUBLIC_ENDPOINTS = {
     "auth.verify_success",
     "dashboard.health",
     "public_intake.website_intake",
+    "seo_api.keywords",
     "customer_portal.login_page",
     "customer_portal.login_api",
     "customer_portal.login_start_api",
@@ -147,6 +149,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(software_update_bp)
     app.register_blueprint(utility_bp)
     app.register_blueprint(seo_keywords_bp)
+    app.register_blueprint(seo_api_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)
@@ -158,6 +161,8 @@ def create_app(config_class: type = Config) -> Flask:
 
     # Website intake uses API key auth (no session CSRF token).
     csrf.exempt(public_intake_bp)
+    # Public SEO keywords for the marketing website (CORS + no CSRF).
+    csrf.exempt(seo_api_bp)
 
     # Integration Settings (and JSON clients): CSRF failures as JSON, not HTML.
     from app.modules.settings.routes import register_integration_csrf_json_handler

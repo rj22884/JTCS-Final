@@ -64,16 +64,34 @@ META_KEYWORDS_MAX_LEN = 280
 def get_active_keywords() -> list[str]:
     """Fetch all active keywords as a list (ordered by id)."""
     try:
+        # Use == 1 / == True (not .is_(True)): SQL Server BIT rejects "IS true".
         rows = (
             db.session.query(SeoKeyword.keyword)
-            .filter(SeoKeyword.is_active.is_(True))
+            .filter(SeoKeyword.is_active == True)  # noqa: E712
             .order_by(SeoKeyword.id.asc())
             .all()
         )
         return [str(row[0]).strip() for row in rows if row and row[0] and str(row[0]).strip()]
     except Exception:
         db.session.rollback()
-        return []
+        # Fallback raw query if ORM mapping mismatches the live table.
+        try:
+            from sqlalchemy import text
+
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT keyword
+                    FROM dbo.seo_keywords
+                    WHERE is_active = 1
+                    ORDER BY id ASC
+                    """
+                )
+            ).fetchall()
+            return [str(row[0]).strip() for row in rows if row and row[0] and str(row[0]).strip()]
+        except Exception:
+            db.session.rollback()
+            return []
 
 
 def normalize_keyword(raw: str | None) -> str:
