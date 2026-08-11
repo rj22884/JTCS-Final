@@ -245,6 +245,7 @@ class FollowupService:
             else:
                 row["filing_date"] = row.get("FilingDate") or row.get("filing_date")
             row["remarks"] = row.get("Remarks")
+            row["reason_for_unverified"] = row.get("ReasonForUnverified")
             row["tax_period"] = row.get("TaxPeriod")
             row["form_type"] = row.get("FormType")
             row["quarter"] = row.get("Quarter")
@@ -653,8 +654,8 @@ class FollowupService:
         return data
 
     @classmethod
-    def _fetch_idsign_latest_status(cls, reference_no: str) -> str:
-        """Fetch latest status text from ID Sign webstatus page for ReferenceNo."""
+    def _fetch_idsign_webstatus_html(cls, reference_no: str) -> str:
+        """Fetch raw HTML from ID Sign webstatus page for ReferenceNo."""
         ref = (reference_no or "").strip()
         if not ref:
             raise ValueError("Application number is required to sync status.")
@@ -673,16 +674,57 @@ class FollowupService:
             raise ValueError(f"ID Sign status page returned HTTP {exc.code}.") from exc
         except URLError as exc:
             raise ValueError(f"Unable to reach ID Sign status page: {exc.reason}") from exc
+        return raw.decode("utf-8", errors="ignore")
 
-        html = raw.decode("utf-8", errors="ignore")
+    @classmethod
+    def _fetch_idsign_latest_status(cls, reference_no: str) -> str:
+        """Fetch latest status text from ID Sign webstatus page for ReferenceNo."""
+        html = cls._fetch_idsign_webstatus_html(reference_no)
         statuses = cls._parse_idsign_status_rows(html)
         if not statuses:
             raise ValueError(
-                f"No status found on ID Sign for Reference No. {ref}. "
+                f"No status found on ID Sign for Reference No. {reference_no.strip()}. "
                 "Verify the application number."
             )
         # Always take the LAST status row from the table (e.g. Token Issued / VIDEO PENDING).
         return statuses[-1]
+
+    @classmethod
+    def _fetch_idsign_status_details(cls, reference_no: str) -> dict:
+        """Fetch latest status + Reject comment(IF ANY) from ID Sign webstatus."""
+        html = cls._fetch_idsign_webstatus_html(reference_no)
+        statuses = cls._parse_idsign_status_rows(html)
+        if not statuses:
+            raise ValueError(
+                f"No status found on ID Sign for Reference No. {reference_no.strip()}. "
+                "Verify the application number."
+            )
+        return {
+            "status": statuses[-1],
+            "reject_comment": cls._parse_idsign_reject_comment(html),
+        }
+
+    @staticmethod
+    def _parse_idsign_reject_comment(html: str) -> str | None:
+        """Extract Reject comment(IF ANY) value from ID Sign webstatus HTML/text."""
+        if not html:
+            return None
+        # Normalize tags to spaces so label/value survive markup splits.
+        text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html)
+        text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        match = re.search(
+            r"Reject\s*comment\s*\(\s*IF\s*ANY\s*\)\s*:\s*(.*)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        value = (match.group(1) or "").strip()
+        # Trim trailing punctuation noise commonly present on ID Sign pages.
+        value = value.strip(" ,;|")
+        return value or None
 
     @staticmethod
     def _parse_idsign_status_rows(html: str) -> list[str]:
@@ -763,16 +805,29 @@ class FollowupService:
         if not application_no:
             raise ValueError("Application number is missing for this record.")
 
-        latest_status = self._fetch_idsign_latest_status(application_no)
+        details = self._fetch_idsign_status_details(application_no)
+        latest_status = details["status"]
         remarks = latest_status[:500]
+        # Reuse existing FollowupEntryMaster.ReasonForUnverified for DSC Reject Comment
+        # (DSC workflow has no Unverified stage). No schema change.
+        reject_comment = details.get("reject_comment")
+        reject_stored = (reject_comment[:500] if reject_comment else None)
 
         def _write():
-            self.followup_repo.update_entry(row, {"Remarks": remarks})
+            self.followup_repo.update_entry(
+                row,
+                {
+                    "Remarks": remarks,
+                    "ReasonForUnverified": reject_stored,
+                },
+            )
             return {
                 "entry_id": entry_id,
                 "application_number": application_no,
                 "remarks": remarks,
                 "status": latest_status,
+                "reason_for_unverified": reject_stored,
+                "reject_comment": reject_stored,
                 "message": "ID Sign status synced to Remarks.",
             }
 

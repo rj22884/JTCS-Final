@@ -74,6 +74,84 @@ button.fu-stat-card {
   overflow: auto;
 }
 
+/* DSC Remarks → Reject comment(IF ANY) hover tip */
+.fu-remarks-cell .fu-remarks-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  cursor: help;
+  border-bottom: 1px dotted #94a3b8;
+  color: inherit;
+}
+
+.fu-remarks-tip-icon {
+  font-size: 0.75rem;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.fu-remarks-reject-popover {
+  position: fixed;
+  z-index: 1080;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 0.55rem 0.7rem;
+  background: #0f172a;
+  color: #f8fafc;
+  border-radius: 0.375rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.28);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: auto;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.fu-remarks-reject-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.fu-remarks-reject-label {
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.fu-remarks-reject-copy {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid rgba(248, 250, 252, 0.35);
+  border-radius: 0.25rem;
+  background: rgba(248, 250, 252, 0.08);
+  color: #f8fafc;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.fu-remarks-reject-copy:hover,
+.fu-remarks-reject-copy:focus-visible {
+  background: rgba(248, 250, 252, 0.18);
+  border-color: rgba(248, 250, 252, 0.55);
+  outline: none;
+}
+
+.fu-remarks-reject-copy.is-copied {
+  color: #86efac;
+  border-color: #86efac;
+}
+
+.fu-remarks-reject-body {
+  color: #f8fafc;
+}
+
 .fu-grid-panel .table {
   font-size: 13px;
 }

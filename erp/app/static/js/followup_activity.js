@@ -550,6 +550,136 @@
       .replace(/"/g, "&quot;");
   }
 
+  function normalizeRejectComment(value) {
+    let text = String(value == null ? "" : value).trim();
+    if (!text || text === "null" || text === "undefined" || text === "None") {
+      return "";
+    }
+    text = text.replace(/^Reject\s*comment\s*\(\s*IF\s*ANY\s*\)\s*:\s*/i, "").trim();
+    return text;
+  }
+
+  function rejectCommentFromRow(row) {
+    if (!row) return "";
+    return normalizeRejectComment(
+      row.reason_for_unverified != null
+        ? row.reason_for_unverified
+        : row.ReasonForUnverified
+    );
+  }
+
+  function remarksRejectTipHtml(rejectComment) {
+    const hasComment = !!rejectComment;
+    const body = rejectComment || "No reject comment";
+    const copyBtn = hasComment
+      ? '<button type="button" class="fu-remarks-reject-copy" title="Copy reject comment" aria-label="Copy reject comment">' +
+        '<i class="bi bi-copy"></i></button>'
+      : "";
+    return (
+      '<div class="fu-remarks-reject-label-row">' +
+      '<div class="fu-remarks-reject-label">Reject comment(IF ANY):</div>' +
+      copyBtn +
+      "</div>" +
+      '<div class="fu-remarks-reject-body fu-copy-text">' +
+      escapeHtml(body) +
+      "</div>"
+    );
+  }
+
+  let remarksRejectTipEl = null;
+  let remarksRejectHideTimer = null;
+
+  function clearRemarksRejectHideTimer() {
+    if (remarksRejectHideTimer) {
+      window.clearTimeout(remarksRejectHideTimer);
+      remarksRejectHideTimer = null;
+    }
+  }
+
+  function hideRemarksRejectTip() {
+    clearRemarksRejectHideTimer();
+    if (remarksRejectTipEl) {
+      remarksRejectTipEl.remove();
+      remarksRejectTipEl = null;
+    }
+  }
+
+  function scheduleHideRemarksRejectTip() {
+    clearRemarksRejectHideTimer();
+    remarksRejectHideTimer = window.setTimeout(function () {
+      hideRemarksRejectTip();
+    }, 160);
+  }
+
+  function positionRemarksRejectTip(anchor) {
+    if (!remarksRejectTipEl || !anchor) return;
+    const margin = 8;
+    const rect = anchor.getBoundingClientRect();
+    const tipRect = remarksRejectTipEl.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + margin;
+    if (left + tipRect.width > window.innerWidth - margin) {
+      left = Math.max(margin, window.innerWidth - tipRect.width - margin);
+    }
+    if (left < margin) left = margin;
+    if (top + tipRect.height > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - tipRect.height - margin);
+    }
+    remarksRejectTipEl.style.left = left + "px";
+    remarksRejectTipEl.style.top = top + "px";
+  }
+
+  function showRemarksRejectTip(anchor) {
+    if (!anchor) return;
+    clearRemarksRejectHideTimer();
+    const rejectComment = normalizeRejectComment(anchor.getAttribute("data-reject-comment"));
+    if (remarksRejectTipEl && remarksRejectTipEl._anchor === anchor) {
+      positionRemarksRejectTip(anchor);
+      return;
+    }
+    hideRemarksRejectTip();
+    remarksRejectTipEl = document.createElement("div");
+    remarksRejectTipEl.className = "fu-remarks-reject-popover";
+    remarksRejectTipEl.setAttribute("role", "tooltip");
+    remarksRejectTipEl.innerHTML = remarksRejectTipHtml(rejectComment);
+    remarksRejectTipEl._anchor = anchor;
+    remarksRejectTipEl._rejectComment = rejectComment;
+    remarksRejectTipEl.addEventListener("mouseenter", function () {
+      clearRemarksRejectHideTimer();
+    });
+    remarksRejectTipEl.addEventListener("mouseleave", function () {
+      scheduleHideRemarksRejectTip();
+    });
+    remarksRejectTipEl.addEventListener("click", function (event) {
+      const copyBtn = event.target.closest(".fu-remarks-reject-copy");
+      if (!copyBtn) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const text = (remarksRejectTipEl._rejectComment || "").trim();
+      if (!text) return;
+      copyTextToClipboard(text, copyBtn);
+    });
+    document.body.appendChild(remarksRejectTipEl);
+    positionRemarksRejectTip(anchor);
+  }
+
+  function remarksCellHtml(row) {
+    const remarksText = row.remarks || "—";
+    if (!isDscModule) {
+      return "<td>" + escapeHtml(remarksText) + "</td>";
+    }
+    const rejectComment = rejectCommentFromRow(row);
+    return (
+      '<td class="fu-remarks-cell">' +
+      '<span class="fu-remarks-tip" tabindex="0" data-reject-comment="' +
+      escapeHtml(rejectComment) +
+      '" title="">' +
+      escapeHtml(remarksText) +
+      '<i class="bi bi-info-circle fu-remarks-tip-icon" aria-hidden="true"></i>' +
+      "</span></td>"
+    );
+  }
+
   function csvCell(value) {
     const text = String(value == null ? "" : value).replace(/"/g, '""');
     return '"' + text + '"';
@@ -1141,7 +1271,7 @@
         (isItrModule
           ? "<td>" + escapeHtml(formatPaymentReceiveDateCell(row)) + "</td>"
           : "") +
-        "<td>" + escapeHtml(row.remarks || "—") + "</td>" +
+        remarksCellHtml(row) +
         paymentReminderCell +
         rowSyncCell +
         "<td>" + thankYouCell + "</td>" +
@@ -1968,9 +2098,19 @@
           throw new Error((result.payload && result.payload.error) || "Sync failed.");
         }
         const remarks = result.payload.remarks || result.payload.status || "";
+        const rejectComment = normalizeRejectComment(
+          result.payload.reason_for_unverified != null
+            ? result.payload.reason_for_unverified
+            : result.payload.reject_comment
+        );
         rawGridRows = (rawGridRows || []).map(function (row) {
           if (Number(row.entry_id) === Number(entryId)) {
-            return Object.assign({}, row, { remarks: remarks });
+            return Object.assign({}, row, {
+              remarks: remarks,
+              Remarks: remarks,
+              reason_for_unverified: rejectComment || null,
+              ReasonForUnverified: rejectComment || null,
+            });
           }
           return row;
         });
@@ -1985,6 +2125,39 @@
           button.innerHTML = '<i class="bi bi-arrow-repeat"></i>';
         }
       });
+  }
+
+  if (isDscModule && els.gridBody) {
+    els.gridBody.addEventListener("mouseover", function (event) {
+      const tip = event.target.closest(".fu-remarks-tip");
+      if (!tip || !els.gridBody.contains(tip)) return;
+      showRemarksRejectTip(tip);
+    });
+    els.gridBody.addEventListener("mouseout", function (event) {
+      const tip = event.target.closest(".fu-remarks-tip");
+      if (!tip) return;
+      const related = event.relatedTarget;
+      if (related && (tip.contains(related) || (remarksRejectTipEl && remarksRejectTipEl.contains(related)))) {
+        return;
+      }
+      scheduleHideRemarksRejectTip();
+    });
+    els.gridBody.addEventListener("focusin", function (event) {
+      const tip = event.target.closest(".fu-remarks-tip");
+      if (!tip || !els.gridBody.contains(tip)) return;
+      showRemarksRejectTip(tip);
+    });
+    els.gridBody.addEventListener("focusout", function (event) {
+      const tip = event.target.closest(".fu-remarks-tip");
+      if (!tip) return;
+      const related = event.relatedTarget;
+      if (related && (tip.contains(related) || (remarksRejectTipEl && remarksRejectTipEl.contains(related)))) {
+        return;
+      }
+      scheduleHideRemarksRejectTip();
+    });
+    document.addEventListener("scroll", hideRemarksRejectTip, true);
+    window.addEventListener("resize", hideRemarksRejectTip);
   }
 
   els.gridBody?.addEventListener("click", function (event) {
