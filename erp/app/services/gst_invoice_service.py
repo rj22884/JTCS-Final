@@ -238,6 +238,15 @@ class GstInvoiceService:
 
     INVOICE_KIND_GST = "GST"
     INVOICE_KIND_NON_GST = "NON_GST"
+    VOUCHER_SALE = "SALE"
+    VOUCHER_PURCHASE = "PURCHASE"
+
+    @staticmethod
+    def normalize_voucher_type(value) -> str:
+        raw = (str(value or "")).strip().upper().replace(" ", "_").replace("-", "_")
+        if raw in {"PURCHASE", "PURCH", "BUY"}:
+            return GstInvoiceService.VOUCHER_PURCHASE
+        return GstInvoiceService.VOUCHER_SALE
 
     @staticmethod
     def normalize_invoice_kind(value) -> str:
@@ -313,6 +322,7 @@ class GstInvoiceService:
             "reverse_charge": bool(inv.ReverseCharge),
             "invoice_kind": getattr(inv, "InvoiceKind", None)
             or self.INVOICE_KIND_NON_GST,
+            "voucher_type": getattr(inv, "VoucherType", None) or self.VOUCHER_SALE,
             "tax_type": inv.TaxType or "IGST",
             "list_price": float(inv.ListPrice or 0),
             "discount_amount": float(inv.DiscountAmount or 0),
@@ -334,6 +344,16 @@ class GstInvoiceService:
             "pay_account_holder": getattr(inv, "PayAccountHolder", None) or "",
             "pay_account_type": getattr(inv, "PayAccountType", None) or "",
             "pay_upi_id": self._live_pay_upi_id(inv),
+            "payment_date": (
+                inv.PaymentDate.isoformat()
+                if getattr(inv, "PaymentDate", None)
+                else ""
+            ),
+            "amount_paid": (
+                float(inv.AmountPaid)
+                if getattr(inv, "AmountPaid", None) is not None
+                else None
+            ),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
             "lines": [
                 {
@@ -361,10 +381,17 @@ class GstInvoiceService:
         search: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        voucher_type: str | None = None,
     ) -> list[dict]:
+        vt = self.normalize_voucher_type(voucher_type) if voucher_type else None
         return [
             self._serialize(inv, lines=[])
-            for inv in self.repo.list_all(search=search, date_from=date_from, date_to=date_to)
+            for inv in self.repo.list_all(
+                search=search,
+                date_from=date_from,
+                date_to=date_to,
+                voucher_type=vt,
+            )
         ]
 
     def get_record(self, invoice_id: int) -> dict:
@@ -507,6 +534,11 @@ class GstInvoiceService:
         invoice_kind = self.normalize_invoice_kind(
             payload.get("invoice_kind") or payload.get("InvoiceKind")
         )
+        voucher_type = self.normalize_voucher_type(
+            payload.get("voucher_type") or payload.get("VoucherType")
+        )
+        if voucher_type == self.VOUCHER_PURCHASE and not inv_date_raw:
+            raise ValueError("Invoice Date is required for Purchase.")
 
         # GST applies for both GST and Non-GST series; kind only controls invoice number format.
         intra_state = bool(place_code) and place_code == seller_code
@@ -526,7 +558,10 @@ class GstInvoiceService:
         words = amount_in_words_inr(invoice_value)
 
         invoice_no = (payload.get("invoice_no") or "").strip()
-        if not invoice_no:
+        if voucher_type == self.VOUCHER_PURCHASE:
+            if not invoice_no:
+                raise ValueError("Supplier Invoice No is required for Purchase.")
+        elif not invoice_no:
             invoice_no = self.next_invoice_no(inv_date, invoice_kind=invoice_kind)
 
         pay_bank_id_raw = payload.get("payment_bank_account_id") or payload.get(
@@ -544,18 +579,43 @@ class GstInvoiceService:
         bank_row = bank_svc.repo.get_by_id(pay_bank_id)
         if bank_row is None or not bank_row.ActiveStatus:
             raise ValueError("Selected payment bank account was not found or is inactive.")
-        if bank_svc._is_cash_account(bank_row.BankName, bank_row.AccountNumber):
+        is_cash = bank_svc._is_cash_account(bank_row.BankName, bank_row.AccountNumber)
+        if voucher_type != self.VOUCHER_PURCHASE and is_cash:
             raise ValueError("Cash cannot be used as payment bank for invoice QR.")
         bank_data = bank_svc._serialize(bank_row)
-        if not (bank_data.get("upi_id") or "").strip():
+        if voucher_type != self.VOUCHER_PURCHASE and not (bank_data.get("upi_id") or "").strip():
             raise ValueError(
                 "Selected payment bank has no UPI ID. "
                 "Set UPI ID in Bank Master (CA-Current / SB), then try again."
             )
 
+        pay_date_raw = (payload.get("payment_date") or payload.get("PaymentDate") or "").strip()
+        payment_date = None
+        if voucher_type == self.VOUCHER_PURCHASE:
+            if pay_date_raw:
+                try:
+                    payment_date = date.fromisoformat(pay_date_raw[:10])
+                except ValueError as exc:
+                    raise ValueError("Invalid Payment Date.") from exc
+            else:
+                payment_date = date.today()
+        amount_paid = None
+        if voucher_type == self.VOUCHER_PURCHASE:
+            amount_paid_raw = payload.get("amount_paid")
+            if amount_paid_raw in (None, ""):
+                amount_paid_raw = payload.get("AmountPaid")
+            if amount_paid_raw not in (None, ""):
+                try:
+                    amount_paid = _q(Decimal(str(amount_paid_raw)))
+                except Exception as exc:
+                    raise ValueError("Invalid Amount Paid.") from exc
+                if amount_paid < 0:
+                    raise ValueError("Amount Paid cannot be negative.")
+
         header = {
             "InvoiceNo": invoice_no
-            or self.next_invoice_no(inv_date, invoice_kind=invoice_kind),
+            if voucher_type == self.VOUCHER_PURCHASE
+            else (invoice_no or self.next_invoice_no(inv_date, invoice_kind=invoice_kind)),
             "InvoiceDate": inv_date,
             "CustomerID": customer_id,
             "CustomerName": customer_name[:200],
@@ -589,6 +649,7 @@ class GstInvoiceService:
             "ReverseCharge": str(payload.get("reverse_charge")).lower()
             in {"1", "true", "yes", "on"},
             "InvoiceKind": invoice_kind,
+            "VoucherType": voucher_type,
             "TaxType": tax_type,
             "ListPrice": list_price,
             "DiscountAmount": discount_total,
@@ -610,12 +671,15 @@ class GstInvoiceService:
             "PayAccountHolder": bank_data["account_holder_name"] or None,
             "PayAccountType": bank_data["account_type"] or None,
             "PayUpiId": bank_data["upi_id"] or None,
+            "PaymentDate": payment_date,
+            "AmountPaid": amount_paid,
             "CreatedBy": (payload.get("created_by") or None),
             "CreatedAt": datetime.utcnow(),
         }
 
         preview = {
             "invoice_kind": invoice_kind,
+            "voucher_type": voucher_type,
             "tax_type": tax_type,
             "list_price": float(list_price),
             "discount_amount": float(discount_total),
@@ -637,6 +701,8 @@ class GstInvoiceService:
             "pay_account_holder": bank_data["account_holder_name"],
             "pay_account_type": bank_data["account_type"],
             "pay_upi_id": bank_data["upi_id"],
+            "payment_date": payment_date.isoformat() if payment_date else "",
+            "amount_paid": float(amount_paid) if amount_paid is not None else None,
         }
         return header, lines_out, preview
 

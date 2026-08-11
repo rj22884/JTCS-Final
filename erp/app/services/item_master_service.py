@@ -49,6 +49,7 @@ class ItemMasterService:
         opening_rate = getattr(row, "OpeningRate", None)
         opening_balance = getattr(row, "OpeningBalance", None)
         opening_date = getattr(row, "OpeningBalanceDate", None)
+        chart_group_id = getattr(row, "ChartGroupID", None)
         return {
             "item_id": row.ItemID,
             "item_code": row.ItemCode or "",
@@ -64,6 +65,7 @@ class ItemMasterService:
             "opening_rate": str(opening_rate if opening_rate is not None else "0.00"),
             "opening_balance": str(opening_balance if opening_balance is not None else "0.00"),
             "opening_balance_date": opening_date.isoformat() if opening_date else "",
+            "chart_group_id": int(chart_group_id) if chart_group_id else None,
             "order_no": int(row.OrderNo or 100),
             "is_active": bool(row.IsActive),
             "created_at": row.CreatedAt.isoformat() if row.CreatedAt else "",
@@ -141,6 +143,20 @@ class ItemMasterService:
         except (TypeError, ValueError):
             order_no = 100
 
+        chart_raw = (
+            payload.get("chart_group_id")
+            if payload.get("chart_group_id") is not None
+            else payload.get("ChartGroupID")
+        )
+        chart_group_id = None
+        if chart_raw not in (None, ""):
+            try:
+                chart_group_id = int(chart_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Select a valid Chart of Account group.") from exc
+            if chart_group_id <= 0:
+                chart_group_id = None
+
         if "is_active" in payload or "IsActive" in payload:
             active_raw = payload.get("is_active")
             if active_raw is None:
@@ -157,6 +173,18 @@ class ItemMasterService:
             raise ValueError("Item Name is required.")
         if not hsn:
             raise ValueError("HSN / SAC is required.")
+        if not chart_group_id:
+            raise ValueError("Select Chart of Account group.")
+        # Validate against active Chart of Group Master options.
+        from app.services.chart_group_service import ChartGroupService
+
+        active_ids = {
+            int(g["group_id"])
+            for g in ChartGroupService().list_active_for_dropdown()
+            if g.get("group_id") is not None
+        }
+        if chart_group_id not in active_ids:
+            raise ValueError("Selected Chart of Account group is invalid or inactive.")
         if gst < 0 or gst > 100:
             raise ValueError("GST Rate must be between 0 and 100.")
         if opening_qty < 0:
@@ -178,6 +206,7 @@ class ItemMasterService:
             "OpeningRate": _q2(opening_rate),
             "OpeningBalance": opening_balance,
             "OpeningBalanceDate": opening_date,
+            "ChartGroupID": chart_group_id,
             "OrderNo": order_no,
             "IsActive": is_active,
         }

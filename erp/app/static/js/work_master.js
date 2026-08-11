@@ -358,7 +358,7 @@
     }
     const underGroupId = (els.underGroup?.value || "").trim();
     if (!underGroupId) {
-      alert("Under Group is required.");
+      alert("Chart of Account Group is required.");
       els.underGroup?.focus();
       return;
     }

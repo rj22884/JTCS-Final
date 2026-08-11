@@ -273,6 +273,22 @@ class BankMasterService:
             rows.append(data)
         return rows
 
+    def list_accounts_for_purchase_payment(self) -> list[dict]:
+        """Active bank + cash accounts for purchase payment (UPI optional)."""
+        self.repo.ensure_schema()
+        rows = []
+        for row in self.repo.list_all():
+            if not row.ActiveStatus:
+                continue
+            data = self._serialize(row)
+            data["label"] = (
+                f"{data['bank_name']} · {data['account_number']}"
+                + (f" [{data['account_type']}]" if data["account_type"] else "")
+            )
+            rows.append(data)
+        rows.sort(key=lambda r: (0 if r.get("is_cash") else 1, (r.get("label") or "").lower()))
+        return rows
+
     def list_account_types_for_form(self) -> list[dict]:
         """Active account types from AccountTypeMaster for Bank Master dropdown."""
         self.account_types.repo.ensure_schema()

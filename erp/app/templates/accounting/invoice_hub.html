@@ -1,0 +1,88 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260811invhub3">
+{% endblock %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('accounting_invoice.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="inv-page inv-page-full">
+  <div class="inv-card inv-hub-card">
+    <div class="inv-card-head">
+      <img src="{{ url_for('static', filename='img/jtcs_invoice_logo.png') }}" alt="JTCS Logo">
+      <div class="flex-grow-1">
+        <div class="inv-company-name">{{ company.name }}</div>
+        <div class="inv-company-meta">Invoices — choose voucher type</div>
+      </div>
+    </div>
+
+    <div class="inv-hub-grid">
+      <a class="inv-hub-tile" href="{{ url_for('accounting_invoice.invoice_purchase') }}">
+        <i class="bi bi-cart-plus"></i>
+        <strong>Purchase</strong>
+        <span>Purchase invoices (GST / Non GST)</span>
+      </a>
+      <a class="inv-hub-tile inv-hub-tile-primary" href="{{ url_for('accounting_invoice.invoice_sale') }}">
+        <i class="bi bi-receipt-cutoff"></i>
+        <strong>Sale / Service</strong>
+        <span>Sales &amp; service invoices</span>
+      </a>
+      <a class="inv-hub-tile" href="{{ url_for('accounting_invoice.invoice_other_voucher') }}">
+        <i class="bi bi-arrow-left-right"></i>
+        <strong>Other Voucher</strong>
+        <span>Money In / Money Out (Bank &amp; Cash)</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="inv-card inv-grid-card">
+    <div class="d-flex flex-wrap align-items-end gap-2 inv-saved-head">
+      <h6 class="mb-0 me-auto">All Voucher Entries</h6>
+      <div>
+        <input type="search" class="form-control form-control-sm inv-fw-lg" id="invHubSearch"
+               placeholder="Search voucher / party...">
+      </div>
+      <button type="button" class="btn btn-inv-outline btn-sm" id="invHubRefresh">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted" id="invHubCount">0 entries</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover table-striped align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Voucher No</th>
+            <th>Date</th>
+            <th>Party / Purpose</th>
+            <th class="text-end">Amount</th>
+            <th class="text-end">Open</th>
+          </tr>
+        </thead>
+        <tbody id="invHubBody"></tbody>
+      </table>
+    </div>
+    <div id="invHubEmpty" class="small text-muted py-3">No saved Sale / Purchase / Other Voucher entries yet.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.INVOICE_HUB_API = {
+    list: {{ url_for('accounting_invoice.api_hub_entries') | tojson }},
+    saleUrl: {{ url_for('accounting_invoice.invoice_sale') | tojson }},
+    purchaseUrl: {{ url_for('accounting_invoice.invoice_purchase') | tojson }},
+    otherUrl: {{ url_for('others_bank_cash.index') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/invoice_hub.js') }}?v=20260811invhub3"></script>
+{% endblock %}

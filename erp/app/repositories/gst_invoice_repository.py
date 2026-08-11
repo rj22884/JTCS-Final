@@ -95,6 +95,9 @@ class GstInvoiceRepository:
             ("PayAccountType", "NVARCHAR(20) NULL"),
             ("PayUpiId", "NVARCHAR(100) NULL"),
             ("InvoiceKind", "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_InvoiceKind DEFAULT (N'NON_GST')"),
+            ("VoucherType", "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_VoucherType DEFAULT (N'SALE')"),
+            ("PaymentDate", "DATE NULL"),
+            ("AmountPaid", "DECIMAL(18,2) NULL"),
         ):
             self.session.execute(
                 text(
@@ -127,9 +130,14 @@ class GstInvoiceRepository:
         search: str | None = None,
         date_from: date | None = None,
         date_to: date | None = None,
+        voucher_type: str | None = None,
     ) -> list[GstInvoice]:
         self.ensure_schema()
         stmt = select(GstInvoice)
+        if voucher_type:
+            vt = voucher_type.strip().upper()
+            if vt in {"SALE", "PURCHASE"}:
+                stmt = stmt.where(GstInvoice.VoucherType == vt)
         if search:
             term = f"%{search.strip()}%"
             stmt = stmt.where(

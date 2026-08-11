@@ -23,6 +23,7 @@
     hsnSuggest: document.getElementById("itmHsnSuggest"),
     hsnType: document.getElementById("itmHsnType"),
     unit: document.getElementById("itmUnit"),
+    chartGroup: document.getElementById("itmChartGroup"),
     rate: document.getElementById("itmRate"),
     gstApplicable: document.getElementById("itmGstApplicable"),
     gst: document.getElementById("itmGst"),
@@ -216,6 +217,7 @@
     els.form?.reset();
     if (els.id) els.id.value = "";
     if (els.unit) els.unit.value = "NOS";
+    if (els.chartGroup) els.chartGroup.value = "";
     if (els.gst) els.gst.value = "18";
     if (els.rate) els.rate.value = "0";
     if (els.orderNo) els.orderNo.value = "100";
@@ -248,6 +250,12 @@
     if (els.hsn) els.hsn.value = row.hsn_sac || "";
     if (els.hsnType) els.hsnType.value = row.hsn_sac_type || "SAC";
     if (els.unit) els.unit.value = row.unit || "NOS";
+    if (els.chartGroup) {
+      els.chartGroup.value =
+        row.chart_group_id != null && row.chart_group_id !== ""
+          ? String(row.chart_group_id)
+          : "";
+    }
     if (els.rate) els.rate.value = row.default_rate || "0";
     if (els.gstApplicable) els.gstApplicable.checked = row.gst_applicable !== false;
     if (els.gst) els.gst.value = row.gst_rate_percent || "0";
@@ -361,6 +369,12 @@
       els.hsn?.focus();
       return;
     }
+    const chartGroupId = (els.chartGroup?.value || "").trim();
+    if (!chartGroupId) {
+      showStatus("Select Chart of Account group.", "danger");
+      els.chartGroup?.focus();
+      return;
+    }
     syncOpeningBalance();
     const payload = {
       item_code: els.code?.value || "",
@@ -368,6 +382,7 @@
       hsn_sac: hsn,
       hsn_sac_type: els.hsnType?.value || "SAC",
       unit: els.unit?.value || "NOS",
+      chart_group_id: chartGroupId,
       default_rate: els.rate?.value || "0",
       gst_applicable: els.gstApplicable?.checked ? "1" : "0",
       gst_rate_percent: els.gstApplicable?.checked ? els.gst?.value || "18" : "0",

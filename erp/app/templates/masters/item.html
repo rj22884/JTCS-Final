@@ -107,6 +107,20 @@
               <label class="form-label" for="itmUnit">Unit</label>
               <input type="text" class="form-control" id="itmUnit" maxlength="30" value="NOS">
             </div>
+            <div class="col-md-8">
+              <label class="form-label" for="itmChartGroup">Chart of Account Group *</label>
+              <select class="form-select" id="itmChartGroup" required>
+                <option value="">— Select Group —</option>
+                {% for g in chart_groups|default([]) %}
+                <option value="{{ g.group_id }}">{{ g.label or g.group_name }}</option>
+                {% endfor %}
+              </select>
+              <div class="form-text">
+                From
+                <a href="{{ url_for('masters_chart_group.index') }}">Chart of Group Master</a>
+                (same list as Customer Master).
+              </div>
+            </div>
             <div class="col-md-4">
               <label class="form-label" for="itmRate">Default Rate</label>
               <input type="number" class="form-control" id="itmRate" step="0.01" min="0" value="0">
@@ -179,5 +193,5 @@
   window.ITEM_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.ITEM_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260723gstob"></script>
+<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260811chart1"></script>
 {% endblock %}

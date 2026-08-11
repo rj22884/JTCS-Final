@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from app.decorators import login_required, require_delete_reauth
+from app.services.chart_group_service import ChartGroupService
 from app.services.hsn_sac_search_service import search_hsn_sac
 from app.services.item_master_service import ItemMasterService
 from app.services.menu_service import MenuService
@@ -65,11 +66,19 @@ def index():
 
         db.session.rollback()
     rows = ItemMasterService().list_records()
+    try:
+        chart_groups = ChartGroupService().list_active_for_dropdown()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+        chart_groups = []
     return render_template(
         "masters/item.html",
         page_title="Item Master",
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
+        chart_groups=chart_groups,
     )
 
 

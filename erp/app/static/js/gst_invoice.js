@@ -8,6 +8,9 @@
   const taxPeriods = api.taxPeriods || [];
   const serviceQuarters = api.serviceQuarters || [];
   const quarterMonths = api.quarterMonths || {};
+  const voucherType = (api.voucherType || "SALE").toString().toUpperCase() === "PURCHASE"
+    ? "PURCHASE"
+    : "SALE";
   const allMonths = [
     "April", "May", "June", "July", "August", "September",
     "October", "November", "December", "January", "February", "March",
@@ -37,6 +40,8 @@
     rcm: document.getElementById("invRcm"),
     notes: document.getElementById("invNotes"),
     payBank: document.getElementById("invPayBank"),
+    payDate: document.getElementById("invPayDate"),
+    amountPaid: document.getElementById("invAmountPaid"),
     kindGst: document.getElementById("invKindGst"),
     kindNonGst: document.getElementById("invKindNonGst"),
     taxHint: document.getElementById("invTaxHint"),
@@ -125,6 +130,11 @@
 
   async function refreshInvoiceNo() {
     if (editingId) return;
+    // Purchase: invoice number is entered manually (supplier bill no).
+    if (voucherType === "PURCHASE") {
+      if (els.no && !els.no.value) els.no.value = "";
+      return;
+    }
     try {
       const url = new URL(api.nextNo, window.location.origin);
       if (els.date?.value) url.searchParams.set("date", els.date.value);
@@ -374,6 +384,7 @@
       invoice_no: els.no?.value || "",
       invoice_date: els.date?.value || "",
       invoice_kind: selectedInvoiceKind(),
+      voucher_type: voucherType,
       customer_id: els.customerId?.value || "",
       customer_name: els.customerName?.value || "",
       contact_person: els.contactPerson?.value || "",
@@ -386,6 +397,10 @@
       reverse_charge: els.rcm?.value || "0",
       notes: els.notes?.value || "",
       payment_bank_account_id: els.payBank?.value || "",
+      payment_date: els.payDate?.value || "",
+      amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
+        ? ""
+        : els.amountPaid.value,
       lines: lines,
     };
   }
@@ -484,6 +499,15 @@
         els.payBank.value = "";
       }
     }
+    if (els.payDate) {
+      els.payDate.value = (record.payment_date || api.today || "").slice(0, 10);
+    }
+    if (els.amountPaid) {
+      els.amountPaid.value =
+        record.amount_paid === null || record.amount_paid === undefined || record.amount_paid === ""
+          ? ""
+          : String(record.amount_paid);
+    }
 
     clearLines();
     const lines = record.lines || [];
@@ -534,7 +558,16 @@
     if (els.rcm) els.rcm.value = "0";
     if (els.notes) els.notes.value = "";
     if (els.payBank) els.payBank.value = "";
-    if (els.date) els.date.value = api.today || new Date().toISOString().slice(0, 10);
+    if (els.payDate) els.payDate.value = api.today || new Date().toISOString().slice(0, 10);
+    if (els.amountPaid) els.amountPaid.value = "";
+    if (els.date) {
+      // Purchase: user enters supplier invoice date; Sale defaults to today.
+      els.date.value =
+        voucherType === "PURCHASE"
+          ? ""
+          : api.today || new Date().toISOString().slice(0, 10);
+    }
+    if (els.no && voucherType === "PURCHASE") els.no.value = "";
     if (els.words) els.words.textContent = "";
     clearLines();
     addLine();
@@ -568,8 +601,30 @@
       showStatus("Select GST Invoice or Non GST Invoice.", "danger");
       return;
     }
+    if (voucherType === "PURCHASE") {
+      if (!(payload.invoice_no || "").trim()) {
+        showStatus("Enter Supplier Invoice No.", "danger");
+        els.no?.focus();
+        return;
+      }
+      if (!(payload.invoice_date || "").trim()) {
+        showStatus("Enter Invoice Date.", "danger");
+        els.date?.focus();
+        return;
+      }
+    }
+    if (!payload.customer_id && !(editingId && payload.customer_name)) {
+      showStatus(
+        "Select a " +
+          (voucherType === "PURCHASE" ? "supplier" : "customer") +
+          " from the list to bill that party only.",
+        "danger"
+      );
+      els.customerSearch?.focus();
+      return;
+    }
     if (!payload.customer_name) {
-      showStatus("Customer Name is required.", "danger");
+      showStatus((voucherType === "PURCHASE" ? "Supplier" : "Customer") + " Name is required.", "danger");
       return;
     }
     if (!payload.lines.length) {
@@ -739,6 +794,7 @@
     const url = new URL(api.list, window.location.origin);
     const q = (els.gridSearch?.value || "").trim();
     if (q) url.searchParams.set("search", q);
+    if (voucherType) url.searchParams.set("voucher_type", voucherType);
     const res = await fetch(url.toString(), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Grid load failed");
@@ -777,7 +833,23 @@
     schedulePreview();
   }
 
+  function clearSelectedCustomer() {
+    if (els.customerId) els.customerId.value = "";
+    if (els.customerName) els.customerName.value = "";
+    if (els.contactPerson) els.contactPerson.value = "";
+    if (els.gstin) els.gstin.value = "";
+    if (els.address) els.address.value = "";
+    if (els.mobile) els.mobile.value = "";
+    if (els.email) els.email.value = "";
+    if (els.place) els.place.value = "";
+    if (els.placeCode) els.placeCode.value = "";
+  }
+
   els.customerSearch?.addEventListener("input", function () {
+    // Typing a new query invalidates previous selection until a list item is chosen.
+    if (els.customerId?.value) {
+      clearSelectedCustomer();
+    }
     clearTimeout(searchTimer);
     const q = (els.customerSearch.value || "").trim();
     searchTimer = setTimeout(async function () {
@@ -936,6 +1008,14 @@
   (async function init() {
     await startNew();
     await loadGrid();
+    const params = new URLSearchParams(window.location.search || "");
+    const editId = (params.get("edit") || "").trim();
+    const deepCustomerId = (params.get("customer_id") || "").trim();
+    if (editId) {
+      await loadForEdit(editId);
+    } else if (deepCustomerId) {
+      await pickCustomer(deepCustomerId);
+    }
   })().catch(function (err) {
     showStatus(err.message || String(err), "danger");
     addLine();

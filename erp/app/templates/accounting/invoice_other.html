@@ -1,0 +1,83 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260811invhub3">
+{% endblock %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('accounting_invoice.invoice_index') }}" class="jtcs-ribbon-btn" title="Back to Invoices">
+    <i class="bi bi-arrow-left"></i>
+    <span>Invoices</span>
+  </a>
+  <a href="{{ url_for('others_bank_cash.index') }}" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" title="New Money In / Out">
+    <i class="bi bi-plus-lg"></i>
+    <span>New Money In / Out</span>
+  </a>
+  <a href="{{ url_for('accounting_invoice.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="inv-page inv-page-full">
+  <div class="inv-card">
+    <div class="inv-card-head">
+      <img src="{{ url_for('static', filename='img/jtcs_invoice_logo.png') }}" alt="JTCS Logo">
+      <div class="flex-grow-1">
+        <div class="inv-company-name">{{ company.name }}</div>
+        <div class="inv-company-meta">Other Voucher — Money In / Money Out</div>
+      </div>
+    </div>
+    <p class="small text-muted mb-3">
+      Use the same Money In / Out program for new entries. Saved Other Voucher records are listed below.
+    </p>
+    <a class="btn btn-inv-orange btn-sm" href="{{ url_for('others_bank_cash.index') }}">
+      <i class="bi bi-arrow-left-right"></i> Open Money In / Out Form
+    </a>
+  </div>
+
+  <div class="inv-card inv-grid-card">
+    <div class="d-flex flex-wrap align-items-end gap-2 inv-saved-head">
+      <h6 class="mb-0 me-auto">Saved Other Vouchers</h6>
+      <div>
+        <input type="search" class="form-control form-control-sm inv-fw-lg" id="invOtherSearch"
+               placeholder="Search voucher / purpose...">
+      </div>
+      <button type="button" class="btn btn-inv-outline btn-sm" id="invOtherRefresh">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+      <span class="small text-muted" id="invOtherCount">0 entries</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover table-striped align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Voucher No</th>
+            <th>Date</th>
+            <th>Purpose</th>
+            <th>Credit</th>
+            <th>Debit</th>
+            <th class="text-end">Amount</th>
+            <th class="text-end">Open</th>
+          </tr>
+        </thead>
+        <tbody id="invOtherBody"></tbody>
+      </table>
+    </div>
+    <div id="invOtherEmpty" class="small text-muted py-3">No Other Voucher entries yet.</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.INVOICE_OTHER_API = {
+    list: {{ url_for('accounting_invoice.api_other_voucher_entries') | tojson }},
+    openUrl: {{ url_for('others_bank_cash.index') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/invoice_other_grid.js') }}?v=20260811invhub3"></script>
+{% endblock %}

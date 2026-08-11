@@ -58,25 +58,40 @@ def _ensure_menus() -> None:
                 WHERE ParentMenuID = @AccountingID
                   AND MenuName IN (N'Journal Entry', N'Ledger View', N'Trial Balance');
 
+                -- Rename legacy "Generate Invoice" → "Invoices" (hub page).
                 IF EXISTS (
                     SELECT 1 FROM dbo.MenuMaster
                     WHERE ParentMenuID = @AccountingID AND MenuName = N'Generate Invoice'
                 )
                     UPDATE dbo.MenuMaster
+                    SET MenuName = N'Invoices',
+                        MenuURL = N'/accounting/invoice',
+                        MenuIcon = N'bi-receipt',
+                        DisplayOrder = 1,
+                        Description = N'Purchase, Sale/Service and Other Vouchers',
+                        IsActive = 1
+                    WHERE ParentMenuID = @AccountingID AND MenuName = N'Generate Invoice';
+
+                IF EXISTS (
+                    SELECT 1 FROM dbo.MenuMaster
+                    WHERE ParentMenuID = @AccountingID AND MenuName = N'Invoices'
+                )
+                    UPDATE dbo.MenuMaster
                     SET MenuURL = N'/accounting/invoice',
                         MenuIcon = N'bi-receipt',
                         DisplayOrder = 1,
-                        Description = N'Generate GST tax invoice',
+                        Description = N'Purchase, Sale/Service and Other Vouchers',
                         IsActive = 1
-                    WHERE ParentMenuID = @AccountingID AND MenuName = N'Generate Invoice';
+                    WHERE ParentMenuID = @AccountingID AND MenuName = N'Invoices';
                 ELSE
                     INSERT INTO dbo.MenuMaster (
                         ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
                         Description, IsActive, RoleName
                     )
                     VALUES (
-                        @AccountingID, N'Generate Invoice', N'bi-receipt',
-                        N'/accounting/invoice', 1, N'Generate GST tax invoice', 1, NULL
+                        @AccountingID, N'Invoices', N'bi-receipt',
+                        N'/accounting/invoice', 1,
+                        N'Purchase, Sale/Service and Other Vouchers', 1, NULL
                     );
 
                 IF EXISTS (
@@ -115,21 +130,18 @@ def _parse_date(raw: str | None) -> date | None:
         return None
 
 
-@bp.route("/invoice", methods=["GET"], strict_slashes=False)
-@login_required
-def invoice_index():
-    try:
-        _ensure_menus()
-    except Exception:
-        from app.extensions import db
-
-        db.session.rollback()
+def _render_invoice_form(*, voucher_type: str, page_title: str):
     svc = GstInvoiceService()
     items = ItemMasterService().list_active_for_dropdown()
-    payment_banks = BankMasterService().list_payment_accounts()
+    bank_svc = BankMasterService()
+    vt = GstInvoiceService.normalize_voucher_type(voucher_type)
+    if vt == GstInvoiceService.VOUCHER_PURCHASE:
+        payment_banks = bank_svc.list_accounts_for_purchase_payment()
+    else:
+        payment_banks = bank_svc.list_payment_accounts()
     return render_template(
         "accounting/invoice.html",
-        page_title="Generate Invoice",
+        page_title=page_title,
         breadcrumb=MenuService().get_breadcrumb("/accounting/invoice", session.get("role")),
         next_invoice_no=svc.next_invoice_no(invoice_kind=GstInvoiceService.INVOICE_KIND_NON_GST),
         company=svc.company_profile(),
@@ -139,7 +151,150 @@ def invoice_index():
         tax_periods=tax_period_options(),
         service_quarters=_SERVICE_QUARTERS,
         quarter_months=_QUARTER_MONTHS,
+        voucher_type=vt,
     )
+
+
+@bp.route("/invoice", methods=["GET"], strict_slashes=False)
+@login_required
+def invoice_index():
+    try:
+        _ensure_menus()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+    # Preserve followup / deep-link billing: open Sale form with query params.
+    if (request.args.get("customer_id") or request.args.get("customer_name") or "").strip():
+        target = url_for("accounting_invoice.invoice_sale")
+        qs = request.query_string.decode("utf-8", errors="ignore")
+        return redirect(f"{target}?{qs}" if qs else target)
+    svc = GstInvoiceService()
+    return render_template(
+        "accounting/invoice_hub.html",
+        page_title="Invoices",
+        breadcrumb=MenuService().get_breadcrumb("/accounting/invoice", session.get("role")),
+        company=svc.company_profile(),
+    )
+
+
+@bp.route("/invoice/sale", methods=["GET"], strict_slashes=False)
+@login_required
+def invoice_sale():
+    try:
+        _ensure_menus()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+    return _render_invoice_form(voucher_type="SALE", page_title="Sale / Service Invoice")
+
+
+@bp.route("/invoice/purchase", methods=["GET"], strict_slashes=False)
+@login_required
+def invoice_purchase():
+    try:
+        _ensure_menus()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+    return _render_invoice_form(voucher_type="PURCHASE", page_title="Purchase Invoice")
+
+
+@bp.route("/invoice/other-voucher", methods=["GET"], strict_slashes=False)
+@login_required
+def invoice_other_voucher():
+    """Other Voucher landing (grid) + open existing Money In / Out form."""
+    try:
+        _ensure_menus()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+    svc = GstInvoiceService()
+    return render_template(
+        "accounting/invoice_other.html",
+        page_title="Other Voucher",
+        breadcrumb=MenuService().get_breadcrumb("/accounting/invoice", session.get("role")),
+        company=svc.company_profile(),
+    )
+
+
+@bp.route("/api/invoice-hub", methods=["GET"], strict_slashes=False)
+@login_required
+def api_hub_entries():
+    """Combined Sale + Purchase + Other Voucher rows for the Invoices hub grid."""
+    search = (request.args.get("search") or "").strip().lower() or None
+    try:
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        rows: list[dict] = []
+        for inv in GstInvoiceService().list_records():
+            kind = (inv.get("voucher_type") or "SALE").upper()
+            rows.append(
+                {
+                    "kind": kind if kind in {"SALE", "PURCHASE"} else "SALE",
+                    "ref_id": inv.get("invoice_id"),
+                    "voucher_no": inv.get("invoice_no") or "",
+                    "work_date": inv.get("invoice_date") or "",
+                    "party": inv.get("customer_name") or "",
+                    "amount": inv.get("invoice_value") or 0,
+                }
+            )
+        for entry in OthersBankCashService().list_entries():
+            rows.append(
+                {
+                    "kind": "OTHER",
+                    "ref_id": entry.get("entry_id"),
+                    "voucher_no": entry.get("voucher_no") or "",
+                    "work_date": entry.get("work_date") or "",
+                    "party": entry.get("purpose")
+                    or entry.get("remarks")
+                    or (
+                        (entry.get("credit_account") or "")
+                        + " → "
+                        + (entry.get("debit_account") or "")
+                    ).strip(" →"),
+                    "amount": entry.get("amount") or 0,
+                }
+            )
+        if search:
+            rows = [
+                r
+                for r in rows
+                if search in (r.get("voucher_no") or "").lower()
+                or search in (r.get("party") or "").lower()
+                or search in (r.get("kind") or "").lower()
+            ]
+        rows.sort(key=lambda r: (r.get("work_date") or "", r.get("voucher_no") or ""), reverse=True)
+        return jsonify({"ok": True, "rows": rows, "count": len(rows)})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/other-vouchers", methods=["GET"], strict_slashes=False)
+@login_required
+def api_other_voucher_entries():
+    """Other Voucher grid only (Money In / Out entries) — read via existing service."""
+    search = (request.args.get("search") or "").strip().lower() or None
+    try:
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        rows = OthersBankCashService().list_entries()
+        if search:
+            rows = [
+                r
+                for r in rows
+                if search in (r.get("voucher_no") or "").lower()
+                or search in (r.get("purpose") or "").lower()
+                or search in (r.get("remarks") or "").lower()
+                or search in (r.get("credit_account") or "").lower()
+                or search in (r.get("debit_account") or "").lower()
+            ]
+        return jsonify({"ok": True, "rows": rows, "count": len(rows)})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @bp.route("/reports", methods=["GET"], strict_slashes=False)
@@ -197,9 +352,13 @@ def api_list_invoices():
     search = (request.args.get("search") or "").strip() or None
     date_from = _parse_date(request.args.get("date_from"))
     date_to = _parse_date(request.args.get("date_to"))
+    voucher_type = (request.args.get("voucher_type") or "").strip() or None
     try:
         rows = GstInvoiceService().list_records(
-            search=search, date_from=date_from, date_to=date_to
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+            voucher_type=voucher_type,
         )
         return jsonify({"ok": True, "rows": rows, "count": len(rows)})
     except Exception as exc:

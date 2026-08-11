@@ -73,7 +73,7 @@
           <th>Expense</th>
           <th>Misc.</th>
           <th>Ledger Kind</th>
-          <th>Under Group</th>
+          <th>Chart of Account Group</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
         </tr>
@@ -121,7 +121,7 @@
             <div><span class="badge text-bg-light border" id="workMasterTypeViewBadge">Income</span></div>
           </div>
           <div class="mb-3">
-            <label class="form-label" for="workMasterUnderGroup">Under Group *</label>
+            <label class="form-label" for="workMasterUnderGroup">Chart of Account Group *</label>
             <select class="form-select" id="workMasterUnderGroup" name="ChartGroupID" required>
               <option value="">— Select group —</option>
               {% for g in chart_groups|default([]) %}
@@ -154,7 +154,7 @@
                   <label class="form-check-label" for="workMasterObCr">Cr</label>
                 </div>
               </div>
-              <div class="form-text">Default from Under Group.</div>
+              <div class="form-text">Default from Chart of Account Group.</div>
             </div>
           </div>
           <div class="mb-0">

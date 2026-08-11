@@ -52,6 +52,7 @@ class ItemMasterRepository:
             ("OpeningRate", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningRate DEFAULT (0)"),
             ("OpeningBalance", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningBalance DEFAULT (0)"),
             ("OpeningBalanceDate", "DATE NULL"),
+            ("ChartGroupID", "INT NULL"),
         ):
             self.session.execute(
                 text(
@@ -62,6 +63,27 @@ class ItemMasterRepository:
                 )
             )
             self.session.commit()
+        # Optional FK to Chart of Group Master (same pattern as WorkMaster / Bank).
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.ItemMaster', N'ChartGroupID') IS NOT NULL
+                   AND OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                        SELECT 1
+                        FROM sys.foreign_keys
+                        WHERE name = N'FK_ItemMaster_ChartGroup'
+                   )
+                BEGIN
+                    ALTER TABLE dbo.ItemMaster
+                    ADD CONSTRAINT FK_ItemMaster_ChartGroup
+                    FOREIGN KEY (ChartGroupID)
+                    REFERENCES dbo.ChartOfGroupMaster (GroupID);
+                END
+                """
+            )
+        )
+        self.session.commit()
         self._schema_ready = True
 
     def list_all(self, *, search: str | None = None, active_only: bool = False) -> list[ItemMaster]:

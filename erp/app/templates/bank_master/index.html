@@ -49,7 +49,7 @@
           <th>Bank Name</th>
           <th>Account No.</th>
           <th>Account Type</th>
-          <th>Under Group</th>
+          <th>Chart of Account Group</th>
           <th>UPI ID</th>
           <th>IFSC</th>
           <th>Branch</th>
@@ -92,7 +92,7 @@
               </select>
             </div>
             <div class="col-md-6">
-              <label class="form-label" for="bankMasterUnderGroup">Under Group *</label>
+              <label class="form-label" for="bankMasterUnderGroup">Chart of Account Group *</label>
               <select class="form-select" id="bankMasterUnderGroup" name="ChartGroupID" required>
                 <option value="">— Select group —</option>
                 {% for g in chart_groups %}
@@ -151,7 +151,7 @@
                   <label class="form-check-label" for="bankMasterObCr">Cr</label>
                 </div>
               </div>
-              <div class="form-text">Default from Under Group (Assets → Dr, Liabilities → Cr).</div>
+              <div class="form-text">Default from Chart of Account Group (Assets → Dr, Liabilities → Cr).</div>
             </div>
             <div class="col-md-4">
               <label class="form-label" for="bankMasterDisplayOrder">Account no shown in order by</label>

@@ -17,27 +17,126 @@
   margin: 0 auto;
 }
 
+.inv-page.inv-page-full {
+  max-width: none;
+  width: 100%;
+  margin: 0;
+}
+
+/* Collapse unused chrome so the bill sits higher on Sale/Purchase. */
+.jtcs-app-shell:has(.inv-page-full) .jtcs-page-head {
+  padding: 0.35rem 1rem 0;
+}
+
+.jtcs-app-shell:has(.inv-page-full) .jtcs-page-head-row {
+  margin-bottom: 0.15rem;
+}
+
+.jtcs-app-shell:has(.inv-page-full) .jtcs-page-title {
+  font-size: 1.1rem;
+}
+
+.jtcs-app-shell:has(.inv-page-full) .jtcs-content {
+  padding: 0.45rem 0.85rem 0.85rem;
+}
+
+.inv-page-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.inv-page-head-actions .jtcs-ribbon-btn {
+  min-height: 2.1rem;
+  padding: 0.2rem 0.55rem;
+}
+
+.inv-page-head-actions .jtcs-ribbon-btn i {
+  font-size: 1rem;
+}
+
+.inv-card-head-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.inv-workspace-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 0.55rem 0.75rem;
+  align-items: start;
+}
+
+.inv-workspace-main {
+  min-width: 0;
+}
+
+.inv-party-panel {
+  position: sticky;
+  top: 0.5rem;
+  background: linear-gradient(180deg, var(--inv-if-orange-soft), #fff);
+  border: 1px solid #ffd2b0;
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem 0.75rem;
+  box-shadow: 0 2px 10px rgba(255, 106, 0, 0.08);
+}
+
+.inv-party-panel .inv-section-title {
+  margin-top: 0;
+  width: 100%;
+}
+
+.inv-party-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.inv-party-fields .form-control,
+.inv-party-fields .form-select {
+  max-width: none;
+  width: 100%;
+}
+
+.inv-party-fields textarea {
+  resize: vertical;
+  min-height: 4.2rem;
+}
+
+.inv-party-row-2 {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr;
+  gap: 0.45rem;
+}
+
+#invCustomerName[readonly] {
+  background: #f3f6f9;
+  cursor: default;
+}
+
 .inv-card {
   background: #fff;
   border: 1px solid var(--inv-if-border);
   border-radius: 10px;
   box-shadow: 0 2px 10px rgba(11, 37, 69, 0.06);
-  padding: 0.85rem 1rem 1rem;
-  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.75rem 0.7rem;
+  margin-bottom: 0.55rem;
 }
 
 .inv-card-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem 1rem;
-  padding-bottom: 0.65rem;
-  margin-bottom: 0.75rem;
+  gap: 0.45rem 0.75rem;
+  padding-bottom: 0.4rem;
+  margin-bottom: 0.4rem;
   border-bottom: 2px solid var(--inv-if-orange);
 }
 
 .inv-card-head img {
-  height: 44px;
+  height: 36px;
   width: auto;
 }
 
@@ -64,8 +163,8 @@
   color: var(--inv-if-navy);
   background: var(--inv-if-orange-soft);
   border-left: 3px solid var(--inv-if-orange);
-  padding: 0.28rem 0.55rem;
-  margin: 0.35rem 0 0.55rem;
+  padding: 0.2rem 0.45rem;
+  margin: 0.15rem 0 0.3rem;
   border-radius: 0 4px 4px 0;
 }
 
@@ -102,8 +201,12 @@
 }
 
 .inv-page .row.g-compact {
-  --bs-gutter-x: 0.55rem;
-  --bs-gutter-y: 0.45rem;
+  --bs-gutter-x: 0.4rem;
+  --bs-gutter-y: 0.25rem;
+}
+
+.inv-page .row.g-compact.mb-2 {
+  margin-bottom: 0.35rem !important;
 }
 
 /* Fixed short field widths (Tally-style) */
@@ -118,12 +221,88 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.85rem 1.25rem;
+  gap: 0.45rem 0.85rem;
   background: linear-gradient(90deg, var(--inv-if-orange-soft), #fff);
   border: 1px solid #ffd2b0;
   border-radius: 6px;
-  padding: 0.45rem 0.7rem;
-  margin-bottom: 0.65rem;
+  padding: 0.3rem 0.55rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Hub landing — Purchase / Sale / Other Voucher */
+.inv-hub-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  padding: 0.5rem 0 0.25rem;
+}
+
+.inv-hub-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 1.15rem 1.2rem;
+  border: 1px solid var(--inv-if-border);
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.inv-hub-tile:hover {
+  border-color: var(--inv-if-orange);
+  box-shadow: 0 4px 14px rgba(255, 106, 0, 0.12);
+  transform: translateY(-1px);
+  color: inherit;
+}
+
+.inv-hub-tile-primary {
+  border-color: #ffd2b0;
+  background: linear-gradient(180deg, var(--inv-if-orange-soft), #fff);
+}
+
+.inv-hub-tile i {
+  font-size: 1.55rem;
+  color: var(--inv-if-orange);
+}
+
+.inv-hub-tile strong {
+  font-size: 1.05rem;
+  color: var(--inv-if-navy);
+}
+
+.inv-hub-tile span {
+  font-size: 0.82rem;
+  color: var(--inv-if-muted);
+}
+
+@media (max-width: 768px) {
+  .inv-hub-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Sale/Purchase form — Invoice Type pinned top-right */
+.inv-form-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.2rem;
+}
+
+.inv-form-top .inv-kind-bar {
+  margin-bottom: 0;
+  margin-left: auto;
+  max-width: 100%;
+}
+
+.inv-form-top .inv-kind-bar .form-text {
+  width: 100%;
+  margin-left: 0 !important;
 }
 
 .inv-kind-bar .form-check-label {
@@ -209,7 +388,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 0.15rem 0 0.4rem;
+  margin: 0.05rem 0 0.25rem;
 }
 
 .inv-lines-toolbar h6 {
@@ -366,8 +545,20 @@
 #invPreviewModal .modal-dialog { max-width: 900px; }
 #invPreviewBody { min-height: 200px; background: #f8f9fa; }
 
+@media (max-width: 1024px) {
+  .inv-workspace-body {
+    grid-template-columns: 1fr;
+  }
+
+  .inv-party-panel {
+    position: static;
+    order: -1;
+  }
+}
+
 @media (max-width: 768px) {
   .inv-fw-xxs, .inv-fw-xs, .inv-fw-sm, .inv-fw-md, .inv-fw-lg, .inv-fw-xl { max-width: 100%; }
   .inv-html-top, .inv-html-cust, .inv-html-pay { grid-template-columns: 1fr; display: block; }
   .inv-html-right { text-align: left; margin-top: 8px; }
+  .inv-party-row-2 { grid-template-columns: 1fr; }
 }
