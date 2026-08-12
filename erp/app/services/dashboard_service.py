@@ -416,6 +416,104 @@ class DashboardService:
             return alnum[-4:]
         return alnum or ""
 
+    @staticmethod
+    def _is_cash_account(bank_name: str | None, account_number: str | None) -> bool:
+        return (bank_name or "").strip().lower() == "cash" or (
+            account_number or ""
+        ).strip().lower() == "cash"
+
+    @staticmethod
+    def _mask_account_display(
+        account_number: str | None, bank_name: str | None = None
+    ) -> str:
+        """Cash → 'Cash'; else skip first 6 chars and show XXXX + last 4 (e.g. XXXX0396)."""
+        if DashboardService._is_cash_account(bank_name, account_number):
+            return "Cash"
+        raw = (account_number or "").strip()
+        if not raw:
+            return "—"
+        # Skip first 6 characters, then keep last 4 of the remainder.
+        remainder = raw[6:] if len(raw) > 6 else raw
+        if not remainder:
+            return "XXXX"
+        last4 = remainder[-4:] if len(remainder) >= 4 else remainder
+        return "XXXX" + last4
+
+    def _accounts_for_daily_txns(
+        self, txn_ids: list[int]
+    ) -> dict[int, list[tuple[str, str]]]:
+        """Map TransactionID → [(bank_name, account_number), ...] in payment order."""
+        if not txn_ids:
+            return {}
+        from sqlalchemy import bindparam
+
+        stmt = text(
+            """
+            SELECT
+                p.TransactionID AS transaction_id,
+                a.BankName AS bank_name,
+                a.AccountNumber AS account_number
+            FROM JTCSDailyTransactionPayment p
+            INNER JOIN JtcsBankAccountMaster a
+                ON a.JtcsBankAccountID = p.BankAccountID
+            WHERE p.TransactionID IN :ids
+            ORDER BY p.TransactionID, p.PaymentSequence, p.PaymentLineID
+            """
+        ).bindparams(bindparam("ids", expanding=True))
+        rows = db.session.execute(stmt, {"ids": txn_ids}).mappings().all()
+        by_txn: dict[int, list[tuple[str, str]]] = {}
+        for row in rows:
+            tid = int(row["transaction_id"])
+            by_txn.setdefault(tid, []).append(
+                (
+                    (row["bank_name"] or "").strip(),
+                    (row["account_number"] or "").strip(),
+                )
+            )
+
+        missing = [tid for tid in txn_ids if tid not in by_txn]
+        if missing:
+            fallback = text(
+                """
+                SELECT
+                    d.TransactionID AS transaction_id,
+                    bt.BankName AS bank_name,
+                    COALESCE(NULLIF(a.AccountNumber, N''), bt.MaskedAccountNumber, N'') AS account_number
+                FROM JTCSDailyTransaction d
+                INNER JOIN JtcsBankTransaction bt
+                    ON bt.JtcsBankTransactionID = d.BankTransactionID
+                LEFT JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = bt.JtcsBankAccountID
+                WHERE d.TransactionID IN :ids
+                  AND d.BankTransactionID IS NOT NULL
+                """
+            ).bindparams(bindparam("ids", expanding=True))
+            for row in db.session.execute(fallback, {"ids": missing}).mappings().all():
+                tid = int(row["transaction_id"])
+                by_txn.setdefault(tid, []).append(
+                    (
+                        (row["bank_name"] or "").strip(),
+                        (row["account_number"] or "").strip(),
+                    )
+                )
+        return by_txn
+
+    def _format_bank_accounts_label(
+        self, accounts: list[tuple[str, str]] | None
+    ) -> str:
+        if not accounts:
+            return "—"
+        labels: list[str] = []
+        seen: set[str] = set()
+        for bank_name, account_number in accounts:
+            label = self._mask_account_display(account_number, bank_name)
+            key = label.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            labels.append(label)
+        return " · ".join(labels) if labels else "—"
+
     def get_today_activity_summary(self, system_date: date | None = None) -> TodayActivitySummary:
         system_date = system_date or date.today()
         row = db.session.execute(
@@ -1108,6 +1206,9 @@ class DashboardService:
             .limit(limit)
         )
         rows = list(db.session.scalars(stmt).all())
+        accounts_by_txn = self._accounts_for_daily_txns(
+            [int(row.TransactionID) for row in rows]
+        )
         result: list[dict] = []
         for row in rows:
             work = row.WorkType or ""
@@ -1124,12 +1225,16 @@ class DashboardService:
                 entry_datetime = f"{row.TransactionDate.isoformat()} 00:00:00"
             else:
                 entry_datetime = ""
+            bank_account = self._format_bank_accounts_label(
+                accounts_by_txn.get(int(row.TransactionID))
+            )
             item = {
                 "transaction_id": row.TransactionID,
                 "entry_date": row.TransactionDate.isoformat() if row.TransactionDate else "",
                 "entry_datetime": entry_datetime,
                 "work": work,
                 "customer": row.CustomerName or "—",
+                "bank_account": bank_account,
                 "reference": row.ReferenceNo or "",
                 "description": row.Description or "",
                 "amount": str(amount),

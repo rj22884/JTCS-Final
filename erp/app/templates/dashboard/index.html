@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260810bankhover">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260812bankcolor">
 {% endblock %}
 
 {% block content %}
@@ -57,7 +57,7 @@
           <button type="button" class="dash-today-metric dash-today-metric-btn"
                   data-today-metric="cash" data-label="Cash" title="View Cash details">
             <div class="small text-muted">Cash</div>
-            <strong>₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
+            <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
           </button>
           {% if today_activity.bank_lines %}
             {% for bank in today_activity.bank_lines %}
@@ -67,35 +67,35 @@
                     data-label="{{ bank.label }}"
                     title="View {{ bank.label }} details">
               <div class="small text-muted">{{ bank.label }}</div>
-              <strong>₹ {{ '%.2f'|format(bank.amount) }}</strong>
+              <strong class="{% if bank.amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(bank.amount) }}</strong>
             </button>
             {% endfor %}
           {% else %}
             <button type="button" class="dash-today-metric dash-today-metric-btn"
                     data-today-metric="bank" data-label="Bank" title="View Bank details">
               <div class="small text-muted">Bank</div>
-              <strong>₹ {{ '%.2f'|format(today_activity.bank_total) }}</strong>
+              <strong class="{% if today_activity.bank_total < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.bank_total) }}</strong>
             </button>
           {% endif %}
           <button type="button" class="dash-today-metric dash-today-metric-btn"
                   data-today-metric="income" data-label="Income" title="View Income details">
             <div class="small text-muted">Income</div>
-            <strong>₹ {{ '%.2f'|format(today_activity.income_amount) }}</strong>
+            <strong class="{% if today_activity.income_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.income_amount) }}</strong>
           </button>
           <button type="button" class="dash-today-metric dash-today-metric-btn"
                   data-today-metric="expense" data-label="Expense" title="View Expense details">
             <div class="small text-muted">Expense</div>
-            <strong>₹ {{ '%.2f'|format(today_activity.expense_amount) }}</strong>
+            <strong class="{% if today_activity.expense_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.expense_amount) }}</strong>
           </button>
           <button type="button" class="dash-today-metric dash-today-metric-btn"
                   data-today-metric="sales" data-label="Sales" title="View Sales details">
             <div class="small text-muted">Sales</div>
-            <strong>₹ {{ '%.2f'|format(today_activity.sale_amount) }}</strong>
+            <strong class="{% if today_activity.sale_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.sale_amount) }}</strong>
           </button>
           <button type="button" class="dash-today-metric dash-today-metric-btn"
                   data-today-metric="total" data-label="Total Amount" title="View Total Amount details">
             <div class="small text-muted">Total Amount</div>
-            <strong>₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
+            <strong class="{% if today_activity.total_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
           </button>
         </div>
       </div>
@@ -135,40 +135,40 @@
 
   <div class="row g-2 mb-3" id="dashMetricCards">
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-income w-100 text-start"
               data-metric="total_income" data-label="Total Income">
         <span class="jtcs-metric-label">Total Income</span>
-        <strong class="jtcs-metric-value" data-metric-value="total_income">₹ {{ '%.2f'|format(metrics.total_income) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.total_income < 0 %} is-negative{% endif %}" data-metric-value="total_income">₹ {{ '%.2f'|format(metrics.total_income) }}</strong>
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-expense w-100 text-start"
               data-metric="total_expenses" data-label="Total Expenses">
         <span class="jtcs-metric-label">Total Expenses</span>
-        <strong class="jtcs-metric-value" data-metric-value="total_expenses">₹ {{ '%.2f'|format(metrics.total_expenses) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.total_expenses < 0 %} is-negative{% endif %}" data-metric-value="total_expenses">₹ {{ '%.2f'|format(metrics.total_expenses) }}</strong>
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-sales w-100 text-start"
               data-metric="total_sales" data-label="Total Sales">
         <span class="jtcs-metric-label">Total Sales</span>
-        <strong class="jtcs-metric-value" data-metric-value="total_sales">₹ {{ '%.2f'|format(metrics.total_sales) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.total_sales < 0 %} is-negative{% endif %}" data-metric-value="total_sales">₹ {{ '%.2f'|format(metrics.total_sales) }}</strong>
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-cash w-100 text-start"
               data-metric="cash_closing_balance" data-label="Cash Closing Balance">
         <span class="jtcs-metric-label">Cash Closing Balance</span>
-        <strong class="jtcs-metric-value" data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}" data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
       <div class="dash-bank-closing-wrap">
-        <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+        <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-bank w-100 text-start"
                 data-metric="bank_closing_balance" data-label="Bank Closing Balance"
                 aria-describedby="dashBankClosingHover">
           <span class="jtcs-metric-label">Bank Closing Balance</span>
-          <strong class="jtcs-metric-value" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
+          <strong class="jtcs-metric-value{% if metrics.bank_closing_balance < 0 %} is-negative{% endif %}" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
         </button>
         <div class="dash-bank-closing-hover" id="dashBankClosingHover" role="tooltip">
           <div class="dash-bank-closing-hover-title">As of {{ date_to|display_date }}</div>
@@ -206,17 +206,17 @@
       </div>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-cash-recv w-100 text-start"
               data-metric="cash_received" data-label="Cash Received">
         <span class="jtcs-metric-label">Cash Received</span>
-        <strong class="jtcs-metric-value" data-metric-value="cash_received">₹ {{ '%.2f'|format(metrics.cash_received) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.cash_received < 0 %} is-negative{% endif %}" data-metric-value="cash_received">₹ {{ '%.2f'|format(metrics.cash_received) }}</strong>
       </button>
     </div>
     <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn w-100 text-start"
+      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-bank-recv w-100 text-start"
               data-metric="bank_received" data-label="Bank Received">
         <span class="jtcs-metric-label">Bank Received</span>
-        <strong class="jtcs-metric-value" data-metric-value="bank_received">₹ {{ '%.2f'|format(metrics.bank_received) }}</strong>
+        <strong class="jtcs-metric-value{% if metrics.bank_received < 0 %} is-negative{% endif %}" data-metric-value="bank_received">₹ {{ '%.2f'|format(metrics.bank_received) }}</strong>
       </button>
     </div>
   </div>
@@ -234,11 +234,13 @@
                 <th>Date / Time</th>
                 <th>Work</th>
                 <th>Customer</th>
+                <th>Bank Account</th>
                 <th class="text-end">Amount</th>
               </tr>
             </thead>
             <tbody id="dashRecentBody">
               {% for row in recent %}
+                {% set amt = row.amount|float %}
                 <tr class="dash-recent-row{% if row.can_open %} is-openable{% endif %}"
                     data-row-key="{{ row.row_key }}"
                     data-can-open="{{ '1' if row.can_open else '0' }}"
@@ -248,18 +250,20 @@
                     data-work="{{ row.work or '' }}"
                     data-reference="{{ row.reference or '' }}"
                     data-customer="{{ row.customer or '' }}"
+                    data-bank-account="{{ row.bank_account or '' }}"
                     data-amount="{{ row.amount or '' }}"
                     data-is-expense="{{ '1' if row.is_expense else '0' }}"
                     {% if row.can_open %}role="button" tabindex="0" title="Open source entry form"{% endif %}>
                   <td class="text-nowrap">{{ (row.entry_datetime or row.entry_date) | display_datetime }}</td>
                   <td>{{ row.work }}</td>
                   <td>{{ row.customer or '—' }}</td>
-                  <td class="text-end{% if row.is_expense %} dash-recent-amt-expense{% endif %}">
-                    {% if row.is_expense %}-{% endif %}₹ {{ '%.2f'|format(row.amount|float|abs) }}
+                  <td class="dash-recent-bank text-nowrap" title="{{ row.bank_account or '' }}">{{ row.bank_account or '—' }}</td>
+                  <td class="text-end{% if amt < 0 %} is-negative{% endif %}">
+                    {% if amt < 0 %}-{% endif %}₹ {{ '%.2f'|format(amt|abs) }}
                   </td>
                 </tr>
               {% else %}
-                <tr><td colspan="4" class="text-muted">No transactions yet.</td></tr>
+                <tr><td colspan="5" class="text-muted">No transactions yet.</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -508,5 +512,5 @@
     }
   };
 </script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260719obc-more"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260812bankcolor"></script>
 {% endblock %}

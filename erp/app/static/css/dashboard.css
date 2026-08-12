@@ -264,19 +264,233 @@
   overflow: auto;
 }
 
-.dash-recent-wrap .dash-recent-amt-expense {
-  color: #c62828;
-  font-weight: 600;
+.dash-recent-wrap .dash-recent-amt-expense,
+.dash-page .is-negative,
+.dash-page .jtcs-metric-value.is-negative,
+.dash-today-metric strong.is-negative {
+  color: #dc2626 !important;
+  font-weight: 700;
 }
 
-.dash-recent-wrap tr.dash-recent-row.is-openable {
-  cursor: pointer;
+.dash-recent-wrap .dash-recent-bank {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: #0f4c81;
+  letter-spacing: 0.02em;
+}
+
+/* ========== JTCS website-inspired colorful dashboard ========== */
+.jtcs-app-shell:has(.dash-page) .jtcs-content {
+  background:
+    radial-gradient(ellipse 80% 50% at 0% 0%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(ellipse 70% 45% at 100% 0%, rgba(15, 76, 129, 0.14), transparent 50%),
+    linear-gradient(180deg, #f0f7fc 0%, #e8f0f8 45%, #f8fafc 100%);
+}
+
+.dash-page {
+  --dash-primary: #0f4c81;
+  --dash-primary-dark: #0a3560;
+  --dash-teal: #0f766e;
+  --dash-green: #10b981;
+  --dash-green-dark: #059669;
+  --dash-orange: #f97316;
+  --dash-amber: #fbbf24;
+  --dash-danger: #dc2626;
+}
+
+.dash-today-card {
+  border: 1px solid rgba(15, 76, 129, 0.12);
+  border-left: 4px solid transparent;
+  border-image: linear-gradient(180deg, #0f4c81, #10b981) 1;
+  background:
+    linear-gradient(135deg, rgba(15, 76, 129, 0.04), rgba(16, 185, 129, 0.06)),
+    #fff;
+  box-shadow: 0 4px 18px rgba(15, 76, 129, 0.08);
+}
+
+.dash-today-title {
+  color: var(--dash-primary) !important;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dash-today-metric {
+  border: 1px solid rgba(15, 76, 129, 0.1);
+  border-radius: 0.65rem;
+  background: linear-gradient(180deg, #ffffff 0%, #f3faf7 100%);
+  padding: 0.45rem 0.55rem;
+}
+
+.dash-today-metric-btn:hover,
+.dash-today-metric-btn:focus-visible {
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.18);
+}
+
+.dash-today-metric strong {
+  color: var(--dash-primary);
+}
+
+.dash-period-bar {
+  border: 1px solid rgba(15, 76, 129, 0.14);
+  background:
+    linear-gradient(135deg, rgba(15, 76, 129, 0.06), rgba(16, 185, 129, 0.08)),
+    #fff;
+  box-shadow: 0 4px 14px rgba(15, 76, 129, 0.07);
+}
+
+.dash-period-row-presets .btn-outline-primary {
+  --bs-btn-color: #0f4c81;
+  --bs-btn-border-color: rgba(15, 76, 129, 0.35);
+  --bs-btn-hover-bg: #0f4c81;
+  --bs-btn-hover-border-color: #0f4c81;
+  --bs-btn-active-bg: #10b981;
+  --bs-btn-active-border-color: #10b981;
+}
+
+.dash-period-row-presets .btn-outline-primary.active {
+  background: linear-gradient(135deg, #0f4c81, #10b981);
+  border-color: transparent;
+  color: #fff;
+}
+
+.dash-period-apply {
+  background: linear-gradient(135deg, #0f4c81, #10b981) !important;
+  border: 0 !important;
+}
+
+#dashMetricCards .jtcs-metric-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 16px rgba(15, 76, 129, 0.08);
+  background: #fff;
+}
+
+#dashMetricCards .jtcs-metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #0f4c81, #10b981);
+}
+
+#dashMetricCards .dash-metric-income {
+  background: linear-gradient(145deg, #ecfdf5 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-income::before {
+  background: linear-gradient(180deg, #059669, #34d399);
+}
+
+#dashMetricCards .dash-metric-expense {
+  background: linear-gradient(145deg, #fff1f2 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-expense::before {
+  background: linear-gradient(180deg, #e11d48, #fb7185);
+}
+
+#dashMetricCards .dash-metric-sales {
+  background: linear-gradient(145deg, #eff6ff 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-sales::before {
+  background: linear-gradient(180deg, #0f4c81, #38bdf8);
+}
+
+#dashMetricCards .dash-metric-cash {
+  background: linear-gradient(145deg, #fff7ed 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-cash::before {
+  background: linear-gradient(180deg, #ea580c, #fbbf24);
+}
+
+#dashMetricCards .dash-metric-bank {
+  background: linear-gradient(145deg, #f0fdfa 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-bank::before {
+  background: linear-gradient(180deg, #0f766e, #14b8a6);
+}
+
+#dashMetricCards .dash-metric-cash-recv {
+  background: linear-gradient(145deg, #fefce8 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-cash-recv::before {
+  background: linear-gradient(180deg, #ca8a04, #facc15);
+}
+
+#dashMetricCards .dash-metric-bank-recv {
+  background: linear-gradient(145deg, #eef2ff 0%, #fff 55%);
+}
+#dashMetricCards .dash-metric-bank-recv::before {
+  background: linear-gradient(180deg, #4338ca, #818cf8);
+}
+
+#dashMetricCards .jtcs-metric-label {
+  color: #475569;
+  font-weight: 650;
+}
+
+#dashMetricCards .jtcs-metric-value {
+  color: var(--dash-primary);
+  font-weight: 800;
+}
+
+.dash-metric-btn:hover,
+.dash-metric-btn:focus {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 6px 20px rgba(15, 76, 129, 0.14);
+  transform: translateY(-2px);
+}
+
+.dash-recent-card,
+.dash-arch-card {
+  border: 1px solid rgba(15, 76, 129, 0.12);
+  border-radius: 0.85rem;
+  box-shadow: 0 6px 22px rgba(15, 76, 129, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), #fff),
+    linear-gradient(135deg, rgba(15, 76, 129, 0.04), rgba(16, 185, 129, 0.05));
+}
+
+.dash-recent-card h2,
+.dash-arch-card h2 {
+  color: var(--dash-primary);
+  font-weight: 700;
+}
+
+.dash-recent-wrap thead th {
+  color: #0f4c81;
+  border-bottom-color: rgba(16, 185, 129, 0.35) !important;
+  font-weight: 650;
 }
 
 .dash-recent-wrap tr.dash-recent-row.is-openable:hover,
 .dash-recent-wrap tr.dash-recent-row.is-openable:focus {
-  background: #e8f1ff;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.1), rgba(15, 76, 129, 0.06));
   outline: none;
+}
+
+.dash-whats-new-title {
+  color: var(--dash-primary);
+}
+
+.dash-whats-new-link:hover {
+  color: var(--dash-green-dark);
+}
+
+.dash-bank-closing-hover {
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 10px 28px rgba(15, 76, 129, 0.18);
+}
+
+.dash-bank-closing-hover-title {
+  color: #0f766e;
+  font-weight: 600;
+}
+
+
+.dash-recent-wrap tr.dash-recent-row.is-openable {
+  cursor: pointer;
 }
 
 #dashMetricCards .jtcs-metric-card {

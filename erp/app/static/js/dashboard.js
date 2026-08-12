@@ -688,7 +688,14 @@
 
   function updateCardTotal(metricKey, total) {
     const el = document.querySelector('[data-metric-value="' + metricKey + '"]');
-    if (el) el.textContent = formatMoney(total);
+    if (!el) return;
+    el.textContent = formatMoney(total);
+    const num = parseFloat(total || "0");
+    if (!Number.isNaN(num) && num < 0) {
+      el.classList.add("is-negative");
+    } else {
+      el.classList.remove("is-negative");
+    }
   }
 
   function resetFilters() {
@@ -946,6 +953,7 @@
       work: tr.getAttribute("data-work") || "",
       reference: tr.getAttribute("data-reference") || "",
       customer: tr.getAttribute("data-customer") || "",
+      bank_account: tr.getAttribute("data-bank-account") || "",
       amount: tr.getAttribute("data-amount") || "",
       is_expense: tr.getAttribute("data-is-expense") === "1",
     };
