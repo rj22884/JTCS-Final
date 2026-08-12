@@ -570,34 +570,60 @@ class DashboardService:
             {"system_date": system_date},
         ).mappings().all()
 
-        # Fallback when today's posted dailies have no payment-split rows:
-        # net bank legs (Debit in − Credit out) for the system date.
-        if not payment_rows:
-            payment_rows = db.session.execute(
-                text(
-                    """
-                    SELECT
-                        bt.JtcsBankAccountID AS account_id,
-                        bt.BankName AS bank_name,
-                        bt.MaskedAccountNumber AS masked_account,
-                        CAST(NULL AS NVARCHAR(50)) AS account_number,
-                        ISNULL(SUM(ISNULL(bt.Debit, 0) - ISNULL(bt.Credit, 0)), 0) AS amount
-                    FROM JtcsBankTransaction bt
-                    WHERE bt.TransactionDate = :system_date
-                      AND (ISNULL(bt.Debit, 0) <> 0 OR ISNULL(bt.Credit, 0) <> 0)
-                    GROUP BY
-                        bt.JtcsBankAccountID,
-                        bt.BankName,
-                        bt.MaskedAccountNumber
-                    ORDER BY bt.BankName, bt.JtcsBankAccountID
-                    """
-                ),
-                {"system_date": system_date},
-            ).mappings().all()
+        # OBC Bank Transfer / contra legs post to JtcsBankTransaction only (no
+        # payment-split rows). Merge those orphan legs so Cash/Bank tiles match
+        # Cash Closing Balance. Skip legs already counted via payment rows.
+        orphan_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    bt.JtcsBankAccountID AS account_id,
+                    bt.BankName AS bank_name,
+                    bt.MaskedAccountNumber AS masked_account,
+                    CAST(NULL AS NVARCHAR(50)) AS account_number,
+                    ISNULL(SUM(ISNULL(bt.Debit, 0) - ISNULL(bt.Credit, 0)), 0) AS amount
+                FROM JtcsBankTransaction bt
+                WHERE bt.TransactionDate = :system_date
+                  AND (ISNULL(bt.Debit, 0) <> 0 OR ISNULL(bt.Credit, 0) <> 0)
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM JTCSDailyTransactionPayment p
+                        WHERE p.BankTransactionID = bt.JtcsBankTransactionID
+                  )
+                GROUP BY
+                    bt.JtcsBankAccountID,
+                    bt.BankName,
+                    bt.MaskedAccountNumber
+                ORDER BY bt.BankName, bt.JtcsBankAccountID
+                """
+            ),
+            {"system_date": system_date},
+        ).mappings().all()
+
+        # Aggregate payment + orphan bank legs by account.
+        by_account: dict[int | None, dict] = {}
+        for item in list(payment_rows) + list(orphan_rows):
+            amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
+            if amount == 0:
+                continue
+            account_id = item.get("account_id")
+            key = int(account_id) if account_id is not None else None
+            if key in by_account:
+                by_account[key]["amount"] = (
+                    Decimal(str(by_account[key]["amount"])) + amount
+                ).quantize(Decimal("0.01"))
+            else:
+                by_account[key] = {
+                    "account_id": key,
+                    "bank_name": (item["bank_name"] or "").strip() or "Bank",
+                    "masked_account": item.get("masked_account"),
+                    "account_number": item.get("account_number"),
+                    "amount": amount,
+                }
 
         cash_amount = Decimal("0.00")
         bank_lines: list[TodayActivityBankLine] = []
-        for item in payment_rows:
+        for item in by_account.values():
             amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
             if amount == 0:
                 continue
@@ -605,13 +631,12 @@ class DashboardService:
             if bank_name.lower() == "cash":
                 cash_amount += amount
                 continue
-            account_id = item.get("account_id")
             bank_lines.append(
                 TodayActivityBankLine(
                     bank_name=bank_name,
-                    last4=self._last4_account(item["masked_account"], item["account_number"]),
+                    last4=self._last4_account(item.get("masked_account"), item.get("account_number")),
                     amount=amount,
-                    account_id=int(account_id) if account_id is not None else None,
+                    account_id=item.get("account_id"),
                 )
             )
 
@@ -987,7 +1012,7 @@ class DashboardService:
         cash_only: bool | None = None,
         account_id: int | None = None,
     ) -> list[dict]:
-        """Detail rows for Cash / Bank tiles (payment splits, with bank-leg fallback)."""
+        """Detail rows for Cash / Bank tiles (payment splits + orphan bank legs)."""
         params: dict = {"system_date": system_date}
         filters = [
             "d.Status = N'Posted'",
@@ -1035,50 +1060,55 @@ class DashboardService:
             params,
         ).mappings().all()
 
-        if payment_rows:
-            result = []
-            for row in payment_rows:
-                work = row["WorkType"] or ""
-                if row["SubWorkType"]:
-                    work = f"{work} / {row['SubWorkType']}" if work else row["SubWorkType"]
-                bank_name = (row["BankName"] or "").strip() or "Bank"
-                reference = row["ReferenceNo"] or f"DT-{row['TransactionID']}"
-                amount = Decimal(str(row["AmountValue"] or 0))
-                is_expense = Decimal(str(row["ExpenseAmount"] or 0)) > 0
-                if is_expense:
-                    amount = -abs(amount)
-                activity_date = row["ActivityDate"]
-                item = {
-                    "row_key": f"pay-{row['PaymentLineID']}",
-                    "entry_id": None,
-                    "source": "system",
-                    "can_edit": False,
-                    "can_delete": False,
-                    "entry_date": activity_date.isoformat() if activity_date else "",
-                    "description": row["Description"] or bank_name,
-                    "reference": reference,
-                    "work": work or bank_name,
-                    "customer": row["CustomerName"] or row["MaskedAccountNumber"] or "—",
-                    "amount": str(amount),
-                    "is_expense": is_expense,
-                }
-                item.update(
-                    self._source_link_for_daily(
-                        transaction_id=row["TransactionID"],
-                        work_type=row["WorkType"],
-                        sub_work_type=row["SubWorkType"],
-                        stamp_id=row["StampID"],
-                        reference=row["ReferenceNo"],
-                    )
+        result: list[dict] = []
+        for row in payment_rows:
+            work = row["WorkType"] or ""
+            if row["SubWorkType"]:
+                work = f"{work} / {row['SubWorkType']}" if work else row["SubWorkType"]
+            bank_name = (row["BankName"] or "").strip() or "Bank"
+            reference = row["ReferenceNo"] or f"DT-{row['TransactionID']}"
+            amount = Decimal(str(row["AmountValue"] or 0))
+            is_expense = Decimal(str(row["ExpenseAmount"] or 0)) > 0
+            if is_expense:
+                amount = -abs(amount)
+            activity_date = row["ActivityDate"]
+            item = {
+                "row_key": f"pay-{row['PaymentLineID']}",
+                "entry_id": None,
+                "source": "system",
+                "can_edit": False,
+                "can_delete": False,
+                "entry_date": activity_date.isoformat() if activity_date else "",
+                "description": row["Description"] or bank_name,
+                "reference": reference,
+                "work": work or bank_name,
+                "customer": row["CustomerName"] or row["MaskedAccountNumber"] or "—",
+                "amount": str(amount),
+                "is_expense": is_expense,
+            }
+            item.update(
+                self._source_link_for_daily(
+                    transaction_id=row["TransactionID"],
+                    work_type=row["WorkType"],
+                    sub_work_type=row["SubWorkType"],
+                    stamp_id=row["StampID"],
+                    reference=row["ReferenceNo"],
                 )
-                result.append(item)
-            return result
+            )
+            result.append(item)
 
-        # Fallback: net bank legs for the system date (same as summary).
+        # Always merge orphan bank legs (e.g. OBC Bank Transfer) that are not
+        # linked via JTCSDailyTransactionPayment — otherwise Cash Closing shows
+        # them but Today's Activity Cash tile does not.
         bank_params: dict = {"system_date": system_date}
         bank_filters = [
             "bt.TransactionDate = :system_date",
             "(ISNULL(bt.Debit, 0) <> 0 OR ISNULL(bt.Credit, 0) <> 0)",
+            """NOT EXISTS (
+                    SELECT 1
+                    FROM JTCSDailyTransactionPayment p
+                    WHERE p.BankTransactionID = bt.JtcsBankTransactionID
+               )""",
         ]
         if cash_only is True:
             bank_filters.append("LOWER(LTRIM(RTRIM(ISNULL(bt.BankName, N'')))) = N'cash'")
@@ -1103,8 +1133,19 @@ class DashboardService:
                     bt.SourceRecordID,
                     ISNULL(bt.Debit, 0) AS DebitValue,
                     ISNULL(bt.Credit, 0) AS CreditValue,
-                    ISNULL(bt.Debit, 0) - ISNULL(bt.Credit, 0) AS AmountValue
+                    ISNULL(bt.Debit, 0) - ISNULL(bt.Credit, 0) AS AmountValue,
+                    d.WorkType,
+                    d.SubWorkType,
+                    d.ReferenceNo AS DailyReference,
+                    d.CustomerName AS DailyCustomer
                 FROM JtcsBankTransaction bt
+                LEFT JOIN JTCSDailyTransaction d
+                    ON d.TransactionID = bt.SourceRecordID
+                   AND LOWER(LTRIM(RTRIM(ISNULL(bt.SourceTable, N'')))) IN (
+                        N'othersbankcashtransaction',
+                        N'others_bank_cash_transaction',
+                        N'jtcsdailytransaction'
+                   )
                 WHERE {bank_where}
                 ORDER BY bt.TransactionDate DESC, bt.JtcsBankTransactionID DESC
                 """
@@ -1112,10 +1153,16 @@ class DashboardService:
             bank_params,
         ).mappings().all()
 
-        result = []
         for row in bank_rows:
             bank_name = (row["BankName"] or "").strip() or "Bank"
             amount = Decimal(str(row["AmountValue"] or 0))
+            work = row["WorkType"] or ""
+            if row["SubWorkType"]:
+                work = f"{work} / {row['SubWorkType']}" if work else row["SubWorkType"]
+            reference = (
+                (row["DailyReference"] or "").strip()
+                or f"BT-{row['JtcsBankTransactionID']}"
+            )
             item = {
                 "row_key": f"bank-{row['JtcsBankTransactionID']}",
                 "entry_id": None,
@@ -1124,9 +1171,9 @@ class DashboardService:
                 "can_delete": False,
                 "entry_date": row["TransactionDate"].isoformat() if row["TransactionDate"] else "",
                 "description": row["Description"] or row["Remarks"] or bank_name,
-                "reference": f"BT-{row['JtcsBankTransactionID']}",
-                "work": bank_name,
-                "customer": row["MaskedAccountNumber"] or "—",
+                "reference": reference,
+                "work": work or bank_name,
+                "customer": row["DailyCustomer"] or row["MaskedAccountNumber"] or "—",
                 "amount": str(amount),
                 "is_expense": amount < 0,
             }
@@ -1138,6 +1185,15 @@ class DashboardService:
                 )
             )
             result.append(item)
+
+        # Newest activity first (payments already ordered; orphans appended — re-sort).
+        result.sort(
+            key=lambda r: (
+                r.get("entry_date") or "",
+                r.get("row_key") or "",
+            ),
+            reverse=True,
+        )
         return result
 
     def get_today_activity_details(
