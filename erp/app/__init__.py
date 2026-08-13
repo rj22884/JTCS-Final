@@ -327,20 +327,20 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("Chart of Account Master menu ensure skipped: %s", exc)
 
         try:
-            from app.routes.ledger_report import ensure_ledger_report_menu
-
-            ensure_ledger_report_menu()
-        except Exception as exc:
-            db.session.rollback()
-            app.logger.warning("Ledger Report menu ensure skipped: %s", exc)
-
-        try:
             from app.routes.financial_statements import ensure_financial_statements_menus
 
             ensure_financial_statements_menus()
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Financial Statements menus ensure skipped: %s", exc)
+
+        try:
+            from app.routes.ledger_report import ensure_ledger_report_menu
+
+            ensure_ledger_report_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Ledger Report menu ensure skipped: %s", exc)
 
         try:
             from app.repositories.customer_repository import CustomerRepository
@@ -350,7 +350,7 @@ def create_app(config_class: type = Config) -> Flask:
             db.session.rollback()
             app.logger.warning("Customer Master / portal schema ensure skipped: %s", exc)
 
-        # After Ledger Report so Stamp / e-Court Exception sit after it under Reports.
+        # After FS so e-Court / Stamp sit under Reports; Financial Statements stays last.
         try:
             from app.routes.exceptional_report import _ensure_exceptional_report_menus
 

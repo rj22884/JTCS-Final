@@ -728,6 +728,14 @@ def ensure_erp_core_nav_menus() -> None:
             WHERE MenuName IN (N'Logout', N'Log Out')
                OR LOWER(ISNULL(MenuURL, N'')) IN (N'/logout', N'/auth/logout');
 
+            /* Remove duplicate ITR Followup Master under Masters (keep Followup Master submenu). */
+            DELETE m
+            FROM dbo.MenuMaster AS m
+            INNER JOIN dbo.MenuMaster AS p ON p.MenuID = m.ParentMenuID
+            WHERE p.ParentMenuID IS NULL
+              AND p.MenuName = N'Masters'
+              AND m.MenuName = N'ITR Followup Master';
+
             """
         )
     )

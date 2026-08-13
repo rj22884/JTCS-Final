@@ -263,9 +263,9 @@
   background: linear-gradient(180deg, var(--inv-if-orange-soft), #fff);
 }
 
-.inv-hub-tile i {
-  font-size: 1.55rem;
-  color: var(--inv-if-orange);
+.inv-hub-tile i.bi.jtcs-illu {
+  font-size: 0;
+  color: inherit;
 }
 
 .inv-hub-tile strong {

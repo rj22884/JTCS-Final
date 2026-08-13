@@ -20,15 +20,15 @@ bp = Blueprint(
 )
 
 CHILD_MENUS = (
-    ("Balance Sheet", "balance-sheet", 1, "bi-layout-split"),
-    ("Profit & Loss", "profit-loss", 2, "bi-graph-up"),
-    ("Trial Balance", "trial-balance", 3, "bi-scales"),
-    ("Trading Account", "trading-account", 4, "bi-cart"),
-    ("Cash Flow", "cash-flow", 5, "bi-cash-stack"),
-    ("Fund Flow", "fund-flow", 6, "bi-arrow-left-right"),
-    ("Depreciation Chart", "depreciation-chart", 7, "bi-percent"),
-    ("Schedule of Fixed Assets", "fixed-assets-schedule", 8, "bi-building"),
-    ("Ratio Analysis", "ratio-analysis", 9, "bi-pie-chart"),
+    ("Balance Sheet", "balance-sheet", 10, "bi-layout-split"),
+    ("Profit & Loss", "profit-loss", 11, "bi-graph-up"),
+    ("Trial Balance", "trial-balance", 12, "bi-scales"),
+    ("Trading Account", "trading-account", 13, "bi-cart"),
+    ("Cash Flow", "cash-flow", 14, "bi-cash-stack"),
+    ("Fund Flow", "fund-flow", 15, "bi-arrow-left-right"),
+    ("Depreciation Chart", "depreciation-chart", 16, "bi-percent"),
+    ("Schedule of Fixed Assets", "fixed-assets-schedule", 17, "bi-building"),
+    ("Ratio Analysis", "ratio-analysis", 18, "bi-pie-chart"),
 )
 
 
@@ -74,7 +74,6 @@ def ensure_financial_statements_menus() -> None:
                 SET MenuName = N'Financial Statements',
                     MenuIcon = N'bi-journal-richtext',
                     MenuURL = N'/Reports_and_analysis/financial-statements',
-                    DisplayOrder = 10,
                     IsActive = 1,
                     Description = N'Tally-style Balance Sheet, P&L, Trial Balance and related reports'
                 WHERE MenuID = :id
@@ -92,7 +91,7 @@ def ensure_financial_statements_menus() -> None:
                 )
                 VALUES (
                     :pid, N'Financial Statements', N'bi-journal-richtext',
-                    N'/Reports_and_analysis/financial-statements', 10,
+                    N'/Reports_and_analysis/financial-statements', 999,
                     N'Tally-style Balance Sheet, P&L, Trial Balance and related reports',
                     1, NULL
                 )
@@ -163,6 +162,71 @@ def ensure_financial_statements_menus() -> None:
                     "ord": order,
                 },
             )
+    _place_financial_statements_last(parent_id, fs_id)
+    db.session.commit()
+
+
+def _place_financial_statements_last(reports_id: int, fs_id: int) -> None:
+    """Keep Financial Statements as the last Reports and Analysis child."""
+    next_order = db.session.execute(
+        text(
+            """
+            SELECT 1 + ISNULL(MAX(DisplayOrder), 0)
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID = :reports_id
+              AND MenuID <> :fs_id
+              AND ISNULL(IsActive, 0) = 1
+            """
+        ),
+        {"reports_id": reports_id, "fs_id": fs_id},
+    ).scalar()
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET DisplayOrder = :ord
+            WHERE MenuID = :fs_id
+            """
+        ),
+        {"ord": int(next_order or 1), "fs_id": fs_id},
+    )
+
+
+def ensure_financial_statements_last_in_reports() -> None:
+    parent_id = db.session.execute(
+        text(
+            """
+            SELECT TOP 1 MenuID
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID IS NULL
+              AND (
+                    MenuName = N'Reports and Analysis'
+                 OR MenuURL LIKE N'/Reports_and_analysis%'
+              )
+            ORDER BY MenuID
+            """
+        )
+    ).scalar()
+    if not parent_id:
+        return
+    fs_id = db.session.execute(
+        text(
+            """
+            SELECT TOP 1 MenuID
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID = :pid
+              AND (
+                    MenuName = N'Financial Statements'
+                 OR MenuURL = N'/Reports_and_analysis/financial-statements'
+              )
+            ORDER BY MenuID
+            """
+        ),
+        {"pid": parent_id},
+    ).scalar()
+    if not fs_id:
+        return
+    _place_financial_statements_last(parent_id, fs_id)
     db.session.commit()
 
 

@@ -6,7 +6,7 @@
     {% if item.has_children %}
       <li class="jtcs-menu-item has-children">
         <a href="#" class="jtcs-menu-link jtcs-flyout-toggle{% if is_active %} active{% endif %}" role="button" aria-expanded="false"{% if item_style %} style="{{ item_style }}"{% endif %}>
-          <i class="bi {{ item.icon }}"></i>
+          <i class="bi {{ item.icon }}" data-jtcs-hint="{{ item.url or item.name }}"></i>
           <span>{{ item.name }}</span>
           <i class="bi bi-chevron-right"></i>
         </a>
@@ -22,7 +22,7 @@
       {% endif %}
       <li class="jtcs-menu-item">
         <a href="{{ href }}" class="jtcs-menu-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}{% if item_style %} style="{{ item_style }}"{% endif %}>
-          <i class="bi {{ item.icon }}"></i>
+          <i class="bi {{ item.icon }}" data-jtcs-hint="{{ item.url or item.name }}"></i>
           <span>{{ item.name }}</span>
         </a>
       </li>
@@ -44,7 +44,7 @@
       {% if item.has_children %}
         <li class="jtcs-top-item has-dropdown" data-menu-key="{{ menu_key }}">
           <button type="button" class="jtcs-top-link{% if is_active %} active{% endif %}" aria-expanded="false"{% if item_style %} style="{{ item_style }}"{% endif %}>
-            <i class="bi {{ item.icon }}"></i>
+            <i class="bi {{ item.icon }}" data-jtcs-hint="{{ item.url or item.name }}"></i>
             <span>{{ item.name }}</span>
             <i class="bi bi-chevron-down"></i>
           </button>
@@ -56,7 +56,7 @@
         {% set href = url_for('auth.logout') if item.url == '/logout' else (item.url if item.url and item.url.startswith('/') else '#') %}
         <li class="jtcs-top-item" data-menu-key="{{ menu_key }}">
           <a href="{{ href }}" class="jtcs-top-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}{% if item_style %} style="{{ item_style }}"{% endif %}>
-            <i class="bi {{ item.icon }}"></i>
+            <i class="bi {{ item.icon }}" data-jtcs-hint="{{ item.url or item.name }}"></i>
             <span>{{ item.name }}</span>
           </a>
         </li>

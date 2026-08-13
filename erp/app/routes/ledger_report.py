@@ -82,6 +82,18 @@ def _ensure_ledger_report_menu() -> None:
                 SET @ParentID = SCOPE_IDENTITY();
             END;
 
+            DECLARE @FsID INT;
+            SELECT TOP 1 @FsID = MenuID
+            FROM dbo.MenuMaster
+            WHERE ParentMenuID = @ParentID
+              AND (
+                    MenuName IN (N'Financial Statements', N'Financial Reports')
+                 OR MenuURL = N'/Reports_and_analysis/financial-statements'
+              )
+            ORDER BY MenuID;
+            IF @FsID IS NOT NULL
+                SET @ParentID = @FsID;
+
             IF EXISTS (
                 SELECT 1 FROM dbo.MenuMaster
                 WHERE MenuURL = N'/Reports_and_analysis/ledger_report'
@@ -91,6 +103,7 @@ def _ensure_ledger_report_menu() -> None:
                     MenuName = N'Ledger Report',
                     MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-text'),
                     MenuURL = N'/Reports_and_analysis/ledger_report',
+                    DisplayOrder = 1,
                     Description = N'Search and preview bank, customer, work/category and item ledgers',
                     IsActive = 1
                 WHERE MenuURL = N'/Reports_and_analysis/ledger_report';
@@ -114,7 +127,7 @@ def _ensure_ledger_report_menu() -> None:
                     N'Ledger Report',
                     N'bi-journal-text',
                     N'/Reports_and_analysis/ledger_report',
-                    10,
+                    1,
                     N'Search and preview bank, customer, work/category and item ledgers',
                     1,
                     NULL

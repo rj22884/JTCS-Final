@@ -1,0 +1,197 @@
+/* JTCS 3D-ish Flat Illustration Icon System
+   Enhances Bootstrap Icons in-place. Does not change menu data or routes. */
+:root {
+  --icon-primary: #2e5aac;
+  --icon-navy: #0b2545;
+  --icon-success: #2e9b6a;
+  --icon-warning: #e8a317;
+  --icon-accent: #e85d00;
+  --icon-purple: #6f42c1;
+  --icon-teal: #0f766e;
+  --icon-rose: #e11d48;
+  --icon-paper: #ffffff;
+  --icon-line: #d7e0ea;
+  --icon-shadow: rgba(11, 37, 69, 0.16);
+  --icon-bg-blue: #e8f1fc;
+  --icon-bg-green: #e7f6ee;
+  --icon-bg-orange: #fff4eb;
+  --icon-bg-yellow: #fff8e1;
+  --icon-bg-purple: #f3eefe;
+  --icon-bg-teal: #e6f7f4;
+  --icon-bg-rose: #fff1f2;
+}
+
+i.bi.jtcs-illu {
+  font-style: normal;
+  font-size: 0 !important;
+  line-height: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+  vertical-align: middle;
+  color: inherit;
+  background: transparent;
+  position: relative;
+}
+
+i.bi.jtcs-illu::before {
+  content: none !important;
+  display: none !important;
+}
+
+.jtcs-illu-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.jtcs-illu-shadow {
+  fill: var(--icon-shadow);
+}
+
+.jtcs-illu-sm {
+  width: 1.2rem !important;
+  height: 1.2rem !important;
+}
+
+.jtcs-illu-md {
+  width: 1.7rem !important;
+  height: 1.7rem !important;
+}
+
+.jtcs-illu-lg {
+  width: 2.75rem !important;
+  height: 2.75rem !important;
+}
+
+.jtcs-illu-tile {
+  border-radius: 0.55rem;
+  padding: 0.28rem;
+  box-sizing: content-box;
+  box-shadow: 0 1px 2px rgba(11, 37, 69, 0.08), 0 4px 10px rgba(11, 37, 69, 0.06);
+  background: var(--icon-bg-blue);
+}
+
+.jtcs-illu-tile[data-tone="green"] { background: var(--icon-bg-green); }
+.jtcs-illu-tile[data-tone="orange"] { background: var(--icon-bg-orange); }
+.jtcs-illu-tile[data-tone="yellow"] { background: var(--icon-bg-yellow); }
+.jtcs-illu-tile[data-tone="purple"] { background: var(--icon-bg-purple); }
+.jtcs-illu-tile[data-tone="teal"] { background: var(--icon-bg-teal); }
+.jtcs-illu-tile[data-tone="rose"] { background: var(--icon-bg-rose); }
+.jtcs-illu-tile[data-tone="blue"] { background: var(--icon-bg-blue); }
+
+/* Compact nav / dropdown — no tile */
+.jtcs-top-link > i.bi.jtcs-illu,
+.jtcs-menu-link > i.bi.jtcs-illu {
+  width: 1.15rem !important;
+  height: 1.15rem !important;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent !important;
+  filter: drop-shadow(0 1px 1px rgba(11, 37, 69, 0.18));
+}
+
+.jtcs-top-link > i.bi.jtcs-illu {
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.28));
+}
+
+/* Ribbon action buttons */
+.jtcs-ribbon-btn > i.bi.jtcs-illu {
+  width: 1.65rem !important;
+  height: 1.65rem !important;
+  padding: 0.22rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px rgba(11, 37, 69, 0.08);
+}
+
+/* Hub / report / page tiles */
+.inv-hub-tile > i.bi.jtcs-illu,
+.jtcs-report-card > i.bi.jtcs-illu,
+.jtcs-page-icon > i.bi.jtcs-illu,
+.cp-module-icon > i.bi.jtcs-illu {
+  width: 2.65rem !important;
+  height: 2.65rem !important;
+  padding: 0.35rem;
+  border-radius: 0.75rem;
+}
+
+.inv-hub-tile > i.bi.jtcs-illu {
+  color: inherit;
+}
+
+.btn > i.bi.jtcs-illu,
+.jtcs-header-pill > i.bi.jtcs-illu,
+.jtcs-header-btn > i.bi.jtcs-illu,
+.jtcs-status-bar i.bi.jtcs-illu {
+  width: 1.05rem !important;
+  height: 1.05rem !important;
+  padding: 0;
+  background: transparent !important;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.table .btn > i.bi.jtcs-illu,
+td .btn > i.bi.jtcs-illu {
+  width: 0.95rem !important;
+  height: 0.95rem !important;
+}
+
+/* Dashboard metric cards */
+.dash-metric-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.dash-metric-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dash-metric-btn .jtcs-illu-host {
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  box-shadow: 0 1px 3px rgba(11, 37, 69, 0.1);
+}
+
+.dash-metric-income .jtcs-illu-host { background: var(--icon-bg-green); }
+.dash-metric-expense .jtcs-illu-host { background: var(--icon-bg-rose); }
+.dash-metric-sales .jtcs-illu-host { background: var(--icon-bg-blue); }
+.dash-metric-cash .jtcs-illu-host,
+.dash-metric-cash-recv .jtcs-illu-host { background: var(--icon-bg-orange); }
+.dash-metric-bank .jtcs-illu-host { background: var(--icon-bg-teal); }
+.dash-metric-bank-recv .jtcs-illu-host { background: var(--icon-bg-purple); }
+
+.dash-metric-btn .jtcs-illu-host .jtcs-illu-svg,
+.dash-metric-btn .jtcs-illu-host svg {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 768px) {
+  .inv-hub-tile > i.bi.jtcs-illu,
+  .jtcs-report-card > i.bi.jtcs-illu {
+    width: 2.2rem !important;
+    height: 2.2rem !important;
+  }
+
+  .dash-metric-btn .jtcs-illu-host {
+    width: 2.1rem;
+    height: 2.1rem;
+  }
+}

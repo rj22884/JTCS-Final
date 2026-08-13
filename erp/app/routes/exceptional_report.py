@@ -15,7 +15,7 @@ _MENU_ENSURED = False
 
 
 def _ensure_exceptional_report_menus() -> None:
-    """Move Stamp / e-Court Exception under Reports and Analysis (after Ledger Report).
+    """Keep e-Court Exception then Stamp Exception under Reports (FS stays last).
 
     Keeps existing module URLs. Hides only the old Exceptional Report parent.
     Does not change or remove any other menus.
@@ -27,9 +27,7 @@ def _ensure_exceptional_report_menus() -> None:
         text(
             """
             DECLARE @ReportsID INT;
-            DECLARE @LedgerOrder INT;
-            DECLARE @StampOrder INT;
-            DECLARE @EcourtOrder INT;
+            DECLARE @KeepEcourt INT;
             DECLARE @ReportsOrder INT = (
                 SELECT TOP 1 DisplayOrder FROM dbo.MenuMaster
                 WHERE MenuName IN (N'Reports', N'Reports and Analysis', N'Reports & Analysis')
@@ -78,18 +76,48 @@ def _ensure_exceptional_report_menus() -> None:
             ELSE
                 UPDATE dbo.MenuMaster SET IsActive = 1 WHERE MenuID = @ReportsID;
 
-            SELECT @LedgerOrder = MAX(DisplayOrder)
+            /* One e-Court Exception under Reports, immediately before Stamp Exception */
+            SELECT TOP 1 @KeepEcourt = MenuID
             FROM dbo.MenuMaster
-            WHERE ParentMenuID = @ReportsID
-              AND (
-                    MenuURL = N'/Reports_and_analysis/ledger_report'
-                 OR MenuName = N'Ledger Report'
-              );
+            WHERE MenuURL = N'/exceptional-report/ecourt-exception'
+               OR MenuName IN (N'e-Court Exception', N'E-Court Exception')
+            ORDER BY MenuID;
 
-            SET @StampOrder = ISNULL(@LedgerOrder, 10) + 10;
-            SET @EcourtOrder = @StampOrder + 10;
+            DELETE FROM dbo.MenuMaster
+            WHERE (
+                    MenuURL = N'/exceptional-report/ecourt-exception'
+                 OR MenuName IN (N'e-Court Exception', N'E-Court Exception')
+                  )
+              AND (@KeepEcourt IS NULL OR MenuID <> @KeepEcourt);
 
-            /* Stamp Exception → Reports and Analysis (after Ledger Report) */
+            IF @KeepEcourt IS NOT NULL
+                UPDATE dbo.MenuMaster
+                SET ParentMenuID = @ReportsID,
+                    MenuName = N'e-Court Exception',
+                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-check'),
+                    MenuURL = N'/exceptional-report/ecourt-exception',
+                    DisplayOrder = 1,
+                    Description = N'e-Court exceptional report',
+                    IsActive = 1,
+                    RoleName = NULL
+                WHERE MenuID = @KeepEcourt;
+            ELSE
+                INSERT INTO dbo.MenuMaster (
+                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+                    Description, IsActive, RoleName
+                )
+                VALUES (
+                    @ReportsID,
+                    N'e-Court Exception',
+                    N'bi-journal-check',
+                    N'/exceptional-report/ecourt-exception',
+                    1,
+                    N'e-Court exceptional report',
+                    1,
+                    NULL
+                );
+
+            /* Stamp Exception stays under Reports, immediately after e-Court Exception */
             IF EXISTS (
                 SELECT 1 FROM dbo.MenuMaster
                 WHERE MenuURL = N'/exceptional-report/stamp-certificate'
@@ -100,7 +128,7 @@ def _ensure_exceptional_report_menus() -> None:
                     MenuName = N'Stamp Exception',
                     MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-file-earmark-spreadsheet'),
                     MenuURL = N'/exceptional-report/stamp-certificate',
-                    DisplayOrder = @StampOrder,
+                    DisplayOrder = 2,
                     Description = N'SHCIL stamp certificate reconciliation',
                     IsActive = 1,
                     RoleName = NULL
@@ -116,41 +144,8 @@ def _ensure_exceptional_report_menus() -> None:
                     N'Stamp Exception',
                     N'bi-file-earmark-spreadsheet',
                     N'/exceptional-report/stamp-certificate',
-                    @StampOrder,
+                    2,
                     N'SHCIL stamp certificate reconciliation',
-                    1,
-                    NULL
-                );
-
-            /* e-Court Exception → Reports and Analysis (after Stamp Exception) */
-            IF EXISTS (
-                SELECT 1 FROM dbo.MenuMaster
-                WHERE MenuURL = N'/exceptional-report/ecourt-exception'
-                   OR MenuName IN (N'e-Court Exception', N'E-Court Exception')
-            )
-                UPDATE dbo.MenuMaster
-                SET ParentMenuID = @ReportsID,
-                    MenuName = N'e-Court Exception',
-                    MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-check'),
-                    MenuURL = N'/exceptional-report/ecourt-exception',
-                    DisplayOrder = @EcourtOrder,
-                    Description = N'e-Court exceptional report',
-                    IsActive = 1,
-                    RoleName = NULL
-                WHERE MenuURL = N'/exceptional-report/ecourt-exception'
-                   OR MenuName IN (N'e-Court Exception', N'E-Court Exception');
-            ELSE
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    @ReportsID,
-                    N'e-Court Exception',
-                    N'bi-journal-check',
-                    N'/exceptional-report/ecourt-exception',
-                    @EcourtOrder,
-                    N'e-Court exceptional report',
                     1,
                     NULL
                 );
@@ -163,29 +158,16 @@ def _ensure_exceptional_report_menus() -> None:
                     N'/exceptional-report/stamp-certificate',
                     N'/exceptional-report/ecourt-exception'
               );
-
-            /* Keep a single active row per exception URL (dedupe legacy seeds) */
-            ;WITH d AS (
-                SELECT MenuID,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY MenuURL
-                           ORDER BY MenuID
-                       ) AS rn
-                FROM dbo.MenuMaster
-                WHERE MenuURL IN (
-                    N'/exceptional-report/stamp-certificate',
-                    N'/exceptional-report/ecourt-exception'
-                )
-            )
-            UPDATE m
-            SET IsActive = 0
-            FROM dbo.MenuMaster m
-            INNER JOIN d ON d.MenuID = m.MenuID
-            WHERE d.rn > 1;
             """
         )
     )
     db.session.commit()
+    try:
+        from app.routes.financial_statements import ensure_financial_statements_last_in_reports
+
+        ensure_financial_statements_last_in_reports()
+    except Exception:
+        db.session.rollback()
     _MENU_ENSURED = True
 
 

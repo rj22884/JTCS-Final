@@ -135,12 +135,10 @@ DECLARE @MastersID INT = (SELECT TOP 1 MenuID FROM dbo.MenuMaster WHERE MenuName
 
 IF @MastersID IS NOT NULL
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'ITR Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'ITR Followup Master', N'bi-diagram-3', N'/masters/followup/itr', 20, N'ITR workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/itr', IsActive = 1
-        WHERE MenuName = N'ITR Followup Master' AND ParentMenuID = @MastersID;
+    /* ITR Followup Master lives under Masters → Followup Master only (no direct Masters child). */
+    DELETE FROM dbo.MenuMaster
+    WHERE ParentMenuID = @MastersID
+      AND MenuName = N'ITR Followup Master';
 
     IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'DSC Followup Master' AND ParentMenuID = @MastersID)
         INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)

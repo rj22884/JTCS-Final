@@ -54,41 +54,14 @@ def _ensure_import_export_menus() -> None:
                 END,
                 MenuID;
 
-            -- Keep / restore the canonical Ledger Report under Reports and Analysis.
+            -- Keep Reports and Analysis active. Ledger Report is nested under
+            -- Financial Statements by ledger_report.ensure (do not re-insert here).
             IF @ReportsID IS NOT NULL
-            BEGIN
                 UPDATE dbo.MenuMaster
                 SET MenuName = N'Reports and Analysis',
                     IsActive = 1,
                     MenuURL = NULL
                 WHERE MenuID = @ReportsID;
-
-                IF EXISTS (
-                    SELECT 1 FROM dbo.MenuMaster
-                    WHERE ParentMenuID = @ReportsID AND MenuName = N'Ledger Report'
-                )
-                    UPDATE dbo.MenuMaster
-                    SET MenuURL = N'/Reports_and_analysis/ledger_report',
-                        MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-journal-text'),
-                        Description = N'Search and preview bank, customer, work/category and item ledgers',
-                        IsActive = 1
-                    WHERE ParentMenuID = @ReportsID AND MenuName = N'Ledger Report';
-                ELSE
-                    INSERT INTO dbo.MenuMaster (
-                        ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                        Description, IsActive, RoleName
-                    )
-                    VALUES (
-                        @ReportsID,
-                        N'Ledger Report',
-                        N'bi-journal-text',
-                        N'/Reports_and_analysis/ledger_report',
-                        1,
-                        N'Search and preview bank, customer, work/category and item ledgers',
-                        1,
-                        NULL
-                    );
-            END;
 
             SELECT TOP 1 @ImportExportID = MenuID
             FROM dbo.MenuMaster
