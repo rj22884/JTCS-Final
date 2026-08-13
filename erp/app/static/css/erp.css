@@ -638,6 +638,78 @@ body.jtcs-body .navbar {
   background: transparent;
 }
 
+/* Viewport-fit popups at 100% zoom: header + Save/Cancel stay visible; body scrolls. */
+body.jtcs-body .modal {
+  --jtcs-modal-gap: 0.75rem;
+}
+
+body.jtcs-body .modal:not([class*="-maximized"]) .modal-dialog:not(.modal-fullscreen):not([class*="-maximized"]) {
+  margin-top: var(--jtcs-modal-gap);
+  margin-bottom: var(--jtcs-modal-gap);
+  max-height: calc(100vh - (var(--jtcs-modal-gap) * 2));
+  max-height: calc(100dvh - (var(--jtcs-modal-gap) * 2));
+}
+
+body.jtcs-body .modal:not([class*="-maximized"]) .modal-dialog:not(.modal-fullscreen):not([class*="-maximized"]) .modal-content {
+  max-height: calc(100vh - (var(--jtcs-modal-gap) * 2));
+  max-height: calc(100dvh - (var(--jtcs-modal-gap) * 2));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body.jtcs-body .modal-content > form,
+body.jtcs-body form.modal-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.jtcs-body .modal-content > form > .modal-body,
+body.jtcs-body form.modal-content > .modal-body,
+body.jtcs-body .modal:not([class*="-maximized"]) .modal-dialog:not(.modal-fullscreen):not([class*="-maximized"]) .modal-content > .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+body.jtcs-body .modal-content > .modal-header,
+body.jtcs-body .modal-content > .modal-footer,
+body.jtcs-body .modal-content > form > .modal-header,
+body.jtcs-body .modal-content > form > .modal-footer,
+body.jtcs-body form.modal-content > .modal-header,
+body.jtcs-body form.modal-content > .modal-footer {
+  flex-shrink: 0;
+}
+
+body.jtcs-body .modal .modal-header {
+  padding: 0.55rem 0.9rem;
+}
+
+body.jtcs-body .modal .modal-footer {
+  padding: 0.5rem 0.9rem;
+}
+
+body.jtcs-body .modal .modal-body {
+  padding: 0.7rem 0.9rem;
+}
+
+body.jtcs-body .modal .form-label {
+  margin-bottom: 0.15rem;
+}
+
+body.jtcs-body .modal .form-text {
+  margin-top: 0.12rem;
+  font-size: 0.75rem;
+}
+
+body.jtcs-body .modal textarea.form-control {
+  min-height: 2.25rem;
+}
+
 .jtcs-report-card i {
   font-size: 1.35rem;
   color: var(--jtcs-secondary);

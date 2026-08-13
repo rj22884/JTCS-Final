@@ -505,6 +505,8 @@ class OthersBankCashService:
 
         amount = self._decimal(form.get("Amount"))
         remarks = self._clean(form.get("Remarks"), 500)
+        if purpose.casefold() == "other" and len(remarks or "") < 10:
+            raise ValueError("If you select Other, the Remarks field is required.")
         entry_id_raw = form.get("EntryID") or form.get("entry_id")
         entry_id = None
         if entry_id_raw not in (None, ""):

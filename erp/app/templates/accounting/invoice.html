@@ -5,7 +5,7 @@
 {% set party_label = 'Supplier' if is_purchase else 'Customer' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260811invhub6">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260813invline1">
 {% endblock %}
 
 {# Ribbon left empty so the toolbar row collapses and bill moves up. #}
@@ -305,5 +305,5 @@
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260811invhub6"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260813invline2"></script>
 {% endblock %}

@@ -86,22 +86,50 @@ class GstInvoicePdfService:
             "pay_account_type": header.get("PayAccountType") or "",
             "pay_upi_id": header.get("PayUpiId") or "",
             "lines": [
-                {
-                    "sr_no": ln["SrNo"],
-                    "item_id": ln.get("ItemID"),
-                    "particulars": ln["Particulars"],
-                    "hsn_sac": ln.get("HsnSac") or "",
-                    "unit": ln.get("Unit") or "",
-                    "qty": float(ln.get("Qty") or 0),
-                    "rate": float(ln.get("Rate") or 0),
-                    "discount_amount": float(ln.get("DiscountAmount") or 0),
-                    "taxable_value": float(ln.get("TaxableValue") or 0),
-                    "gst_rate_percent": float(ln.get("GstRatePercent") or 0),
-                }
-                for ln in lines
+                self._pdf_line_from_build(ln) for ln in lines
             ],
         }
         return self._render_pdf(data), f"Invoice-Preview.pdf"
+
+    def _pdf_line_from_build(self, ln: dict) -> dict:
+        item_id = ln.get("ItemID")
+        item_name = ""
+        if item_id:
+            item = self.invoice_service.item_repo.get_by_id(item_id)
+            if item:
+                item_name = item.ItemName or ""
+        return {
+            "sr_no": ln["SrNo"],
+            "item_id": item_id,
+            "item_name": item_name,
+            "tax_period": ln.get("TaxPeriod") or "",
+            "quarter": ln.get("Quarter") or "",
+            "month": ln.get("Month") or "",
+            "particulars": ln["Particulars"],
+            "hsn_sac": ln.get("HsnSac") or "",
+            "unit": ln.get("Unit") or "",
+            "qty": float(ln.get("Qty") or 0),
+            "rate": float(ln.get("Rate") or 0),
+            "discount_amount": float(ln.get("DiscountAmount") or 0),
+            "taxable_value": float(ln.get("TaxableValue") or 0),
+            "gst_rate_percent": float(ln.get("GstRatePercent") or 0),
+        }
+
+    @staticmethod
+    def _pdf_escape(value: str) -> str:
+        return (
+            (value or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    def _particulars_paragraph(self, line: dict, cell: ParagraphStyle) -> Paragraph:
+        main, extra = GstInvoiceService.line_particulars_parts(line)
+        html = self._pdf_escape(main or "—")
+        if extra:
+            html += f"<br/>({self._pdf_escape(extra)})"
+        return Paragraph(html, cell)
 
     def _upi_qr_png_bytes(self, data: dict) -> bytes | None:
         upi = (data.get("pay_upi_id") or "").strip()
@@ -190,7 +218,7 @@ class GstInvoicePdfService:
             parent=styles["Normal"],
             fontName="Helvetica",
             fontSize=8,
-            leading=10,
+            leading=11,
         )
         cell_b = ParagraphStyle("CellB", parent=cell, fontName="Helvetica-Bold")
 
@@ -322,7 +350,7 @@ class GstInvoicePdfService:
             table_data.append(
                 [
                     Paragraph(str(line.get("sr_no") or ""), cell),
-                    Paragraph(line.get("particulars") or "—", cell),
+                    self._particulars_paragraph(line, cell),
                     Paragraph(hsn, cell),
                     Paragraph(f"{self._fmt(line.get('qty'))} {line.get('unit') or ''}", cell),
                     Paragraph(self._fmt(line.get("rate")), cell),
@@ -342,7 +370,7 @@ class GstInvoicePdfService:
                     ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#154375")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                     ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
                     ("TOPPADDING", (0, 0), (-1, -1), 4),
                     ("BOTTOMPADDING", (0, 0), (-1, -1), 4),

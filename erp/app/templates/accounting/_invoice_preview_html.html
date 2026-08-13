@@ -70,7 +70,12 @@
       {% for line in invoice.lines or [] %}
       <tr>
         <td>{{ line.sr_no }}</td>
-        <td>{{ line.particulars or dash }}</td>
+        <td>
+          {{ line.particulars_display or line.particulars or dash }}
+          {% if line.particulars_extra %}
+          <span class="inv-html-line-extra">({{ line.particulars_extra }})</span>
+          {% endif %}
+        </td>
         <td>{{ line.hsn_sac or '' }}</td>
         <td>{{ money(line.qty) }} {{ line.unit or '' }}</td>
         <td class="text-end">{{ money(line.rate) }}</td>

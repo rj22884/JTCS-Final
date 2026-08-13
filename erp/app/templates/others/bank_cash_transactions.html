@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/bank_cash_transactions.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bank_cash_transactions.css') }}?v=20260813obcui1">
 {% endblock %}
 
 {% block content %}
@@ -108,8 +108,8 @@
             </div>
           </div>
 
-          <div class="obc-subsection mb-3">
-            <div class="obc-subsection-title">Credit (Source / Money Out)</div>
+          <div class="obc-subsection obc-subsection-credit mb-3">
+            <div class="obc-subsection-title"><i class="bi bi-box-arrow-up-right"></i> Credit (Source / Money Out)</div>
             <div class="row g-3">
               <div class="col-md-8">
                 <label class="form-label obc-required" for="obcCreditAccount">Credit Account</label>
@@ -137,8 +137,8 @@
             </div>
           </div>
 
-          <div class="obc-subsection mb-3">
-            <div class="obc-subsection-title">Debit (Destination / Money In)</div>
+          <div class="obc-subsection obc-subsection-debit mb-3">
+            <div class="obc-subsection-title"><i class="bi bi-box-arrow-in-down-left"></i> Debit (Destination / Money In)</div>
             <div class="row g-3">
               <div class="col-12">
                 <label class="form-label obc-required" for="obcDebitAccount">Debit Account</label>
@@ -160,9 +160,10 @@
             </div>
           </div>
 
-          <div class="mb-2">
+          <div class="obc-subsection obc-subsection-remarks mb-0">
             <label class="form-label" for="obcRemarks">Remarks</label>
             <textarea class="form-control" id="obcRemarks" name="Remarks" rows="2" maxlength="500"></textarea>
+            <div class="form-text d-none" id="obcRemarksHint">Required when Purpose is Other — at least 10 characters.</div>
           </div>
         </form>
       </div>
@@ -191,5 +192,5 @@
   };
   window.OBC_AUTO_LOAD_ENTRY_ID = {{ (load_entry_id if load_entry_id is defined else none) | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}"></script>
+<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}?v=20260813obcui1"></script>
 {% endblock %}

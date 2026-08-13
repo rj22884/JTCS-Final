@@ -26,3 +26,14 @@
 #bankMasterModal .btn-close {
   filter: invert(1);
 }
+
+#bankMasterModal .form-control,
+#bankMasterModal .form-select {
+  min-height: 1.85rem;
+  padding-top: 0.22rem;
+  padding-bottom: 0.22rem;
+}
+
+#bankMasterModal textarea.form-control {
+  min-height: 2.1rem;
+}

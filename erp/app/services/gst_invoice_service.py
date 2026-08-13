@@ -125,6 +125,40 @@ class GstInvoiceService:
             return Decimal(default)
 
     @staticmethod
+    def _line_text(*values) -> str:
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    @classmethod
+    def line_particulars_parts(cls, line: dict) -> tuple[str, str]:
+        """Item name on the first line; tax year / quarter / month / notes in brackets."""
+        item_name = cls._line_text(line.get("item_name"), line.get("ItemName"))
+        particulars = cls._line_text(line.get("particulars"), line.get("Particulars"))
+        tax_period = cls._line_text(line.get("tax_period"), line.get("TaxPeriod"))
+        quarter = cls._line_text(line.get("quarter"), line.get("Quarter"))
+        month = cls._line_text(line.get("month"), line.get("Month"))
+        main = item_name or particulars or "—"
+        extras: list[str] = []
+        if tax_period:
+            extras.append(tax_period)
+        if quarter:
+            extras.append(quarter)
+        if month:
+            extras.append(month)
+        if (
+            particulars
+            and item_name
+            and particulars.casefold() != item_name.casefold()
+        ):
+            extras.append(particulars)
+        return main, ", ".join(extras)
+
+    @staticmethod
     def company_profile() -> dict[str, str]:
         cfg = current_app.config
         return {
@@ -355,25 +389,45 @@ class GstInvoiceService:
                 else None
             ),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
-            "lines": [
-                {
-                    "sr_no": ln.SrNo,
-                    "item_id": ln.ItemID,
-                    "tax_period": getattr(ln, "TaxPeriod", None) or "",
-                    "quarter": getattr(ln, "Quarter", None) or "",
-                    "month": getattr(ln, "Month", None) or "",
-                    "particulars": ln.Particulars,
-                    "hsn_sac": ln.HsnSac or "",
-                    "unit": ln.Unit or "",
-                    "qty": float(ln.Qty or 0),
-                    "rate": float(ln.Rate or 0),
-                    "discount_amount": float(ln.DiscountAmount or 0),
-                    "taxable_value": float(ln.TaxableValue or 0),
-                    "gst_rate_percent": float(ln.GstRatePercent or 0),
-                }
-                for ln in lines
-            ],
+            "lines": self._serialize_lines(lines),
         }
+
+    def _item_names_by_id(self, item_ids: list) -> dict[int, str]:
+        names: dict[int, str] = {}
+        for item_id in {iid for iid in item_ids if iid}:
+            item = self.item_repo.get_by_id(item_id)
+            if item:
+                names[int(item_id)] = item.ItemName or ""
+        return names
+
+    def _serialize_lines(self, lines: list) -> list[dict]:
+        item_names = self._item_names_by_id(
+            [getattr(ln, "ItemID", None) for ln in lines]
+        )
+        out: list[dict] = []
+        for ln in lines:
+            item_id = getattr(ln, "ItemID", None)
+            row = {
+                "sr_no": ln.SrNo,
+                "item_id": item_id,
+                "item_name": item_names.get(int(item_id), "") if item_id else "",
+                "tax_period": getattr(ln, "TaxPeriod", None) or "",
+                "quarter": getattr(ln, "Quarter", None) or "",
+                "month": getattr(ln, "Month", None) or "",
+                "particulars": ln.Particulars,
+                "hsn_sac": ln.HsnSac or "",
+                "unit": ln.Unit or "",
+                "qty": float(ln.Qty or 0),
+                "rate": float(ln.Rate or 0),
+                "discount_amount": float(ln.DiscountAmount or 0),
+                "taxable_value": float(ln.TaxableValue or 0),
+                "gst_rate_percent": float(ln.GstRatePercent or 0),
+            }
+            display, extra = self.line_particulars_parts(row)
+            row["particulars_display"] = display
+            row["particulars_extra"] = extra
+            out.append(row)
+        return out
 
     def list_records(
         self,

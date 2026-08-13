@@ -462,14 +462,27 @@
   font-weight: 700;
 }
 
-/* HTML preview accents */
+/* HTML preview — A4 sheet (same as PDF) */
 .inv-html-preview {
   color: #1c2833;
   font-size: 12px;
   line-height: 1.45;
-  max-width: 820px;
+  width: 210mm;
+  min-height: 297mm;
+  max-width: 210mm;
   margin: 0 auto;
+  padding: 10mm 12mm 12mm;
+  box-sizing: border-box;
   background: #fff;
+  box-shadow: 0 1px 10px rgba(11, 37, 69, 0.18);
+  flex-shrink: 0;
+}
+.inv-html-line-extra {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #1c2833;
 }
 .inv-html-meta { font-size: 11px; color: #5d6d7e; margin-bottom: 8px; }
 .inv-html-top {
@@ -512,7 +525,7 @@
 .inv-html-items td {
   border: 1px solid #5d6d7e;
   padding: 5px;
-  vertical-align: middle;
+  vertical-align: top;
 }
 .inv-html-words { margin-bottom: 8px; }
 .inv-html-totals {
@@ -542,8 +555,30 @@
   font-size: 11px;
   color: #5d6d7e;
 }
-#invPreviewModal .modal-dialog { max-width: 900px; }
-#invPreviewBody { min-height: 200px; background: #f8f9fa; }
+#invPreviewModal .modal-dialog {
+  max-width: min(230mm, 96vw);
+}
+#invPreviewBody {
+  min-height: 200px;
+  background: #cfd4da;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 16px 12px;
+  overflow: auto;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  .inv-html-preview {
+    box-shadow: none;
+    width: 210mm;
+    min-height: 297mm;
+  }
+}
 
 @media (max-width: 1024px) {
   .inv-workspace-body {

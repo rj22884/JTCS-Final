@@ -71,6 +71,22 @@
     return String(template || "").replace("/0", "/" + String(id));
   }
 
+  function isOtherPurpose() {
+    return String(els.purpose?.value || "").trim().toLowerCase() === "other";
+  }
+
+  function syncOtherRemarksUi() {
+    const other = isOtherPurpose();
+    const label = document.querySelector('label[for="obcRemarks"]');
+    if (label) label.classList.toggle("obc-required", other);
+    if (els.remarks) {
+      els.remarks.classList.toggle("obc-remarks-required", other);
+      els.remarks.placeholder = other ? "Minimum 10 characters" : "";
+    }
+    const hint = document.getElementById("obcRemarksHint");
+    if (hint) hint.classList.toggle("d-none", !other);
+  }
+
   async function parseJsonResponse(res) {
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
@@ -351,6 +367,7 @@
         })
         .join("");
     if (selectedPurpose) els.purpose.value = selectedPurpose;
+    syncOtherRemarksUi();
   }
 
   async function openNew() {
@@ -398,6 +415,11 @@
   async function saveEntry() {
     if (!els.form.checkValidity()) {
       els.form.reportValidity();
+      return;
+    }
+    if (isOtherPurpose() && String(els.remarks?.value || "").trim().length < 10) {
+      alert("If you select Other, the Remarks field is required.");
+      els.remarks?.focus();
       return;
     }
     if (els.creditAccount.value && els.creditAccount.value === els.debitAccount.value) {
@@ -479,6 +501,9 @@
     els.workDate.addEventListener("change", function () {
       refreshVoucher().catch(function () {});
     });
+  }
+  if (els.purpose) {
+    els.purpose.addEventListener("change", syncOtherRemarksUi);
   }
 
   const gridTable = document.getElementById("obcDataGrid");

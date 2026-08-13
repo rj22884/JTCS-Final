@@ -54,13 +54,70 @@
   color: #c62828;
 }
 
+.obc-entry-modal {
+  border: 0;
+  overflow: hidden;
+}
+
 .obc-entry-modal .modal-header {
-  background: linear-gradient(90deg, #0d47a1, #1565c0);
+  background: linear-gradient(90deg, #0b2545, #153a63);
   color: #fff;
+}
+
+.obc-entry-modal .modal-footer {
+  background: #f7fafc;
+  border-top: 1px solid #d7e0ea;
 }
 
 .obc-entry-modal .btn-close {
   filter: invert(1);
+}
+
+.obc-entry-form .row.g-3 {
+  --bs-gutter-y: 0.65rem;
+}
+
+.obc-subsection {
+  border: 1px solid #d6e4f5;
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem 0.85rem;
+  background: #f7fbff;
+}
+
+.obc-subsection-credit {
+  border-color: #ffd2b0;
+  background: linear-gradient(180deg, #fff4eb, #fff);
+}
+
+.obc-subsection-credit .obc-subsection-title {
+  color: #e85d00;
+}
+
+.obc-subsection-debit {
+  border-color: #b9d7ef;
+  background: linear-gradient(180deg, #e8f3fc, #fff);
+}
+
+.obc-subsection-remarks {
+  border-color: #d7e0ea;
+  background: #fff;
+}
+
+.obc-subsection-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #1565c0;
+  margin-bottom: 0.55rem;
+}
+
+.obc-remarks-required {
+  border-color: #e85d00;
+  box-shadow: 0 0 0 0.12rem rgba(232, 93, 0, 0.12);
 }
 
 .obc-modal-header-actions {
@@ -108,22 +165,6 @@
   flex: 1 1 auto;
   overflow: auto;
   min-height: 0;
-}
-
-.obc-subsection {
-  border: 1px solid #d6e4f5;
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
-  background: #f7fbff;
-}
-
-.obc-subsection-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #1565c0;
-  margin-bottom: 0.65rem;
 }
 
 .obc-amt-credit {

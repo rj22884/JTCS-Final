@@ -330,7 +330,6 @@
         syncServicePeriodFields(tr);
         return;
       }
-      tr.querySelector(".inv-particulars").value = it.item_name || "";
       tr.querySelector(".inv-hsn").value = it.hsn_sac || "";
       tr.querySelector(".inv-unit").value = it.unit || "NOS";
       tr.querySelector(".inv-rate").value = it.default_rate != null ? it.default_rate : 0;
