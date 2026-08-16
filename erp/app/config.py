@@ -109,6 +109,26 @@ class Config:
     CRM_WHATSAPP_MEDIA_FOLDER = UPLOAD_FOLDER / "whatsapp_media"
     CRM_EMAIL_ATTACHMENTS_FOLDER = UPLOAD_FOLDER / "email_attachments"
 
+    # Website Sales Executive applications (SQLite from JTCS Web Page recruitment)
+    RECRUITMENT_DB_PATH = Path(
+        (os.getenv("RECRUITMENT_DB_PATH") or r"D:\JTCS Web Page\recruitment\var\recruitment.db")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
+    RECRUITMENT_UPLOAD_DIR = Path(
+        (os.getenv("RECRUITMENT_UPLOAD_DIR") or r"D:\JTCS Web Page\recruitment\var\uploads")
+        .strip()
+        .strip('"')
+        .strip("'")
+    )
+    RECRUITMENT_ADMIN_URL = (
+        os.getenv("RECRUITMENT_ADMIN_URL") or "http://localhost:5050/recruitment/admin/applications"
+    ).strip().strip('"').strip("'")
+    RECRUITMENT_ADMIN_LOGIN_URL = (
+        os.getenv("RECRUITMENT_ADMIN_LOGIN_URL") or "http://localhost:5050/recruitment/admin/login"
+    ).strip().strip('"').strip("'")
+
     # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
     WEBSITE_INTAKE_API_KEY = (os.getenv("WEBSITE_INTAKE_API_KEY") or "").strip().strip('"').strip("'")
     NOTIFICATION_POLL_SECONDS = int(os.getenv("NOTIFICATION_POLL_SECONDS", "15"))

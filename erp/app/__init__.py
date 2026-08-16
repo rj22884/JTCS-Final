@@ -52,6 +52,7 @@ from app.routes.software_update import bp as software_update_bp
 from app.routes.utility import bp as utility_bp
 from app.routes.seo_keywords import bp as seo_keywords_bp
 from app.routes.seo_api import bp as seo_api_bp
+from app.routes.recruitment_applications import bp as recruitment_applications_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -150,6 +151,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(utility_bp)
     app.register_blueprint(seo_keywords_bp)
     app.register_blueprint(seo_api_bp)
+    app.register_blueprint(recruitment_applications_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)
@@ -277,6 +279,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Client/Customer Activity menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.recruitment_applications import ensure_recruitment_menu
+
+            ensure_recruitment_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Sales Executive Applications menu ensure skipped: %s", exc)
 
         try:
             from app.routes.menu_customization import ensure_menu_customization_menu

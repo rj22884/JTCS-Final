@@ -1,0 +1,96 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('recruitment_applications.index') }}" class="jtcs-ribbon-btn" title="Back">
+    <i class="bi bi-arrow-left"></i>
+    <span>Back</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h5 mb-1">{{ app.application_number }}</h1>
+    <p class="small text-muted mb-0">{{ app.job_title }} · {{ app.application_status }}</p>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {% if app.resume_stored_name %}
+    <a class="btn btn-sm btn-primary" href="{{ url_for('recruitment_applications.resume', application_id=app.application_id) }}">Download resume</a>
+    {% endif %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('recruitment_applications.index') }}">All applications</a>
+  </div>
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Personal Information</h2>
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Name</strong><div>{{ app.name }}</div></div>
+    <div class="col-md-4"><strong>Father's Name</strong><div>{{ app.father_name }}</div></div>
+    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob }}</div></div>
+    <div class="col-md-4"><strong>Gender</strong><div>{{ app.gender }}</div></div>
+    <div class="col-md-4"><strong>Mobile</strong><div>{{ app.mobile }}</div></div>
+    <div class="col-md-4"><strong>Email</strong><div>{{ app.email }}</div></div>
+    <div class="col-12"><strong>Address</strong><div>{{ app.address }}, {{ app.city }}, {{ app.state }} {{ app.pin_code }}</div></div>
+  </div>
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Education</h2>
+  {% for edu in app.education %}
+  <p class="small mb-1"><strong>{{ edu.education_type }}:</strong> {{ edu.qualification }} · {{ edu.university_board or '—' }} · {{ edu.passing_year or '—' }} · {{ edu.percentage_cgpa or '—' }}</p>
+  {% else %}
+  <p class="small text-muted mb-0">No education records.</p>
+  {% endfor %}
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Experience</h2>
+  {% set exp = app.experience %}
+  {% if exp %}
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Sales experience</strong><div>{{ exp.sales_experience_years or 0 }} years {{ exp.sales_experience_months or 0 }} months</div></div>
+    <div class="col-md-4"><strong>Previous company</strong><div>{{ exp.previous_company or '—' }}</div></div>
+    <div class="col-md-4"><strong>Designation</strong><div>{{ exp.previous_designation or '—' }}</div></div>
+    <div class="col-12"><strong>Responsibilities</strong><div>{{ exp.responsibilities or '—' }}</div></div>
+  </div>
+  {% else %}
+  <p class="small text-muted mb-0">No experience record.</p>
+  {% endif %}
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Application</h2>
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Expected salary</strong><div>{{ app.expected_salary or '—' }}</div></div>
+    <div class="col-md-4"><strong>Notice period</strong><div>{{ app.notice_period or '—' }}</div></div>
+    <div class="col-md-4"><strong>Employment status</strong><div>{{ app.current_employment_status or '—' }}</div></div>
+    <div class="col-md-4"><strong>Work in Haldwani</strong><div>{{ 'Yes' if app.willing_to_work_haldwani else 'No' }}</div></div>
+    <div class="col-md-4"><strong>Willing to travel</strong><div>{{ 'Yes' if app.willing_to_travel else 'No' }}</div></div>
+    <div class="col-md-4"><strong>Source</strong><div>{{ app.source or '—' }}</div></div>
+    <div class="col-12"><strong>About</strong><div>{{ app.about_candidate or '—' }}</div></div>
+    <div class="col-12"><strong>Suitability</strong><div>{{ app.suitability_answer or '—' }}</div></div>
+  </div>
+</div>
+
+{% if app.notes %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Internal notes</h2>
+  {% for note in app.notes %}
+  <p class="small mb-2"><strong>{{ note.created_by }}</strong> · {{ note.created_at }}<br>{{ note.note }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if app.history %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Status history</h2>
+  <ul class="small mb-0">
+    {% for h in app.history %}
+    <li>{{ h.changed_at }} — {{ h.old_status or '—' }} → {{ h.new_status }} ({{ h.changed_by or '—' }})</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}
