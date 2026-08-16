@@ -6,18 +6,22 @@ from flask import (
     Blueprint,
     abort,
     current_app,
+    flash,
     redirect,
     render_template,
     request,
     send_file,
     session,
+    url_for,
 )
 from sqlalchemy import text
 
 from app.decorators import admin_required, login_required
 from app.extensions import db
+from app.repositories.user_repository import UserRepository
 from app.services import recruitment_applications_service as rec
 from app.services.menu_service import MenuService
+from app.services.recruitment_sso import make_sso_token, recruitment_public_base, sso_secret
 from app.whats_new import publish_whats_new
 
 bp = Blueprint("recruitment_applications", __name__, url_prefix="/admin/recruitment")
@@ -188,7 +192,7 @@ def index():
         error=error,
         search=search,
         status=status,
-        admin_url=current_app.config.get("RECRUITMENT_ADMIN_URL") or "",
+        admin_url=url_for("recruitment_applications.admin_login"),
     )
 
 
@@ -200,11 +204,17 @@ def admin_login():
         _ensure_recruitment_menu()
     except Exception:
         db.session.rollback()
-    target = (
-        current_app.config.get("RECRUITMENT_ADMIN_LOGIN_URL")
-        or "http://localhost:5050/recruitment/admin/login"
-    ).strip()
-    return redirect(target)
+    user = UserRepository().get_by_id(session.get("user_id"))
+    email = ((getattr(user, "EmailID", None) or "") if user else "").strip().lower()
+    name = (session.get("user_name") or getattr(user, "FullName", None) or "JTCS Admin").strip()
+    if not email:
+        flash("Your ERP user has no email, so recruitment admin cannot open automatically.", "danger")
+        return redirect(url_for("recruitment_applications.index"))
+    from urllib.parse import quote
+
+    token = make_sso_token(email, name, session.get("role") or "admin", sso_secret())
+    base = recruitment_public_base()
+    return redirect(f"{base}/recruitment/admin/sso?token={quote(token, safe='')}")
 
 
 @bp.route("/<int:application_id>", methods=["GET"], strict_slashes=False)

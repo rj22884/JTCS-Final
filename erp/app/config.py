@@ -110,23 +110,29 @@ class Config:
     CRM_EMAIL_ATTACHMENTS_FOLDER = UPLOAD_FOLDER / "email_attachments"
 
     # Website Sales Executive applications (SQLite from JTCS Web Page recruitment)
-    RECRUITMENT_DB_PATH = Path(
-        (os.getenv("RECRUITMENT_DB_PATH") or r"D:\JTCS Web Page\recruitment\var\recruitment.db")
-        .strip()
-        .strip('"')
-        .strip("'")
+    _rec_db_env = (os.getenv("RECRUITMENT_DB_PATH") or "").strip().strip('"').strip("'")
+    _rec_up_env = (os.getenv("RECRUITMENT_UPLOAD_DIR") or "").strip().strip('"').strip("'")
+    _rec_db_local = Path(r"D:\JTCS Web Page\recruitment\var\recruitment.db")
+    _rec_db_vps = Path("/var/www/jtcsxpert.com/recruitment/var/recruitment.db")
+    _rec_up_local = Path(r"D:\JTCS Web Page\recruitment\var\uploads")
+    _rec_up_vps = Path("/var/www/jtcsxpert.com/recruitment/var/uploads")
+    RECRUITMENT_DB_PATH = Path(_rec_db_env) if _rec_db_env else (
+        _rec_db_local if _rec_db_local.is_file() else _rec_db_vps
     )
-    RECRUITMENT_UPLOAD_DIR = Path(
-        (os.getenv("RECRUITMENT_UPLOAD_DIR") or r"D:\JTCS Web Page\recruitment\var\uploads")
-        .strip()
-        .strip('"')
-        .strip("'")
+    RECRUITMENT_UPLOAD_DIR = Path(_rec_up_env) if _rec_up_env else (
+        _rec_up_local if _rec_up_local.is_dir() else _rec_up_vps
     )
     RECRUITMENT_ADMIN_URL = (
-        os.getenv("RECRUITMENT_ADMIN_URL") or "http://localhost:5050/recruitment/admin/applications"
+        os.getenv("RECRUITMENT_ADMIN_URL") or ""
     ).strip().strip('"').strip("'")
     RECRUITMENT_ADMIN_LOGIN_URL = (
-        os.getenv("RECRUITMENT_ADMIN_LOGIN_URL") or "http://localhost:5050/recruitment/admin/login"
+        os.getenv("RECRUITMENT_ADMIN_LOGIN_URL") or ""
+    ).strip().strip('"').strip("'")
+    RECRUITMENT_PUBLIC_URL = (
+        os.getenv("RECRUITMENT_PUBLIC_URL") or ""
+    ).strip().strip('"').strip("'")
+    RECRUITMENT_SSO_SECRET = (
+        os.getenv("RECRUITMENT_SSO_SECRET") or "jtcs-xpert-recruitment-sso-v1"
     ).strip().strip('"').strip("'")
 
     # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
