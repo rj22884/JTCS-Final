@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from calendar import month_abbr
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select, text
@@ -1771,3 +1772,216 @@ class DashboardService:
         except Exception:
             db.session.rollback()
             raise
+
+    @staticmethod
+    def _money(value) -> float:
+        return float(Decimal(str(value or 0)).quantize(Decimal("0.01")))
+
+    def get_analytics(
+        self,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict:
+        """Aggregated posted daily-transaction series for dashboard charts."""
+        date_from, date_to = self._normalize_period(date_from, date_to)
+        span_days = (date_to - date_from).days + 1
+        monthly = span_days > 45
+
+        daily_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CAST(TransactionDate AS DATE) AS txn_date,
+                    ISNULL(SUM(ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0)), 0) AS collection_amount,
+                    ISNULL(SUM(ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0)), 0) AS income_amount,
+                    ISNULL(SUM(ISNULL(ExpenseAmount, 0)), 0) AS expense_amount
+                FROM JTCSDailyTransaction
+                WHERE TransactionDate >= :date_from
+                  AND TransactionDate <= :date_to
+                  AND Status = N'Posted'
+                GROUP BY CAST(TransactionDate AS DATE)
+                ORDER BY CAST(TransactionDate AS DATE)
+                """
+            ),
+            {"date_from": date_from, "date_to": date_to},
+        ).mappings().all()
+
+        by_date: dict[date, dict[str, Decimal]] = {}
+        for row in daily_rows:
+            txn_date = row["txn_date"]
+            if hasattr(txn_date, "date"):
+                txn_date = txn_date.date()
+            by_date[txn_date] = {
+                "collection": Decimal(str(row["collection_amount"] or 0)),
+                "income": Decimal(str(row["income_amount"] or 0)),
+                "expense": Decimal(str(row["expense_amount"] or 0)),
+            }
+
+        collection_labels: list[str] = []
+        collection_values: list[float] = []
+        has_collection = any(v["collection"] != 0 for v in by_date.values())
+        if has_collection:
+            cursor = date_from
+            while cursor <= date_to:
+                collection_labels.append(cursor.strftime("%d-%b"))
+                collection_values.append(
+                    self._money(by_date.get(cursor, {}).get("collection", 0))
+                )
+                cursor += timedelta(days=1)
+
+        income_labels: list[str] = []
+        income_values: list[float] = []
+        expense_values: list[float] = []
+        net_values: list[float] = []
+        has_pl = any(v["income"] != 0 or v["expense"] != 0 for v in by_date.values())
+        if has_pl:
+            if monthly:
+                buckets: dict[date, dict[str, Decimal]] = {}
+                cursor = date_from
+                while cursor <= date_to:
+                    key = date(cursor.year, cursor.month, 1)
+                    bucket = buckets.setdefault(
+                        key, {"income": Decimal("0"), "expense": Decimal("0")}
+                    )
+                    day = by_date.get(cursor)
+                    if day:
+                        bucket["income"] += day["income"]
+                        bucket["expense"] += day["expense"]
+                    cursor += timedelta(days=1)
+                for key in sorted(buckets):
+                    income_labels.append(f"{month_abbr[key.month]} {key.year}")
+                    inc = buckets[key]["income"]
+                    exp = buckets[key]["expense"]
+                    income_values.append(self._money(inc))
+                    expense_values.append(self._money(exp))
+                    net_values.append(self._money(inc - exp))
+            else:
+                cursor = date_from
+                while cursor <= date_to:
+                    income_labels.append(cursor.strftime("%d-%b"))
+                    day = by_date.get(cursor, {})
+                    inc = day.get("income", Decimal("0"))
+                    exp = day.get("expense", Decimal("0"))
+                    income_values.append(self._money(inc))
+                    expense_values.append(self._money(exp))
+                    net_values.append(self._money(inc - exp))
+                    cursor += timedelta(days=1)
+
+        activity_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CASE
+                        WHEN NULLIF(LTRIM(RTRIM(WorkType)), N'') IS NULL THEN N'Other'
+                        ELSE LTRIM(RTRIM(WorkType))
+                    END AS activity,
+                    ISNULL(SUM(ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0)), 0) AS amount
+                FROM JTCSDailyTransaction
+                WHERE TransactionDate >= :date_from
+                  AND TransactionDate <= :date_to
+                  AND Status = N'Posted'
+                GROUP BY
+                    CASE
+                        WHEN NULLIF(LTRIM(RTRIM(WorkType)), N'') IS NULL THEN N'Other'
+                        ELSE LTRIM(RTRIM(WorkType))
+                    END
+                HAVING ISNULL(SUM(ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0)), 0) <> 0
+                ORDER BY amount DESC
+                """
+            ),
+            {"date_from": date_from, "date_to": date_to},
+        ).mappings().all()
+
+        activity_labels = [str(row["activity"] or "Other") for row in activity_rows]
+        activity_values = [self._money(row["amount"]) for row in activity_rows]
+        if len(activity_labels) > 10:
+            other_total = sum(activity_values[9:])
+            activity_labels = activity_labels[:9] + ["Other"]
+            activity_values = activity_values[:9] + [round(other_total, 2)]
+
+        payment_rows = db.session.execute(
+            text(
+                """
+                SELECT payment_mode, ISNULL(SUM(amount), 0) AS amount
+                FROM (
+                    SELECT
+                        ISNULL(NULLIF(LTRIM(RTRIM(pm.PaymentModeName)), N''), N'Unspecified') AS payment_mode,
+                        ISNULL(p.Amount, 0) AS amount
+                    FROM JTCSDailyTransaction d
+                    INNER JOIN JTCSDailyTransactionPayment p
+                        ON p.TransactionID = d.TransactionID
+                    LEFT JOIN PaymentModeMaster pm
+                        ON pm.PaymentModeID = COALESCE(p.PaymentModeID, d.PaymentModeID)
+                    WHERE d.TransactionDate >= :date_from
+                      AND d.TransactionDate <= :date_to
+                      AND d.Status = N'Posted'
+                      AND ISNULL(d.ExpenseAmount, 0) = 0
+                      AND ISNULL(p.Amount, 0) <> 0
+                    UNION ALL
+                    SELECT
+                        ISNULL(NULLIF(LTRIM(RTRIM(pm.PaymentModeName)), N''), N'Unspecified') AS payment_mode,
+                        ISNULL(d.IncomeAmount, 0) + ISNULL(d.SaleAmount, 0) AS amount
+                    FROM JTCSDailyTransaction d
+                    LEFT JOIN PaymentModeMaster pm
+                        ON pm.PaymentModeID = d.PaymentModeID
+                    WHERE d.TransactionDate >= :date_from
+                      AND d.TransactionDate <= :date_to
+                      AND d.Status = N'Posted'
+                      AND ISNULL(d.IncomeAmount, 0) + ISNULL(d.SaleAmount, 0) <> 0
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM JTCSDailyTransactionPayment p
+                            WHERE p.TransactionID = d.TransactionID
+                      )
+                ) src
+                GROUP BY payment_mode
+                HAVING ISNULL(SUM(amount), 0) <> 0
+                ORDER BY amount DESC
+                """
+            ),
+            {"date_from": date_from, "date_to": date_to},
+        ).mappings().all()
+
+        payment_labels = [
+            str(row["payment_mode"] or "Unspecified") for row in payment_rows
+        ]
+        payment_values = [self._money(row["amount"]) for row in payment_rows]
+
+        collection_total = round(sum(collection_values), 2)
+        income_total = round(sum(income_values), 2)
+        expense_total = round(sum(expense_values), 2)
+
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "group": "month" if monthly else "day",
+            "daily_collection": {
+                "labels": collection_labels,
+                "values": collection_values,
+                "total": collection_total,
+                "empty": not has_collection,
+            },
+            "by_activity": {
+                "labels": activity_labels,
+                "values": activity_values,
+                "chart": "doughnut" if 0 < len(activity_labels) <= 7 else "bar",
+                "total": round(sum(activity_values), 2),
+                "empty": not activity_labels,
+            },
+            "income_expense": {
+                "labels": income_labels,
+                "income": income_values,
+                "expense": expense_values,
+                "net": net_values,
+                "income_total": income_total,
+                "expense_total": expense_total,
+                "net_total": round(income_total - expense_total, 2),
+                "empty": not has_pl,
+            },
+            "payment_mode": {
+                "labels": payment_labels,
+                "values": payment_values,
+                "total": round(sum(payment_values), 2),
+                "empty": not payment_labels,
+            },
+        }

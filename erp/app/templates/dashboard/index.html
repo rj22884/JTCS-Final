@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260817icon1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260817charts1">
 {% endblock %}
 
 {% block content %}
@@ -117,6 +117,10 @@
         <div class="dash-period-row dash-period-row-presets" role="group" aria-label="Period presets">
           <a href="{{ url_for('dashboard.index', period='today') }}"
              class="btn btn-sm btn-outline-primary {% if period_preset == 'today' %}active{% endif %}">Today</a>
+          <a href="{{ url_for('dashboard.index', period='last7') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'last7' %}active{% endif %}">Last 7 Days</a>
+          <a href="{{ url_for('dashboard.index', period='last30') }}"
+             class="btn btn-sm btn-outline-primary {% if period_preset == 'last30' %}active{% endif %}">Last 30 Days</a>
           <a href="{{ url_for('dashboard.index', period='month') }}"
              class="btn btn-sm btn-outline-primary {% if period_preset == 'month' %}active{% endif %}">This Month</a>
           <a href="{{ url_for('dashboard.index', period='fy') }}"
@@ -330,6 +334,65 @@
       </div>
     </div>
   </div>
+
+  <section class="dash-analytics" aria-label="Business analytics">
+    <div class="row g-3">
+      <div class="col-lg-8">
+        <div class="jtcs-card dash-chart-card">
+          <div class="dash-chart-head">
+            <h2 class="h6 mb-0">Daily Business Collection</h2>
+            <div class="small text-muted">Posted receipts (income + sales) for the selected period</div>
+          </div>
+          <div class="dash-chart-meta" id="dashChartCollectionMeta"></div>
+          <div class="dash-chart-body dash-chart-body-lg">
+            <div class="dash-chart-state" id="dashChartCollectionState">Loading charts…</div>
+            <canvas id="dashChartCollection" aria-label="Daily business collection"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="jtcs-card dash-chart-card">
+          <div class="dash-chart-head">
+            <h2 class="h6 mb-0">Business by Activity</h2>
+            <div class="small text-muted">Collection by work type already stored in daily transactions</div>
+          </div>
+          <div class="dash-chart-meta" id="dashChartActivityMeta"></div>
+          <div class="dash-chart-body">
+            <div class="dash-chart-state" id="dashChartActivityState">Loading charts…</div>
+            <canvas id="dashChartActivity" aria-label="Business by activity"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row g-3 mt-0">
+      <div class="col-lg-8">
+        <div class="jtcs-card dash-chart-card">
+          <div class="dash-chart-head">
+            <h2 class="h6 mb-0">Income vs Expense</h2>
+            <div class="small text-muted">Posted income + sales versus expenses for the selected period</div>
+          </div>
+          <div class="dash-chart-meta" id="dashChartPlMeta"></div>
+          <div class="dash-chart-body dash-chart-body-lg">
+            <div class="dash-chart-state" id="dashChartPlState">Loading charts…</div>
+            <canvas id="dashChartPl" aria-label="Income versus expense"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-4">
+        <div class="jtcs-card dash-chart-card">
+          <div class="dash-chart-head">
+            <h2 class="h6 mb-0">Collection by Payment Mode</h2>
+            <div class="small text-muted">From Payment Mode Master and daily payment splits</div>
+          </div>
+          <div class="dash-chart-meta" id="dashChartPayMeta"></div>
+          <div class="dash-chart-body">
+            <div class="dash-chart-state" id="dashChartPayState">Loading charts…</div>
+            <canvas id="dashChartPay" aria-label="Collection by payment mode"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div class="modal fade" id="dashMetricModal" tabindex="-1" aria-labelledby="dashMetricModalTitle" aria-hidden="true">
@@ -502,6 +565,7 @@
     systemDate: {{ system_date.isoformat() | tojson }},
     csrfToken: {{ csrf_token() | tojson }},
     detailsUrl: {{ url_for('dashboard.metric_details') | tojson }},
+    analyticsUrl: {{ url_for('dashboard.analytics') | tojson }},
     todayDetailsUrl: {{ url_for('dashboard.today_activity_details') | tojson }},
     createUrl: {{ url_for('dashboard.manual_entry_create') | tojson }},
     updateUrlTemplate: {{ url_for('dashboard.manual_entry_update', entry_id=0) | tojson }},
@@ -533,5 +597,7 @@
     }
   };
 </script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260812bankcolor"></script>
+<script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
 {% endblock %}

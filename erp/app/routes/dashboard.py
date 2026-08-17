@@ -1,7 +1,7 @@
 from calendar import monthrange
-from datetime import date
+from datetime import date, timedelta
 
-from flask import Blueprint, jsonify, render_template, request, session
+from flask import Blueprint, current_app, jsonify, render_template, request, session
 
 from app.decorators import login_required, require_delete_reauth
 from app.services.dashboard_service import DashboardService
@@ -43,6 +43,14 @@ def _resolve_period(dashboard_service: DashboardService) -> tuple[date, date, st
 
     if preset == "month":
         date_from, date_to = dashboard_service.month_bounds(today)
+    elif preset in {"last7", "last_7", "7d"}:
+        date_from = today - timedelta(days=6)
+        date_to = today
+        preset = "last7"
+    elif preset in {"last30", "last_30", "30d"}:
+        date_from = today - timedelta(days=29)
+        date_to = today
+        preset = "last30"
     elif preset == "fy":
         date_from, date_to = dashboard_service.fiscal_year_bounds(today)
         if date_to > today:
@@ -137,6 +145,22 @@ def index():
         integration_health_alerts=integration_health_alerts,
         system_health_alerts=system_health_alerts,
     )
+
+
+@bp.route("/dashboard/api/analytics")
+@login_required
+def analytics():
+    service = DashboardService()
+    date_from = _parse_date(request.args.get("from"))
+    date_to = _parse_date(request.args.get("to"))
+    try:
+        data = service.get_analytics(date_from=date_from, date_to=date_to)
+        return jsonify({"ok": True, **data})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        current_app.logger.exception("Dashboard analytics failed")
+        return jsonify({"ok": False, "error": "Unable to load analytics."}), 500
 
 
 @bp.route("/dashboard/api/metric-details")
