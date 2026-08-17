@@ -59,7 +59,8 @@ class HrApplicationState(db.Model):
 
     __tablename__ = "HrApplicationState"
 
-    ApplicationID: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Natural key = website application id (not SQL Server IDENTITY).
+    ApplicationID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     ApplicationNumber: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
     OverlayStatus: Mapped[str] = mapped_column(Unicode(50), nullable=False)
     UpdatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

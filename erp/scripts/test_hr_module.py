@@ -40,6 +40,23 @@ def main() -> None:
             print(f"TABLE {table}: {'OK' if exists else 'MISSING'}")
             if not exists:
                 failures += 1
+        from app.models.hr import HrApplicationState
+
+        if HrApplicationState.__table__.c.ApplicationID.autoincrement is not False:
+            print("FAIL: HrApplicationState.ApplicationID must not be IDENTITY")
+            failures += 1
+        else:
+            print("MODEL HrApplicationState.ApplicationID autoincrement: False")
+        is_identity = db.session.execute(
+            text(
+                "SELECT COLUMNPROPERTY(OBJECT_ID(N'dbo.HrApplicationState'), "
+                "N'ApplicationID', N'IsIdentity')"
+            )
+        ).scalar()
+        print("SQL HrApplicationState.ApplicationID IsIdentity:", is_identity)
+        if is_identity:
+            print("FAIL: SQL Server table has IDENTITY on ApplicationID")
+            failures += 1
         hr_menu = MenuMaster.query.filter(
             MenuMaster.MenuName == "HR",
             MenuMaster.ParentMenuID.is_(None),
