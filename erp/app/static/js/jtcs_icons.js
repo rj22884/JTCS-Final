@@ -28,6 +28,9 @@
     "bi-sort-down": 1,
     "bi-sort-up": 1,
     "bi-filter": 1,
+    "bi-arrows-fullscreen": 1,
+    "bi-fullscreen": 1,
+    "bi-fullscreen-exit": 1,
   };
 
   var SKIP_ROOTS = "#biPickerModal, .mcust-icon-grid, .mcust-icon-pick, .jtcs-illu-skip, thead, .dash-sort-icon, .dash-th-label";

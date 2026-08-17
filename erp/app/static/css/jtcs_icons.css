@@ -158,6 +158,20 @@ thead svg,
   box-shadow: none !important;
 }
 
+.modal-header .btn > i.bi,
+.modal-header .btn > i.bi.jtcs-illu,
+.modal-header .btn svg,
+.obc-modal-size-btn i.bi,
+.dash-modal-size-btn i.bi {
+  width: 1rem !important;
+  height: 1rem !important;
+  max-width: 1rem !important;
+  max-height: 1rem !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
 /* Dashboard metric cards */
 .dash-metric-btn {
   display: flex;

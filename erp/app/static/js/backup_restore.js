@@ -162,7 +162,13 @@
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!window.confirm(confirmMsg)) return;
     } else {
-      creds = await window.JTCSDeleteConfirm.ask({ message: confirmMsg });
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: confirmMsg,
+        title: "Confirm Restore",
+        confirmLabel: "Confirm Restore",
+        confirmIcon: "bi-arrow-repeat",
+        variant: "warning",
+      });
       if (!creds) return;
     }
 

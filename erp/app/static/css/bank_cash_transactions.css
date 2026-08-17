@@ -134,6 +134,14 @@
   padding: 0.2rem 0.45rem;
 }
 
+.obc-modal-size-btn i.bi,
+.obc-modal-size-btn svg {
+  width: 0.95rem !important;
+  height: 0.95rem !important;
+  max-width: 0.95rem !important;
+  max-height: 0.95rem !important;
+}
+
 .obc-modal-size-btn:hover,
 .obc-modal-size-btn:focus {
   background: rgba(255, 255, 255, 0.15);

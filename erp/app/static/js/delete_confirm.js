@@ -1,12 +1,28 @@
 /**
- * Global delete re-auth: User ID (prefilled) + Password modal.
- * Usage:
+ * Global re-auth checkpoint: User ID (prefilled) + Password modal.
+ * Delete callers keep the default "Confirm Delete" chrome.
+ * Other checkpoints (restore, deactivate, …) can pass title/label/icon/variant.
+ *
  *   const creds = await JTCSDeleteConfirm.ask({ message: "Delete this record?" });
  *   if (!creds) return; // cancelled
- *   // send creds.user_id + creds.password with the delete request
+ *   // send creds.user_id + creds.password with the request
  */
 (function () {
   "use strict";
+
+  var DEFAULT_CHROME = {
+    title: "Confirm Delete",
+    confirmLabel: "Confirm Delete",
+    confirmIcon: "bi-trash",
+    variant: "danger",
+  };
+
+  var VARIANT_BTN = {
+    danger: "btn btn-danger btn-sm",
+    warning: "btn btn-warning btn-sm",
+    primary: "btn btn-primary btn-sm",
+    success: "btn btn-success btn-sm",
+  };
 
   function byId(id) {
     return document.getElementById(id);
@@ -14,12 +30,16 @@
 
   var els = {
     modal: byId("jtcsDeleteConfirmModal"),
+    header: byId("jtcsDeleteConfirmHeader"),
+    title: byId("jtcsDeleteConfirmTitle"),
     form: byId("jtcsDeleteConfirmForm"),
     message: byId("jtcsDeleteConfirmMessage"),
     userId: byId("jtcsDeleteConfirmUserId"),
     password: byId("jtcsDeleteConfirmPassword"),
     error: byId("jtcsDeleteConfirmError"),
     confirmBtn: byId("jtcsDeleteConfirmBtn"),
+    confirmIcon: byId("jtcsDeleteConfirmBtnIcon"),
+    confirmText: byId("jtcsDeleteConfirmBtnText"),
     cancelBtn: byId("jtcsDeleteConfirmCancelBtn"),
   };
 
@@ -38,6 +58,72 @@
     if (!els.error) return;
     els.error.textContent = text || "";
     els.error.classList.toggle("d-none", !text);
+  }
+
+  function inferChrome(options) {
+    var msg = String((options && options.message) || "").toLowerCase();
+    if (/\brestore\b/.test(msg)) {
+      return {
+        title: "Confirm Restore",
+        confirmLabel: "Confirm Restore",
+        confirmIcon: "bi-arrow-repeat",
+        variant: "warning",
+      };
+    }
+    if (/\bdelete\b/.test(msg)) {
+      return DEFAULT_CHROME;
+    }
+    if (/\bdeactivat/.test(msg) || /\binactive\b/.test(msg)) {
+      return {
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-exclamation-triangle",
+        variant: "warning",
+      };
+    }
+    if (/\bclear group assignment\b/.test(msg) || /\bclear assignment\b/.test(msg)) {
+      return {
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-x-circle",
+        variant: "primary",
+      };
+    }
+    return DEFAULT_CHROME;
+  }
+
+  function applyChrome(options) {
+    options = options || {};
+    var inferred = inferChrome(options);
+    var title = options.title || inferred.title;
+    var confirmLabel = options.confirmLabel || inferred.confirmLabel;
+    var confirmIcon = options.confirmIcon || inferred.confirmIcon;
+    var variant = options.variant || inferred.variant;
+    if (!VARIANT_BTN[variant]) variant = inferred.variant || "danger";
+
+    if (els.title) els.title.textContent = title;
+    if (els.header) {
+      els.header.className = "modal-header py-2 bg-" + variant + "-subtle";
+    }
+    if (els.confirmBtn) {
+      els.confirmBtn.className = VARIANT_BTN[variant];
+    }
+    if (els.confirmText) {
+      els.confirmText.textContent = confirmLabel;
+    } else if (els.confirmBtn) {
+      var iconHtml = els.confirmIcon ? els.confirmIcon.outerHTML : "";
+      els.confirmBtn.innerHTML = iconHtml + " " + confirmLabel;
+      els.confirmIcon = byId("jtcsDeleteConfirmBtnIcon");
+    }
+    if (els.confirmIcon) {
+      els.confirmIcon.className = "bi " + confirmIcon;
+      els.confirmIcon.removeAttribute("data-jtcs-svg");
+      els.confirmIcon.removeAttribute("data-tone");
+      els.confirmIcon.innerHTML = "";
+      if (window.JTCSIcons && typeof window.JTCSIcons.paint === "function") {
+        window.JTCSIcons.paint(els.confirmIcon);
+      }
+    }
   }
 
   function resolvePending(value) {
@@ -73,6 +159,7 @@
       }
       pending = resolve;
 
+      applyChrome(options);
       if (els.message) els.message.textContent = message;
       if (els.userId) {
         els.userId.value = window.JTCS_CURRENT_LOGIN_ID || "";
@@ -145,6 +232,7 @@
   els.modal?.addEventListener("hidden.bs.modal", function () {
     if (els.password) els.password.value = "";
     setError("");
+    applyChrome(DEFAULT_CHROME);
     // If still pending, user dismissed modal
     if (pending) resolvePending(null);
   });
@@ -165,7 +253,13 @@
       var message =
         form.getAttribute("data-delete-message") ||
         "Enter your password to confirm delete.";
-      ask({ message: message }).then(function (creds) {
+      ask({
+        message: message,
+        title: form.getAttribute("data-confirm-title") || undefined,
+        confirmLabel: form.getAttribute("data-confirm-label") || undefined,
+        confirmIcon: form.getAttribute("data-confirm-icon") || undefined,
+        variant: form.getAttribute("data-confirm-variant") || undefined,
+      }).then(function (creds) {
         if (!creds) return;
         form.querySelectorAll(".jtcs-delete-reauth-field").forEach(function (node) {
           node.remove();
