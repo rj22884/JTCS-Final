@@ -36,12 +36,7 @@ class AdminDashboardService:
 
     @staticmethod
     def _last4(masked: str | None, account_number: str | None) -> str:
-        raw = (masked or account_number or "").strip()
-        digits = "".join(ch for ch in raw if ch.isdigit())
-        if len(digits) >= 4:
-            return digits[-4:]
-        alnum = "".join(ch for ch in raw if ch.isalnum())
-        return alnum[-4:] if len(alnum) >= 4 else (alnum or "")
+        return DashboardService._account_suffix(account_number, masked)
 
     def _entered_by_lookup(self) -> dict[str, str]:
         mapping: dict[str, str] = {}

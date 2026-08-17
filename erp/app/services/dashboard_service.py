@@ -4,6 +4,7 @@ from calendar import month_abbr
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+import re
 
 from sqlalchemy import select, text
 
@@ -407,15 +408,28 @@ class DashboardService:
         return result
 
     @staticmethod
-    def _last4_account(masked: str | None, account_number: str | None) -> str:
-        raw = (masked or account_number or "").strip()
+    def _account_suffix(account_number: str | None, masked: str | None = None) -> str:
+        """Short public suffix: BOB 5825…0396 → 396; SHCILStamp → Stamp (not tamp)."""
+        raw = (account_number or "").strip() or (masked or "").strip()
+        if not raw:
+            return ""
         digits = "".join(ch for ch in raw if ch.isdigit())
-        if len(digits) >= 4:
-            return digits[-4:]
+        if len(digits) >= 3:
+            chunk = digits[-4:] if len(digits) >= 4 else digits
+            stripped = chunk.lstrip("0")
+            return stripped if stripped else chunk
+        parts = re.findall(
+            r"[A-Z]+(?=[A-Z][a-z])|[A-Z][a-z]+|[A-Z]+|[a-z]+|\d+",
+            raw,
+        )
+        if len(parts) >= 2:
+            return parts[-1]
         alnum = "".join(ch for ch in raw if ch.isalnum())
-        if len(alnum) >= 4:
-            return alnum[-4:]
-        return alnum or ""
+        return alnum[-4:] if len(alnum) >= 4 else alnum
+
+    @staticmethod
+    def _last4_account(masked: str | None, account_number: str | None) -> str:
+        return DashboardService._account_suffix(account_number, masked)
 
     @staticmethod
     def _is_cash_account(bank_name: str | None, account_number: str | None) -> bool:
@@ -427,18 +441,13 @@ class DashboardService:
     def _mask_account_display(
         account_number: str | None, bank_name: str | None = None
     ) -> str:
-        """Cash → 'Cash'; else skip first 6 chars and show XXXX + last 4 (e.g. XXXX0396)."""
+        """Cash → 'Cash'; numeric accounts → XXXX396; letter codes → XXXXStamp."""
         if DashboardService._is_cash_account(bank_name, account_number):
             return "Cash"
-        raw = (account_number or "").strip()
-        if not raw:
+        suffix = DashboardService._account_suffix(account_number)
+        if not suffix:
             return "—"
-        # Skip first 6 characters, then keep last 4 of the remainder.
-        remainder = raw[6:] if len(raw) > 6 else raw
-        if not remainder:
-            return "XXXX"
-        last4 = remainder[-4:] if len(remainder) >= 4 else remainder
-        return "XXXX" + last4
+        return "XXXX" + suffix
 
     def _accounts_for_daily_txns(
         self, txn_ids: list[int]
@@ -579,11 +588,13 @@ class DashboardService:
                 """
                 SELECT
                     bt.JtcsBankAccountID AS account_id,
-                    bt.BankName AS bank_name,
-                    bt.MaskedAccountNumber AS masked_account,
-                    CAST(NULL AS NVARCHAR(50)) AS account_number,
+                    COALESCE(a.BankName, bt.BankName) AS bank_name,
+                    COALESCE(a.MaskedAccountNumber, bt.MaskedAccountNumber) AS masked_account,
+                    a.AccountNumber AS account_number,
                     ISNULL(SUM(ISNULL(bt.Debit, 0) - ISNULL(bt.Credit, 0)), 0) AS amount
                 FROM JtcsBankTransaction bt
+                LEFT JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = bt.JtcsBankAccountID
                 WHERE bt.TransactionDate = :system_date
                   AND (ISNULL(bt.Debit, 0) <> 0 OR ISNULL(bt.Credit, 0) <> 0)
                   AND NOT EXISTS (
@@ -593,9 +604,10 @@ class DashboardService:
                   )
                 GROUP BY
                     bt.JtcsBankAccountID,
-                    bt.BankName,
-                    bt.MaskedAccountNumber
-                ORDER BY bt.BankName, bt.JtcsBankAccountID
+                    COALESCE(a.BankName, bt.BankName),
+                    COALESCE(a.MaskedAccountNumber, bt.MaskedAccountNumber),
+                    a.AccountNumber
+                ORDER BY COALESCE(a.BankName, bt.BankName), bt.JtcsBankAccountID
                 """
             ),
             {"system_date": system_date},
