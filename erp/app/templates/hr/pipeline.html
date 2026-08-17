@@ -1,0 +1,46 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<p class="small text-muted mb-3">Uses the existing application status, plus HR offer/appointment/employee records. Drag a card to change HR status.</p>
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+<div class="hr-pipeline">
+  {% for stage in stages %}
+  <section class="hr-pipeline-col" data-stage="{{ stage }}" ondragover="event.preventDefault()" ondrop="hrDrop(event, '{{ stage }}')">
+    <h2 class="h6">{{ stage }} <span class="text-muted">({{ grouped[stage]|length }})</span></h2>
+    {% for row in grouped[stage] %}
+    <article class="hr-pipeline-card" draggable="true" data-id="{{ row.application_id }}" ondragstart="hrDrag(event)">
+      <strong>{{ row.name }}</strong>
+      <div class="small text-muted">{{ row.application_number }}</div>
+      <div class="small">{{ row.job_title }}</div>
+      <a class="small" href="{{ url_for('hr.application_detail', application_id=row.application_id) }}">Open</a>
+    </article>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
+<script>
+function hrDrag(ev) {
+  ev.dataTransfer.setData('text/plain', ev.currentTarget.dataset.id);
+}
+function hrDrop(ev, stage) {
+  ev.preventDefault();
+  const id = ev.dataTransfer.getData('text/plain');
+  const token = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+  fetch('/hr/applications/' + id + '/status', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': token,
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: JSON.stringify({status: stage})
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.ok) location.reload();
+    else alert(data.error || 'Unable to update status');
+  }).catch(function() { alert('Unable to update status'); });
+}
+</script>
+{% endblock %}

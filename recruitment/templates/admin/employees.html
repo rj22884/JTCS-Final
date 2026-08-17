@@ -1,0 +1,66 @@
+{% extends "admin/base.html" %}
+{% block heading %}HR — Employee Master{% endblock %}
+{% block content %}
+<form class="adm-filters" method="get">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status')==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+</form>
+{% if employees %}
+<div class="adm-table-wrap">
+  <table class="adm-table">
+    <thead>
+      <tr>
+        <th>Employee Code</th>
+        <th>Employee Name</th>
+        <th>Designation</th>
+        <th>Department</th>
+        <th>Date of Joining</th>
+        <th>Employment Status</th>
+        <th>Application Number</th>
+        <th>Offer Status</th>
+        <th>Appointment Letter</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      {% set offer = e.offers[0] if e.offers else None %}
+      {% set apt = e.appointments[0] if e.appointments else None %}
+      <tr>
+        <td>{{ e.employee_code }}</td>
+        <td>{{ e.name }}</td>
+        <td>{{ e.designation.name if e.designation else '—' }}</td>
+        <td>{{ e.department.name if e.department else '—' }}</td>
+        <td>{{ e.joining_date.strftime('%d-%b-%Y') if e.joining_date else '—' }}</td>
+        <td>{{ e.employment_status }}</td>
+        <td><a href="{{ url_for('admin.application_detail', application_id=e.application_id) }}">{{ e.application_number }}</a></td>
+        <td>{{ offer.offer_status if offer else '—' }}</td>
+        <td>{% if apt %}Issued{% else %}—{% endif %}</td>
+        <td>
+          <a href="{{ url_for('hr.employee_detail', employee_id=e.employee_id) }}">View</a>
+          · <a href="{{ url_for('hr.employee_detail', employee_id=e.employee_id) }}#employment">Edit</a>
+          · <a href="{{ url_for('hr.employee_detail', employee_id=e.employee_id) }}#documents">View Documents</a>
+          {% if offer %}
+          · <a href="{{ url_for('hr.download_offer', employee_id=e.employee_id, view=1) }}" target="_blank" rel="noopener">View Offer Letter</a>
+          · <a href="{{ url_for('hr.download_offer', employee_id=e.employee_id) }}">Download Offer Letter</a>
+          {% endif %}
+          {% if apt %}
+          · <a href="{{ url_for('hr.download_appointment', employee_id=e.employee_id, view=1) }}" target="_blank" rel="noopener">View Appointment Letter</a>
+          · <a href="{{ url_for('hr.download_appointment', employee_id=e.employee_id) }}">Download Appointment Letter</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="adm-empty">
+  <h2>No employees yet</h2>
+  <p>Convert a Selected application from Job Applications.</p>
+</div>
+{% endif %}
+{% endblock %}

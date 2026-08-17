@@ -1,0 +1,18 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+{% for row in rows %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">{{ row.employee.EmployeeCode }} — {{ row.employee.Name }}</h2>
+  <ol class="small mb-0">
+    {% for event in row.events %}
+    <li class="mb-1"><strong>{{ event.title }}</strong> · {{ event.at }} {% if event.detail %}<span class="text-muted">{{ event.detail }}</span>{% endif %}</li>
+    {% else %}
+    <li class="text-muted">No timeline events from stored records.</li>
+    {% endfor %}
+  </ol>
+</div>
+{% else %}
+<p class="text-muted">No employee timelines yet.</p>
+{% endfor %}
+{% endblock %}

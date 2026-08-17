@@ -1,0 +1,33 @@
+{% extends "public/base.html" %}
+{% block title %}Application Submitted Successfully — JTCS Xpert{% endblock %}
+{% block robots %}noindex, nofollow{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="hero-bg-pattern"></div>
+  <div class="container-jtcs">
+    <h1>Application Submitted Successfully</h1>
+    <p>Thank you for applying for the {{ job_title }} position at JTCS Xpert.</p>
+  </div>
+</section>
+<section class="section">
+  <div class="container-jtcs">
+    <div class="rec-confirm rec-card rec-applied-box">
+      <i class="fas fa-check-circle" aria-hidden="true"></i>
+      <h2>Your application is submitted successfully</h2>
+      <p class="rec-applied-label">Application Number:</p>
+      <p class="rec-app-no">{{ application_number }}</p>
+      <p class="rec-applied-save">Save for future reference.</p>
+      {% if pdf_error %}
+      <p class="rec-alert">Your application has been submitted successfully. However, the PDF could not be generated immediately. Please use the Download Application PDF option from your application status page.</p>
+      {% endif %}
+      <div class="rec-form-nav" style="justify-content:center;">
+        {% if has_pdf and pdf_token %}
+        <a class="btn-jtcs btn-secondary-jtcs" href="{{ url_for('public.confirmation_pdf', number=application_number, t=pdf_token) }}">Download Application PDF</a>
+        {% endif %}
+        <a class="btn-jtcs btn-primary-jtcs" href="{{ url_for('public.application_status') }}">Check Application Status</a>
+      </div>
+      <p class="rec-muted">Do not share your resume or personal details on public channels.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

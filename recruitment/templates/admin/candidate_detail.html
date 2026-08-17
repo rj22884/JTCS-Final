@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block heading %}{{ candidate.name }}{% endblock %}
+{% block content %}
+<section class="adm-panel">
+  <h2>Personal Information</h2>
+  <dl class="adm-dl">
+    <div><dt>Full Name</dt><dd>{{ candidate.name }}</dd></div>
+    <div><dt>Father's Name</dt><dd>{{ candidate.father_name }}</dd></div>
+    <div><dt>Date of Birth</dt><dd>{{ candidate.dob }}</dd></div>
+    <div><dt>Gender</dt><dd>{{ candidate.gender }}</dd></div>
+    <div><dt>Mobile</dt><dd>{{ candidate.mobile }}</dd></div>
+    <div><dt>Email</dt><dd>{{ candidate.email }}</dd></div>
+    <div><dt>Address</dt><dd>{{ candidate.address }}</dd></div>
+    <div><dt>City</dt><dd>{{ candidate.city }}</dd></div>
+    <div><dt>State</dt><dd>{{ candidate.state }}</dd></div>
+    <div><dt>PIN</dt><dd>{{ candidate.pin_code }}</dd></div>
+  </dl>
+</section>
+<section class="adm-panel">
+  <h2>Education</h2>
+  <ul>{% for e in candidate.education %}<li>{{ e.qualification }} — {{ e.university_board }} ({{ e.passing_year }})</li>{% endfor %}</ul>
+</section>
+<section class="adm-panel">
+  <h2>Applications</h2>
+  {% if candidate.applications %}
+  <ul>
+    {% for app in candidate.applications %}
+    <li><a href="{{ url_for('admin.application_detail', application_id=app.application_id) }}">{{ app.application_number }}</a> — {{ app.application_status }} · {{ app.submitted_at.strftime('%d-%b-%Y') if app.submitted_at else '' }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No applications received yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

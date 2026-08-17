@@ -1,0 +1,70 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<p class="small text-muted mb-3">Existing website applications. Records are read from the current recruitment store; they are not copied into a new table.</p>
+<form class="jtcs-card mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label class="form-label" for="q">Search</label>
+      <input class="form-control form-control-sm" id="q" name="q" value="{{ search }}" placeholder="Name, mobile, email, application no.">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="status">Status</label>
+      <select class="form-select form-select-sm" id="status" name="status">
+        <option value="">All</option>
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('hr.applications') }}">Reset</a>
+    </div>
+  </div>
+</form>
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Application Number</th>
+          <th>Candidate Name</th>
+          <th>Job</th>
+          <th>Application Date</th>
+          <th>Experience</th>
+          <th>Current Status</th>
+          <th>Interview Status</th>
+          <th>Offer Status</th>
+          <th>Employee Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.application_number }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.job_title }}</td>
+          <td>{{ row.submitted_at }}</td>
+          <td>{{ row.total_work_experience or '—' }}</td>
+          <td>{{ row.effective_status }}</td>
+          <td>{{ row.interview_status or '—' }}</td>
+          <td>{{ row.offer_status or '—' }}</td>
+          <td>{{ row.employee_status or '—' }}</td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.application_detail', application_id=row.application_id) }}">View</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="text-muted">No applications found in the existing recruitment store.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

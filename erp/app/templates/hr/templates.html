@@ -1,0 +1,32 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<p class="small text-muted mb-3">Variables: {{ '{{employee_name}}' }}, {{ '{{employee_code}}' }}, {{ '{{application_number}}' }}, {{ '{{designation}}' }}, {{ '{{department}}' }}, {{ '{{joining_date}}' }}, {{ '{{work_location}}' }}, {{ '{{salary_ctc}}' }}, {{ '{{probation_period}}' }}, {{ '{{reporting_manager}}' }}, {{ '{{employment_type}}' }}</p>
+{% for row in rows %}
+<div class="jtcs-card mb-3">
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="template_id" value="{{ row.TemplateID }}">
+    <div class="row g-2">
+      <div class="col-md-3"><div class="small text-muted">{{ row.LetterType }} / {{ row.SectionKey }}</div></div>
+      <div class="col-md-5">
+        <label class="form-label" for="title{{ row.TemplateID }}">Title</label>
+        <input class="form-control form-control-sm" name="title" id="title{{ row.TemplateID }}" value="{{ row.Title }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="active{{ row.TemplateID }}">Active</label>
+        <select class="form-select form-select-sm" name="is_active" id="active{{ row.TemplateID }}">
+          <option value="1" {% if row.IsActive %}selected{% endif %}>Yes</option>
+          <option value="0" {% if not row.IsActive %}selected{% endif %}>No</option>
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="body{{ row.TemplateID }}">Body</label>
+        <textarea class="form-control form-control-sm" name="body" id="body{{ row.TemplateID }}" rows="4">{{ row.Body }}</textarea>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm mt-2" type="submit">Save section</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

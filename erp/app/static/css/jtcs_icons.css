@@ -143,6 +143,21 @@ td .btn > i.bi.jtcs-illu {
   height: 0.95rem !important;
 }
 
+thead i.bi,
+thead i.bi.jtcs-illu,
+thead .jtcs-illu-svg,
+thead svg,
+.dash-sort-icon,
+.dash-sort-icon.jtcs-illu {
+  width: 0.7rem !important;
+  height: 0.7rem !important;
+  max-width: 0.7rem !important;
+  max-height: 0.7rem !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
 /* Dashboard metric cards */
 .dash-metric-btn {
   display: flex;

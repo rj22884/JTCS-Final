@@ -1,0 +1,55 @@
+.hr-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.hr-funnel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.hr-funnel-step {
+  flex: 1 1 110px;
+  min-width: 110px;
+}
+.hr-pipeline {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+.hr-pipeline-col {
+  min-width: 220px;
+  flex: 1 0 220px;
+  background: var(--jtcs-card-bg);
+  border: 1px solid var(--jtcs-border);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.hr-pipeline-card {
+  border: 1px solid var(--jtcs-border);
+  border-radius: 0.4rem;
+  padding: 0.6rem;
+  margin-bottom: 0.5rem;
+  background: #fff;
+  cursor: grab;
+}
+.hr-action-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.hr-action-card:hover {
+  box-shadow: var(--jtcs-shadow-sm);
+}
+@media (max-width: 768px) {
+  .hr-pipeline {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+  .hr-pipeline-col {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+}

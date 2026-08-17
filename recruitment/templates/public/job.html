@@ -1,0 +1,75 @@
+{% extends "public/base.html" %}
+{% block title %}{{ job.job_title }} – Join JTCS Xpert{% endblock %}
+{% block description %}Apply for the {{ job.job_title }} role at JTCS Xpert. Applications are accepted only through the official online form.{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="hero-bg-pattern"></div>
+  <div class="hero-grid"></div>
+  <div class="container-jtcs">
+    <h1 data-aos="fade-up">{{ job.job_title }} – Join JTCS Xpert</h1>
+    <p data-aos="fade-up" data-aos-delay="80">{{ job.location }} · {{ job.employment_type }}</p>
+    <div class="breadcrumb-jtcs"><a href="/">Home</a><span>/</span><a href="{{ url_for('public.careers_index') }}">Careers</a><span>/</span><span class="current">{{ job.job_title }}</span></div>
+  </div>
+</section>
+<section class="section rec-job">
+  <div class="container-jtcs">
+    <div class="rec-job-grid">
+      <div class="rec-job-main">
+        <article class="rec-card" data-aos="fade-up">
+          <div class="section-label">About JTCS Xpert</div>
+          <h2 class="section-title">Who we are</h2>
+          <p>{{ job.about_company }}</p>
+        </article>
+        <article class="rec-card" data-aos="fade-up">
+          <h2>Job description</h2>
+          <p>{{ job.description }}</p>
+        </article>
+        <article class="rec-card" data-aos="fade-up">
+          <h2>Responsibilities</h2>
+          <ul class="rec-list">{% for line in (job.responsibilities or '').splitlines() if line.strip() %}<li>{{ line }}</li>{% endfor %}</ul>
+        </article>
+        <article class="rec-card" data-aos="fade-up">
+          <h2>Required skills</h2>
+          <ul class="rec-list">{% for line in (job.required_skills or '').splitlines() if line.strip() %}<li>{{ line }}</li>{% endfor %}</ul>
+        </article>
+        {% if applications_open %}
+        <p class="rec-open-banner">Applications are open · Last Date: {{ last_date_label }}</p>
+        <p class="rec-only-form"><i class="fas fa-lock"></i> Applications are accepted only through this online application form.</p>
+        <a class="btn-jtcs btn-primary-jtcs rec-apply-btn" href="{{ url_for('public.apply', slug=job.slug) }}">Apply Now <i class="fas fa-arrow-right"></i></a>
+        {% else %}
+        <p class="rec-closed-banner">Applications Closed · Last Date: {{ last_date_label }}</p>
+        <p class="rec-only-form">Applications are currently closed. The application form is no longer accepting submissions.</p>
+        <a class="btn-jtcs btn-secondary-jtcs rec-apply-btn" href="{{ url_for('public.application_status') }}">Check Application Status</a>
+        {% endif %}
+      </div>
+      <aside class="rec-job-aside">
+        <div class="rec-card rec-meta">
+          <h3>Role snapshot</h3>
+          <dl>
+            <div><dt>Qualification</dt><dd>{{ job.qualification_required }}</dd></div>
+            <div><dt>Experience</dt><dd>{{ job.experience_required }}</dd></div>
+            <div><dt>Location</dt><dd>{{ job.location }}</dd></div>
+            <div><dt>Employment type</dt><dd>{{ job.employment_type }}</dd></div>
+            {% if job.salary_ctc %}<div><dt>Salary / CTC</dt><dd>{{ job.salary_ctc }}</dd></div>{% endif %}
+            <div><dt>Department</dt><dd>{{ job.department }}</dd></div>
+          </dl>
+          {% if job.benefits %}
+          <h4>Benefits</h4>
+          <ul class="rec-list">{% for line in job.benefits.splitlines() if line.strip() %}<li>{{ line }}</li>{% endfor %}</ul>
+          {% endif %}
+          {% if job.application_instructions %}
+          <h4>How to apply</h4>
+          <p>{{ job.application_instructions }}</p>
+          {% endif %}
+          {% if applications_open %}
+          <a class="btn-jtcs btn-primary-jtcs" href="{{ url_for('public.apply', slug=job.slug) }}" style="width:100%;">Apply Now</a>
+          {% else %}
+          <p class="rec-closed-banner">Applications Closed</p>
+          <a class="btn-jtcs btn-secondary-jtcs" href="{{ url_for('public.application_status') }}" style="width:100%;">Check Application Status</a>
+          {% endif %}
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}

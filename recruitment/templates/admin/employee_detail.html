@@ -1,0 +1,197 @@
+{% extends "admin/base.html" %}
+{% block heading %}Employee Details{% endblock %}
+{% block content %}
+<p class="adm-appno">Employee Code: <strong>{{ employee.employee_code }}</strong></p>
+<p>Application No: <a href="{{ url_for('admin.application_detail', application_id=employee.application_id) }}">{{ employee.application_number }}</a></p>
+<p class="adm-status-lg">Employment status: <strong>{{ employee.employment_status }}</strong></p>
+
+<section class="adm-panel">
+  <h2>Personal Information</h2>
+  <p class="adm-note">Copied from the original application. Edit personal data on the candidate record only if a correction is required later.</p>
+  <dl class="adm-dl">
+    <div><dt>Employee Name</dt><dd>{{ employee.name }}</dd></div>
+    <div><dt>Father's Name</dt><dd>{{ employee.father_name or '—' }}</dd></div>
+    <div><dt>Date of Birth</dt><dd>{{ employee.dob.strftime('%d-%b-%Y') if employee.dob else '—' }}</dd></div>
+    <div><dt>Gender</dt><dd>{{ employee.gender or '—' }}</dd></div>
+    <div><dt>Mobile</dt><dd>{{ employee.mobile or '—' }}</dd></div>
+    <div><dt>Email</dt><dd>{{ employee.email or '—' }}</dd></div>
+    <div><dt>Current Address</dt><dd>{{ employee.address or '—' }}</dd></div>
+    <div><dt>City</dt><dd>{{ employee.city or '—' }}</dd></div>
+    <div><dt>State</dt><dd>{{ employee.state or '—' }}</dd></div>
+    <div><dt>PIN Code</dt><dd>{{ employee.pin_code or '—' }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Education</h2>
+  <dl class="adm-dl">
+    <div><dt>Highest Qualification</dt><dd>{{ employee.highest_qualification or '—' }}</dd></div>
+    <div><dt>Last Qualification</dt><dd>{{ employee.last_qualification or '—' }}</dd></div>
+    <div><dt>University / Board</dt><dd>{{ employee.university_board or '—' }}</dd></div>
+    <div><dt>Passing Year</dt><dd>{{ employee.passing_year or '—' }}</dd></div>
+    <div><dt>Percentage / CGPA</dt><dd>{{ employee.percentage_cgpa or '—' }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Previous Experience</h2>
+  <dl class="adm-dl">
+    <div><dt>Sales Experience</dt><dd>{{ employee.sales_experience or '—' }}</dd></div>
+    <div><dt>Total Experience</dt><dd>{{ employee.total_work_experience or '—' }}</dd></div>
+    <div><dt>Previous Company</dt><dd>{{ employee.previous_company or '—' }}</dd></div>
+    <div><dt>Previous Designation</dt><dd>{{ employee.previous_designation or '—' }}</dd></div>
+    <div><dt>Previous Responsibilities</dt><dd>{{ employee.responsibilities or '—' }}</dd></div>
+    <div><dt>Software / IT Sales</dt><dd>{{ employee.software_sales_experience or '—' }}</dd></div>
+    <div><dt>B2B Sales</dt><dd>{{ employee.b2b_sales_experience or '—' }}</dd></div>
+    <div><dt>Tax / Accounting / ERP Sales</dt><dd>{{ employee.tax_accounting_erp_sales_experience or '—' }}</dd></div>
+  </dl>
+</section>
+
+{% if current_user.can_write() %}
+<section class="adm-panel" id="employment">
+  <h2>Employment Information</h2>
+  <form class="adm-form" method="post" action="{{ url_for('hr.employee_update', employee_id=employee.employee_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Date of Joining<input type="date" name="joining_date" value="{{ employee.joining_date.isoformat() if employee.joining_date else '' }}"></label>
+    <label>Department
+      <select name="department_id">
+        <option value="">Select</option>
+        {% for d in departments %}<option value="{{ d.department_id }}" {% if employee.department_id==d.department_id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Designation
+      <select name="designation_id">
+        <option value="">Select</option>
+        {% for d in designations %}<option value="{{ d.designation_id }}" {% if employee.designation_id==d.designation_id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Reporting Manager<input name="reporting_manager" value="{{ employee.reporting_manager or '' }}"></label>
+    <label>Employment Type
+      <select name="employment_type">{% for t in employment_types %}<option value="{{ t }}" {% if employee.employment_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+    </label>
+    <label>Work Location<input name="work_location" value="{{ employee.work_location or '' }}"></label>
+    <label>Probation Period<input name="probation_period" value="{{ employee.probation_period or '' }}" placeholder="e.g. 6 months"></label>
+    <label>Probation End Date<input type="date" name="probation_end_date" value="{{ employee.probation_end_date.isoformat() if employee.probation_end_date else '' }}"></label>
+    <label>Employee Status
+      <select name="employment_status">{% for s in employee_statuses %}<option value="{{ s }}" {% if employee.employment_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <h3>Compensation / Offer</h3>
+    <label>Salary / CTC<input name="salary_ctc" value="{{ employee.salary_ctc or '' }}"></label>
+    <label>Salary Frequency
+      <select name="salary_frequency">
+        <option value="">Select</option>
+        {% for f in salary_frequencies %}<option value="{{ f }}" {% if employee.salary_frequency==f %}selected{% endif %}>{{ f }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Basic Salary<input name="basic_salary" value="{{ employee.basic_salary or '' }}"></label>
+    <label>HRA<input name="hra" value="{{ employee.hra or '' }}"></label>
+    <label>Allowances<input name="allowances" value="{{ employee.allowances or '' }}"></label>
+    <label>Other Compensation<input name="other_compensation" value="{{ employee.other_compensation or '' }}"></label>
+    <label>Effective Date<input type="date" name="compensation_effective_date" value="{{ employee.compensation_effective_date.isoformat() if employee.compensation_effective_date else '' }}"></label>
+    <button type="submit">Save employment details</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="adm-panel">
+  <h2>Offer Letter</h2>
+  {% if latest_offer %}
+  <p>Latest: <strong>{{ latest_offer.offer_number }}</strong> · Status: <strong>{{ latest_offer.offer_status }}</strong> · {{ latest_offer.generated_at.strftime('%d-%b-%Y') }}</p>
+  <a class="adm-btn" href="{{ url_for('hr.download_offer', employee_id=employee.employee_id, view=1) }}" target="_blank" rel="noopener">View Offer Letter</a>
+  <a class="adm-btn" href="{{ url_for('hr.download_offer', employee_id=employee.employee_id) }}">Download Offer Letter</a>
+  {% if current_user.can_write() and smtp_ready %}
+  <form method="post" action="{{ url_for('hr.email_offer', employee_id=employee.employee_id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="adm-btn" type="submit">Send Offer Letter by Email</button>
+  </form>
+  {% endif %}
+  {% if current_user.can_write() %}
+  <form class="adm-form" method="post" action="{{ url_for('hr.offer_status', employee_id=employee.employee_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Offer Status
+      <select name="offer_status">{% for s in offer_statuses %}<option value="{{ s }}" {% if latest_offer.offer_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <label>Acceptance method
+      <select name="acceptance_method">{% for m in acceptance_methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select>
+    </label>
+    <button type="submit">Save offer status</button>
+  </form>
+  {% endif %}
+  <h3>Offer history</h3>
+  <ol class="adm-timeline">
+    {% for o in employee.offers %}
+    <li>{{ o.offer_number }} · v{{ o.version }} · {{ o.offer_status }} · {{ o.generated_at.strftime('%d-%b-%Y') }}{% if o.accepted_at %} · accepted {{ o.accepted_at.strftime('%d-%b-%Y') }} ({{ o.acceptance_method }}){% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No offer letter yet.</p>
+  {% endif %}
+  {% if current_user.can_write() %}
+  <form method="post" action="{{ url_for('hr.generate_offer', employee_id=employee.employee_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="adm-btn" type="submit">Generate Offer Letter</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Appointment Letter</h2>
+  {% if latest_appointment %}
+  <p>Latest: <strong>{{ latest_appointment.appointment_number }}</strong> · {{ latest_appointment.issued_at.strftime('%d-%b-%Y') }}</p>
+  <a class="adm-btn" href="{{ url_for('hr.download_appointment', employee_id=employee.employee_id, view=1) }}" target="_blank" rel="noopener">View Appointment Letter</a>
+  <a class="adm-btn" href="{{ url_for('hr.download_appointment', employee_id=employee.employee_id) }}">Download Appointment Letter</a>
+  {% if current_user.can_write() and smtp_ready %}
+  <form method="post" action="{{ url_for('hr.email_appointment', employee_id=employee.employee_id) }}" style="display:inline;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="adm-btn" type="submit">Send Appointment Letter by Email</button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p>No appointment letter yet. Record offer acceptance first.</p>
+  {% endif %}
+  {% if current_user.can_write() and latest_offer and latest_offer.offer_status == 'Accepted' %}
+  <form method="post" action="{{ url_for('hr.generate_appointment', employee_id=employee.employee_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="adm-btn" type="submit">Generate Appointment Letter</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel" id="documents">
+  <h2>Documents</h2>
+  {% if employee.application and employee.application.resume_stored_name %}
+  <p>Resume (from application):
+    <a href="{{ url_for('admin.download_resume', application_id=employee.application_id, view=1) }}" target="_blank" rel="noopener">View</a>
+    · <a href="{{ url_for('admin.download_resume', application_id=employee.application_id) }}">Download</a>
+  </p>
+  {% endif %}
+  {% if employee.documents %}
+  <ul>
+    {% for d in employee.documents %}
+    <li>{{ d.document_type }} — <a href="{{ url_for('hr.download_document', employee_id=employee.employee_id, document_id=d.document_id) }}">{{ d.original_name }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No additional documents uploaded.</p>
+  {% endif %}
+  {% if current_user.can_write() %}
+  <form class="adm-form" method="post" action="{{ url_for('hr.upload_document', employee_id=employee.employee_id) }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Document type
+      <select name="document_type">{% for t in document_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select>
+    </label>
+    <label>File<input type="file" name="document" required></label>
+    <button type="submit">Upload document</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Recruitment History</h2>
+  <ol class="adm-timeline">
+    {% for step in history %}
+    <li class="{% if step.done %}is-done{% endif %}">{% if step.done %}✓ {% endif %}{{ step.label }}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

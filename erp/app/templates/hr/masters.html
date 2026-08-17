@@ -1,0 +1,31 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="jtcs-card mb-3">
+  <form method="post" class="row g-2 align-items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-6">
+      <label class="form-label" for="name">Name</label>
+      <input class="form-control form-control-sm" name="name" id="name" required>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary btn-sm" type="submit">Add</button>
+    </div>
+  </form>
+</div>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Name</th><th>Active</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.Name }}</td>
+          <td>{{ 'Yes' if row.IsActive else 'No' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

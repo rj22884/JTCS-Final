@@ -1,0 +1,45 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Employee Code</th>
+          <th>Employee Name</th>
+          <th>Designation</th>
+          <th>Department</th>
+          <th>Date of Joining</th>
+          <th>Employment Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.EmployeeCode }}</td>
+          <td>{{ row.Name }}</td>
+          <td>{{ row.designation_name or '—' }}</td>
+          <td>{{ row.department_name or '—' }}</td>
+          <td>{{ row.JoiningDate or '—' }}</td>
+          <td>{{ row.EmploymentStatus }}</td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.employee_profile', employee_id=row.EmployeeID) }}">View</a>
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('hr.employee_profile', employee_id=row.EmployeeID) }}#documents">Documents</a>
+            {% if row.latest_offer %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('hr.offer_download', offer_id=row.latest_offer.OfferID) }}">Offer Letter</a>
+            {% endif %}
+            {% if row.latest_appointment %}
+            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('hr.appointment_download', appointment_id=row.latest_appointment.AppointmentID) }}">Appointment Letter</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted">No employees in the directory.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

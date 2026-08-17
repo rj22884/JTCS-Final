@@ -1,0 +1,38 @@
+{% extends "admin/base.html" %}
+{% block heading %}Settings{% endblock %}
+{% block content %}
+<form class="adm-form" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Application number prefix<input name="application_number_prefix" value="{{ settings.get('application_number_prefix', 'JTCS-SE') }}"></label>
+  <label>Sequence padding<input name="application_number_padding" value="{{ settings.get('application_number_padding', '5') }}"></label>
+  <label>Store IP as technical identifier
+    <select name="store_ip_address">
+      <option value="true" {% if settings.get('store_ip_address','true')=='true' %}selected{% endif %}>Yes</option>
+      <option value="false" {% if settings.get('store_ip_address')=='false' %}selected{% endif %}>No</option>
+    </select>
+  </label>
+  <label>Max resume size (MB)<input name="max_resume_mb" value="{{ settings.get('max_resume_mb', '5') }}"></label>
+  <label>Recruitment notify email<input name="notify_admin_email" value="{{ settings.get('notify_admin_email', '') }}"></label>
+  <h2>Add admin user</h2>
+  <label>Name<input name="new_user_name"></label>
+  <label>Email<input type="email" name="new_user_email"></label>
+  <label>Password<input type="password" name="new_user_password" autocomplete="new-password"></label>
+  <label>Role
+    <select name="new_user_role">
+      {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">Save settings</button>
+</form>
+<section class="adm-panel">
+  <h2>Admin users</h2>
+  <table class="adm-table">
+    <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Active</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr><td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td><td>{{ 'Yes' if u.is_active else 'No' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

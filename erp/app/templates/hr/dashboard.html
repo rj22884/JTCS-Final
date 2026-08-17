@@ -1,0 +1,86 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<p class="small text-muted mb-3">Recruitment through appointment. Counts use live application and HR records only.</p>
+{% if not kpis.store_ok %}
+<div class="alert alert-warning">{{ kpis.store_message }}</div>
+{% endif %}
+<div class="hr-kpi-grid mb-4">
+  {% for item in [
+    ('Open Jobs', kpis.open_jobs),
+    ('Applications', kpis.applications),
+    ('Interviews', kpis.interviews),
+    ('Selected', kpis.selected),
+    ('Offers Pending', kpis.offers_pending),
+    ('Employees', kpis.employees),
+    ('Appointments Issued', kpis.appointments_issued)
+  ] %}
+  <div class="jtcs-metric-card">
+    <span class="jtcs-metric-label">{{ item[0] }}</span>
+    <strong class="jtcs-metric-value">{{ item[1] }}</strong>
+  </div>
+  {% endfor %}
+</div>
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Recruitment funnel</h2>
+  <div class="hr-funnel">
+    {% for step in kpis.funnel %}
+    <div class="jtcs-metric-card hr-funnel-step">
+      <span class="jtcs-metric-label">{{ step.stage }}</span>
+      <strong class="jtcs-metric-value">{{ step.count }}</strong>
+      {% if step.conversion is not none %}
+      <div class="small text-muted">{{ step.conversion }}% of previous</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="jtcs-card h-100">
+      <h2 class="h6">Applications by source</h2>
+      {% if kpis.sources %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Source</th><th class="text-end">Applications</th></tr></thead>
+          <tbody>
+            {% for row in kpis.sources %}
+            <tr><td>{{ row.source }}</td><td class="text-end">{{ row.n }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No source data yet.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="jtcs-card h-100">
+      <h2 class="h6">Source conversion</h2>
+      {% if kpis.source_conversion %}
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Source</th><th>Apps</th><th>Interview</th><th>Selected</th></tr></thead>
+          <tbody>
+            {% for row in kpis.source_conversion %}
+            <tr>
+              <td>{{ row.source }}</td>
+              <td>{{ row.applications }}</td>
+              <td>{{ row.interview }}</td>
+              <td>{{ row.selected }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="small text-muted mb-0">No conversion data yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

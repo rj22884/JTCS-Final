@@ -680,6 +680,7 @@ ERP_CORE_TOP_LEVEL_MENUS = (
     "Masters",
     "Accounting",
     "CRM",
+    "HR",
 )
 
 

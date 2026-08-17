@@ -1,0 +1,70 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Upload document</h2>
+  <form method="post" enctype="multipart/form-data" class="row g-2 align-items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-4">
+      <label class="form-label" for="employee_id">Employee</label>
+      <select class="form-select form-select-sm" name="employee_id" id="employee_id" required>
+        <option value="">Select</option>
+        {% for row in rows %}
+        <option value="{{ row.EmployeeID }}">{{ row.EmployeeCode }} — {{ row.Name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="document_type">Type</label>
+      <select class="form-select form-select-sm" name="document_type" id="document_type">
+        {% for t in document_types %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="file">File</label>
+      <input class="form-control form-control-sm" type="file" name="file" id="file" required>
+    </div>
+    <div class="col-md-2">
+      <button class="btn btn-primary btn-sm" type="submit">Upload</button>
+    </div>
+  </form>
+</div>
+{% for row in rows %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">{{ row.EmployeeCode }} — {{ row.Name }}</h2>
+  <ul class="small mb-2">
+    {% if row.ApplicationID %}
+    <li><a href="{{ url_for('hr.application_resume', application_id=row.ApplicationID) }}">Resume (from application)</a></li>
+    <li><a href="{{ url_for('hr.application_pdf', application_id=row.ApplicationID) }}">Application PDF</a></li>
+    {% endif %}
+    {% if row.latest_offer %}
+    <li><a href="{{ url_for('hr.offer_download', offer_id=row.latest_offer.OfferID) }}">Offer Letter</a></li>
+    {% endif %}
+    {% if row.latest_appointment %}
+    <li><a href="{{ url_for('hr.appointment_download', appointment_id=row.latest_appointment.AppointmentID) }}">Appointment Letter</a></li>
+    {% endif %}
+  </ul>
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Type</th><th>File</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+        {% for doc in row.documents %}
+        <tr>
+          <td>{{ doc.DocumentType }}</td>
+          <td>{{ doc.OriginalName }}</td>
+          <td>{{ doc.UploadedAt }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.document_download', document_id=doc.DocumentID) }}">Download</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted">No uploaded documents.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="text-muted">No employees yet.</p>
+{% endfor %}
+{% endblock %}

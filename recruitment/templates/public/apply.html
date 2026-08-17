@@ -1,0 +1,218 @@
+{% extends "public/base.html" %}
+{% block title %}Apply — {{ job.job_title }} — JTCS Xpert{% endblock %}
+{% block robots %}noindex, follow{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="hero-bg-pattern"></div>
+  <div class="container-jtcs">
+    <h1>Apply for {{ job.job_title }}</h1>
+    {% if applications_open %}
+    <p class="rec-open-banner">Applications are open</p>
+    <p><strong>Last Date: {{ last_date_label }}</strong></p>
+    {% else %}
+    <p class="rec-closed-banner">Applications Closed</p>
+    <p><strong>Last Date: {{ last_date_label }}</strong></p>
+    {% endif %}
+    <p>Applications are accepted only through this online application form.</p>
+  </div>
+</section>
+<section class="section rec-apply-section">
+  <div class="container-jtcs">
+    {% if errors.form %}
+    <div class="rec-alert" id="recFormErrors">
+      {{ errors.form }}
+      <ul class="rec-alert-list">
+        {% for key, msg in errors.items() %}
+          {% if key != "form" and msg %}
+          <li><a href="#{{ key }}">{{ msg }}</a></li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+      {% if duplicate %}
+      <p class="rec-alert-action"><a class="btn-jtcs btn-secondary-jtcs" href="{{ url_for('public.application_status') }}">Check Application Status</a></p>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="rec-alert" id="recFormErrors" hidden></div>
+    {% endif %}
+    {% if not applications_open %}
+    <div class="rec-card rec-closed-box">
+      <h2>Applications Closed</h2>
+      <p>Thank you for your interest in joining JTCS Xpert.</p>
+      <p>Applications for the Sales Executive position were accepted until <strong>{{ last_date_label }}</strong>.</p>
+      <p>Applications are currently closed.</p>
+      <p>If you already applied, you can still check your application status.</p>
+      <a class="btn-jtcs btn-secondary-jtcs" href="{{ url_for('public.application_status') }}">Check Application Status</a>
+    </div>
+    {% else %}
+    <form class="rec-form rec-card" id="recApplyForm" method="post" enctype="multipart/form-data" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="visitor_id" id="visitor_id" value="{{ values.get('visitor_id', '') }}">
+      <input type="hidden" name="session_id" id="session_id" value="{{ values.get('session_id', '') }}">
+
+      <fieldset class="rec-section">
+        <legend>Personal Information</legend>
+        <div class="form-row">
+          <div class="form-group"><label for="name">Full Name *</label><input class="form-control-jtcs{% if errors.get('name') %} is-invalid{% endif %}" id="name" name="name" required maxlength="200" value="{{ values.get('name', '') }}"><span class="rec-error" id="nameError">{{ errors.get('name', '') }}</span></div>
+          <div class="form-group"><label for="father_name">Father's Name *</label><input class="form-control-jtcs{% if errors.get('father_name') %} is-invalid{% endif %}" id="father_name" name="father_name" required maxlength="200" value="{{ values.get('father_name', '') }}"><span class="rec-error" id="father_nameError">{{ errors.get('father_name', '') }}</span></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="dob">Date of Birth *</label><input class="form-control-jtcs" id="dob" name="dob" type="date" required value="{{ values.get('dob', '') }}"><span class="rec-error">{{ errors.get('dob', '') }}</span></div>
+          <div class="form-group"><label for="gender">Gender *</label>
+            <select class="form-control-jtcs" id="gender" name="gender" required>
+              <option value="">Select</option>
+              {% for g in genders %}<option value="{{ g }}" {% if values.get('gender')==g %}selected{% endif %}>{{ g }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get('gender', '') }}</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="mobile">Mobile Number *</label><input class="form-control-jtcs" id="mobile" name="mobile" type="tel" inputmode="numeric" required placeholder="10-digit mobile" value="{{ values.get('mobile', '') }}"><span class="rec-hint">One application per mobile number.</span><span class="rec-error" id="mobileError">{{ errors.get('mobile', '') }}</span></div>
+          <div class="form-group"><label for="email">Email Address *</label><input class="form-control-jtcs" id="email" name="email" type="email" required value="{{ values.get('email', '') }}"><span class="rec-hint">One application per email address.</span><span class="rec-error" id="emailError">{{ errors.get('email', '') }}</span></div>
+        </div>
+        <div class="form-group"><label for="address">Current Address *</label><textarea class="form-control-jtcs" id="address" name="address" required>{{ values.get('address', '') }}</textarea><span class="rec-error">{{ errors.get('address', '') }}</span></div>
+        <div class="form-row">
+          <div class="form-group"><label for="city">City *</label><input class="form-control-jtcs" id="city" name="city" required value="{{ values.get('city', '') }}"><span class="rec-error">{{ errors.get('city', '') }}</span></div>
+          <div class="form-group"><label for="state">State *</label>
+            <select class="form-control-jtcs" id="state" name="state" required>
+              <option value="">Select</option>
+              {% for s in states %}<option value="{{ s }}" {% if values.get('state')==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get('state', '') }}</span>
+          </div>
+          <div class="form-group"><label for="pin_code">PIN Code *</label><input class="form-control-jtcs" id="pin_code" name="pin_code" inputmode="numeric" required value="{{ values.get('pin_code', '') }}"><span class="rec-error">{{ errors.get('pin_code', '') }}</span></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rec-section">
+        <legend>Educational Information</legend>
+        <p class="rec-hint">Highest qualification is your most advanced completed level. Last academic qualification / degree is the specific course you completed most recently.</p>
+        <div class="form-row">
+          <div class="form-group"><label for="highest_qualification">Highest Educational Qualification *</label>
+            <select class="form-control-jtcs" id="highest_qualification" name="highest_qualification" required>
+              <option value="">Select</option>
+              {% for q in qualifications %}<option value="{{ q }}" {% if values.get('highest_qualification')==q %}selected{% endif %}>{{ q }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get('highest_qualification', '') }}</span>
+          </div>
+          <div class="form-group"><label for="last_qualification">Last Academic Qualification / Degree *</label><input class="form-control-jtcs" id="last_qualification" name="last_qualification" required placeholder="e.g. B.Com, MBA, B.A." value="{{ values.get('last_qualification', '') }}"><span class="rec-error">{{ errors.get('last_qualification', '') }}</span></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="university_board">University / Board *</label><input class="form-control-jtcs" id="university_board" name="university_board" required value="{{ values.get('university_board', '') }}"><span class="rec-error">{{ errors.get('university_board', '') }}</span></div>
+          <div class="form-group"><label for="passing_year">Year of Passing *</label><input class="form-control-jtcs" id="passing_year" name="passing_year" inputmode="numeric" required value="{{ values.get('passing_year', '') }}"><span class="rec-error">{{ errors.get('passing_year', '') }}</span></div>
+          <div class="form-group"><label for="percentage_cgpa">Percentage / CGPA *</label><input class="form-control-jtcs" id="percentage_cgpa" name="percentage_cgpa" required value="{{ values.get('percentage_cgpa', '') }}"><span class="rec-error">{{ errors.get('percentage_cgpa', '') }}</span></div>
+        </div>
+      </fieldset>
+
+      <fieldset class="rec-section">
+        <legend>Experience &amp; Skills</legend>
+        <div class="form-row">
+          <div class="form-group"><label for="sales_experience_years">Sales Experience – Years *</label><input class="form-control-jtcs" id="sales_experience_years" name="sales_experience_years" type="number" min="0" max="50" required value="{{ values.get('sales_experience_years', '0') }}"><span class="rec-hint">Enter 0 if you are a fresher.</span><span class="rec-error">{{ errors.get('sales_experience_years', '') }}</span></div>
+          <div class="form-group"><label for="sales_experience_months">Sales Experience – Months</label><input class="form-control-jtcs" id="sales_experience_months" name="sales_experience_months" type="number" min="0" max="11" value="{{ values.get('sales_experience_months', '') }}"><span class="rec-error">{{ errors.get('sales_experience_months', '') }}</span></div>
+          <div class="form-group"><label for="total_work_experience">Total Work Experience</label><input class="form-control-jtcs" id="total_work_experience" name="total_work_experience" placeholder="e.g. 2 years" value="{{ values.get('total_work_experience', '') }}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="previous_company">Previous Company Name</label><input class="form-control-jtcs" id="previous_company" name="previous_company" value="{{ values.get('previous_company', '') }}"></div>
+          <div class="form-group"><label for="previous_designation">Previous Designation</label><input class="form-control-jtcs" id="previous_designation" name="previous_designation" value="{{ values.get('previous_designation', '') }}"></div>
+        </div>
+        <div class="form-group"><label for="responsibilities">Previous Job Responsibilities</label><textarea class="form-control-jtcs" id="responsibilities" name="responsibilities">{{ values.get('responsibilities', '') }}</textarea></div>
+        <div class="form-group"><label for="software_sales_experience">Experience in Software / IT Sales (optional)</label><input class="form-control-jtcs" id="software_sales_experience" name="software_sales_experience" value="{{ values.get('software_sales_experience', '') }}"></div>
+        <div class="form-group"><label for="b2b_sales_experience">Experience in B2B Sales (optional)</label><input class="form-control-jtcs" id="b2b_sales_experience" name="b2b_sales_experience" value="{{ values.get('b2b_sales_experience', '') }}"></div>
+        <div class="form-group"><label for="tax_accounting_erp_sales_experience">Experience in Tax / Accounting / ERP Software Sales (optional)</label><input class="form-control-jtcs" id="tax_accounting_erp_sales_experience" name="tax_accounting_erp_sales_experience" value="{{ values.get('tax_accounting_erp_sales_experience', '') }}"></div>
+        <div class="form-row">
+          {% for key, label in [('communication_skills','Communication Skills'),('computer_knowledge','Computer Knowledge'),('ms_excel_knowledge','MS Excel Knowledge'),('crm_erp_knowledge','CRM/ERP Knowledge'),('digital_marketing_knowledge','Digital Marketing Knowledge')] %}
+          <div class="form-group"><label for="{{ key }}">{{ label }} *</label>
+            <select class="form-control-jtcs" id="{{ key }}" name="{{ key }}" required>
+              <option value="">Select</option>
+              {% for lvl in skill_levels %}<option value="{{ lvl }}" {% if values.get(key)==lvl %}selected{% endif %}>{{ lvl }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get(key, '') }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="form-group"><label for="other_skills">Other Skills</label><textarea class="form-control-jtcs" id="other_skills" name="other_skills">{{ values.get('other_skills', '') }}</textarea></div>
+      </fieldset>
+
+      <fieldset class="rec-section">
+        <legend>Resume &amp; Other Information</legend>
+        <div class="form-group rec-resume-hold" id="recResumeHold">
+          <label for="resume">Upload Resume * (PDF, DOC, DOCX · max 5 MB)</label>
+          <input class="form-control-jtcs" id="resume" name="resume" type="file" required accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+          <p class="rec-file-name" id="recResumeName" hidden></p>
+          <span class="rec-error" id="resumeError">{{ errors.get('resume', '') }}</span>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label for="expected_salary">Expected Salary *</label><input class="form-control-jtcs" id="expected_salary" name="expected_salary" required value="{{ values.get('expected_salary', '') }}"><span class="rec-error">{{ errors.get('expected_salary', '') }}</span></div>
+          <div class="form-group"><label for="notice_period">Notice Period *</label>
+            <select class="form-control-jtcs" id="notice_period" name="notice_period" required>
+              <option value="">Select</option>
+              {% for n in notice_periods %}<option value="{{ n }}" {% if values.get('notice_period')==n %}selected{% endif %}>{{ n }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get('notice_period', '') }}</span>
+          </div>
+          <div class="form-group"><label for="current_employment_status">Current Employment Status *</label>
+            <select class="form-control-jtcs" id="current_employment_status" name="current_employment_status" required>
+              <option value="">Select</option>
+              {% for e in employment_statuses %}<option value="{{ e }}" {% if values.get('current_employment_status')==e %}selected{% endif %}>{{ e }}</option>{% endfor %}
+            </select><span class="rec-error">{{ errors.get('current_employment_status', '') }}</span>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Willing to Work in Haldwani? *</label>
+            <div class="rec-yesno">
+              <label><input type="radio" name="willing_to_work_haldwani" value="yes" {% if values.get('willing_to_work_haldwani')=='yes' %}checked{% endif %} required> Yes</label>
+              <label><input type="radio" name="willing_to_work_haldwani" value="no" {% if values.get('willing_to_work_haldwani')=='no' %}checked{% endif %}> No</label>
+            </div><span class="rec-error">{{ errors.get('willing_to_work_haldwani', '') }}</span>
+          </div>
+          <div class="form-group"><label>Willing to Travel for Sales? *</label>
+            <div class="rec-yesno">
+              <label><input type="radio" name="willing_to_travel" value="yes" {% if values.get('willing_to_travel')=='yes' %}checked{% endif %} required> Yes</label>
+              <label><input type="radio" name="willing_to_travel" value="no" {% if values.get('willing_to_travel')=='no' %}checked{% endif %}> No</label>
+            </div><span class="rec-error">{{ errors.get('willing_to_travel', '') }}</span>
+          </div>
+        </div>
+        <div class="form-group"><label for="source">How did you hear about this opportunity? *</label>
+          <select class="form-control-jtcs" id="source" name="source" required>
+            <option value="">Select</option>
+            {% for s in sources %}<option value="{{ s }}" {% if values.get('source')==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select><span class="rec-error">{{ errors.get('source', '') }}</span>
+        </div>
+        <div class="form-group"><label for="about_candidate">Tell us briefly about yourself *</label><textarea class="form-control-jtcs" id="about_candidate" name="about_candidate" required>{{ values.get('about_candidate', '') }}</textarea><span class="rec-error">{{ errors.get('about_candidate', '') }}</span></div>
+        <div class="form-group"><label for="suitability_answer">Why do you think you are suitable for this Sales Executive position? *</label><textarea class="form-control-jtcs" id="suitability_answer" name="suitability_answer" required>{{ values.get('suitability_answer', '') }}</textarea><span class="rec-error">{{ errors.get('suitability_answer', '') }}</span></div>
+      </fieldset>
+
+      <fieldset class="rec-section">
+        <legend>Declaration &amp; Submit</legend>
+        <div class="rec-privacy">
+          <p>Applicant information and resumes are used only to evaluate this job application, contact you about the role, and keep recruitment records. Access is limited to authorised JTCS Xpert staff. We do not publish your date of birth, mobile number, email or resume on the public website.</p>
+        </div>
+        <blockquote class="rec-declaration">I confirm that the information provided by me is true and complete to the best of my knowledge. I understand that JTCS Xpert may contact me regarding this job application.</blockquote>
+        <label class="rec-check">
+          <input type="checkbox" name="declaration" value="yes" {% if values.get('declaration') %}checked{% endif %} required>
+          <span>I agree to the above declaration. *</span>
+        </label>
+        <span class="rec-error">{{ errors.get('declaration', '') }}</span>
+        <p class="rec-hint">Preview your application first. After you confirm and submit, you will return to the home page with your Application Number.</p>
+      </fieldset>
+
+      <div class="rec-form-nav-bar">
+        <div class="rec-form-nav rec-submit-actions" id="recFinalActions">
+          <button type="button" class="btn-jtcs btn-secondary-jtcs" id="recPreview">Preview Application</button>
+          <button type="button" class="btn-jtcs btn-secondary-jtcs" id="recPreviewPdf">Download Preview PDF</button>
+          <button type="submit" class="btn-jtcs btn-primary-jtcs" id="recSubmit">Confirm &amp; Submit Application</button>
+        </div>
+      </div>
+    </form>
+    <div class="hiring-modal" id="recPreviewModal" hidden>
+      <div class="hiring-modal-card rec-preview-card" role="dialog" aria-labelledby="recPreviewTitle">
+        <h2 id="recPreviewTitle">Preview Your Application</h2>
+        <div id="recPreviewBody"></div>
+        <div class="rec-form-nav">
+          <button type="button" class="btn-jtcs btn-secondary-jtcs" id="recPreviewEdit">Edit Application</button>
+          <button type="button" class="btn-jtcs btn-secondary-jtcs" id="recPreviewPdfModal">Download Preview PDF</button>
+          <button type="button" class="btn-jtcs btn-primary-jtcs" id="recPreviewSubmit">Confirm &amp; Submit Application</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/recruitment-apply.js') }}?v=20260817d"></script>
+{% endblock %}

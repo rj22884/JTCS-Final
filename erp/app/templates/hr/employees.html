@@ -1,0 +1,36 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Employee Code</th>
+          <th>Name</th>
+          <th>Application Number</th>
+          <th>Department</th>
+          <th>Designation</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.EmployeeCode }}</td>
+          <td>{{ row.Name }}</td>
+          <td>{{ row.ApplicationNumber or '—' }}</td>
+          <td>{{ row.department_name or '—' }}</td>
+          <td>{{ row.designation_name or '—' }}</td>
+          <td>{{ row.EmploymentStatus }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.employee_profile', employee_id=row.EmployeeID) }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="text-muted">No employees yet. Convert a selected candidate to create the first record.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

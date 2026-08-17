@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Recruitment Admin — JTCS Xpert{% endblock %}</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0F4C81">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.svg') }}">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260816d">
+</head>
+<body>
+  <div class="adm-shell">
+    <aside class="adm-nav">
+      <a class="adm-brand" href="{{ url_for('admin.dashboard') }}">JTCS <span>Recruitment</span></a>
+      <p class="adm-nav-label">Recruitment</p>
+      <a href="{{ url_for('admin.dashboard') }}" class="{% if request.endpoint=='admin.dashboard' %}active{% endif %}"><i class="fas fa-gauge-high"></i> Dashboard</a>
+      <a href="{{ url_for('admin.applications') }}" class="{% if request.endpoint in ['admin.applications','admin.application_detail'] %}active{% endif %}"><i class="fas fa-file-lines"></i> Job Applications</a>
+      <a href="{{ url_for('admin.candidates') }}" class="{% if request.endpoint in ['admin.candidates','admin.candidate_detail'] %}active{% endif %}"><i class="fas fa-users"></i> Candidates</a>
+      <a href="{{ url_for('admin.audit') }}" class="{% if request.endpoint=='admin.audit' %}active{% endif %}"><i class="fas fa-clipboard-list"></i> Audit Trail</a>
+      <a href="{{ url_for('admin.jobs') }}" class="{% if request.endpoint in ['admin.jobs','admin.job_edit'] %}active{% endif %}"><i class="fas fa-briefcase"></i> Jobs</a>
+      <a href="{{ url_for('admin.analytics') }}" class="{% if request.endpoint=='admin.analytics' %}active{% endif %}"><i class="fas fa-chart-column"></i> Analytics</a>
+      <p class="adm-nav-label">HR</p>
+      <a href="{{ url_for('hr.employees') }}" class="{% if request.endpoint in ['hr.employees','hr.employee_detail'] %}active{% endif %}"><i class="fas fa-id-card"></i> Employee Master</a>
+      {% if current_user.is_authenticated and current_user.can_manage_settings() %}
+      <a href="{{ url_for('hr.letter_templates') }}" class="{% if request.endpoint=='hr.letter_templates' %}active{% endif %}"><i class="fas fa-file-signature"></i> Letter Templates</a>
+      <a href="{{ url_for('admin.settings') }}" class="{% if request.endpoint=='admin.settings' %}active{% endif %}"><i class="fas fa-gear"></i> Settings</a>
+      {% endif %}
+      <form class="adm-logout" method="post" action="{{ url_for('admin.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit"><i class="fas fa-right-from-bracket"></i> Sign out</button>
+      </form>
+    </aside>
+    <div class="adm-main">
+      <header class="adm-top">
+        <h1>{% block heading %}Recruitment{% endblock %}</h1>
+        <span>{{ current_user.name }} · {{ current_user.role }}</span>
+      </header>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for cat, msg in messages %}<div class="adm-flash {{ cat }}">{{ msg }}</div>{% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

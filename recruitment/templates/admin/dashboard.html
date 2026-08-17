@@ -1,0 +1,74 @@
+{% extends "admin/base.html" %}
+{% block heading %}Recruitment Dashboard{% endblock %}
+{% block content %}
+<section class="adm-cards">
+  <article><h3>Total Applications</h3><p>{{ stats.applications_submitted }}</p></article>
+  <article><h3>New Applications</h3><p>{{ stats.new_applications }}</p></article>
+  <article><h3>Under Review</h3><p>{{ stats.under_review }}</p></article>
+  <article><h3>Shortlisted</h3><p>{{ stats.shortlisted }}</p></article>
+  <article><h3>Interview Scheduled</h3><p>{{ stats.interview_scheduled }}</p></article>
+  <article><h3>Selected</h3><p>{{ stats.selected }}</p></article>
+  <article><h3>Rejected</h3><p>{{ stats.rejected }}</p></article>
+</section>
+<section class="adm-cards">
+  <article><h3>Selected Candidates</h3><p>{{ stats.hr_selected }}</p></article>
+  <article><h3>Offers Pending</h3><p>{{ stats.hr_offers_pending }}</p></article>
+  <article><h3>Offers Accepted</h3><p>{{ stats.hr_offers_accepted }}</p></article>
+  <article><h3>Appointment Issued</h3><p>{{ stats.hr_appointment_issued }}</p></article>
+  <article><h3>Employees Created</h3><p>{{ stats.hr_employees }}</p></article>
+</section>
+<section class="adm-panel">
+  <h2>Application window</h2>
+  <p>Sales Executive applications are currently <strong>{{ 'OPEN' if data.job_window.open else 'CLOSED' }}</strong>. Last date: <strong>{{ data.job_window.last_date_label }}</strong> ({{ data.job_window.timezone }}, {{ data.job_window.closing_time }}).</p>
+  <p class="adm-note">Change the closing date under Recruitment → Jobs. The public CTA stays visible after the deadline; only new submissions are blocked.</p>
+</section>
+<section class="adm-panel">
+  <h2>Sales Executive conversion</h2>
+  <p>CTA Clicks: <strong>{{ stats.cta_clicks }}</strong> · Job Page Views: <strong>{{ stats.job_page_views }}</strong> · Applications Submitted: <strong>{{ stats.applications_submitted }}</strong> · Application Conversion Rate: <strong>{{ stats.cta_to_application_rate }}%</strong></p>
+  <p class="adm-note">Conversion uses recorded CTA clicks from the existing tracking table. Unique visitors are anonymous technical IDs, not people identified by IP.</p>
+</section>
+<div class="adm-charts">
+  <section class="adm-panel"><h2>Applications by Source</h2><canvas id="sourceChart"></canvas>
+    <ul class="adm-pct">{% for row in data.by_source %}<li>{{ row.label }}: {{ row.value }} ({{ row.pct }}%)</li>{% else %}<li>No applications yet.</li>{% endfor %}</ul>
+  </section>
+  <section class="adm-panel"><h2>Sales Experience</h2><canvas id="expChart"></canvas></section>
+  <section class="adm-panel"><h2>Applications by Qualification</h2><canvas id="qualChart"></canvas></section>
+  <section class="adm-panel">
+    <h2>Applications Over Time</h2>
+    <div class="adm-tabs">
+      <button type="button" class="is-active" data-series="daily">Daily</button>
+      <button type="button" data-series="weekly">Weekly</button>
+      <button type="button" data-series="monthly">Monthly</button>
+    </div>
+    <canvas id="timeChart"></canvas>
+  </section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const payload = {{ data|tojson }};
+function bar(id, rows, color) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  return new Chart(el, {
+    type: 'bar',
+    data: { labels: (rows || []).map(r => r.label), datasets: [{ data: (rows || []).map(r => r.value), backgroundColor: color || '#0F4C81' }] },
+    options: { plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: false }
+  });
+}
+bar('sourceChart', payload.by_source, '#0F4C81');
+bar('expChart', payload.by_experience, '#10B981');
+bar('qualChart', payload.by_qualification, '#F97316');
+const series = { daily: payload.daily_applications, weekly: payload.weekly_applications, monthly: payload.monthly_applications };
+let timeChart = bar('timeChart', series.daily, '#1A6BB5');
+document.querySelectorAll('.adm-tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.adm-tabs button').forEach(b => b.classList.remove('is-active'));
+    btn.classList.add('is-active');
+    const rows = series[btn.dataset.series] || [];
+    timeChart.data.labels = rows.map(r => r.label);
+    timeChart.data.datasets[0].data = rows.map(r => r.value);
+    timeChart.update();
+  });
+});
+</script>
+{% endblock %}

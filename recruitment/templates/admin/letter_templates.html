@@ -1,0 +1,17 @@
+{% extends "admin/base.html" %}
+{% block heading %}Letter Templates{% endblock %}
+{% block content %}
+<p class="adm-note">These clauses appear on Offer and Appointment letters. They are not legal advice. Keep wording general and update them as company policy changes.</p>
+{% for t in templates %}
+<section class="adm-panel">
+  <h2>{{ t.letter_type|capitalize }} — {{ t.section_key }}</h2>
+  <form class="adm-form" method="post" action="{{ url_for('hr.save_letter_template', template_id=t.template_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Title<input name="title" value="{{ t.title }}"></label>
+    <label>Body<textarea name="body" rows="6">{{ t.body }}</textarea></label>
+    <label><input type="checkbox" name="is_active" value="1" {% if t.is_active %}checked{% endif %}> Active</label>
+    <button type="submit">Save section</button>
+  </form>
+</section>
+{% endfor %}
+{% endblock %}

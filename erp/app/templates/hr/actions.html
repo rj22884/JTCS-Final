@@ -1,0 +1,17 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="row g-3">
+  {% for item in items %}
+  <div class="col-md-6 col-xl-4">
+    <a class="jtcs-card hr-action-card h-100" href="{{ item.url }}">
+      <span class="jtcs-metric-label text-{{ item.tone }}">{{ item.title }}</span>
+      <strong class="jtcs-metric-value">{{ item.count }}</strong>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

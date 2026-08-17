@@ -1,0 +1,203 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h5 mb-1">{{ employee.Name }}</h1>
+    <p class="small text-muted mb-0">{{ employee.EmployeeCode }} · Application {{ employee.ApplicationNumber or '—' }}</p>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    <form method="post" action="{{ url_for('hr.employee_offer', employee_id=employee.EmployeeID) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-outline-primary" type="submit">Generate Offer Letter</button>
+    </form>
+    <form method="post" action="{{ url_for('hr.employee_appointment', employee_id=employee.EmployeeID) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-outline-primary" type="submit">Generate Appointment Letter</button>
+    </form>
+  </div>
+</div>
+<ul class="nav nav-tabs mb-3" role="tablist">
+  <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#personal" type="button">Personal</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#employment" type="button">Employment</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#education" type="button">Education</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#experience" type="button">Experience</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#documents" type="button">Documents</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#recruitment" type="button">Recruitment History</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#letters" type="button">Letters</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#timeline" type="button">Timeline</button></li>
+</ul>
+<form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="personal">
+      <div class="jtcs-card">
+        <div class="row g-2">
+          <div class="col-md-4"><label class="form-label">Employee Code</label><div class="form-control form-control-sm bg-light">{{ employee.EmployeeCode }}</div></div>
+          <div class="col-md-4"><label class="form-label">Employee Name</label><div class="form-control form-control-sm bg-light">{{ employee.Name }}</div></div>
+          <div class="col-md-4"><label class="form-label" for="father_name">Father's Name</label><input class="form-control form-control-sm" name="father_name" id="father_name" value="{{ employee.FatherName or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="date_of_birth">Date of Birth</label><input class="form-control form-control-sm" type="date" name="date_of_birth" id="date_of_birth" value="{{ employee.DateOfBirth or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="gender">Gender</label><input class="form-control form-control-sm" name="gender" id="gender" value="{{ employee.Gender or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="mobile">Mobile</label><input class="form-control form-control-sm" name="mobile" id="mobile" value="{{ employee.Mobile or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="email">Email</label><input class="form-control form-control-sm" name="email" id="email" value="{{ employee.Email or '' }}"></div>
+          <div class="col-md-8"><label class="form-label" for="address">Address</label><input class="form-control form-control-sm" name="address" id="address" value="{{ employee.Address or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="city">City</label><input class="form-control form-control-sm" name="city" id="city" value="{{ employee.City or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="state">State</label><input class="form-control form-control-sm" name="state" id="state" value="{{ employee.State or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="pin_code">PIN Code</label><input class="form-control form-control-sm" name="pin_code" id="pin_code" value="{{ employee.PinCode or '' }}"></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="employment">
+      <div class="jtcs-card">
+        <div class="row g-2">
+          <div class="col-md-4"><label class="form-label">Application Number</label><div class="form-control form-control-sm bg-light">{{ employee.ApplicationNumber or '—' }}</div></div>
+          <div class="col-md-4"><label class="form-label">Candidate ID</label><div class="form-control form-control-sm bg-light">{{ employee.CandidateID or '—' }}</div></div>
+          <div class="col-md-4"><label class="form-label" for="joining_date">Date of Joining</label><input class="form-control form-control-sm" type="date" name="joining_date" id="joining_date" value="{{ employee.JoiningDate or '' }}"></div>
+          <div class="col-md-4">
+            <label class="form-label" for="department_id">Department</label>
+            <select class="form-select form-select-sm" name="department_id" id="department_id">
+              <option value="">Select</option>
+              {% for row in masters.departments %}
+              <option value="{{ row.DepartmentID }}" {% if employee.DepartmentID == row.DepartmentID %}selected{% endif %}>{{ row.Name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="designation_id">Designation</label>
+            <select class="form-select form-select-sm" name="designation_id" id="designation_id">
+              <option value="">Select</option>
+              {% for row in masters.designations %}
+              <option value="{{ row.DesignationID }}" {% if employee.DesignationID == row.DesignationID %}selected{% endif %}>{{ row.Name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4"><label class="form-label" for="reporting_manager">Reporting Manager</label><input class="form-control form-control-sm" name="reporting_manager" id="reporting_manager" value="{{ employee.ReportingManager or '' }}"></div>
+          <div class="col-md-4">
+            <label class="form-label" for="employment_type_id">Employment Type</label>
+            <select class="form-select form-select-sm" name="employment_type_id" id="employment_type_id">
+              <option value="">Select</option>
+              {% for row in masters.employment_types %}
+              <option value="{{ row.EmploymentTypeID }}" {% if employee.EmploymentTypeID == row.EmploymentTypeID %}selected{% endif %}>{{ row.Name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label" for="work_location_id">Work Location</label>
+            <select class="form-select form-select-sm" name="work_location_id" id="work_location_id">
+              <option value="">Select</option>
+              {% for row in masters.work_locations %}
+              <option value="{{ row.WorkLocationID }}" {% if employee.WorkLocationID == row.WorkLocationID %}selected{% endif %}>{{ row.Name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4"><label class="form-label" for="probation_period">Probation Period</label><input class="form-control form-control-sm" name="probation_period" id="probation_period" value="{{ employee.ProbationPeriod or '' }}" placeholder="6 Months"></div>
+          <div class="col-md-4"><label class="form-label" for="probation_end_date">Probation End Date</label><input class="form-control form-control-sm" type="date" name="probation_end_date" id="probation_end_date" value="{{ employee.ProbationEndDate or '' }}"></div>
+          <div class="col-md-4">
+            <label class="form-label" for="employment_status">Employment Status</label>
+            <select class="form-select form-select-sm" name="employment_status" id="employment_status">
+              {% for s in statuses %}
+              <option value="{{ s }}" {% if employee.EmploymentStatus == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-4"><label class="form-label" for="salary_ctc">Salary / CTC</label><input class="form-control form-control-sm" name="salary_ctc" id="salary_ctc" value="{{ employee.SalaryCtc or '' }}"></div>
+          <div class="col-md-4"><label class="form-label" for="salary_frequency">Salary Frequency</label><input class="form-control form-control-sm" name="salary_frequency" id="salary_frequency" value="{{ employee.SalaryFrequency or '' }}"></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="education">
+      <div class="jtcs-card">
+        <div class="row g-2 small">
+          <div class="col-md-4"><strong>Highest Qualification</strong><div>{{ employee.HighestQualification or '—' }}</div></div>
+          <div class="col-md-4"><strong>Last Qualification</strong><div>{{ employee.LastQualification or '—' }}</div></div>
+          <div class="col-md-4"><strong>Degree</strong><div>{{ employee.Degree or '—' }}</div></div>
+          <div class="col-md-4"><strong>University/Board</strong><div>{{ employee.UniversityBoard or '—' }}</div></div>
+          <div class="col-md-4"><strong>Passing Year</strong><div>{{ employee.PassingYear or '—' }}</div></div>
+          <div class="col-md-4"><strong>Percentage/CGPA</strong><div>{{ employee.PercentageCgpa or '—' }}</div></div>
+        </div>
+        <p class="small text-muted mt-2 mb-0">Copied from the existing application. Edit is not required unless HR later adds a correction process.</p>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="experience">
+      <div class="jtcs-card">
+        <div class="row g-2 small">
+          <div class="col-md-4"><strong>Total Experience</strong><div>{{ employee.TotalExperience or '—' }}</div></div>
+          <div class="col-md-4"><strong>Sales Experience</strong><div>{{ employee.SalesExperience or '—' }}</div></div>
+          <div class="col-md-4"><strong>Previous Company</strong><div>{{ employee.PreviousCompany or '—' }}</div></div>
+          <div class="col-md-4"><strong>Previous Designation</strong><div>{{ employee.PreviousDesignation or '—' }}</div></div>
+          <div class="col-12"><strong>Previous Responsibilities</strong><div>{{ employee.PreviousResponsibilities or '—' }}</div></div>
+          <div class="col-12"><strong>Other relevant experience</strong><div>{{ employee.OtherExperience or '—' }}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="documents">
+      <div class="jtcs-card">
+        <ul class="small">
+          {% if employee.ApplicationID %}
+          <li><a href="{{ url_for('hr.application_resume', application_id=employee.ApplicationID) }}">Resume</a></li>
+          <li><a href="{{ url_for('hr.application_pdf', application_id=employee.ApplicationID) }}">Application PDF</a></li>
+          {% endif %}
+          {% for offer in employee.offers %}
+          <li><a href="{{ url_for('hr.offer_download', offer_id=offer.OfferID) }}">Offer {{ offer.OfferNumber }}</a></li>
+          {% endfor %}
+          {% for appt in employee.appointments %}
+          <li><a href="{{ url_for('hr.appointment_download', appointment_id=appt.AppointmentID) }}">Appointment {{ appt.AppointmentNumber }}</a></li>
+          {% endfor %}
+          {% for doc in employee.documents %}
+          <li><a href="{{ url_for('hr.document_download', document_id=doc.DocumentID) }}">{{ doc.DocumentType }} — {{ doc.OriginalName }}</a></li>
+          {% endfor %}
+        </ul>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.documents') }}">Manage documents</a>
+      </div>
+    </div>
+    <div class="tab-pane fade" id="recruitment">
+      <div class="jtcs-card">
+        {% if application %}
+        <p class="small mb-1">Application {{ application.application_number }} · {{ application.job_title }}</p>
+        <p class="small mb-1">Website status: {{ application.website_status }} · HR status: {{ application.effective_status }}</p>
+        <a href="{{ url_for('hr.application_detail', application_id=application.application_id) }}">Open application</a>
+        {% else %}
+        <p class="small text-muted mb-0">No linked application record.</p>
+        {% endif %}
+      </div>
+    </div>
+    <div class="tab-pane fade" id="letters">
+      <div class="jtcs-card">
+        <h3 class="h6">Offers</h3>
+        {% for offer in employee.offers %}
+        <p class="small mb-1">{{ offer.OfferNumber }} · {{ offer.OfferStatus }}
+          <a href="{{ url_for('hr.offer_download', offer_id=offer.OfferID) }}">Download</a>
+        </p>
+        {% else %}
+        <p class="small text-muted">No offer letters.</p>
+        {% endfor %}
+        <h3 class="h6 mt-3">Appointments</h3>
+        {% for appt in employee.appointments %}
+        <p class="small mb-1">{{ appt.AppointmentNumber }}
+          <a href="{{ url_for('hr.appointment_download', appointment_id=appt.AppointmentID) }}">Download</a>
+        </p>
+        {% else %}
+        <p class="small text-muted mb-0">No appointment letters.</p>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="tab-pane fade" id="timeline">
+      <div class="jtcs-card">
+        <ol class="small mb-0">
+          {% for event in timeline %}
+          <li class="mb-1"><strong>{{ event.title }}</strong> · {{ event.at }} {% if event.detail %}<span class="text-muted">{{ event.detail }}</span>{% endif %}</li>
+          {% else %}
+          <li class="text-muted">No stored timeline events.</li>
+          {% endfor %}
+        </ol>
+      </div>
+    </div>
+  </div>
+  <div class="mt-3">
+    <button class="btn btn-primary btn-sm" type="submit">Save employment information</button>
+  </div>
+</form>
+{% endblock %}

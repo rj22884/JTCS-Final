@@ -1,0 +1,46 @@
+{% extends "admin/base.html" %}
+{% block heading %}Recruitment Analytics{% endblock %}
+{% block content %}
+<section class="adm-cards">
+  <article><h3>CTA Clicks</h3><p>{{ data.stats.cta_clicks }}</p></article>
+  <article><h3>Unique Visitors</h3><p>{{ data.stats.unique_visitors }}</p></article>
+  <article><h3>Applications</h3><p>{{ data.stats.applications_submitted }}</p></article>
+  <article><h3>Conversion</h3><p>{{ data.stats.click_to_apply_rate }}%</p></article>
+</section>
+<div class="adm-charts">
+  <section class="adm-panel"><h2>Daily CTA clicks</h2><canvas id="ctaChart"></canvas></section>
+  <section class="adm-panel"><h2>Daily applications</h2><canvas id="appChart"></canvas></section>
+  <section class="adm-panel"><h2>Weekly applications</h2><canvas id="weekChart"></canvas></section>
+  <section class="adm-panel"><h2>Monthly applications</h2><canvas id="monthChart"></canvas></section>
+  <section class="adm-panel"><h2>Applications by source</h2><canvas id="sourceChart"></canvas></section>
+  <section class="adm-panel"><h2>Applications by city</h2><canvas id="cityChart"></canvas></section>
+  <section class="adm-panel"><h2>Applications by qualification</h2><canvas id="qualChart"></canvas></section>
+  <section class="adm-panel"><h2>Freshers vs experienced</h2><canvas id="expChart"></canvas></section>
+  <section class="adm-panel"><h2>Application status distribution</h2><canvas id="statusChart"></canvas></section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+const payload = {{ data|tojson }};
+function bar(id, rows, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  new Chart(el, {
+    type: 'bar',
+    data: {
+      labels: (rows || []).map(r => r.label),
+      datasets: [{ data: (rows || []).map(r => r.value), backgroundColor: color || '#0F4C81' }]
+    },
+    options: { plugins: { legend: { display: false } }, responsive: true, maintainAspectRatio: false }
+  });
+}
+bar('ctaChart', payload.daily_cta, '#0F4C81');
+bar('appChart', payload.daily_applications, '#10B981');
+bar('weekChart', payload.weekly_applications, '#F97316');
+bar('monthChart', payload.monthly_applications, '#1A6BB5');
+bar('sourceChart', payload.by_source, '#0F4C81');
+bar('cityChart', payload.by_city, '#10B981');
+bar('qualChart', payload.by_qualification, '#F97316');
+bar('expChart', payload.by_experience, '#0F4C81');
+bar('statusChart', payload.by_status, '#1A6BB5');
+</script>
+{% endblock %}

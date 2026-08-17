@@ -86,6 +86,13 @@ class CalendarService:
                 }
             )
 
+        try:
+            from app.services.hr_service import list_calendar_events
+
+            events.extend(list_calendar_events(start, end))
+        except Exception:
+            db.session.rollback()
+
         events.sort(key=lambda e: e.get("starts_at") or datetime.min)
         return events
 

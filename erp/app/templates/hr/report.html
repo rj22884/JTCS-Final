@@ -1,0 +1,23 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.reports', kind=kind, export='csv') }}">Export CSV</a>
+</div>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+        {% else %}
+        <tr><td colspan="{{ headers|length }}" class="text-muted">No rows.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

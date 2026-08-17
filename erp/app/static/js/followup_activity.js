@@ -168,50 +168,7 @@
     return isItrModule && rowHasPaymentReceived(row);
   }
 
-  async function verifyItrEditReauth() {
-    let creds = null;
-    if (!window.JTCSDeleteConfirm?.ask) {
-      const userId = window.prompt("User ID:", window.JTCS_CURRENT_LOGIN_ID || "");
-      if (userId == null) return false;
-      const password = window.prompt("Password:");
-      if (password == null) return false;
-      creds = { user_id: String(userId || "").trim(), password: String(password || "") };
-    } else {
-      creds = await window.JTCSDeleteConfirm.ask({
-        message:
-          "Payment Received entry is locked. Enter your User ID and password to edit.",
-      });
-      if (!creds) return false;
-    }
-    const verifyUrl = window.FU_API && window.FU_API.verify_edit_reauth;
-    if (!verifyUrl) {
-      alert("Edit re-authentication is not available. Refresh the page and try again.");
-      return false;
-    }
-    const res = await fetch(verifyUrl, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "X-CSRFToken": csrfToken(),
-      },
-      body: JSON.stringify(window.JTCSDeleteConfirm?.withCreds
-        ? window.JTCSDeleteConfirm.withCreds({}, creds)
-        : creds),
-    });
-    const data = await parseJsonResponse(res);
-    if (!data.ok) throw new Error(data.error || "Invalid credentials.");
-    return true;
-  }
-
   async function openEntryForEdit(entryId) {
-    const row = rows.find(function (r) {
-      return Number(r.entry_id) === Number(entryId);
-    });
-    if (isItrPaymentReceivedLocked(row)) {
-      const ok = await verifyItrEditReauth();
-      if (!ok) return;
-    }
     return loadEntry(entryId);
   }
 
@@ -1233,12 +1190,8 @@
           '><i class="bi bi-arrow-repeat"></i></button>' +
           "</td>"
         : "<td>" + escapeHtml(workTypeLabel) + "</td>";
-      const deleteDisabledAttrs = paymentLocked
-        ? ' disabled title="Delete locked after Payment Received"'
-        : ' title="Delete"';
-      const editTitle = paymentLocked
-        ? "Edit (password required)"
-        : "Edit";
+      const deleteDisabledAttrs = ' title="Delete"';
+      const editTitle = "Edit";
       const appNoValue = isDscModule
         ? (row.application_number || row.bill_no || "")
         : (row.bill_no || "");
@@ -2217,13 +2170,6 @@
     if (delBtn) {
       if (delBtn.disabled) return;
       const delId = parseInt(delBtn.dataset.id, 10);
-      const delRow = rows.find(function (r) {
-        return Number(r.entry_id) === delId;
-      });
-      if (isItrPaymentReceivedLocked(delRow)) {
-        alert("Delete is locked after Payment Received.");
-        return;
-      }
       deleteEntry(delId);
     }
   });

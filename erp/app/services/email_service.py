@@ -145,6 +145,7 @@ class EmailService:
         max_attempts: int | None = None,
         timeout: float | None = None,
         reply_to: str | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,
     ) -> tuple[bool, str | None]:
         cfg = self._mail_config()
         logger.info(
@@ -185,6 +186,8 @@ class EmailService:
         )
         if reply_to:
             message.reply_to = reply_to
+        for filename, data, mime in attachments or []:
+            message.attach(filename, mime or "application/octet-stream", data)
 
         self._log_smtp_config()
         last_error: Exception | None = None

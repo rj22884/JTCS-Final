@@ -1,0 +1,96 @@
+{% extends 'layouts/base.html' %}
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/hr.css') }}?v=20260816hr1" rel="stylesheet">
+{% endblock %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h5 mb-1">{{ app.application_number }}</h1>
+    <p class="small text-muted mb-0">{{ app.job_title }} · Website status {{ app.website_status }} · HR status {{ app.effective_status }}</p>
+  </div>
+  <div class="d-flex flex-wrap gap-2">
+    {% if app.resume_stored_name %}
+    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.application_resume', application_id=app.application_id) }}">View Resume</a>
+    {% endif %}
+    {% if app.application_pdf_stored_name %}
+    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.application_pdf', application_id=app.application_id) }}">View Application PDF</a>
+    {% endif %}
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('hr.interview_new', application_id=app.application_id) }}">Interview</a>
+    {% if app.can_convert %}
+    <form method="post" action="{{ url_for('hr.convert_employee', application_id=app.application_id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-primary" type="submit">Convert to Employee</button>
+    </form>
+    {% elif app.employee %}
+    <a class="btn btn-sm btn-primary" href="{{ url_for('hr.employee_profile', employee_id=app.employee.EmployeeID) }}">Open Employee {{ app.employee.EmployeeCode }}</a>
+    {% endif %}
+  </div>
+</div>
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Change Status</h2>
+  <form class="row g-2 align-items-end" method="post" action="{{ url_for('hr.application_status', application_id=app.application_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="col-md-4">
+      <label class="form-label" for="status">Status</label>
+      <select class="form-select form-select-sm" id="status" name="status">
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if app.effective_status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-5">
+      <label class="form-label" for="reason">Reason</label>
+      <input class="form-control form-control-sm" id="reason" name="reason">
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-primary btn-sm" type="submit">Update</button>
+    </div>
+  </form>
+  <p class="small text-muted mt-2 mb-0">The original website application row is not overwritten. HR status is stored in the ERP overlay and shown here.</p>
+</div>
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Personal Information</h2>
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Name</strong><div>{{ app.name }}</div></div>
+    <div class="col-md-4"><strong>Father's Name</strong><div>{{ app.father_name or '—' }}</div></div>
+    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob or '—' }}</div></div>
+    <div class="col-md-4"><strong>Gender</strong><div>{{ app.gender or '—' }}</div></div>
+    <div class="col-md-4"><strong>Mobile</strong><div>{{ app.mobile }}</div></div>
+    <div class="col-md-4"><strong>Email</strong><div>{{ app.email }}</div></div>
+    <div class="col-12"><strong>Address</strong><div>{{ app.address }}, {{ app.city }}, {{ app.state }} {{ app.pin_code }}</div></div>
+    <div class="col-md-4"><strong>Work in Haldwani</strong><div>{{ 'Yes' if app.willing_to_work_haldwani else 'No' }}</div></div>
+    <div class="col-md-4"><strong>Source</strong><div>{{ app.source or '—' }}</div></div>
+  </div>
+</div>
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Education</h2>
+  {% for edu in app.education %}
+  <p class="small mb-1">{{ edu.education_type }}: {{ edu.qualification }} · {{ edu.university_board or '—' }} · {{ edu.passing_year or '—' }} · {{ edu.percentage_cgpa or '—' }}</p>
+  {% else %}
+  <p class="small text-muted mb-0">No education records on the existing application.</p>
+  {% endfor %}
+</div>
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Experience</h2>
+  {% set exp = app.experience %}
+  {% if exp %}
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Total</strong><div>{{ exp.total_work_experience or '—' }}</div></div>
+    <div class="col-md-4"><strong>Sales</strong><div>{{ exp.sales_experience_years or 0 }}y {{ exp.sales_experience_months or 0 }}m</div></div>
+    <div class="col-md-4"><strong>Previous company</strong><div>{{ exp.previous_company or '—' }}</div></div>
+    <div class="col-12"><strong>Responsibilities</strong><div>{{ exp.responsibilities or '—' }}</div></div>
+  </div>
+  {% else %}
+  <p class="small text-muted mb-0">No experience record on the existing application.</p>
+  {% endif %}
+</div>
+{% if app.interview %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Interview (internal)</h2>
+  <p class="small mb-1">{{ app.interview.InterviewDate }} {{ app.interview.InterviewTime or '' }} · {{ app.interview.InterviewMode }} · {{ app.interview.InterviewResult }}</p>
+  <p class="small text-muted mb-0">Internal notes are not shown to candidates.</p>
+  <p class="small mt-2">{{ app.interview.InterviewNotes or '—' }}</p>
+</div>
+{% endif %}
+{% endblock %}

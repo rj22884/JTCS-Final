@@ -1,0 +1,53 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Generate after offer accepted</h2>
+  <p class="small text-muted">Open an employee whose latest offer is Accepted, then use Generate Appointment Letter.</p>
+  <ul class="small mb-0">
+    {% for emp in employees %}
+      {% if emp.latest_offer and emp.latest_offer.OfferStatus == 'Accepted' and not emp.latest_appointment %}
+      <li>
+        {{ emp.EmployeeCode }} — {{ emp.Name }}
+        <form class="d-inline" method="post" action="{{ url_for('hr.employee_appointment', employee_id=emp.EmployeeID) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-sm btn-primary" type="submit">Generate Appointment Letter</button>
+        </form>
+      </li>
+      {% endif %}
+    {% endfor %}
+  </ul>
+</div>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Appointment Number</th>
+          <th>Application</th>
+          <th>Issued</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.AppointmentNumber }}</td>
+          <td>{{ row.ApplicationNumber or '—' }}</td>
+          <td>{{ row.IssuedAt }}</td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.appointment_download', appointment_id=row.AppointmentID) }}">Download</a>
+            <form class="d-inline" method="post" action="{{ url_for('hr.appointment_email', appointment_id=row.AppointmentID) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Send Email</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted">No appointment letters yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

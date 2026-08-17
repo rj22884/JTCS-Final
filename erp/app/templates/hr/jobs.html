@@ -1,0 +1,35 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Department</th>
+          <th>Location</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Closing</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.job_title }}</td>
+          <td>{{ row.department }}</td>
+          <td>{{ row.location }}</td>
+          <td>{{ row.employment_type }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.closing_date or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-muted">No jobs found in the existing recruitment store.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

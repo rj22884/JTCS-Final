@@ -22,9 +22,15 @@
     "bi-three-dots-vertical": 1,
     "bi-dot": 1,
     "bi-list": 1,
+    "bi-arrow-down-up": 1,
+    "bi-arrow-up": 1,
+    "bi-arrow-down": 1,
+    "bi-sort-down": 1,
+    "bi-sort-up": 1,
+    "bi-filter": 1,
   };
 
-  var SKIP_ROOTS = "#biPickerModal, .mcust-icon-grid, .mcust-icon-pick, .jtcs-illu-skip";
+  var SKIP_ROOTS = "#biPickerModal, .mcust-icon-grid, .mcust-icon-pick, .jtcs-illu-skip, thead, .dash-sort-icon, .dash-th-label";
 
   function wrap(inner) {
     return (

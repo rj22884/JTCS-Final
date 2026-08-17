@@ -1,0 +1,41 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Application Number</th>
+          <th>Candidate</th>
+          <th>Job</th>
+          <th>Employee Code</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.application_number }}</td>
+          <td>{{ row.name }}</td>
+          <td>{{ row.job_title }}</td>
+          <td>{{ row.employee_code or '—' }}</td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.application_detail', application_id=row.application_id) }}">View</a>
+            {% if row.can_convert %}
+            <form class="d-inline" method="post" action="{{ url_for('hr.convert_employee', application_id=row.application_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-primary" type="submit">Convert to Employee</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted">No selected candidates.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

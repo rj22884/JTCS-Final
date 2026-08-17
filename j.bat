@@ -22,7 +22,7 @@ echo   3. app.jtcsxpert.com on local
 echo   4. app.jtcsxpert.com on web
 echo   5. Deploy jtcsxpert.com
 echo   6. Deploy app.jtcsxpert.com
-echo   7.
+echo   7. Recruitment (Sales Executive) local
 echo.
 echo  50. Deploy all
 echo  51. Exit
@@ -37,7 +37,7 @@ if "!choice!"=="3" goto app_local
 if "!choice!"=="4" goto app_live
 if "!choice!"=="5" goto web_deploy
 if "!choice!"=="6" goto app_deploy
-if "!choice!"=="7" goto blank
+if "!choice!"=="7" goto rec_local
 if "!choice!"=="50" goto deploy_all
 if "!choice!"=="51" exit /b 0
 
@@ -122,9 +122,20 @@ echo.
 pause
 goto menu
 
-:blank
+:rec_local
 echo.
-echo [7] (blank - reserved)
+echo [7] Recruitment module on local
+echo     Path: %APP_PATH%\recruitment
+echo     URL : http://127.0.0.1:5050/careers/apply/sales-executive
+if not exist "%APP_PATH%\recruitment\start.bat" (
+  echo [FAIL] Missing %APP_PATH%\recruitment\start.bat
+  pause
+  goto menu
+)
+start "JTCS Recruitment" cmd /k "cd /d \"%APP_PATH%\recruitment\" && start.bat"
+timeout /t 2 /nobreak >nul
+start "" "http://127.0.0.1:5050/careers/apply/sales-executive"
+echo [OK] Recruitment starting on port 5050. Website :5500 and ERP :8000 stay separate.
 pause
 goto menu
 

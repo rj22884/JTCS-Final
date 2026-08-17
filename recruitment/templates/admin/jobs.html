@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% block heading %}Jobs{% endblock %}
+{% block content %}
+<table class="adm-table">
+  <thead><tr><th>Title</th><th>Department</th><th>Location</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+    {% for job in jobs %}
+    <tr>
+      <td>{{ job.job_title }}</td>
+      <td>{{ job.department }}</td>
+      <td>{{ job.location }}</td>
+      <td>{{ job.status }}</td>
+      <td><a href="{{ url_for('admin.job_edit', job_id=job.job_id) }}">Edit</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

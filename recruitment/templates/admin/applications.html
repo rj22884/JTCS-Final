@@ -1,0 +1,122 @@
+{% extends "admin/base.html" %}
+{% block heading %}Job Applications{% endblock %}
+{% block content %}
+<form class="adm-filters" method="get">
+  <input name="q" placeholder="Search application no., name, mobile, email, city, company" value="{{ filters.get('q', '') }}">
+  <select name="status">
+    <option value="">All statuses</option>
+    {% for s in statuses %}<option value="{{ s }}" {% if filters.get('status')==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+  </select>
+  <select name="experience">
+    <option value="">All experience</option>
+    <option value="fresher" {% if filters.get('experience')=='fresher' %}selected{% endif %}>Fresher</option>
+    <option value="1-2" {% if filters.get('experience')=='1-2' %}selected{% endif %}>1–2 Years</option>
+    <option value="2-5" {% if filters.get('experience')=='2-5' %}selected{% endif %}>2–5 Years</option>
+    <option value="5plus" {% if filters.get('experience')=='5plus' %}selected{% endif %}>5+ Years</option>
+  </select>
+  <select name="qualification">
+    <option value="">All qualifications</option>
+    {% for qv in qualifications %}<option value="{{ qv }}" {% if filters.get('qualification')==qv %}selected{% endif %}>{{ qv }}</option>{% endfor %}
+  </select>
+  <select name="city">
+    <option value="">All cities</option>
+    {% for c in cities %}<option value="{{ c }}" {% if filters.get('city')==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+  </select>
+  <input type="date" name="from" value="{{ filters.get('from', '') }}" aria-label="From date">
+  <input type="date" name="to" value="{{ filters.get('to', '') }}" aria-label="To date">
+  <select name="per_page">
+    {% for n in [10, 25, 50, 100] %}<option value="{{ n }}" {% if per_page==n %}selected{% endif %}>{{ n }} / page</option>{% endfor %}
+  </select>
+  <button type="submit">Apply Filter</button>
+  <a class="adm-btn adm-btn-ghost" href="{{ url_for('admin.applications') }}">Reset</a>
+</form>
+<p class="adm-export">
+  Export current filters:
+  <a href="{{ url_for('admin.applications_export', fmt='xlsx') }}?{{ request.query_string.decode() }}">Excel</a>
+  <a href="{{ url_for('admin.applications_export', fmt='csv') }}?{{ request.query_string.decode() }}">CSV</a>
+  <a href="{{ url_for('admin.applications_export', fmt='pdf') }}?{{ request.query_string.decode() }}">PDF</a>
+</p>
+{% if not pagination.items %}
+<section class="adm-empty">
+  <h2>No applications received yet.</h2>
+  <p>Submitted Sales Executive applications will appear here.</p>
+</section>
+{% else %}
+<form method="post" action="{{ url_for('admin.applications_bulk') }}" id="bulkForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if current_user.can_write() %}
+  <div class="adm-bulk">
+    <select name="action" required>
+      <option value="">Bulk action</option>
+      <option value="under_review">Mark as Under Review</option>
+      <option value="shortlist">Shortlist</option>
+      <option value="reject">Reject</option>
+      <option value="export">Export Selected</option>
+    </select>
+    <button type="submit">Apply to selected</button>
+  </div>
+  {% endif %}
+  <p class="adm-note">Showing {{ showing_from }}–{{ showing_to }} of {{ pagination.total }} applications</p>
+  <div class="adm-table-wrap">
+  <table class="adm-table">
+    <thead>
+      <tr>
+        {% if current_user.can_write() %}<th></th>{% endif %}
+        <th><a href="?sort=number&amp;dir={{ 'asc' if filters.get('dir')=='desc' else 'desc' }}">Application No.</a></th>
+        <th><a href="?sort=name&amp;dir={{ 'asc' if filters.get('dir')=='desc' else 'desc' }}">Candidate Name</a></th>
+        <th>Mobile</th>
+        <th>Email</th>
+        <th>Highest Qualification</th>
+        <th><a href="?sort=experience&amp;dir={{ 'asc' if filters.get('dir')=='desc' else 'desc' }}">Sales Experience</a></th>
+        <th>City</th>
+        <th><a href="?sort=submitted_at&amp;dir={{ 'asc' if filters.get('dir')=='desc' else 'desc' }}">Application Date</a></th>
+        <th>Source</th>
+        <th><a href="?sort=status&amp;dir={{ 'asc' if filters.get('dir')=='desc' else 'desc' }}">Status</a></th>
+        <th>Resume</th>
+        <th>Application PDF</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for app in pagination.items %}
+      {% set edu = education_map(app.candidate) %}
+      {% set exp = app.candidate.experience[0] if app.candidate.experience else None %}
+      <tr>
+        {% if current_user.can_write() %}<td><input type="checkbox" name="application_ids" value="{{ app.application_id }}"></td>{% endif %}
+        <td>{{ app.application_number }}</td>
+        <td>{{ app.candidate.name }}</td>
+        <td>{{ app.candidate.mobile }}</td>
+        <td>{{ app.candidate.email }}</td>
+        <td>{{ edu.degree or edu.highest or '—' }}</td>
+        <td>{{ experience_label(exp) }}</td>
+        <td>{{ app.candidate.city }}</td>
+        <td>{{ app.submitted_at.strftime('%d-%b-%Y') if app.submitted_at else '' }}</td>
+        <td>{{ app.source or '—' }}</td>
+        <td><span class="adm-status">{{ app.application_status }}</span></td>
+        <td>{% if app.resume_file_reference %}<a href="{{ url_for('admin.download_resume', application_id=app.application_id) }}">Download</a>{% else %}—{% endif %}</td>
+        <td>{% if app.application_pdf_stored_name %}<a href="{{ url_for('admin.download_application_pdf', application_id=app.application_id) }}">Download</a>{% else %}—{% endif %}</td>
+        <td><a href="{{ url_for('admin.application_detail', application_id=app.application_id) }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</form>
+<nav class="adm-pager">
+  {% if pagination.has_prev %}<a href="?page={{ pagination.prev_num }}&amp;per_page={{ per_page }}">Previous</a>{% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>
+  {% if pagination.has_next %}<a href="?page={{ pagination.next_num }}&amp;per_page={{ per_page }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+<script>
+document.getElementById('bulkForm')?.addEventListener('submit', function (e) {
+  const action = this.action && this.querySelector('[name="action"]').value;
+  const count = this.querySelectorAll('[name="application_ids"]:checked').length;
+  if (!action || action === 'export') return;
+  const label = {under_review:'Under Review', shortlist:'Shortlisted', reject:'Rejected'}[action] || action;
+  if (!confirm('Are you sure you want to change the status of ' + count + ' applications to ' + label + '?')) {
+    e.preventDefault();
+  }
+});
+</script>
+{% endblock %}

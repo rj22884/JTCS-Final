@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% block heading %}Candidates{% endblock %}
+{% block content %}
+<form class="adm-filters" method="get">
+  <input name="q" placeholder="Search name, email, mobile" value="{{ request.args.get('q', '') }}">
+  <button type="submit">Search</button>
+</form>
+{% if not pagination.items %}
+<section class="adm-empty"><h2>No applications received yet.</h2><p>Candidates appear here after they submit the Sales Executive form.</p></section>
+{% else %}
+<div class="adm-table-wrap">
+<table class="adm-table">
+  <thead>
+    <tr>
+      <th>Candidate Name</th>
+      <th>Mobile</th>
+      <th>Email</th>
+      <th>City</th>
+      <th>Qualification</th>
+      <th>Total Applications</th>
+      <th>Latest Application</th>
+      <th>Latest Status</th>
+      <th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in pagination.items %}
+    {% set latest = (c.applications|sort(attribute='submitted_at', reverse=true)|first) if c.applications else None %}
+    {% set edu = education_map(c) %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td>{{ c.mobile }}</td>
+      <td>{{ c.email }}</td>
+      <td>{{ c.city }}</td>
+      <td>{{ edu.degree or edu.highest or '—' }}</td>
+      <td>{{ c.applications|length }}</td>
+      <td>{{ latest.application_number if latest else '—' }}</td>
+      <td>{{ latest.application_status if latest else '—' }}</td>
+      <td>
+        {% if latest %}<a href="{{ url_for('admin.application_detail', application_id=latest.application_id) }}">View</a>
+        {% else %}<a href="{{ url_for('admin.candidate_detail', candidate_id=c.candidate_id) }}">View</a>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<nav class="adm-pager">
+  {% if pagination.has_prev %}<a href="?page={{ pagination.prev_num }}">Previous</a>{% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>
+  {% if pagination.has_next %}<a href="?page={{ pagination.next_num }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

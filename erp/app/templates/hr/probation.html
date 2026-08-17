@@ -1,0 +1,35 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<p class="small text-muted mb-3">Tracking only. This is not a performance-management system.</p>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Joining Date</th>
+          <th>Probation Period</th>
+          <th>Probation End Date</th>
+          <th>Days Remaining</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><a href="{{ url_for('hr.employee_profile', employee_id=row.employee.EmployeeID) }}">{{ row.employee.Name }}</a></td>
+          <td>{{ row.employee.JoiningDate or '—' }}</td>
+          <td>{{ row.employee.ProbationPeriod or '—' }}</td>
+          <td>{{ row.employee.ProbationEndDate or '—' }}</td>
+          <td>{{ row.days_remaining }}</td>
+          <td>{{ row.status }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-muted">No employees have a probation end date yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

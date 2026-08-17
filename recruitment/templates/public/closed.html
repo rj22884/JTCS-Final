@@ -1,0 +1,12 @@
+{% extends "public/base.html" %}
+{% block title %}Vacancy unavailable — JTCS Xpert{% endblock %}
+{% block robots %}noindex{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="container-jtcs">
+    <h1>This vacancy is not available</h1>
+    <p>The role may be closed or the link is incorrect.</p>
+    <a class="btn-jtcs btn-primary-jtcs" href="{{ url_for('public.careers_index') }}">View open roles</a>
+  </div>
+</section>
+{% endblock %}

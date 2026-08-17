@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+{% block heading %}Edit job{% endblock %}
+{% block content %}
+<form class="adm-form" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label>Title<input name="job_title" value="{{ job.job_title or '' }}"></label>
+  <label>Department<input name="department" value="{{ job.department or '' }}"></label>
+  <label>Location<input name="location" value="{{ job.location or '' }}"></label>
+  <label>Employment type<input name="employment_type" value="{{ job.employment_type or '' }}"></label>
+  <label>Status
+    <select name="status">
+      {% for s in ['open','closed','draft'] %}<option value="{{ s }}" {% if job.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Application closing date<input type="date" name="closing_date" value="{{ job.closing_date or '' }}"></label>
+  <label>Application closing time (24h)<input name="closing_time" value="{{ job.closing_time or '23:59:59' }}" placeholder="23:59:59"></label>
+  <label>Timezone<input name="timezone" value="{{ job.timezone or 'Asia/Kolkata' }}"></label>
+  <p class="adm-note">Applications are accepted through the closing date and time in this timezone. After that the CTA stays visible but new submissions are rejected.</p>
+  <label>Salary / CTC<input name="salary_ctc" value="{{ job.salary_ctc or '' }}"></label>
+  <label>Experience required<input name="experience_required" value="{{ job.experience_required or '' }}"></label>
+  <label>Qualification required<input name="qualification_required" value="{{ job.qualification_required or '' }}"></label>
+  <label>About company<textarea name="about_company">{{ job.about_company or '' }}</textarea></label>
+  <label>Description<textarea name="description">{{ job.description or '' }}</textarea></label>
+  <label>Responsibilities<textarea name="responsibilities">{{ job.responsibilities or '' }}</textarea></label>
+  <label>Required skills<textarea name="required_skills">{{ job.required_skills or '' }}</textarea></label>
+  <label>Benefits<textarea name="benefits">{{ job.benefits or '' }}</textarea></label>
+  <label>Application instructions<textarea name="application_instructions">{{ job.application_instructions or '' }}</textarea></label>
+  <button type="submit">Save job</button>
+</form>
+{% endblock %}

@@ -1,0 +1,204 @@
+{% extends "admin/base.html" %}
+{% block heading %}Candidate Application Details{% endblock %}
+{% block content %}
+{% set c = application.candidate %}
+{% set exp = c.experience[0] if c.experience else None %}
+{% set skill = c.skills[0] if c.skills else None %}
+<p class="adm-appno">Application No: <strong>{{ application.application_number }}</strong></p>
+<p class="adm-status-lg">Current status: <strong>{{ application.application_status }}</strong></p>
+{% if application.application_status == 'Selected' and current_user.can_write() and not employee %}
+<form method="post" action="{{ url_for('hr.convert_application', application_id=application.application_id) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="adm-btn" type="submit">Convert to Employee</button>
+</form>
+{% elif employee %}
+<p>Employee Code: <a href="{{ url_for('hr.employee_detail', employee_id=employee.employee_id) }}"><strong>{{ employee.employee_code }}</strong></a></p>
+{% endif %}
+
+<section class="adm-panel">
+  <h2>Personal Information</h2>
+  <dl class="adm-dl">
+    <div><dt>Full Name</dt><dd>{{ c.name }}</dd></div>
+    <div><dt>Father's Name</dt><dd>{{ c.father_name }}</dd></div>
+    <div><dt>Date of Birth</dt><dd>{{ c.dob.strftime('%d-%b-%Y') if c.dob else '—' }}</dd></div>
+    <div><dt>Gender</dt><dd>{{ c.gender }}</dd></div>
+    <div><dt>Mobile Number</dt><dd>{{ c.mobile }}</dd></div>
+    <div><dt>Email Address</dt><dd>{{ c.email }}</dd></div>
+    <div><dt>Current Address</dt><dd>{{ c.address }}</dd></div>
+    <div><dt>City</dt><dd>{{ c.city }}</dd></div>
+    <div><dt>State</dt><dd>{{ c.state }}</dd></div>
+    <div><dt>PIN Code</dt><dd>{{ c.pin_code }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Educational Information</h2>
+  <dl class="adm-dl">
+    <div><dt>Highest Educational Qualification</dt><dd>{{ edu.highest or '—' }}</dd></div>
+    <div><dt>Last Educational Qualification</dt><dd>{{ edu.last or '—' }}</dd></div>
+    <div><dt>Academic Qualification / Degree</dt><dd>{{ edu.degree or '—' }}</dd></div>
+    <div><dt>University / Board</dt><dd>{{ edu.university or '—' }}</dd></div>
+    <div><dt>Year of Passing</dt><dd>{{ edu.year or '—' }}</dd></div>
+    <div><dt>Percentage / CGPA</dt><dd>{{ edu.score or '—' }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Professional Information</h2>
+  {% if exp and (exp.sales_experience_years or 0) == 0 and (exp.sales_experience_months or 0) == 0 %}
+  <p class="adm-fresher">Fresher – 0 Years Experience</p>
+  {% endif %}
+  <dl class="adm-dl">
+    <div><dt>Sales Experience – Years</dt><dd>{{ exp.sales_experience_years if exp else 0 }}</dd></div>
+    <div><dt>Sales Experience – Months</dt><dd>{{ exp.sales_experience_months if exp else 0 }}</dd></div>
+    <div><dt>Previous Company</dt><dd>{{ exp.previous_company if exp and exp.previous_company else '—' }}</dd></div>
+    <div><dt>Previous Designation</dt><dd>{{ exp.previous_designation if exp and exp.previous_designation else '—' }}</dd></div>
+    <div><dt>Previous Job Responsibilities</dt><dd>{{ exp.responsibilities if exp and exp.responsibilities else '—' }}</dd></div>
+    <div><dt>Total Work Experience</dt><dd>{{ exp.total_work_experience if exp and exp.total_work_experience else '—' }}</dd></div>
+    <div><dt>Software / IT Sales Experience</dt><dd>{{ exp.software_sales_experience if exp and exp.software_sales_experience else '—' }}</dd></div>
+    <div><dt>B2B Sales Experience</dt><dd>{{ exp.b2b_sales_experience if exp and exp.b2b_sales_experience else '—' }}</dd></div>
+    <div><dt>Tax / Accounting / ERP Software Sales Experience</dt><dd>{{ exp.tax_accounting_erp_sales_experience if exp and exp.tax_accounting_erp_sales_experience else '—' }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Skills &amp; Knowledge</h2>
+  <dl class="adm-dl">
+    <div><dt>Communication Skills</dt><dd>{{ skill.communication_skills if skill else '—' }}</dd></div>
+    <div><dt>Computer Knowledge</dt><dd>{{ skill.computer_knowledge if skill else '—' }}</dd></div>
+    <div><dt>MS Excel Knowledge</dt><dd>{{ skill.ms_excel_knowledge if skill else '—' }}</dd></div>
+    <div><dt>CRM/ERP Knowledge</dt><dd>{{ skill.crm_erp_knowledge if skill else '—' }}</dd></div>
+    <div><dt>Digital Marketing Knowledge</dt><dd>{{ skill.digital_marketing_knowledge if skill else '—' }}</dd></div>
+    <div><dt>Other Skills</dt><dd>{{ skill.other_skills if skill and skill.other_skills else '—' }}</dd></div>
+  </dl>
+</section>
+
+<section class="adm-panel">
+  <h2>Application Information</h2>
+  <dl class="adm-dl">
+    <div><dt>Expected Salary</dt><dd>{{ application.expected_salary or '—' }}</dd></div>
+    <div><dt>Notice Period</dt><dd>{{ application.notice_period or '—' }}</dd></div>
+    <div><dt>Current Employment Status</dt><dd>{{ application.current_employment_status or '—' }}</dd></div>
+    <div><dt>Willing to Work in Haldwani</dt><dd>{{ 'Yes' if application.willing_to_work_haldwani else 'No' }}</dd></div>
+    <div><dt>Willing to Travel for Sales</dt><dd>{{ 'Yes' if application.willing_to_travel else 'No' }}</dd></div>
+    <div><dt>How did you hear about this opportunity?</dt><dd>{{ application.source or '—' }}</dd></div>
+  </dl>
+  <h3>About Yourself</h3>
+  <p>{{ application.about_candidate or '—' }}</p>
+  <h3>Why do you think you are suitable for this position?</h3>
+  <p>{{ application.suitability_answer or '—' }}</p>
+</section>
+
+<section class="adm-panel">
+  <h2>Resume</h2>
+  {% if application.resume_file_reference %}
+  <p>Resume: <strong>{{ application.resume_original_name }}</strong></p>
+  <a class="adm-btn" href="{{ url_for('admin.download_resume', application_id=application.application_id, view=1) }}" target="_blank" rel="noopener">View Resume</a>
+  <a class="adm-btn" href="{{ url_for('admin.download_resume', application_id=application.application_id) }}">Download Resume</a>
+  {% else %}<p>No resume on file.</p>{% endif %}
+  <h3>Application PDF</h3>
+  {% if application.application_pdf_stored_name %}
+  <a class="adm-btn" href="{{ url_for('admin.download_application_pdf', application_id=application.application_id, view=1) }}" target="_blank" rel="noopener">View PDF</a>
+  <a class="adm-btn" href="{{ url_for('admin.download_application_pdf', application_id=application.application_id) }}">Download PDF</a>
+  {% else %}
+  <p>Final application PDF is not available yet.</p>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Application Status</h2>
+  <p class="adm-status-lg">{{ application.application_status }}</p>
+  {% if current_user.can_write() %}
+  <form class="adm-form" method="post" action="{{ url_for('admin.application_status', application_id=application.application_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Change Status
+      <select name="status">{% for s in statuses %}<option value="{{ s }}" {% if application.application_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <label>Reason / comment<input name="reason" placeholder="Optional"></label>
+    <button type="submit">Change Status</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Interview</h2>
+  <dl class="adm-dl">
+    <div><dt>Interview Date</dt><dd>{{ application.interview_scheduled_at.strftime('%d-%b-%Y') if application.interview_scheduled_at else '—' }}</dd></div>
+    <div><dt>Interview Time</dt><dd>{{ application.interview_scheduled_at.strftime('%I:%M %p') if application.interview_scheduled_at else '—' }}</dd></div>
+    <div><dt>Interview Mode</dt><dd>{{ application.interview_mode or '—' }}</dd></div>
+    <div><dt>Interviewer</dt><dd>{{ application.interview_interviewer or '—' }}</dd></div>
+    <div><dt>Interview Result</dt><dd>{{ application.interview_result or '—' }}</dd></div>
+  </dl>
+  <p class="adm-note">Interview notes are internal and are not shown on the candidate status page.</p>
+  <p>{{ application.interview_notes or '' }}</p>
+  {% if current_user.can_write() %}
+  <form class="adm-form" method="post" action="{{ url_for('admin.save_interview', application_id=application.application_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Interview Date<input type="date" name="interview_date" value="{{ application.interview_scheduled_at.strftime('%Y-%m-%d') if application.interview_scheduled_at else '' }}"></label>
+    <label>Interview Time<input type="time" name="interview_time" value="{{ application.interview_scheduled_at.strftime('%H:%M') if application.interview_scheduled_at else '' }}"></label>
+    <label>Interview Mode
+      <select name="interview_mode">
+        <option value="">Select</option>
+        {% for m in interview_modes %}<option value="{{ m }}" {% if application.interview_mode==m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Interview Location / Meeting Information<input name="interview_location" value="{{ application.interview_location or '' }}"></label>
+    <label>Interviewer<input name="interview_interviewer" value="{{ application.interview_interviewer or '' }}"></label>
+    <label>Interview Notes<textarea name="interview_notes">{{ application.interview_notes or '' }}</textarea></label>
+    <label>Interview Result
+      <select name="interview_result">
+        <option value="">Select</option>
+        {% for r in interview_results %}<option value="{{ r }}" {% if application.interview_result==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save interview</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Internal Notes</h2>
+  <p class="adm-note">These notes are not visible to the candidate.</p>
+  {% if application.notes %}
+  <ol class="adm-timeline">
+    {% for n in application.notes %}
+    <li><strong>{{ n.created_at.strftime('%d-%b-%Y %I:%M %p') }}</strong> — {{ n.created_by }}<br>{{ n.note }}</li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No internal notes yet.</p>
+  {% endif %}
+  {% if current_user.can_write() %}
+  <form class="adm-form" method="post" action="{{ url_for('admin.add_note', application_id=application.application_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Add note<textarea name="note" required placeholder="Good communication skills, call tomorrow…"></textarea></label>
+    <button type="submit">Save note</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="adm-panel">
+  <h2>Application History</h2>
+  <ol class="adm-timeline">
+    {% for h in application.status_history %}
+    <li>
+      <strong>{{ h.changed_at.strftime('%d-%b-%Y %I:%M %p') }}</strong><br>
+      {% if h.old_status %}Status: {{ h.old_status }} → {{ h.new_status }}{% else %}Application Submitted<br>Status: {{ h.new_status }}{% endif %}
+      {% if h.changed_by %}<br>{{ h.changed_by }}{% endif %}
+      {% if h.change_reason %}<br>{{ h.change_reason }}{% endif %}
+    </li>
+    {% else %}
+    <li>No history recorded yet.</li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="adm-panel">
+  <h2>Audit Trail</h2>
+  <ol class="adm-timeline">
+    {% for log in logs %}
+    <li><strong>{{ log.event_timestamp.strftime('%d-%b-%Y %I:%M %p') }}</strong> — {{ log.event_name }}{% if log.actor_name %} · {{ log.actor_name }}{% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

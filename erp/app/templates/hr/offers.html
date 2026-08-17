@@ -1,0 +1,63 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<form class="jtcs-card mb-3" method="get">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label" for="status">Offer Status</label>
+      <select class="form-select form-select-sm" name="status" id="status">
+        <option value="">All</option>
+        {% for s in statuses %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <button class="btn btn-primary btn-sm" type="submit">Filter</button>
+    </div>
+  </div>
+</form>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Offer Number</th>
+          <th>Application</th>
+          <th>Status</th>
+          <th>Generated</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.OfferNumber }}</td>
+          <td>{{ row.ApplicationNumber or '—' }}</td>
+          <td>{{ row.OfferStatus }}</td>
+          <td>{{ row.GeneratedAt }}</td>
+          <td class="text-nowrap">
+            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.offer_download', offer_id=row.OfferID) }}">Download</a>
+            <form class="d-inline" method="post" action="{{ url_for('hr.offer_email', offer_id=row.OfferID) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Send Email</button>
+            </form>
+            <form class="d-inline" method="post" action="{{ url_for('hr.offer_status', offer_id=row.OfferID) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select class="form-select form-select-sm d-inline-block w-auto" name="status">
+                {% for s in statuses %}
+                <option value="{{ s }}" {% if row.OfferStatus == s %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-primary" type="submit">Update</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted">No offer letters yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

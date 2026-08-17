@@ -1,0 +1,88 @@
+{% extends "public/base.html" %}
+{% block title %}Check Your Application Status — JTCS Xpert{% endblock %}
+{% block robots %}noindex, follow{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="hero-bg-pattern"></div>
+  <div class="container-jtcs">
+    <h1>Check Your Application Status</h1>
+    <p>Enter your Application Number and registered mobile number or email address to check the current status of your application.</p>
+  </div>
+</section>
+<section class="section rec-apply-section">
+  <div class="container-jtcs">
+    <form class="rec-card rec-form rec-status-form" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-group">
+        <label for="application_number">Application Number *</label>
+        <input class="form-control-jtcs" id="application_number" name="application_number" required placeholder="JTCS-SE-2026-00001" value="{{ values.application_number }}">
+      </div>
+      <p class="rec-hint">Verify with one of the following registered details.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="mobile">Registered Mobile Number</label>
+          <input class="form-control-jtcs" id="mobile" name="mobile" type="tel" inputmode="numeric" placeholder="10-digit mobile" value="{{ values.mobile }}">
+        </div>
+        <div class="form-group">
+          <label for="email">Registered Email Address</label>
+          <input class="form-control-jtcs" id="email" name="email" type="email" placeholder="email@example.com" value="{{ values.email }}">
+        </div>
+      </div>
+      {% if error %}<div class="rec-alert">{{ error }}</div>{% endif %}
+      <button type="submit" class="btn-jtcs btn-primary-jtcs">Check Status</button>
+    </form>
+
+    {% if result %}
+    <article class="rec-card rec-status-result">
+      <h2>Application Status</h2>
+      <dl class="rec-status-meta">
+        <div><dt>Application No.</dt><dd>{{ result.application_number }}</dd></div>
+        <div><dt>Position</dt><dd>{{ result.position }}</dd></div>
+        <div><dt>Location</dt><dd>{{ result.location }}</dd></div>
+        <div><dt>Application Date</dt><dd>{{ result.application_date }}</dd></div>
+        <div><dt>Current Status</dt><dd class="rec-status-now">{{ result.current_status }}</dd></div>
+      </dl>
+      <p class="rec-status-msg">{{ result.message }}</p>
+      <p class="rec-muted">Last Updated: {{ result.last_updated }}</p>
+
+      <ol class="rec-timeline" aria-label="Application progress">
+        {% for step in result.timeline %}
+        <li class="is-{{ step.state }}"><span>{{ step.name }}</span></li>
+        {% endfor %}
+      </ol>
+
+      {% if result.interview %}
+      <div class="rec-interview">
+        <h3>Interview Details</h3>
+        <dl class="rec-status-meta">
+          {% if result.interview.date %}<div><dt>Interview Date</dt><dd>{{ result.interview.date }}</dd></div>{% endif %}
+          {% if result.interview.time %}<div><dt>Interview Time</dt><dd>{{ result.interview.time }}</dd></div>{% endif %}
+          {% if result.interview.mode %}<div><dt>Interview Mode</dt><dd>{{ result.interview.mode }}</dd></div>{% endif %}
+          {% if result.interview.location %}<div><dt>Interview Location / Meeting Information</dt><dd>{{ result.interview.location }}</dd></div>{% endif %}
+        </dl>
+      </div>
+      {% endif %}
+
+      {% if result.history %}
+      <div class="rec-history">
+        <h3>Status History</h3>
+        <ol>
+          {% for item in result.history %}
+          <li><strong>{{ item.date }}</strong> — {{ item.label }}</li>
+          {% endfor %}
+        </ol>
+      </div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('public.application_status_pdf') }}" class="rec-form-nav">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="application_number" value="{{ values.application_number }}">
+        <input type="hidden" name="mobile" value="{{ values.mobile }}">
+        <input type="hidden" name="email" value="{{ values.email }}">
+        <button type="submit" class="btn-jtcs btn-secondary-jtcs">Download Application PDF</button>
+      </form>
+    </article>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+{% block heading %}Audit Trail{% endblock %}
+{% block content %}
+<p class="adm-note">This log is append-only. Records cannot be edited or deleted from the admin UI.</p>
+<form class="adm-filters" method="get">
+  <input type="date" name="from" value="{{ filters.get('from', '') }}">
+  <input type="date" name="to" value="{{ filters.get('to', '') }}">
+  <select name="event_type">
+    <option value="">All events</option>
+    {% for e in event_types %}<option value="{{ e }}" {% if filters.get('event_type')==e %}selected{% endif %}>{{ e }}</option>{% endfor %}
+  </select>
+  <input name="application" placeholder="Application number" value="{{ filters.get('application', filters.get('application_number', '')) }}">
+  <input name="admin" placeholder="Admin / user" value="{{ filters.get('admin', '') }}">
+  <input name="candidate" placeholder="Candidate" value="{{ filters.get('candidate', '') }}">
+  <button type="submit">Filter</button>
+  <a class="adm-btn adm-btn-ghost" href="{{ url_for('admin.audit') }}">Reset</a>
+</form>
+<p class="adm-export">
+  Export:
+  <a href="{{ url_for('admin.audit_export', fmt='csv') }}">CSV</a>
+  <a href="{{ url_for('admin.audit_export', fmt='xlsx') }}">Excel</a>
+  <a href="{{ url_for('admin.audit_export', fmt='pdf') }}">PDF</a>
+</p>
+{% if not pagination.items %}
+<section class="adm-empty"><h2>No audit events yet.</h2></section>
+{% else %}
+<div class="adm-table-wrap">
+<table class="adm-table">
+  <thead>
+    <tr>
+      <th>Date/Time</th>
+      <th>Event</th>
+      <th>Application Number</th>
+      <th>Candidate</th>
+      <th>User/Admin</th>
+      <th>Details</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for log in pagination.items %}
+    {% set app = app_map.get(log.application_id) %}
+    {% set cand = cand_map.get(log.candidate_id) %}
+    <tr>
+      <td>{{ log.event_timestamp.strftime('%d-%b-%Y %I:%M %p') }}</td>
+      <td>{{ log.event_name or log.event_type }}</td>
+      <td>{% if app %}<a href="{{ url_for('admin.application_detail', application_id=app.application_id) }}">{{ app.application_number }}</a>{% else %}—{% endif %}</td>
+      <td>{{ cand.name if cand else '—' }}</td>
+      <td>{{ log.actor_name or log.actor_type or '—' }}</td>
+      <td class="adm-clip">{{ log.details or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+<nav class="adm-pager">
+  {% if pagination.has_prev %}<a href="?page={{ pagination.prev_num }}">Previous</a>{% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>
+  {% if pagination.has_next %}<a href="?page={{ pagination.next_num }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

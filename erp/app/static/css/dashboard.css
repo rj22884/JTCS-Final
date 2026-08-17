@@ -587,8 +587,22 @@
   color: #0f172a;
 }
 
-#dashMetricGrid thead .dash-sort-icon {
-  font-size: 0.7rem;
+#dashMetricGrid thead .dash-sort-icon,
+#dashMetricGrid thead i.bi,
+#dashMetricGrid thead i.bi.jtcs-illu,
+#dashMetricGrid thead .jtcs-illu-svg,
+#dashMetricGrid thead svg {
+  width: 0.7rem !important;
+  height: 0.7rem !important;
+  max-width: 0.7rem !important;
+  max-height: 0.7rem !important;
+  font-size: 0.7rem !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  overflow: hidden;
   color: #64748b;
 }
 

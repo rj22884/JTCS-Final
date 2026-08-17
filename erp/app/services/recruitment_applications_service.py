@@ -54,14 +54,25 @@ def list_applications(search: str = "", status: str = "") -> list[dict]:
             a.source,
             a.submitted_at,
             a.expected_salary,
+            a.resume_stored_name,
+            a.application_pdf_stored_name,
+            a.interview_result,
+            a.interview_mode,
+            a.willing_to_work_haldwani,
             c.name,
+            c.father_name,
             c.mobile,
             c.email,
             c.city,
-            j.job_title
+            c.state,
+            j.job_title,
+            e.total_work_experience,
+            e.sales_experience_years,
+            e.sales_experience_months
         FROM job_applications a
         JOIN candidates c ON c.candidate_id = a.candidate_id
         JOIN jobs j ON j.job_id = a.job_id
+        LEFT JOIN candidate_experience e ON e.candidate_id = c.candidate_id
         WHERE 1 = 1
     """
     params: list = []
@@ -180,3 +191,54 @@ def summary() -> dict:
             "SELECT COUNT(*) FROM job_applications WHERE application_status = 'New'"
         ).fetchone()[0]
         return {"total": int(total), "new": int(new)}
+
+
+def list_jobs() -> list[dict]:
+    with _connect() as con:
+        return [_row(r) for r in con.execute("SELECT * FROM jobs ORDER BY created_at DESC")]
+
+
+def source_counts() -> list[dict]:
+    with _connect() as con:
+        return [
+            _row(r)
+            for r in con.execute(
+                """
+                SELECT COALESCE(NULLIF(source, ''), 'Other') AS source, COUNT(*) AS n
+                FROM job_applications
+                GROUP BY COALESCE(NULLIF(source, ''), 'Other')
+                ORDER BY n DESC
+                """
+            )
+        ]
+
+
+def resolve_application_pdf(application_id: int) -> tuple[Path, str, str] | None:
+    with _connect() as con:
+        row = con.execute(
+            """
+            SELECT application_pdf_stored_name, application_pdf_original_name
+            FROM job_applications
+            WHERE application_id = ?
+            """,
+            (application_id,),
+        ).fetchone()
+    if row is None or not row["application_pdf_stored_name"]:
+        return None
+    stored = row["application_pdf_stored_name"]
+    if "/" in stored or "\\" in stored or ".." in stored:
+        return None
+    bases = [_upload_dir(), _upload_dir().parent / "application_pdfs"]
+    for base in bases:
+        path = (base / stored).resolve()
+        try:
+            path.relative_to(base.resolve())
+        except ValueError:
+            continue
+        if path.is_file():
+            return (
+                path,
+                row["application_pdf_original_name"] or stored,
+                "application/pdf",
+            )
+    return None

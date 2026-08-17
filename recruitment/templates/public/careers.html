@@ -1,0 +1,33 @@
+{% extends "public/base.html" %}
+{% block title %}Careers — JTCS Xpert{% endblock %}
+{% block content %}
+<section class="page-hero">
+  <div class="hero-bg-pattern"></div>
+  <div class="hero-grid"></div>
+  <div class="container-jtcs">
+    <h1>Careers at JTCS Xpert</h1>
+    <p>Build your career with a trusted tax, legal and business technology firm in Haldwani.</p>
+  </div>
+</section>
+<section class="section">
+  <div class="container-jtcs">
+    {% if jobs %}
+    <div class="rec-job-list">
+      {% for job in jobs %}
+      <article class="rec-card rec-job-teaser">
+        <div>
+          <div class="section-label">{{ job.department }}</div>
+          <h2>{{ job.job_title }}</h2>
+          <p>{{ job.location }} · {{ job.employment_type }}</p>
+        </div>
+        <a class="btn-jtcs btn-primary-jtcs" href="{{ url_for('public.job_page', slug=job.slug) }}">View role</a>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p>There are no open vacancies at the moment. Please check back later.</p>
+    {% endif %}
+    <p style="margin-top:1.5rem;"><a class="btn-jtcs btn-secondary-jtcs" href="{{ url_for('public.application_status') }}">Check Application Status</a></p>
+  </div>
+</section>
+{% endblock %}

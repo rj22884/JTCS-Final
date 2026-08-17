@@ -1,0 +1,41 @@
+{% extends 'layouts/base.html' %}
+{% block ribbon_toolbar %}{% include 'hr/_ribbon.html' %}{% endblock %}
+{% block content %}
+<div class="mb-3">
+  <a class="btn btn-sm btn-primary" href="{{ url_for('hr.interview_new') }}">Schedule Interview</a>
+</div>
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0">
+      <thead>
+        <tr>
+          <th>Application Number</th>
+          <th>Candidate</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Mode</th>
+          <th>Interviewer</th>
+          <th>Result</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.ApplicationNumber }}</td>
+          <td>{{ row.CandidateName }}</td>
+          <td>{{ row.InterviewDate }}</td>
+          <td>{{ row.InterviewTime or '—' }}</td>
+          <td>{{ row.InterviewMode or '—' }}</td>
+          <td>{{ row.Interviewer or '—' }}</td>
+          <td>{{ row.InterviewResult }}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.interview_edit', interview_id=row.InterviewID) }}">Open</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-muted">No interviews scheduled.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
