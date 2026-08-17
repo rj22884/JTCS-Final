@@ -1,4 +1,4 @@
-"""HR business logic — reads existing applications; writes only to ERP HR tables."""
+"""HR business logic — reads existing applications and syncs status back to the website store."""
 
 from __future__ import annotations
 
@@ -48,8 +48,10 @@ WEBSITE_STATUSES = (
     "Under Review",
     "Shortlisted",
     "Interview Scheduled",
+    "Interviewed",
     "Selected",
     "Rejected",
+    "On Hold",
     "Offer",
     "Appointment",
     "Employee",
@@ -207,13 +209,47 @@ def website_status_to_pipeline(status: str | None) -> str:
         "Shortlisted": "Shortlisted",
         "Interview Scheduled": "Interview",
         "Interview": "Interview",
+        "Interviewed": "Interview",
         "Selected": "Selected",
         "Offer": "Offer",
+        "Offer Issued": "Offer",
+        "Offer Accepted": "Offer",
         "Appointment": "Appointment",
+        "Appointment Issued": "Appointment",
         "Employee": "Employee",
         "Rejected": "Rejected",
     }
     return mapping.get(raw, raw or "New")
+
+
+def push_status_to_website(application_id: int, status: str, reason: str = "") -> None:
+    """Keep the public application-status page in sync with HR overlay."""
+    try:
+        rec.update_application_status(
+            application_id,
+            status,
+            changed_by=actor_name(),
+            reason=reason,
+        )
+    except Exception:
+        current_app.logger.exception(
+            "Could not sync website application status for application_id=%s",
+            application_id,
+        )
+
+
+def _touch_overlay(application_id: int, application_number: str | None, status: str) -> None:
+    overlay = HrApplicationState.query.get(application_id)
+    if overlay is None:
+        overlay = HrApplicationState(
+            ApplicationID=application_id,
+            ApplicationNumber=application_number,
+        )
+    overlay.ApplicationNumber = application_number
+    overlay.OverlayStatus = status
+    overlay.UpdatedDate = datetime.utcnow()
+    overlay.UpdatedBy = actor_name()
+    db.session.add(overlay)
 
 
 def effective_status(application: dict, overlay: HrApplicationState | None) -> str:
@@ -289,9 +325,10 @@ def list_enriched_applications(search: str = "", status: str = "") -> list[dict]
     interviews = latest_interview_map()
     offers = latest_offer_map()
     appointments = latest_appointment_map()
-    enriched = [
-        _enrich_one(row, overlays, employees, interviews, offers, appointments) for row in rows
-    ]
+    enriched = []
+    for row in rows:
+        item = _enrich_one(row, overlays, employees, interviews, offers, appointments)
+        enriched.append(_heal_website_status(row, item))
     if status:
         status_l = status.strip().lower()
         enriched = [
@@ -303,12 +340,34 @@ def list_enriched_applications(search: str = "", status: str = "") -> list[dict]
     return enriched
 
 
+def _heal_website_status(row: dict, enriched: dict) -> dict:
+    desired = rec.preferred_website_status(
+        enriched.get("effective_status"),
+        enriched.get("pipeline_stage"),
+    )
+    if not rec.website_needs_status_sync(row.get("application_status"), desired):
+        return enriched
+    push_status_to_website(
+        int(row["application_id"]),
+        desired,
+        "Synced from HR overlay",
+    )
+    enriched["website_status"] = rec.website_status_for_store(desired)
+    return enriched
+
+
 def get_enriched_application(application_id: int) -> dict | None:
     bootstrap()
     raw = rec.get_application(application_id)
     if raw is None:
         return None
-    return enrich_application(raw)
+    enriched = enrich_application(raw)
+    before = raw.get("application_status")
+    enriched = _heal_website_status(raw, enriched)
+    if enriched.get("website_status") != before:
+        raw = rec.get_application(application_id) or raw
+        return enrich_application(raw)
+    return enriched
 
 
 def set_application_status(application_id: int, new_status: str, reason: str = "") -> dict:
@@ -334,6 +393,7 @@ def set_application_status(application_id: int, new_status: str, reason: str = "
     overlay.UpdatedBy = actor_name()
     db.session.add(overlay)
     db.session.commit()
+    push_status_to_website(application_id, new_status, reason or "Updated from HR")
     action = "CANDIDATE_SELECTED" if new_status == "Selected" else "APPLICATION_STATUS_CHANGED"
     _audit(
         action,
@@ -448,6 +508,7 @@ def convert_to_employee(application_id: int) -> HrEmployee:
         )
         db.session.add(overlay)
     db.session.commit()
+    push_status_to_website(application_id, "Selected", "Converted to employee")
     _audit(
         "EMPLOYEE_CREATED",
         "HrEmployee",
@@ -600,6 +661,7 @@ def save_interview(form: dict, interview_id: int | None = None) -> HrInterview:
     row.UpdatedDate = datetime.utcnow()
     row.UpdatedBy = actor_name()
     db.session.add(row)
+    website_push = None
     if created:
         set_quietly = HrApplicationState.query.get(application_id)
         if set_quietly is None:
@@ -615,7 +677,21 @@ def save_interview(form: dict, interview_id: int | None = None) -> HrInterview:
             set_quietly.OverlayStatus = "Interview Scheduled"
             set_quietly.UpdatedDate = datetime.utcnow()
             set_quietly.UpdatedBy = actor_name()
+        website_push = ("Interview Scheduled", "Interview scheduled from HR")
+    elif result in {"Recommended", "Not Recommended", "Further Review"}:
+        overlay = HrApplicationState.query.get(application_id)
+        stage = website_status_to_pipeline(overlay.OverlayStatus if overlay else None)
+        if stage in {"New", "Under Review", "Shortlisted", "Interview"}:
+            if overlay is None:
+                _touch_overlay(application_id, application.get("application_number"), "Interviewed")
+            else:
+                overlay.OverlayStatus = "Interviewed"
+                overlay.UpdatedDate = datetime.utcnow()
+                overlay.UpdatedBy = actor_name()
+            website_push = ("Interviewed", "Interview result recorded")
     db.session.commit()
+    if website_push:
+        push_status_to_website(application_id, website_push[0], website_push[1])
     _audit(
         "INTERVIEW_CREATED" if created else "INTERVIEW_UPDATED",
         "HrInterview",
@@ -665,7 +741,12 @@ def generate_offer(employee_id: int) -> HrOfferLetter:
         GeneratedBy=actor_name(),
     )
     db.session.add(row)
+    application_id = employee.get("ApplicationID")
+    if application_id:
+        _touch_overlay(int(application_id), employee.get("ApplicationNumber"), "Offer Issued")
     db.session.commit()
+    if application_id:
+        push_status_to_website(int(application_id), "Offer Issued", "Offer letter generated")
     _audit(
         "OFFER_LETTER_GENERATED",
         "HrOfferLetter",
@@ -687,7 +768,16 @@ def set_offer_status(offer_id: int, status: str) -> HrOfferLetter:
     row.OfferStatus = status
     if status == "Accepted":
         row.AcceptedAt = datetime.utcnow()
+        if row.ApplicationID:
+            _touch_overlay(int(row.ApplicationID), row.ApplicationNumber, "Offer Accepted")
+    elif status == "Declined" and row.ApplicationID:
+        _touch_overlay(int(row.ApplicationID), row.ApplicationNumber, "Rejected")
     db.session.commit()
+    if row.ApplicationID:
+        if status == "Accepted":
+            push_status_to_website(int(row.ApplicationID), "Offer Accepted", "Offer accepted")
+        elif status == "Declined":
+            push_status_to_website(int(row.ApplicationID), "Rejected", "Offer declined")
     _audit("OFFER_STATUS_CHANGED", "HrOfferLetter", row.OfferID, old={"status": old}, new={"status": status})
     if status == "Accepted":
         _audit("OFFER_ACCEPTED", "HrOfferLetter", row.OfferID, new={"offer_number": row.OfferNumber})
@@ -727,7 +817,19 @@ def generate_appointment(employee_id: int) -> HrAppointmentLetter:
         IssuedBy=actor_name(),
     )
     db.session.add(row)
+    if employee.get("ApplicationID"):
+        _touch_overlay(
+            int(employee["ApplicationID"]),
+            employee.get("ApplicationNumber"),
+            "Appointment Issued",
+        )
     db.session.commit()
+    if employee.get("ApplicationID"):
+        push_status_to_website(
+            int(employee["ApplicationID"]),
+            "Appointment Issued",
+            "Appointment letter generated",
+        )
     _audit(
         "APPOINTMENT_LETTER_GENERATED",
         "HrAppointmentLetter",

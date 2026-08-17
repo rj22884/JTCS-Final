@@ -331,8 +331,8 @@ input.is-invalid, select.is-invalid, textarea.is-invalid {
 }
 .rec-timeline li:last-child::after { display: none; }
 .rec-timeline li.is-done::before { background: var(--secondary); }
-.rec-timeline li.is-current::before { background: #F97316; box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.2); }
-.rec-timeline li.is-current span { color: #EA580C; }
+.rec-timeline li.is-current::before { background: var(--secondary); box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.22); }
+.rec-timeline li.is-current span { color: var(--secondary); }
 .rec-interview, .rec-history { margin-top: 1.25rem; }
 .rec-preview-card { max-width: 48rem; max-height: 90vh; overflow: auto; }
 .rec-preview-card h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }

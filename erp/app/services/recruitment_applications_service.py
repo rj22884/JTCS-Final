@@ -1,8 +1,13 @@
-"""Read Sales Executive applications from the website recruitment SQLite database."""
+"""Read Sales Executive applications from the website recruitment SQLite database.
+
+HR status changes in ERP are written back to job_applications so the public
+application-status page stays in sync.
+"""
 
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import current_app
@@ -37,6 +42,115 @@ def _connect() -> sqlite3.Connection:
     con = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
+
+
+def _connect_rw() -> sqlite3.Connection:
+    path = _db_path()
+    if not path.is_file():
+        raise RecruitmentStoreError(
+            "Sales Executive applications are stored with the website recruitment module. "
+            f"Database not found: {path}"
+        )
+    con = sqlite3.connect(str(path), timeout=15)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+WEBSITE_STATUS_FROM_HR = {
+    "Interview": "Interview Scheduled",
+    "Offer": "Offer Issued",
+    "Appointment": "Appointment Issued",
+    "Employee": "Appointment Issued",
+}
+
+
+def website_status_for_store(status: str | None) -> str:
+    raw = (status or "New").strip() or "New"
+    return WEBSITE_STATUS_FROM_HR.get(raw, raw)
+
+
+_STATUS_RANK = {
+    "New": 0,
+    "Under Review": 1,
+    "Shortlisted": 2,
+    "Interview": 3,
+    "Interview Scheduled": 3,
+    "Interviewed": 4,
+    "Selected": 5,
+    "Offer": 6,
+    "Offer Issued": 6,
+    "Offer Accepted": 7,
+    "Appointment": 8,
+    "Appointment Issued": 8,
+    "Employee": 9,
+}
+
+
+def website_needs_status_sync(current: str | None, desired: str | None) -> bool:
+    """True when the public SQLite row is behind the HR/pipeline status."""
+    desired_store = website_status_for_store(desired)
+    current_store = (current or "").strip()
+    if not desired_store or desired_store == current_store:
+        return False
+    if desired_store in {"Rejected", "On Hold"}:
+        return True
+    return _STATUS_RANK.get(desired_store, 0) > _STATUS_RANK.get(current_store, 0)
+
+
+def preferred_website_status(overlay: str | None, pipeline: str | None) -> str:
+    overlay_store = website_status_for_store(overlay) if overlay else ""
+    if overlay_store in {"Rejected", "On Hold"}:
+        return overlay_store
+    mapped = [website_status_for_store(s) for s in (overlay, pipeline) if s]
+    if not mapped:
+        return "New"
+    return max(mapped, key=lambda s: _STATUS_RANK.get(s, 0))
+
+
+def update_application_status(
+    application_id: int,
+    new_status: str,
+    changed_by: str = "",
+    reason: str = "",
+) -> bool:
+    """Update website job_applications so candidate status page matches HR."""
+    new_status = website_status_for_store(new_status)
+    with _connect_rw() as con:
+        row = con.execute(
+            "SELECT application_status FROM job_applications WHERE application_id = ?",
+            (int(application_id),),
+        ).fetchone()
+        if row is None:
+            return False
+        old = (row["application_status"] or "").strip()
+        if old == new_status:
+            return False
+        now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        con.execute(
+            """
+            UPDATE job_applications
+            SET application_status = ?, updated_at = ?
+            WHERE application_id = ?
+            """,
+            (new_status, now, int(application_id)),
+        )
+        con.execute(
+            """
+            INSERT INTO application_status_history
+                (application_id, old_status, new_status, changed_by, change_reason, changed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(application_id),
+                old or None,
+                new_status,
+                (changed_by or "HR Admin")[:200],
+                (reason or "Updated from HR")[:500],
+                now,
+            ),
+        )
+        con.commit()
+    return True
 
 
 def _row(row: sqlite3.Row | None) -> dict:

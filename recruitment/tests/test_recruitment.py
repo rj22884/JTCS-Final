@@ -647,7 +647,11 @@ def test_public_status_mapping():
     assert public_status("Under Review")["label"] == "Application Under Review"
     assert public_status("Interviewed")["label"] == "Interview Completed"
     assert public_status("Rejected")["label"] == "Application Not Selected"
-    assert public_status("On Hold")["label"] == "Application On Hold"
+    assert public_status("Selected")["label"] == "Selected"
+    assert public_status("Interview")["label"] == "Interview Scheduled"
+    assert public_status("Offer")["label"] == "Offer Letter Issued"
+    assert public_status("Appointment")["label"] == "Appointment Letter Issued"
+    assert public_status("Employee")["label"] == "Appointment Letter Issued"
     assert set(STATUS_MAP) >= {
         "New",
         "Under Review",

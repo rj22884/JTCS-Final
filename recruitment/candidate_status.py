@@ -97,6 +97,11 @@ STATUS_MAP = {
     },
 }
 
+STATUS_MAP["Interview"] = STATUS_MAP["Interview Scheduled"]
+STATUS_MAP["Offer"] = STATUS_MAP["Offer Issued"]
+STATUS_MAP["Appointment"] = STATUS_MAP["Appointment Issued"]
+STATUS_MAP["Employee"] = STATUS_MAP["Appointment Issued"]
+
 
 def normalize_application_number(raw: str | None) -> str:
     return re.sub(r"\s+", "", (raw or "")).upper()
