@@ -31,6 +31,12 @@ CAPABILITIES = {
     "crm.call_logs": {"support", "sales", "executive", "manager", "super admin", "admin"},
     "crm.leads_convert": {"manager", "super admin", "admin"},
     "crm.admin": {"super admin", "admin"},
+    "whatsapp.view": {"support", "sales", "executive", "accounts", "manager", "super admin", "admin"},
+    "whatsapp.send": {"support", "sales", "executive", "manager", "super admin", "admin", "accounts"},
+    "whatsapp.assign": {"manager", "super admin", "admin"},
+    "whatsapp.templates": {"manager", "super admin", "admin"},
+    "whatsapp.configure": {"super admin", "admin"},
+    "whatsapp.audit": {"manager", "super admin", "admin"},
 }
 
 
@@ -45,7 +51,13 @@ def user_has_capability(capability: str) -> bool:
     user_roles = _user_role_tokens()
     if not user_roles:
         return False
-    open_caps = {"crm.view", "crm.reply", "crm.call_logs"}
+    open_caps = {
+        "crm.view",
+        "crm.reply",
+        "crm.call_logs",
+        "whatsapp.view",
+        "whatsapp.send",
+    }
     operational = {
         "operator",
         "reception",

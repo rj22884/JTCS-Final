@@ -33,8 +33,8 @@
       .map(function (ev) {
         return (
           '<div class="crm-calendar-event">' +
-          '<div class="fw-semibold">' + CrmCommon.escapeHtml(ev.Title || ev.Subject || ev.EventType || "Event") + "</div>" +
-          '<div class="small text-muted">' + CrmCommon.formatDate(ev.StartAt || ev.DueAt || ev.EventDate) + "</div>" +
+          '<div class="fw-semibold">' + CrmCommon.escapeHtml(ev.title || ev.Title || ev.Subject || ev.event_type || ev.EventType || "Event") + "</div>" +
+          '<div class="small text-muted">' + CrmCommon.formatDate(ev.starts_at || ev.StartAt || ev.DueAt || ev.EventDate) + "</div>" +
           (ev.Description ? '<div class="small mt-1">' + CrmCommon.escapeHtml(ev.Description) + "</div>" : "") +
           "</div>"
         );

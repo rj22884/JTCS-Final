@@ -4,6 +4,8 @@
   const els = {
     addBtn: document.getElementById("cmAddBtn"),
     editBtn: document.getElementById("cmEditBtn"),
+    restoreBtn: document.getElementById("cmRestoreBtn"),
+    restoreFormBtn: document.getElementById("cmRestoreFormBtn"),
     deleteBtn: document.getElementById("cmDeleteBtn"),
     resetPortalBtn: document.getElementById("cmResetPortalBtn"),
     newBtn: document.getElementById("cmNewBtn"),
@@ -31,6 +33,10 @@
     saveBtn: document.getElementById("cmSaveBtn"),
     mobileDupPanel: document.getElementById("cmMobileDupPanel"),
     mobileDupList: document.getElementById("cmMobileDupList"),
+    usagePanel: document.getElementById("cmUsagePanel"),
+    usageLinks: document.getElementById("cmUsageLinks"),
+    usageRows: document.getElementById("cmUsageRows"),
+    usageEmpty: document.getElementById("cmUsageEmpty"),
     duplicateModalEl: document.getElementById("cmDuplicateModal"),
     duplicateMessage: document.getElementById("cmDuplicateMessage"),
     duplicateDetails: document.getElementById("cmDuplicateDetails"),
@@ -166,6 +172,77 @@
     if (els.mobileDupList) els.mobileDupList.innerHTML = "";
   }
 
+  function formatUsageDate(value) {
+    const raw = String(value || "").slice(0, 10);
+    const parts = raw.split("-");
+    if (parts.length === 3) return parts[2] + "/" + parts[1] + "/" + parts[0];
+    return raw || "—";
+  }
+
+  function formatUsageAmount(value) {
+    if (value == null || value === "") return "—";
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "—";
+    return num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function hideUsagePanel() {
+    if (els.usagePanel) els.usagePanel.classList.add("d-none");
+    if (els.usageLinks) els.usageLinks.innerHTML = "";
+    if (els.usageRows) els.usageRows.innerHTML = "";
+    if (els.usageEmpty) els.usageEmpty.classList.add("d-none");
+    applyStatusLock(false);
+  }
+
+  function applyStatusLock(locked) {
+    const statusField = document.getElementById("cm_customer_status");
+    if (!statusField) return;
+    Array.prototype.forEach.call(statusField.options, function (opt) {
+      if (String(opt.value).toLowerCase() === "inactive") {
+        opt.disabled = !!locked && String(statusField.value).toLowerCase() !== "inactive";
+      }
+    });
+  }
+
+  function showUsagePanel(usage) {
+    if (!els.usagePanel) return;
+    if (!usage || usage.can_delete !== false) {
+      hideUsagePanel();
+      return;
+    }
+    const links = usage.links || [];
+    const txns = usage.transactions || [];
+    if (els.usageLinks) {
+      els.usageLinks.innerHTML = links.map(function (link) {
+        return (
+          '<span class="cm-usage-chip">' +
+          escapeHtml(link.label || link.table || "Record") +
+          " (" + escapeHtml(link.count) + ")</span>"
+        );
+      }).join("");
+    }
+    if (els.usageRows) {
+      els.usageRows.innerHTML = txns.map(function (row) {
+        const work = escapeHtml(row.work || row.source || "—");
+        const ref = row.reference ? '<span class="cm-usage-ref">' + escapeHtml(row.reference) + "</span>" : "";
+        return (
+          "<tr>" +
+          "<td>" + escapeHtml(formatUsageDate(row.txn_date)) + "</td>" +
+          '<td class="cm-usage-work">' + work + ref + "</td>" +
+          '<td class="text-end">' + escapeHtml(formatUsageAmount(row.amount)) + "</td>" +
+          "</tr>"
+        );
+      }).join("");
+    }
+    if (els.usageEmpty) {
+      els.usageEmpty.classList.toggle("d-none", txns.length > 0);
+    }
+    const wrap = els.usagePanel.querySelector(".cm-usage-table-wrap");
+    if (wrap) wrap.classList.toggle("d-none", txns.length === 0);
+    applyStatusLock(true);
+    els.usagePanel.classList.remove("d-none");
+  }
+
   function showMobileDupPanel(duplicates) {
     if (!els.mobileDupPanel || !els.mobileDupList) return;
     const list = duplicates || [];
@@ -286,7 +363,10 @@
     const row = rows.find(function (r) { return r.customer_id === selectedId; });
     const has = !!selectedId;
     if (els.editBtn) els.editBtn.disabled = !has;
-    if (els.deleteBtn) els.deleteBtn.disabled = !has || (row && row.customer_status === "Inactive");
+    if (els.restoreBtn) els.restoreBtn.disabled = !has || !row || row.customer_status !== "Inactive";
+    if (els.deleteBtn) {
+      els.deleteBtn.disabled = !has || (row && (row.customer_status === "Inactive" || row.has_links));
+    }
     if (els.resetPortalBtn) {
       els.resetPortalBtn.disabled = !has || (row && row.customer_status === "Inactive");
     }
@@ -342,12 +422,16 @@
     if (els.count) els.count.textContent = rows.length + " record" + (rows.length === 1 ? "" : "s");
     els.gridBody.innerHTML = rows.map(function (row) {
       const inactive = row.customer_status === "Inactive";
-      const delBtn = inactive
-        ? '<button type="button" class="btn btn-outline-secondary btn-sm" disabled><i class="bi bi-trash"></i></button>'
-        : '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' + row.customer_id + '"><i class="bi bi-trash"></i></button>';
+      const linked = !!row.has_links;
+      let extraBtn = "";
+      if (inactive) {
+        extraBtn = '<button type="button" class="btn btn-outline-success btn-sm cm-row-restore" data-id="' + row.customer_id + '" title="Restore Active"><i class="bi bi-arrow-counterclockwise"></i></button>';
+      } else if (!linked) {
+        extraBtn = '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' + row.customer_id + '" title="Delete"><i class="bi bi-trash"></i></button>';
+      }
       const badge = inactive
         ? '<span class="badge bg-secondary">Inactive</span>'
-        : '<span class="badge bg-success">Active</span>';
+        : '<span class="badge bg-success">' + escapeHtml(row.customer_status || "Active") + "</span>";
       const logged = !!row.logged;
       const loggedLight = logged
         ? '<span class="cm-logged-light is-on" title="Portal login active (password set)" aria-label="Logged"></span>'
@@ -364,8 +448,8 @@
         "<td>" + badge + "</td>" +
         '<td class="text-center">' + loggedLight + "</td>" +
         '<td class="text-end cm-actions">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm cm-row-edit" data-id="' + row.customer_id + '"><i class="bi bi-pencil"></i></button> ' +
-        delBtn +
+        '<button type="button" class="btn btn-outline-primary btn-sm cm-row-edit" data-id="' + row.customer_id + '" title="Edit"><i class="bi bi-pencil"></i></button> ' +
+        extraBtn +
         "</td></tr>"
       );
     }).join("");
@@ -1066,6 +1150,7 @@
         countryField.value = "India";
       }
     }
+    if (els.restoreFormBtn) els.restoreFormBtn.classList.add("d-none");
     if (els.tabNav) els.tabNav.innerHTML = "";
     els.formPanels?.querySelectorAll(".cm-tab-panel").forEach(function (p) {
       p.classList.add("d-none");
@@ -1075,6 +1160,7 @@
       els.formError.textContent = "";
     }
     hideMobileDupPanel();
+    hideUsagePanel();
     syncMandatoryMarkers();
     syncFilingFrequencyVisibility();
   }
@@ -1132,6 +1218,11 @@
     syncMandatoryMarkers();
     syncFilingFrequencyVisibility();
     refreshPincodeIntegration();
+    if (els.restoreFormBtn) {
+      const inactive = String(record.customer_status || "") === "Inactive";
+      els.restoreFormBtn.classList.toggle("d-none", !inactive);
+    }
+    showUsagePanel(record.usage);
     if (record.photo_path) {
       const rel = String(record.photo_path).replace(/^\/?static\//, "");
       setCustomerPhotoPreview("/static/" + rel.replace(/^\//, ""));
@@ -1299,6 +1390,15 @@
           }
           return;
         }
+        if (result.status === 409 && data.in_use) {
+          showUsagePanel(data.usage);
+          if (els.formError) {
+            els.formError.textContent = data.error || "This customer is in use and cannot be inactivated.";
+            els.formError.className = "alert alert-warning py-2 small mt-3";
+            els.formError.classList.remove("d-none");
+          }
+          return;
+        }
         if (!data.ok) throw new Error(data.error || "Save failed.");
         showStatus(data.message || "Customer saved.", "success");
         hideMobileDupPanel();
@@ -1343,9 +1443,41 @@
     })
       .then(function (res) { return res.json(); })
       .then(function (data) {
+        if (data.in_use) {
+          if (row) row.has_links = true;
+          showStatus(data.error || "Customer is in use and cannot be deleted.", "warning");
+          setSelected(customerId);
+          loadRecord(customerId);
+          return;
+        }
         if (!data.ok) throw new Error(data.error || "Delete failed.");
         showStatus(data.message, "success");
         setSelected(null);
+        loadGrid();
+      })
+      .catch(function (err) {
+        showStatus(err.message, "danger");
+      });
+  }
+
+  function restoreCustomer(id) {
+    const customerId = id || selectedId;
+    if (!customerId || !window.CM_API.restore) return;
+    const row = rows.find(function (r) { return r.customer_id === customerId; });
+    const name = row ? row.customer_name : "this customer";
+    if (!confirm('Restore "' + name + '" to Active?')) return;
+    fetch(apiUrl(window.CM_API.restore, customerId), {
+      method: "POST",
+      headers: { Accept: "application/json", "X-CSRFToken": csrfToken() },
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data.ok) throw new Error(data.error || "Restore failed.");
+        showStatus(data.message, "success");
+        const statusField = document.getElementById("cm_customer_status");
+        if (statusField) statusField.value = "Active";
+        if (els.restoreFormBtn) els.restoreFormBtn.classList.add("d-none");
+        if (row) row.customer_status = "Active";
         loadGrid();
       })
       .catch(function (err) {
@@ -1359,6 +1491,11 @@
     if (selectedId) loadRecord(selectedId);
   });
   els.deleteBtn?.addEventListener("click", function () { deleteCustomer(selectedId); });
+  els.restoreBtn?.addEventListener("click", function () { restoreCustomer(selectedId); });
+  els.restoreFormBtn?.addEventListener("click", function () {
+    const id = parseInt(els.customerId?.value || selectedId, 10);
+    restoreCustomer(id);
+  });
   els.resetPortalBtn?.addEventListener("click", function () {
     if (selectedId) resetPortalPassword(selectedId);
   });
@@ -1436,6 +1573,13 @@
       const id = parseInt(delBtn.dataset.id, 10);
       setSelected(id);
       deleteCustomer(id);
+      return;
+    }
+    const restoreBtn = event.target.closest(".cm-row-restore");
+    if (restoreBtn) {
+      const id = parseInt(restoreBtn.dataset.id, 10);
+      setSelected(id);
+      restoreCustomer(id);
       return;
     }
     const tr = event.target.closest("tr[data-id]");

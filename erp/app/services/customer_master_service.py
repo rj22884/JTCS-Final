@@ -36,6 +36,18 @@ class DuplicateMobileWarning(ValueError):
         self.duplicates = duplicates
 
 
+class CustomerInUseError(ValueError):
+    def __init__(self, usage: dict, message: str):
+        super().__init__(message)
+        self.usage = usage
+
+
+_IN_USE_MESSAGE = (
+    "This customer is linked to existing records and cannot be deleted or inactivated. "
+    "Only Edit is allowed."
+)
+
+
 class CustomerMasterService:
     def __init__(
         self,
@@ -67,6 +79,8 @@ class CustomerMasterService:
         record = self.repository.get_full(customer_id)
         record.update(self._chart_group_fields(customer_id))
         record.update(self._income_expense_work_fields(customer_id))
+        record["usage"] = self.repository.get_usage(customer_id)
+        record["has_links"] = not record["usage"].get("can_delete", True)
         return record
 
     @staticmethod
@@ -347,6 +361,10 @@ class CustomerMasterService:
 
         self._check_blocking_duplicates(payload, entry_id)
         self._check_mobile_duplicate(payload, entry_id, allow=allow_duplicate_mobile)
+        if entry_id and (payload.get("customer_status") or "").strip().lower() == "inactive":
+            usage = self.repository.get_usage(int(entry_id))
+            if not usage.get("can_delete"):
+                raise CustomerInUseError(usage, _IN_USE_MESSAGE)
 
         # Chart of Account groups required (Sale/Purchase/Income/Expense/Contra — max 5).
         from app.services.chart_account_service import ChartAccountService
@@ -372,12 +390,29 @@ class CustomerMasterService:
         return saved
 
     def delete_record(self, customer_id: int) -> str:
+        usage = self.repository.get_usage(customer_id)
+        if not usage.get("can_delete"):
+            raise CustomerInUseError(usage, _IN_USE_MESSAGE)
+
         def _write() -> str:
             row = self.repository.get_detail(customer_id)
             if (row.get("CustomerStatus") or "").lower() == "inactive":
                 raise ValueError("Customer is already inactive.")
             self.repository.deactivate(customer_id)
             return "Customer marked inactive successfully."
+
+        return persist(_write)
+
+    def restore_record(self, customer_id: int) -> str:
+        def _write() -> str:
+            row = self.repository.get_detail(customer_id)
+            status = (row.get("CustomerStatus") or "").strip().lower()
+            if status == "active":
+                raise ValueError("Customer is already active.")
+            if status != "inactive":
+                raise ValueError("Only inactive customers can be restored.")
+            self.repository.activate(customer_id)
+            return "Customer restored to Active."
 
         return persist(_write)
 

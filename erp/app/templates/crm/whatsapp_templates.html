@@ -1,0 +1,75 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260818">
+{% endblock %}
+
+{% block content %}
+<div class="crm-page" id="crmTplPage"
+     data-api-list="{{ api.list }}"
+     data-api-create="{{ api.create }}"
+     data-api-qr="{{ api.quick_replies }}"
+     data-api-qr-create="{{ api.quick_create }}">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+      <h1 class="h4 mb-0">WhatsApp Templates</h1>
+      <p class="text-muted small mb-0">Meta-ready templates (not sent until Cloud API is connected) and internal quick replies.</p>
+    </div>
+    <a href="{{ url_for('crm.inbox_page') }}?channel=WhatsApp" class="btn btn-success btn-sm"><i class="bi bi-whatsapp"></i> Open Inbox</a>
+  </div>
+  <div class="row g-3">
+    <div class="col-lg-7">
+      <div class="jtcs-card">
+        <h2 class="h6">Approved / draft templates</h2>
+        <p class="small text-muted">Variables: {% raw %}{{customer_name}} {{financial_year}} {{due_date}} {{service_name}} {{amount}} {{firm_name}}{% endraw %}</p>
+        <div class="table-responsive">
+          <table class="table table-sm">
+            <thead><tr><th>Name</th><th>Language</th><th>Category</th><th>Body</th><th>Variables</th><th>Status</th><th>Active</th></tr></thead>
+            <tbody id="crmTplBody"><tr><td colspan="7" class="text-muted">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="jtcs-card">
+        <h2 class="h6">Quick replies (staff shortcuts)</h2>
+        <ul class="list-unstyled small mb-0" id="crmQrList"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260818"></script>
+<script>
+(function () {
+  const page = document.getElementById("crmTplPage");
+  if (!page) return;
+  async function load() {
+    const t = await CrmCommon.apiFetch(page.dataset.apiList + "?channel=WhatsApp");
+    const body = document.getElementById("crmTplBody");
+    body.innerHTML = (t.rows || []).map(function (r) {
+      return "<tr><td>" + CrmCommon.escapeHtml(r.Name || "") +
+        "<div class='small text-muted'>" + CrmCommon.escapeHtml(r.ExternalTemplateName || "") + "</div></td><td>" +
+        CrmCommon.escapeHtml(r.LanguageCode || "en") + "</td><td>" +
+        CrmCommon.escapeHtml(r.Category || "—") + "</td><td class='small'>" +
+        CrmCommon.escapeHtml((r.Body || "").slice(0, 80)) + "</td><td class='small'>" +
+        CrmCommon.escapeHtml(r.VariablesJson || "—") + "</td><td>" +
+        CrmCommon.escapeHtml(r.TemplateStatus || "Draft") + "</td><td>" +
+        (r.IsActive === 0 || r.IsActive === false ? "Inactive" : "Active") + "</td></tr>";
+    }).join("") || "<tr><td colspan='7' class='text-muted'>No templates.</td></tr>";
+    const q = await CrmCommon.apiFetch(page.dataset.apiQr + "?channel=WhatsApp");
+    document.getElementById("crmQrList").innerHTML = (q.rows || []).map(function (r) {
+      return "<li class='mb-2'><strong>" + CrmCommon.escapeHtml(r.Shortcut || r.Title) +
+        "</strong><div class='text-muted'>" + CrmCommon.escapeHtml(r.Body || "") + "</div></li>";
+    }).join("") || "<li class='text-muted'>No quick replies.</li>";
+  }
+  load().catch(function (err) {
+    CrmCommon.showAlert(err.message || "Unable to load templates", "danger");
+  });
+})();
+</script>
+{% endblock %}

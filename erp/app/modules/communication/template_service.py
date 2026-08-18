@@ -92,7 +92,8 @@ class TemplateService:
             text(
                 f"""
                 SELECT TemplateID, Name, Channel, Subject, Body, ExternalTemplateName,
-                       LanguageCode, CreatedDate
+                       LanguageCode, Category, VariablesJson, TemplateStatus, IsActive,
+                       CreatedDate
                 FROM dbo.CrmMessageTemplate
                 WHERE {where}
                 ORDER BY Name
@@ -101,6 +102,13 @@ class TemplateService:
             params,
         ).mappings().all()
         return [dict(r) for r in rows]
+
+    @staticmethod
+    def interpolate(body: str, values: dict | None = None) -> str:
+        text_body = body or ""
+        for key, val in (values or {}).items():
+            text_body = text_body.replace("{{" + str(key) + "}}", str(val or ""))
+        return text_body
 
     def create_template(
         self,

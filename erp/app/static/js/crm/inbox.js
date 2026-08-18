@@ -14,7 +14,17 @@
     quickReplies: page.dataset.apiQuickReplies,
     templates: page.dataset.apiTemplates,
     emailSync: page.dataset.apiEmailSync,
+    staff: page.dataset.apiStaff,
+    labels: page.dataset.apiLabels,
+    simulate: page.dataset.apiSimulate,
+    link: page.dataset.apiLink,
+    convLabels: page.dataset.apiConvLabels,
+    tasks: page.dataset.apiTasks,
+    followups: page.dataset.apiFollowups,
+    simulateStatus: page.dataset.apiSimulateStatus,
+    customer360: page.dataset.customer360,
   };
+  const testMode = page.dataset.testMode === "1";
   const pollSeconds = Math.max(5, parseInt(page.dataset.pollSeconds, 10) || 15);
   let activeChannel = page.dataset.initialChannel || "";
   let activeConvId = page.dataset.initialConversation
@@ -23,6 +33,9 @@
   let activeConvMeta = null;
   let lastUnreadTotal = null;
   let pollTimer = null;
+  let activeBucket = "";
+  let staffRows = [];
+  let allLabels = [];
 
   const convList = document.getElementById("crmConvList");
   const convEmpty = document.getElementById("crmConvEmpty");
@@ -69,12 +82,19 @@
         const unread = (c.UnreadCount || 0) > 0 ? " is-unread" : "";
         const active = id === activeConvId ? " is-active" : "";
         const name =
-          c.CustomerName || c.LeadName || c.Subject || "Conversation #" + id;
+          c.IsUnknown
+            ? "Unknown WhatsApp Contact"
+            : c.CustomerName || c.LeadName || c.Subject || "Conversation #" + id;
         const pin = c.IsPinned ? '<i class="bi bi-pin-angle-fill wa-pin"></i> ' : "";
         const badge =
           (c.UnreadCount || 0) > 0
             ? '<span class="wa-unread-pill">' + c.UnreadCount + "</span>"
             : "";
+        const mobile =
+          c.ContactMobile || c.WhatsAppNumber || c.MobileNumber || c.LeadMobile || "";
+        const preview = c.LastMessagePreview || "";
+        const pri = c.Priority && c.Priority !== "Normal" ? " · " + c.Priority : "";
+        const unk = c.IsUnknown ? ' <span class="wa-unknown">Unknown</span>' : "";
         return (
           '<li><button type="button" class="crm-conv-item' +
           unread +
@@ -86,13 +106,19 @@
           '<div class="crm-conv-subject">' +
           pin +
           CrmCommon.escapeHtml(name) +
+          unk +
           "</div>" +
           badge +
           "</div>" +
           '<div class="crm-conv-meta">' +
-          CrmCommon.escapeHtml(c.Channel || "") +
+          CrmCommon.escapeHtml(mobile) +
           (c.LastMessageAt ? " · " + CrmCommon.formatDate(c.LastMessageAt) : "") +
-          "</div></button></li>"
+          pri +
+          "</div>" +
+          (preview
+            ? '<div class="crm-conv-preview">' + CrmCommon.escapeHtml(preview) + "</div>"
+            : "") +
+          "</button></li>"
         );
       })
       .join("");
@@ -142,10 +168,14 @@
                 "</a>";
             }
           }
+          const testBadge = m.IsTest
+            ? '<span class="wa-test-flag">TEST MESSAGE</span> '
+            : "";
           return (
             '<div class="' +
             cls +
             '"><div class="wa-bubble">' +
+            testBadge +
             CrmCommon.escapeHtml(m.Body || "") +
             mediaHtml +
             '<div class="wa-msg-time">' +
@@ -191,9 +221,28 @@
       conv.LeadMobile ||
       "";
     const email = conv.ContactEmail || conv.EmailID || conv.LeadEmail || "";
-    detailName.textContent =
-      conv.CustomerName || conv.LeadName || conv.Subject || "—";
+    detailName.textContent = conv.IsUnknown
+      ? "Unknown WhatsApp Contact"
+      : conv.CustomerName || conv.LeadName || conv.Subject || "—";
     detailContact.textContent = [mobile, email].filter(Boolean).join(" · ") || "—";
+
+    const unknownBanner = document.getElementById("crmUnknownBanner");
+    if (unknownBanner) unknownBanner.hidden = !conv.IsUnknown;
+
+    const st = document.getElementById("crmDetailStatus");
+    if (st && conv.Status) st.value = conv.Status;
+    const pr = document.getElementById("crmDetailPriority");
+    if (pr && conv.Priority) pr.value = conv.Priority;
+    const asg = document.getElementById("crmDetailAssignSelect");
+    if (asg) asg.value = conv.AssignedUserID || "";
+
+    const c360 = document.getElementById("crmDetail360Btn");
+    if (c360) {
+      if (conv.CustomerID && api.customer360) {
+        c360.href = api.customer360.replace(/\/?$/, "/") + conv.CustomerID;
+        c360.classList.remove("d-none");
+      } else c360.classList.add("d-none");
+    }
 
     if (mobile) {
       callBtn.href = "tel:" + mobile.replace(/\s/g, "");
@@ -253,7 +302,10 @@
     if (dateF && dateF.value) params.set("date", dateF.value);
     if (search && search.value.trim()) params.set("search", search.value.trim());
     if (unreadOnly && unreadOnly.checked) params.set("unread", "1");
+    if (activeBucket) params.set("bucket", activeBucket);
     if (activeChannel) params.set("channel", activeChannel);
+    const labelF = document.getElementById("crmInboxLabelFilter");
+    if (labelF && labelF.value) params.set("label_id", labelF.value);
     const data = await CrmCommon.apiFetch(api.list + "?" + params.toString());
     renderConversations(data.rows || []);
     const unreadSum = (data.rows || []).reduce(function (n, r) {
@@ -303,8 +355,10 @@
                 return (
                   '<option value="' +
                   CrmCommon.escapeHtml(r.Body || "") +
+                  '" data-shortcut="' +
+                  CrmCommon.escapeHtml(r.Shortcut || "") +
                   '">' +
-                  CrmCommon.escapeHtml(r.Title || "Reply") +
+                  CrmCommon.escapeHtml((r.Shortcut ? r.Shortcut + " — " : "") + (r.Title || "Reply")) +
                   "</option>"
                 );
               })
@@ -450,7 +504,7 @@
     if (!activeConvId) return;
     const userId = parseInt(document.getElementById("crmInboxAssignUserId").value, 10);
     try {
-      await patchConv({ assigned_user_id: userId });
+      await patchConv({ assigned_user_id: userId || null });
       if (assignModal) assignModal.hide();
     } catch (err) {
       CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
@@ -509,7 +563,7 @@
     });
   }
 
-  ["crmInboxStatusFilter", "crmInboxDateFilter", "crmInboxUnreadOnly"].forEach(function (id) {
+  ["crmInboxStatusFilter", "crmInboxDateFilter", "crmInboxUnreadOnly", "crmInboxLabelFilter"].forEach(function (id) {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", loadConversations);
   });
@@ -520,6 +574,250 @@
     });
   }
 
+  document.querySelectorAll("#crmInboxBuckets .wa-bucket").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.querySelectorAll("#crmInboxBuckets .wa-bucket").forEach(function (b) {
+        b.classList.remove("is-active");
+      });
+      btn.classList.add("is-active");
+      activeBucket = btn.dataset.bucket || "";
+      loadConversations();
+    });
+  });
+
+  function fillStaffSelects() {
+    const opts =
+      '<option value="">Unassigned</option>' +
+      staffRows
+        .map(function (u) {
+          return (
+            '<option value="' +
+            u.UserID +
+            '">' +
+            CrmCommon.escapeHtml(u.FullName || "User " + u.UserID) +
+            "</option>"
+          );
+        })
+        .join("");
+    ["crmInboxAssignUserId", "crmDetailAssignSelect", "crmFuAssign", "crmTaskAssign"].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = opts;
+    });
+  }
+
+  async function loadStaffAndLabels() {
+    try {
+      if (api.staff) {
+        const data = await CrmCommon.apiFetch(api.staff);
+        staffRows = data.rows || [];
+        fillStaffSelects();
+      }
+    } catch (_e) {}
+    try {
+      if (api.labels) {
+        const data = await CrmCommon.apiFetch(api.labels);
+        allLabels = data.rows || [];
+        const picker = document.getElementById("crmLabelPicker");
+        const labelFilter = document.getElementById("crmInboxLabelFilter");
+        const opts = allLabels
+          .map(function (l) {
+            return (
+              '<option value="' +
+              l.LabelID +
+              '">' +
+              CrmCommon.escapeHtml(l.LabelName) +
+              "</option>"
+            );
+          })
+          .join("");
+        if (picker) picker.innerHTML = opts;
+        if (labelFilter) {
+          labelFilter.innerHTML = '<option value="">All labels</option>' + opts;
+        }
+      }
+    } catch (_e) {}
+    const simWrap = document.getElementById("crmSimulateWrap");
+    if (simWrap) simWrap.hidden = !testMode;
+  }
+
+  document.getElementById("crmUnknownBanner") &&
+    document.getElementById("crmUnknownBanner").addEventListener("click", async function (e) {
+      const btn = e.target.closest("[data-link-action]");
+      if (!btn || !activeConvId || !api.link) return;
+      const action = btn.getAttribute("data-link-action");
+      const name = window.prompt("Name for this contact", activeConvMeta && (activeConvMeta.Subject || "")) || "";
+      try {
+        await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, activeConvId), {
+          method: "POST",
+          body: { action: action, full_name: name },
+        });
+        selectConversation(activeConvId);
+        loadConversations();
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      }
+    });
+
+  const detailStatus = document.getElementById("crmDetailStatus");
+  if (detailStatus) {
+    detailStatus.addEventListener("change", function () {
+      patchConv({ status: detailStatus.value });
+    });
+  }
+  const detailPri = document.getElementById("crmDetailPriority");
+  if (detailPri) {
+    detailPri.addEventListener("change", function () {
+      patchConv({ priority: detailPri.value });
+    });
+  }
+  const detailAssign = document.getElementById("crmDetailAssignSelect");
+  if (detailAssign) {
+    detailAssign.addEventListener("change", function () {
+      const val = detailAssign.value ? parseInt(detailAssign.value, 10) : null;
+      patchConv({ assigned_user_id: val });
+    });
+  }
+  const labelSave = document.getElementById("crmLabelSaveBtn");
+  if (labelSave && api.convLabels) {
+    labelSave.addEventListener("click", async function () {
+      if (!activeConvId) return;
+      const picker = document.getElementById("crmLabelPicker");
+      const ids = picker ? Array.from(picker.selectedOptions).map(function (o) { return parseInt(o.value, 10); }) : [];
+      try {
+        await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.convLabels, activeConvId), {
+          method: "POST",
+          body: { label_ids: ids },
+        });
+        CrmCommon.showAlert("Labels saved", "success");
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      }
+    });
+  }
+
+  const fuModalEl = document.getElementById("crmFollowupModal");
+  const fuModal = fuModalEl ? bootstrap.Modal.getOrCreateInstance(fuModalEl) : null;
+  const taskModalEl = document.getElementById("crmTaskModal");
+  const taskModal = taskModalEl ? bootstrap.Modal.getOrCreateInstance(taskModalEl) : null;
+  const fuBtn = document.getElementById("crmDetailFollowupBtn");
+  if (fuBtn) fuBtn.addEventListener("click", function () { if (fuModal) fuModal.show(); });
+  const taskBtn = document.getElementById("crmDetailTaskBtn");
+  if (taskBtn) taskBtn.addEventListener("click", function () { if (taskModal) taskModal.show(); });
+
+  const fuForm = document.getElementById("crmFollowupForm");
+  if (fuForm && api.followups) {
+    fuForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!activeConvId || !activeConvMeta) return;
+      try {
+        await CrmCommon.apiFetch(api.followups, {
+          method: "POST",
+          body: {
+            followup_type: document.getElementById("crmFuType").value,
+            due_at: document.getElementById("crmFuDue").value,
+            notes: document.getElementById("crmFuNotes").value,
+            priority: (document.getElementById("crmFuPriority") || {}).value || "Normal",
+            assigned_user_id: (function () {
+              const el = document.getElementById("crmFuAssign");
+              return el && el.value ? parseInt(el.value, 10) : null;
+            })(),
+            assigned_user_name: (function () {
+              const el = document.getElementById("crmFuAssign");
+              if (!el || !el.value) return null;
+              const opt = el.options[el.selectedIndex];
+              return opt ? opt.textContent : null;
+            })(),
+            customer_id: activeConvMeta.CustomerID,
+            lead_id: activeConvMeta.LeadID,
+            conversation_id: activeConvId,
+          },
+        });
+        if (fuModal) fuModal.hide();
+        CrmCommon.showAlert("Follow-up created", "success");
+        selectConversation(activeConvId);
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      }
+    });
+  }
+  const taskForm = document.getElementById("crmTaskForm");
+  if (taskForm && api.tasks) {
+    taskForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      if (!activeConvId || !activeConvMeta) return;
+      try {
+        await CrmCommon.apiFetch(api.tasks, {
+          method: "POST",
+          body: {
+            title: document.getElementById("crmTaskTitle").value,
+            deadline: document.getElementById("crmTaskDue").value || null,
+            priority: document.getElementById("crmTaskPriority").value,
+            assigned_user_id: (function () {
+              const el = document.getElementById("crmTaskAssign");
+              return el && el.value ? parseInt(el.value, 10) : null;
+            })(),
+            assigned_user_name: (function () {
+              const el = document.getElementById("crmTaskAssign");
+              if (!el || !el.value) return null;
+              const opt = el.options[el.selectedIndex];
+              return opt ? opt.textContent : null;
+            })(),
+            customer_id: activeConvMeta.CustomerID,
+            lead_id: activeConvMeta.LeadID,
+            conversation_id: activeConvId,
+            source: "WhatsApp",
+          },
+        });
+        if (taskModal) taskModal.hide();
+        CrmCommon.showAlert("Task created", "success");
+        selectConversation(activeConvId);
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      }
+    });
+  }
+
+  const simBtn = document.getElementById("crmSimSendBtn");
+  if (simBtn && api.simulate) {
+    simBtn.addEventListener("click", async function () {
+      try {
+        const data = await CrmCommon.apiFetch(api.simulate, {
+          method: "POST",
+          body: {
+            mobile: document.getElementById("crmSimMobile").value,
+            display_name: document.getElementById("crmSimName").value,
+            body: document.getElementById("crmSimBody").value,
+          },
+        });
+        CrmCommon.showAlert("Test message received", "success");
+        if (data.conversation_id) selectConversation(data.conversation_id);
+        else loadConversations();
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      }
+    });
+  }
+
+  const replyBody = document.getElementById("crmReplyBody");
+  if (replyBody) {
+    replyBody.addEventListener("input", function () {
+      const raw = replyBody.value.trim();
+      if (!raw.startsWith("/") || raw.indexOf(" ") >= 0) return;
+      const sel = document.getElementById("crmQuickReplySelect");
+      if (!sel) return;
+      for (let i = 0; i < sel.options.length; i++) {
+        const opt = sel.options[i];
+        const shortcut = (opt.getAttribute("data-shortcut") || "").trim().toLowerCase();
+        if (shortcut && shortcut === raw.toLowerCase() && opt.value) {
+          replyBody.value = opt.value;
+          replyBody.focus();
+          return;
+        }
+      }
+    });
+  }
+
+  loadStaffAndLabels();
   loadConversations()
     .then(function () {
       if (activeConvId) return selectConversation(activeConvId);

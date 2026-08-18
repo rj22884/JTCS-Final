@@ -130,6 +130,31 @@ class WhatsAppCloudApiProvider:
             return {"ok": False, "error": str(exc)}
 
 
+class MockWhatsAppProvider:
+    """Development/test provider — no Meta credentials required.
+
+    Outbound messages succeed with a synthetic Meta-style ID and are marked TEST.
+    """
+
+    def open_chat_url(self, mobile: str, body: str = "") -> str | None:
+        return WaMeProvider().open_chat_url(mobile, body)
+
+    def send_message(self, mobile: str, body: str) -> dict:
+        to = _normalize_e164(mobile)
+        if not to:
+            return {"ok": False, "error": "Invalid mobile number", "is_test": True}
+        fake_id = f"TEST-{to[-10:] if len(to) >= 10 else to}-{int(__import__('time').time())}"
+        return {
+            "ok": True,
+            "external_message_id": fake_id,
+            "is_test": True,
+            "wa_url": self.open_chat_url(mobile, body),
+        }
+
+    def send_media(self, mobile: str, **kwargs) -> dict:
+        return self.send_message(mobile, kwargs.get("caption") or "[media]")
+
+
 def is_cloud_api_configured(config: dict[str, Any] | None = None) -> bool:
     cfg = config
     if cfg is None:
@@ -144,7 +169,7 @@ def is_cloud_api_configured(config: dict[str, Any] | None = None) -> bool:
 
 
 def get_whatsapp_provider() -> WhatsAppProvider:
-    """Return Cloud API provider when Integration Settings are complete."""
+    """Cloud API when Integration Settings are complete; otherwise test/mock provider."""
     try:
         from app.modules.settings.services import IntegrationSettingsService
 
@@ -152,5 +177,5 @@ def get_whatsapp_provider() -> WhatsAppProvider:
         if is_cloud_api_configured(cfg):
             return WhatsAppCloudApiProvider(cfg)
     except Exception:
-        logger.debug("WhatsApp Cloud API config unavailable; using wa.me fallback")
-    return WaMeProvider()
+        logger.debug("WhatsApp Cloud API config unavailable; using mock test provider")
+    return MockWhatsAppProvider()

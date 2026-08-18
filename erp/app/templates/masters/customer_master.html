@@ -10,6 +10,10 @@
     <i class="bi bi-pencil-square"></i>
     <span>Edit</span>
   </button>
+  <button type="button" class="jtcs-ribbon-btn" id="cmRestoreBtn" disabled title="Restore">
+    <i class="bi bi-arrow-counterclockwise"></i>
+    <span>Restore</span>
+  </button>
   <button type="button" class="jtcs-ribbon-btn" id="cmDeleteBtn" disabled title="Delete">
     <i class="bi bi-trash"></i>
     <span>Delete</span>
@@ -28,7 +32,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260809logged1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260818usage1">
 {% endblock %}
 
 {% block content %}
@@ -196,7 +200,31 @@
         </form>
           </div>
 
-          <aside id="cmMobileDupPanel" class="cm-mobile-dup-panel d-none" aria-live="polite">
+          <aside class="cm-entry-side">
+          <div id="cmUsagePanel" class="cm-usage-panel d-none" aria-live="polite">
+            <div class="cm-usage-header">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+              <span>Cannot Delete / Inactive</span>
+            </div>
+            <p class="cm-usage-note mb-2">
+              This customer ID is linked in other records. Only <strong>Edit</strong> is allowed.
+            </p>
+            <div id="cmUsageLinks" class="cm-usage-links mb-2"></div>
+            <div class="table-responsive cm-usage-table-wrap">
+              <table class="table table-sm mb-0 cm-usage-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Work</th>
+                    <th class="text-end">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="cmUsageRows"></tbody>
+              </table>
+            </div>
+            <div id="cmUsageEmpty" class="small text-muted mt-2 d-none">Linked records found, but no transaction lines to list.</div>
+          </div>
+          <div id="cmMobileDupPanel" class="cm-mobile-dup-panel d-none" aria-live="polite">
             <div class="cm-mobile-dup-header">
               <i class="bi bi-exclamation-triangle-fill text-warning"></i>
               <span>Duplicate Mobile</span>
@@ -205,10 +233,14 @@
               This mobile number is already used by other customer(s). You may still save.
             </p>
             <ul id="cmMobileDupList" class="cm-mobile-dup-list list-unstyled mb-0"></ul>
+          </div>
           </aside>
         </div>
       </div>
       <div class="modal-footer cm-entry-footer">
+        <button type="button" class="btn btn-success d-none" id="cmRestoreFormBtn">
+          <i class="bi bi-arrow-counterclockwise"></i> Restore Active
+        </button>
         <button type="button" class="btn btn-primary" id="cmSaveBtn">
           <i class="bi bi-check-lg"></i> Save Customer
         </button>
@@ -413,5 +445,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260810mand3"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260818usage1"></script>
 {% endblock %}

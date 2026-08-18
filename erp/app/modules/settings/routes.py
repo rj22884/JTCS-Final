@@ -426,9 +426,9 @@ def api_whatsapp_webhook():
         cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta")
         app_secret = (cfg.get("app_secret") or "").strip()
         sig = request.headers.get("X-Hub-Signature-256")
-        # Enforce signature when app_secret is configured
-        if app_secret and sig and not WhatsAppMetaClient.verify_signature(app_secret, raw, sig):
-            return jsonify({"ok": False, "error": "Invalid signature"}), 403
+        if app_secret:
+            if not sig or not WhatsAppMetaClient.verify_signature(app_secret, raw, sig):
+                return jsonify({"ok": False, "error": "Invalid signature"}), 403
     except Exception:
         pass
 
@@ -441,7 +441,7 @@ def api_whatsapp_webhook():
     except Exception as exc:
         # Always ACK to Meta to avoid retry storms; log server-side
         current_app.logger.exception("WhatsApp webhook processing failed: %s", exc)
-        return jsonify({"ok": True, "received": True, "error": str(exc)})
+        return jsonify({"ok": True, "received": True, "error": "Webhook processing failed"})
 
 
 # ---------------------------------------------------------------------------

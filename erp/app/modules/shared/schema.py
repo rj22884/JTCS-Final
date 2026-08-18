@@ -315,8 +315,9 @@ _COMM_CENTER_CHILDREN: tuple[tuple[str, str, str, int, str], ...] = (
     ("Website Contact Messages", "bi-globe", "/crm/inbox?channel=Website", 4, "Website enquiries"),
     ("AI Chatbot Conversations", "bi-robot", "/crm/inbox?channel=AI", 5, "AI chatbot (Phase 2)"),
     ("Call Logs", "bi-telephone", "/crm/call-logs", 6, "Phone call logs"),
-    ("Follow-up Manager", "bi-alarm", "/crm/followups", 7, "Pending and overdue follow-ups"),
-    ("Customer Timeline", "bi-clock-history", "/crm/timeline", 8, "Customer activity timeline"),
+    ("WhatsApp Templates", "bi-file-earmark-text", "/crm/whatsapp-templates", 7, "WhatsApp template master"),
+    ("Follow-up Manager", "bi-alarm", "/crm/followups", 8, "Pending and overdue follow-ups"),
+    ("Customer Timeline", "bi-clock-history", "/crm/timeline", 9, "Customer activity timeline"),
 )
 
 
@@ -448,7 +449,278 @@ _COMM_CENTER_ALTERS: tuple[str, ...] = (
         CREATE INDEX IX_CrmCallLog_Customer ON dbo.CrmCallLog (CustomerID, CalledAt DESC);
     END;
     """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'AssignedDate') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD AssignedDate DATETIME2 NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'AssignedByUserID') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD AssignedByUserID INT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'LastMessagePreview') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD LastMessagePreview NVARCHAR(240) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'IsTest') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD IsTest BIT NOT NULL
+            CONSTRAINT DF_CrmMessage_IsTest DEFAULT (0);
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmFollowUp', N'ConversationID') IS NULL
+        ALTER TABLE dbo.CrmFollowUp ADD ConversationID INT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmTask', N'ConversationID') IS NULL
+        ALTER TABLE dbo.CrmTask ADD ConversationID INT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmTask', N'Source') IS NULL
+        ALTER TABLE dbo.CrmTask ADD Source NVARCHAR(50) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmDocument', N'ConversationID') IS NULL
+        ALTER TABLE dbo.CrmDocument ADD ConversationID INT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmDocument', N'MessageID') IS NULL
+        ALTER TABLE dbo.CrmDocument ADD MessageID INT NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmDocument', N'Source') IS NULL
+        ALTER TABLE dbo.CrmDocument ADD Source NVARCHAR(50) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmDocument', N'FinancialYear') IS NULL
+        ALTER TABLE dbo.CrmDocument ADD FinancialYear NVARCHAR(20) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessageTemplate', N'Category') IS NULL
+        ALTER TABLE dbo.CrmMessageTemplate ADD Category NVARCHAR(50) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessageTemplate', N'VariablesJson') IS NULL
+        ALTER TABLE dbo.CrmMessageTemplate ADD VariablesJson NVARCHAR(1000) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessageTemplate', N'TemplateStatus') IS NULL
+        ALTER TABLE dbo.CrmMessageTemplate ADD TemplateStatus NVARCHAR(30) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.CrmConversation', N'MatchStatus') IS NULL
+        ALTER TABLE dbo.CrmConversation ADD MatchStatus NVARCHAR(30) NULL;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND COL_LENGTH(N'dbo.CrmWhatsAppContact', N'ConversationID') IS NULL
+        ALTER TABLE dbo.CrmWhatsAppContact ADD ConversationID INT NULL;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND COL_LENGTH(N'dbo.CrmWhatsAppContact', N'IsConfirmed') IS NULL
+        ALTER TABLE dbo.CrmWhatsAppContact ADD IsConfirmed BIT NOT NULL
+            CONSTRAINT DF_CrmWhatsAppContact_Confirmed DEFAULT (0);
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND COL_LENGTH(N'dbo.CrmWhatsAppContact', N'ConfirmedByUserID') IS NULL
+        ALTER TABLE dbo.CrmWhatsAppContact ADD ConfirmedByUserID INT NULL;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND COL_LENGTH(N'dbo.CrmWhatsAppContact', N'ConfirmedDate') IS NULL
+        ALTER TABLE dbo.CrmWhatsAppContact ADD ConfirmedDate DATETIME2 NULL;
+    """,
+    """
+    IF EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = N'UX_CrmWhatsAppContact_Number'
+          AND object_id = OBJECT_ID(N'dbo.CrmWhatsAppContact')
+    )
+        DROP INDEX UX_CrmWhatsAppContact_Number ON dbo.CrmWhatsAppContact;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = N'IX_CrmWhatsAppContact_Number'
+          AND object_id = OBJECT_ID(N'dbo.CrmWhatsAppContact')
+    )
+        CREATE INDEX IX_CrmWhatsAppContact_Number ON dbo.CrmWhatsAppContact (WhatsAppNumber);
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM sys.indexes
+        WHERE name = N'UX_CrmWhatsAppContact_Conversation'
+          AND object_id = OBJECT_ID(N'dbo.CrmWhatsAppContact')
+    )
+        CREATE UNIQUE INDEX UX_CrmWhatsAppContact_Conversation
+            ON dbo.CrmWhatsAppContact (ConversationID) WHERE ConversationID IS NOT NULL;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWebhookEvent', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmWebhookEvent (
+            WebhookEventID BIGINT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            ExternalEventID NVARCHAR(160) NOT NULL,
+            EventType NVARCHAR(50) NOT NULL,
+            PayloadPreview NVARCHAR(500) NULL,
+            ProcessedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmWebhookEvent_Processed DEFAULT (SYSUTCDATETIME())
+        );
+        CREATE UNIQUE INDEX UX_CrmWebhookEvent_External ON dbo.CrmWebhookEvent (ExternalEventID);
+    END;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmWhatsAppContact', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmWhatsAppContact (
+            MappingID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            WhatsAppNumber NVARCHAR(30) NOT NULL,
+            CustomerID INT NULL,
+            LeadID INT NULL,
+            ConversationID INT NULL,
+            IsConfirmed BIT NOT NULL CONSTRAINT DF_CrmWhatsAppContact_Confirmed DEFAULT (0),
+            ConfirmedByUserID INT NULL,
+            ConfirmedDate DATETIME2 NULL,
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmWhatsAppContact_Created DEFAULT (SYSUTCDATETIME()),
+            ModifiedDate DATETIME2 NULL
+        );
+        CREATE INDEX IX_CrmWhatsAppContact_Number ON dbo.CrmWhatsAppContact (WhatsAppNumber);
+        CREATE UNIQUE INDEX UX_CrmWhatsAppContact_Conversation
+            ON dbo.CrmWhatsAppContact (ConversationID) WHERE ConversationID IS NOT NULL;
+    END;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmLabel', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmLabel (
+            LabelID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            LabelName NVARCHAR(80) NOT NULL,
+            Color NVARCHAR(20) NULL,
+            IsActive BIT NOT NULL CONSTRAINT DF_CrmLabel_IsActive DEFAULT (1),
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmLabel_Created DEFAULT (SYSUTCDATETIME())
+        );
+        CREATE UNIQUE INDEX UX_CrmLabel_Name ON dbo.CrmLabel (LabelName);
+    END;
+    """,
+    """
+    IF OBJECT_ID(N'dbo.CrmConversationLabel', N'U') IS NULL
+    BEGIN
+        CREATE TABLE dbo.CrmConversationLabel (
+            ConversationLabelID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+            ConversationID INT NOT NULL,
+            LabelID INT NOT NULL,
+            CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_CrmConversationLabel_Created DEFAULT (SYSUTCDATETIME())
+        );
+        CREATE UNIQUE INDEX UX_CrmConversationLabel ON dbo.CrmConversationLabel (ConversationID, LabelID);
+    END;
+    """,
 )
+
+
+def _seed_whatsapp_crm_defaults() -> None:
+    """Idempotent labels, quick replies, and WhatsApp templates."""
+    labels = [
+        ("New Customer", "#0d6efd"),
+        ("New Lead", "#6f42c1"),
+        ("Documents Pending", "#fd7e14"),
+        ("Documents Received", "#198754"),
+        ("Work in Progress", "#0dcaf0"),
+        ("Payment Pending", "#dc3545"),
+        ("Urgent", "#b02a37"),
+        ("Follow-up Required", "#ffc107"),
+        ("Completed", "#198754"),
+    ]
+    for name, color in labels:
+        exists = db.session.execute(
+            text("SELECT TOP 1 1 FROM dbo.CrmLabel WHERE LabelName = :n"),
+            {"n": name},
+        ).scalar()
+        if not exists:
+            db.session.execute(
+                text(
+                    "INSERT INTO dbo.CrmLabel (LabelName, Color) VALUES (:n, :c)"
+                ),
+                {"n": name, "c": color},
+            )
+    db.session.commit()
+
+    quick_replies = [
+        ("/itr", "ITR reminder", "Dear {{customer_name}}, please share your ITR documents for {{financial_year}}."),
+        ("/tds", "TDS reminder", "Dear {{customer_name}}, kindly share TDS documents so we can proceed."),
+        ("/gst", "GST reminder", "Dear {{customer_name}}, GST documents are pending for {{due_date}}."),
+        ("/payment", "Payment reminder", "Dear {{customer_name}}, a payment of {{amount}} is pending. Please arrange at the earliest."),
+        ("/challan", "Challan reminder", "Dear {{customer_name}}, please share the challan copy for {{service_name}}."),
+        ("/reminder", "General reminder", "Dear {{customer_name}}, this is a reminder from {{firm_name}} regarding your pending work."),
+        ("/thankyou", "Thank you", "Thank you, {{customer_name}}. {{firm_name}} has received your message. We will update you shortly."),
+    ]
+    for shortcut, title, body in quick_replies:
+        exists = db.session.execute(
+            text("SELECT TOP 1 1 FROM dbo.CrmQuickReply WHERE Shortcut = :s AND IsActive = 1"),
+            {"s": shortcut},
+        ).scalar()
+        if not exists:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.CrmQuickReply (Title, Body, Channel, Shortcut, SortOrder)
+                    VALUES (:title, :body, N'WhatsApp', :shortcut, 0)
+                    """
+                ),
+                {"title": title, "body": body, "shortcut": shortcut},
+            )
+    db.session.commit()
+
+    templates = [
+        ("ITR Document Reminder", "itr_document_reminder", "UTILITY",
+         "Dear {{customer_name}}, please share ITR documents for {{financial_year}}.",
+         "customer_name,financial_year"),
+        ("GST Document Reminder", "gst_document_reminder", "UTILITY",
+         "Dear {{customer_name}}, GST documents are pending. Due date: {{due_date}}.",
+         "customer_name,due_date"),
+        ("TDS Document Reminder", "tds_document_reminder", "UTILITY",
+         "Dear {{customer_name}}, please share TDS documents for {{service_name}}.",
+         "customer_name,service_name"),
+        ("Payment Reminder", "payment_reminder", "UTILITY",
+         "Dear {{customer_name}}, payment of {{amount}} is pending with {{firm_name}}.",
+         "customer_name,amount,firm_name"),
+        ("Challan Reminder", "challan_reminder", "UTILITY",
+         "Dear {{customer_name}}, please share the challan for {{service_name}}.",
+         "customer_name,service_name"),
+        ("Return Filing Reminder", "return_filing_reminder", "UTILITY",
+         "Dear {{customer_name}}, return filing for {{financial_year}} is due on {{due_date}}.",
+         "customer_name,financial_year,due_date"),
+        ("General Follow-up", "general_followup", "UTILITY",
+         "Dear {{customer_name}}, {{firm_name}} is following up regarding {{service_name}}.",
+         "customer_name,firm_name,service_name"),
+    ]
+    for name, ext, category, body, variables in templates:
+        exists = db.session.execute(
+            text("SELECT TOP 1 1 FROM dbo.CrmMessageTemplate WHERE Name = :n"),
+            {"n": name},
+        ).scalar()
+        if not exists:
+            db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.CrmMessageTemplate
+                        (Name, Channel, Body, ExternalTemplateName, LanguageCode,
+                         Category, VariablesJson, TemplateStatus, IsActive)
+                    VALUES
+                        (:name, N'WhatsApp', :body, :ext, N'en',
+                         :category, :vars, N'Draft', 1)
+                    """
+                ),
+                {
+                    "name": name,
+                    "body": body,
+                    "ext": ext,
+                    "category": category,
+                    "vars": variables,
+                },
+            )
+    db.session.commit()
 
 
 def ensure_communication_center_schema() -> None:
@@ -456,6 +728,10 @@ def ensure_communication_center_schema() -> None:
     for stmt in _COMM_CENTER_ALTERS:
         db.session.execute(text(stmt))
         db.session.commit()
+    try:
+        _seed_whatsapp_crm_defaults()
+    except Exception:
+        db.session.rollback()
 
 
 def ensure_crm_schema() -> None:

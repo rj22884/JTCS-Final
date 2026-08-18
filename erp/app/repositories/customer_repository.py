@@ -5,6 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.customer_master.constants import DB_TO_FORM, FORM_TO_DB
@@ -13,6 +14,102 @@ from app.models.transactions import CustomerMaster
 
 
 _CUSTOMER_SCHEMA_READY = False
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Customer-master's own setup / auth rows — not business usage.
+_USAGE_SKIP_TABLES = frozenset(
+    {
+        "CustomerMaster",
+        "CustomerIncomeExpenseWorkLink",
+        "ChartOfAccountMaster",
+        "CustomerPortalLoginLog",
+    }
+)
+
+_USAGE_TABLE_LABELS = {
+    "JTCSDailyTransaction": "Daily Transaction",
+    "FollowupEntryMaster": "Follow-up Work",
+    "GstInvoice": "GST Invoice",
+    "CrmTask": "CRM Task",
+    "CrmFollowUp": "CRM Follow-up",
+    "CrmConversation": "Conversation",
+    "CrmLead": "Lead",
+    "CrmDocument": "Document",
+    "CrmTimelineEvent": "Timeline",
+    "CrmCallLog": "Call Log",
+    "CrmWhatsAppContact": "WhatsApp Contact",
+    "CrmWorkflowInstance": "Workflow",
+    "CrmNotification": "Notification",
+    "AppNotification": "Notification",
+}
+
+_USAGE_DETAIL_SQL = {
+    "JTCSDailyTransaction": """
+        SELECT TOP 80
+            CONVERT(varchar(10), TransactionDate, 23) AS txn_date,
+            LTRIM(RTRIM(ISNULL(WorkType, N'')
+                + CASE WHEN NULLIF(LTRIM(RTRIM(SubWorkType)), N'') IS NULL THEN N''
+                       ELSE N' / ' + SubWorkType END)) AS work,
+            CAST(
+                CASE
+                    WHEN ISNULL(TotalAmount, 0) <> 0 THEN TotalAmount
+                    ELSE ISNULL(IncomeAmount, 0) + ISNULL(ExpenseAmount, 0)
+                       + ISNULL(SaleAmount, 0) + ISNULL(PurchaseAmount, 0)
+                END AS decimal(18, 2)
+            ) AS amount,
+            ISNULL(ReferenceNo, N'') AS reference,
+            N'Daily Transaction' AS source
+        FROM dbo.JTCSDailyTransaction
+        WHERE CustomerID = :id
+        ORDER BY TransactionDate DESC, TransactionID DESC
+    """,
+    "FollowupEntryMaster": """
+        SELECT TOP 80
+            CONVERT(varchar(10), WorkDate, 23) AS txn_date,
+            ISNULL(ModuleCode, N'') AS work,
+            CAST(0 AS decimal(18, 2)) AS amount,
+            ISNULL(BillNo, N'') AS reference,
+            N'Follow-up Work' AS source
+        FROM dbo.FollowupEntryMaster
+        WHERE CustomerID = :id
+        ORDER BY WorkDate DESC, EntryID DESC
+    """,
+    "GstInvoice": """
+        SELECT TOP 80
+            CONVERT(varchar(10), InvoiceDate, 23) AS txn_date,
+            N'GST Invoice' AS work,
+            CAST(ISNULL(InvoiceValue, 0) AS decimal(18, 2)) AS amount,
+            ISNULL(InvoiceNo, N'') AS reference,
+            N'GST Invoice' AS source
+        FROM dbo.GstInvoice
+        WHERE CustomerID = :id
+        ORDER BY InvoiceDate DESC, InvoiceID DESC
+    """,
+    "CrmTask": """
+        SELECT TOP 40
+            CONVERT(varchar(10), CAST(ISNULL(Deadline, CreatedDate) AS date), 23) AS txn_date,
+            ISNULL(Title, N'Task') AS work,
+            CAST(NULL AS decimal(18, 2)) AS amount,
+            ISNULL(Status, N'') AS reference,
+            N'CRM Task' AS source
+        FROM dbo.CrmTask
+        WHERE CustomerID = :id
+        ORDER BY ISNULL(Deadline, CreatedDate) DESC, TaskID DESC
+    """,
+    "CrmFollowUp": """
+        SELECT TOP 40
+            CONVERT(varchar(10), CAST(ISNULL(DueAt, CreatedDate) AS date), 23) AS txn_date,
+            LTRIM(RTRIM(ISNULL(FollowUpType, N'')
+                + CASE WHEN NULLIF(LTRIM(RTRIM(Subject)), N'') IS NULL THEN N''
+                       ELSE N' / ' + Subject END)) AS work,
+            CAST(NULL AS decimal(18, 2)) AS amount,
+            ISNULL(Status, N'') AS reference,
+            N'CRM Follow-up' AS source
+        FROM dbo.CrmFollowUp
+        WHERE CustomerID = :id
+        ORDER BY ISNULL(DueAt, CreatedDate) DESC, FollowUpID DESC
+    """,
+}
 
 
 class CustomerRepository:
@@ -177,6 +274,30 @@ class CustomerRepository:
             )
         )
         self.session.commit()
+        # WhatsApp / incomplete KYC customers must be allowed with blank PAN/GST/Aadhaar.
+        for col, sql_type in (
+            ("PANNumber", "NVARCHAR(20)"),
+            ("GSTNumber", "NVARCHAR(20)"),
+            ("AadhaarNumber", "NVARCHAR(20)"),
+        ):
+            try:
+                self.session.execute(
+                    text(
+                        f"""
+                        IF COL_LENGTH(N'dbo.CustomerMaster', N'{col}') IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM sys.columns
+                            WHERE object_id = OBJECT_ID(N'dbo.CustomerMaster')
+                              AND name = N'{col}'
+                              AND is_nullable = 0
+                        )
+                            ALTER TABLE dbo.CustomerMaster ALTER COLUMN {col} {sql_type} NULL;
+                        """
+                    )
+                )
+                self.session.commit()
+            except Exception:
+                self.session.rollback()
         _CUSTOMER_SCHEMA_READY = True
 
     @staticmethod
@@ -316,7 +437,7 @@ class CustomerRepository:
             params["status"] = status.strip()
         sql += " ORDER BY CustomerName, CustomerID DESC"
         rows = self.session.execute(text(sql), params).mappings().all()
-        return [
+        items = [
             {
                 "customer_id": row["CustomerID"],
                 "customer_group": row.get("CustomerGroup") or "",
@@ -334,6 +455,10 @@ class CustomerRepository:
             }
             for row in rows
         ]
+        linked_ids = self.list_linked_customer_ids()
+        for item in items:
+            item["has_links"] = item["customer_id"] in linked_ids
+        return items
 
     def get_by_id(self, customer_id: int) -> CustomerMaster | None:
         return self.session.get(CustomerMaster, customer_id)
@@ -570,6 +695,113 @@ class CustomerRepository:
             {"id": customer_id, "now": datetime.utcnow()},
         )
         self.session.flush()
+
+    def activate(self, customer_id: int) -> None:
+        self.session.execute(
+            text(
+                "UPDATE CustomerMaster SET CustomerStatus = N'Active', ModifiedDate = :now "
+                "WHERE CustomerID = :id"
+            ),
+            {"id": customer_id, "now": datetime.utcnow()},
+        )
+        self.session.flush()
+
+    @staticmethod
+    def _safe_table_name(name: str) -> str | None:
+        token = (name or "").strip()
+        if not token or not _IDENT_RE.match(token):
+            return None
+        return token
+
+    def _linked_customer_tables(self) -> list[str]:
+        names: list[str] = []
+        try:
+            rows = self.session.execute(
+                text(
+                    """
+                    SELECT t.name
+                    FROM sys.columns c
+                    INNER JOIN sys.tables t ON t.object_id = c.object_id
+                    INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+                    WHERE s.name = N'dbo'
+                      AND c.name = N'CustomerID'
+                    """
+                )
+            ).fetchall()
+            names = [str(row[0]) for row in rows]
+        except SQLAlchemyError:
+            self.session.rollback()
+            names = list(_USAGE_DETAIL_SQL.keys())
+        tables: list[str] = []
+        seen: set[str] = set()
+        for raw in names:
+            table = self._safe_table_name(raw)
+            if not table or table in _USAGE_SKIP_TABLES or table in seen:
+                continue
+            seen.add(table)
+            tables.append(table)
+        return tables
+
+    def list_linked_customer_ids(self) -> set[int]:
+        tables = self._linked_customer_tables()
+        if not tables:
+            return set()
+        parts = [f"SELECT CustomerID FROM dbo.[{table}] WHERE CustomerID IS NOT NULL" for table in tables]
+        try:
+            rows = self.session.execute(text(" UNION ".join(parts))).fetchall()
+        except SQLAlchemyError:
+            self.session.rollback()
+            return set()
+        return {int(row[0]) for row in rows if row[0] is not None}
+
+    def get_usage(self, customer_id: int) -> dict:
+        cid = int(customer_id)
+        links: list[dict] = []
+        for table in self._linked_customer_tables():
+            try:
+                count = self.session.execute(
+                    text(f"SELECT COUNT(1) FROM dbo.[{table}] WHERE CustomerID = :id"),
+                    {"id": cid},
+                ).scalar()
+            except SQLAlchemyError:
+                self.session.rollback()
+                continue
+            total = int(count or 0)
+            if total:
+                links.append(
+                    {
+                        "table": table,
+                        "label": _USAGE_TABLE_LABELS.get(table, table),
+                        "count": total,
+                    }
+                )
+        transactions: list[dict] = []
+        existing = {item["table"] for item in links}
+        for table, sql in _USAGE_DETAIL_SQL.items():
+            if table not in existing:
+                continue
+            try:
+                rows = self.session.execute(text(sql), {"id": cid}).mappings().all()
+            except SQLAlchemyError:
+                self.session.rollback()
+                continue
+            for row in rows:
+                amount = row.get("amount")
+                transactions.append(
+                    {
+                        "txn_date": str(row.get("txn_date") or "")[:10],
+                        "work": (row.get("work") or "").strip(),
+                        "amount": float(amount) if amount is not None else None,
+                        "reference": (row.get("reference") or "").strip(),
+                        "source": (row.get("source") or "").strip(),
+                    }
+                )
+        transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
+        return {
+            "can_delete": not links,
+            "links": links,
+            "transactions": transactions[:80],
+        }
 
     def _duplicate_customer_dict(self, row) -> dict:
         return {

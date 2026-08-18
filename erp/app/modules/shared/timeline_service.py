@@ -50,6 +50,40 @@ class TimelineService:
         db.session.commit()
         return int(row[0]) if row else 0
 
+    def reassign_conversation(
+        self,
+        conversation_id: int,
+        *,
+        customer_id: int | None,
+        lead_id: int | None = None,
+    ) -> None:
+        """Move this conversation's timeline events to the selected customer only."""
+        ensure_crm_schema()
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.CrmTimelineEvent
+                SET CustomerID = :cid, LeadID = :lid
+                WHERE EntityType = N'CrmConversation' AND EntityID = :conv
+                """
+            ),
+            {"cid": customer_id, "lid": lead_id, "conv": int(conversation_id)},
+        )
+        db.session.execute(
+            text(
+                """
+                UPDATE t
+                SET t.CustomerID = :cid, t.LeadID = :lid
+                FROM dbo.CrmTimelineEvent t
+                INNER JOIN dbo.CrmMessage m ON m.MessageID = t.EntityID
+                WHERE t.EntityType = N'CrmMessage'
+                  AND m.ConversationID = :conv
+                """
+            ),
+            {"cid": customer_id, "lid": lead_id, "conv": int(conversation_id)},
+        )
+        db.session.commit()
+
     def list_events(
         self,
         *,

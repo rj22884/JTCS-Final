@@ -131,6 +131,7 @@ class CrmFollowUpService:
         assigned_user_name: str | None = None,
         user_id: int | None = None,
         user_name: str | None = None,
+        conversation_id: int | None = None,
     ) -> dict:
         ensure_crm_schema()
         ftype = (followup_type or "").strip()
@@ -166,6 +167,18 @@ class CrmFollowUpService:
             },
         ).first()
         followup_id = int(row[0])
+        db.session.commit()
+        if conversation_id:
+            try:
+                db.session.execute(
+                    text(
+                        "UPDATE dbo.CrmFollowUp SET ConversationID = :cid WHERE FollowUpID = :id"
+                    ),
+                    {"cid": conversation_id, "id": followup_id},
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         self.timeline.add_event(
             event_type="FollowUpScheduled",

@@ -113,6 +113,8 @@ class CrmTaskService:
         assigned_user_name: str | None = None,
         user_id: int | None = None,
         user_name: str | None = None,
+        conversation_id: int | None = None,
+        source: str | None = None,
     ) -> dict:
         ensure_crm_schema()
         title_text = (title or "").strip()
@@ -147,6 +149,27 @@ class CrmTaskService:
             },
         ).first()
         task_id = int(row[0])
+        db.session.commit()
+        if conversation_id or source:
+            try:
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE dbo.CrmTask
+                        SET ConversationID = COALESCE(:cid, ConversationID),
+                            Source = COALESCE(:source, Source)
+                        WHERE TaskID = :id
+                        """
+                    ),
+                    {
+                        "cid": conversation_id,
+                        "source": (source or "")[:50] or None,
+                        "id": task_id,
+                    },
+                )
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
 
         self.timeline.add_event(
             event_type="TaskCreated",

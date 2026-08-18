@@ -14,6 +14,7 @@ from app.services.chart_group_service import ChartGroupService
 from app.services.customer_group_service import CustomerGroupService
 from app.services.customer_master_service import (
     CustomerMasterService,
+    CustomerInUseError,
     DuplicateFieldError,
     DuplicateMobileWarning,
 )
@@ -22,6 +23,17 @@ from app.services.work_master_service import WorkMasterService
 
 bp = Blueprint("masters_customer", __name__, url_prefix="/masters/customer")
 MENU_PATH = "/masters/customer"
+
+
+def _in_use_response(exc: CustomerInUseError):
+    return jsonify(
+        {
+            "ok": False,
+            "error": str(exc),
+            "in_use": True,
+            "usage": exc.usage,
+        }
+    ), 409
 
 
 @bp.route("", strict_slashes=False)
@@ -37,6 +49,7 @@ def index():
         "get": url_for("masters_customer.get_record", customer_id=0),
         "save": url_for("masters_customer.save_record"),
         "delete": url_for("masters_customer.delete_record", customer_id=0),
+        "restore": url_for("masters_customer.restore_record", customer_id=0),
         "checkDuplicates": url_for("masters_customer.check_duplicates"),
         "pincodeLookup": url_for("masters_customer.lookup_pincode"),
         "incomeTaxPortalLogin": url_for("masters_customer.income_tax_portal_login"),
@@ -159,6 +172,8 @@ def save_record():
         )
         message = "Customer updated successfully." if customer_id else "Customer added successfully."
         return jsonify({"ok": True, "record": record, "message": message})
+    except CustomerInUseError as exc:
+        return _in_use_response(exc)
     except DuplicateFieldError as exc:
         return jsonify(
             {
@@ -190,8 +205,20 @@ def delete_record(customer_id: int):
     try:
         message = CustomerMasterService().delete_record(customer_id)
         return jsonify({"ok": True, "message": message})
+    except CustomerInUseError as exc:
+        return _in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/api/records/<int:customer_id>/restore", methods=["POST"], strict_slashes=False)
+@login_required
+def restore_record(customer_id: int):
+    try:
+        message = CustomerMasterService().restore_record(customer_id)
+        return jsonify({"ok": True, "message": message})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @bp.route("/api/portal/income-tax-login", methods=["POST"], strict_slashes=False)

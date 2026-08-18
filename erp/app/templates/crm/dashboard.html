@@ -58,6 +58,11 @@
       <span class="crm-widget-label">Website Enquiries</span>
       <span class="crm-widget-value">{{ comm_stats.website_enquiries|default(0) }}</span>
     </a>
+    <div class="crm-widget crm-widget--danger">
+      <span class="crm-widget-icon"><i class="bi bi-exclamation-triangle"></i></span>
+      <span class="crm-widget-label">Failed Messages</span>
+      <span class="crm-widget-value">{{ comm_stats.failed_messages|default(0) }}</span>
+    </div>
     <a href="{{ url_for('crm.inbox_page') }}?channel=AI" class="crm-widget">
       <span class="crm-widget-icon"><i class="bi bi-robot"></i></span>
       <span class="crm-widget-label">AI Conversations</span>

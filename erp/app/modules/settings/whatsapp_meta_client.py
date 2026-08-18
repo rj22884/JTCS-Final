@@ -240,6 +240,28 @@ class WhatsAppMetaClient:
         payload[mtype] = media_obj
         return self.post(f"/{phone_number_id}/messages", payload)
 
+    def send_template(
+        self,
+        phone_number_id: str,
+        to_e164: str,
+        *,
+        template_name: str,
+        language_code: str = "en",
+        components: list | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "messaging_product": "whatsapp",
+            "to": to_e164,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": language_code or "en"},
+            },
+        }
+        if components:
+            payload["template"]["components"] = components
+        return self.post(f"/{phone_number_id}/messages", payload)
+
     def mark_as_read(self, phone_number_id: str, message_id: str) -> dict[str, Any]:
         return self.post(
             f"/{phone_number_id}/messages",

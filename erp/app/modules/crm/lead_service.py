@@ -408,9 +408,10 @@ class CrmLeadService:
                 "mobile_number": mobile or None,
                 "email_id": (lead.get("Email") or "").strip() or None,
                 "company_firm_name": (lead.get("BusinessName") or "").strip() or None,
-                "pan_number": normalized_pan or CustomerRepository.PLACEHOLDER_PAN,
                 "customer_status": "Active",
             }
+            if normalized_pan:
+                payload["pan_number"] = normalized_pan
             if not payload["customer_name"]:
                 raise ValueError("Lead full name is required to create a customer.")
             record = self.customer_repo.save_full(payload)

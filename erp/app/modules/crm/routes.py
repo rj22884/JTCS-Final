@@ -22,11 +22,15 @@ from app.modules.calendar.services import CalendarService
 from app.modules.communication.ai_chatbot_stub import AiChatbotStub
 from app.modules.communication.broadcast_stub import BroadcastStub
 from app.modules.communication.call_log_service import CallLogService
+from app.modules.communication.customer_link_service import CustomerLinkService
 from app.modules.communication.email_channel_service import EmailChannelService
+from app.modules.communication.label_service import LabelService
+from app.modules.communication.meta_whatsapp_service import MetaWhatsAppService
 from app.modules.communication.services import CommunicationService
 from app.modules.communication.sms_provider import SmsGatewayProvider
 from app.modules.communication.template_service import TemplateService
-from app.modules.communication.whatsapp_provider import get_whatsapp_provider
+from app.modules.communication.webhook_service import WhatsAppWebhookService
+from app.modules.communication.whatsapp_provider import get_whatsapp_provider, is_cloud_api_configured
 from app.modules.crm.customer360_service import Customer360Service
 from app.modules.crm.followup_service import CrmFollowUpService
 from app.modules.crm.lead_service import CrmLeadService
@@ -100,6 +104,7 @@ def dashboard():
         "today_emails": 0,
         "website_enquiries": 0,
         "ai_conversations": 0,
+        "failed_messages": 0,
         "total_customers": 0,
         "avg_response_minutes": None,
         "customer_satisfaction": None,
@@ -212,6 +217,7 @@ def inbox_page():
         poll_seconds=current_app.config.get("NOTIFICATION_POLL_SECONDS", 15),
         initial_channel=channel,
         initial_conversation_id=request.args.get("c") or "",
+        test_mode=not is_cloud_api_configured(),
         api={
             "list": url_for("crm_api.conversations_list"),
             "detail": url_for("crm_api.conversation_detail", conversation_id=0),
@@ -222,6 +228,31 @@ def inbox_page():
             "quick_replies": url_for("crm_api.quick_replies_list"),
             "templates": url_for("crm_api.templates_list"),
             "email_sync": url_for("crm_api.email_sync"),
+            "staff": url_for("crm_api.staff_list"),
+            "labels": url_for("crm_api.labels_list"),
+            "simulate": url_for("crm_api.whatsapp_simulate_inbound"),
+            "link": url_for("crm_api.conversation_link", conversation_id=0),
+            "conv_labels": url_for("crm_api.conversation_labels", conversation_id=0),
+            "tasks": url_for("crm_api.tasks_create"),
+            "followups": url_for("crm_api.followups_create"),
+            "customer360": url_for("crm.customer_360"),
+            "simulate_status": url_for("crm_api.whatsapp_simulate_status"),
+        },
+    )
+
+
+@crm_bp.route("/whatsapp-templates", strict_slashes=False)
+@login_required
+def whatsapp_templates_page():
+    return render_template(
+        "crm/whatsapp_templates.html",
+        page_title="WhatsApp Templates",
+        breadcrumb=_menu("/crm/whatsapp-templates"),
+        api={
+            "list": url_for("crm_api.templates_list"),
+            "create": url_for("crm_api.templates_create"),
+            "quick_replies": url_for("crm_api.quick_replies_list"),
+            "quick_create": url_for("crm_api.quick_replies_create"),
         },
     )
 
@@ -473,12 +504,13 @@ def conversations_list():
         elif date_preset == "month":
             date_from, date_to = start_today - timedelta(days=30), start_today + timedelta(days=1)
 
+    bucket = (request.args.get("bucket") or "").strip().lower()
     data = CommunicationService().list_conversations(
         status=request.args.get("status"),
-        priority=request.args.get("priority"),
+        priority=None if bucket == "high" else request.args.get("priority"),
         search=request.args.get("search"),
         channel=request.args.get("channel") or None,
-        unread_only=request.args.get("unread") == "1",
+        unread_only=request.args.get("unread") == "1" or bucket == "unread",
         archived=request.args.get("archived") == "1",
         pinned_only=request.args.get("pinned") == "1",
         starred_only=request.args.get("starred") == "1",
@@ -486,6 +518,12 @@ def conversations_list():
         date_from=date_from,
         date_to=date_to,
         page=int(request.args.get("page") or 1),
+        assigned_to_me=_uid() if bucket == "mine" else None,
+        unknown_only=bucket == "unknown",
+        pending_reply=bucket == "pending",
+        high_priority=bucket == "high",
+        label_id=int(request.args["label_id"]) if request.args.get("label_id") else None,
+        message_search=request.args.get("q") or None,
     )
     for row in data.get("rows", []):
         mobile = (
@@ -505,8 +543,23 @@ def conversation_detail(conversation_id: int):
     if not row:
         return jsonify({"ok": False, "error": "Not found"}), 404
     CommunicationService().mark_read(conversation_id)
+    row["UnreadCount"] = 0
     mobile = row.get("WhatsAppNumber") or row.get("MobileNumber") or row.get("LeadMobile")
-    row["wa_url"] = wa_me_url(mobile)
+    row["wa_url"] = wa_me_url(mobile or row.get("ContactMobile"))
+    row["labels"] = LabelService().conversation_labels(conversation_id)
+    link = CustomerLinkService()
+    candidates = link.find_customers_by_mobile(row.get("ContactMobile") or mobile)
+    hint = link.find_whatsapp_mapping(
+        row.get("ContactMobile") or mobile,
+        conversation_id=conversation_id,
+    )
+    row["match_candidates"] = candidates
+    row["match_count"] = len(candidates)
+    row["suggested_customer_id"] = (
+        int(row["CustomerID"])
+        if row.get("CustomerID")
+        else (hint.get("customer_id") if hint else None)
+    )
     timeline = TimelineService().list_events(
         customer_id=row.get("CustomerID"),
         lead_id=row.get("LeadID"),
@@ -518,6 +571,8 @@ def conversation_detail(conversation_id: int):
 @crm_api_bp.route("/conversations/<int:conversation_id>/messages", methods=["GET"])
 @login_required
 def conversation_messages(conversation_id: int):
+    if not CommunicationService().get_conversation(conversation_id):
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
     return jsonify({"ok": True, "rows": CommunicationService().list_messages(conversation_id)})
 
 
@@ -539,6 +594,19 @@ def conversation_reply(conversation_id: int):
     external_id = None
     error_detail = None
     send_result = None
+    is_test = False
+
+    vars_map = {
+        "customer_name": conv.get("CustomerName") or conv.get("LeadName") or "",
+        "firm_name": "Joshi Tax Consultancy & Services",
+        "financial_year": "",
+        "due_date": "",
+        "service_name": "",
+        "amount": "",
+    }
+    if payload.get("template_vars") and isinstance(payload.get("template_vars"), dict):
+        vars_map.update({str(k): str(v or "") for k, v in payload["template_vars"].items()})
+    body = TemplateService.interpolate(body, vars_map)
 
     if not is_note and channel == "WhatsApp":
         mobile = (
@@ -552,9 +620,11 @@ def conversation_reply(conversation_id: int):
         if send_result.get("ok"):
             external_id = send_result.get("external_message_id")
             delivery_status = "Sent"
+            is_test = bool(send_result.get("is_test"))
         else:
             delivery_status = "Failed"
             error_detail = send_result.get("error")
+            is_test = bool(send_result.get("is_test"))
             # Still store the outbound attempt for auditability
     elif not is_note and channel == "Email":
         to_email = conv.get("ContactEmail") or conv.get("EmailID") or conv.get("LeadEmail")
@@ -588,13 +658,16 @@ def conversation_reply(conversation_id: int):
         delivery_status=delivery_status,
         error_detail=error_detail,
         media_type="text",
+        is_test=is_test,
         user_id=_uid(),
         user_name=_uname(),
         bump_unread=False,
     )
     TimelineService().add_event(
         event_type="InternalNote" if is_note else "MessageSent",
-        title="Internal note" if is_note else f"{channel} message sent",
+        title="Internal note" if is_note else (
+            "WhatsApp – Employee Reply" if channel == "WhatsApp" else f"{channel} message sent"
+        ) + (" (TEST)" if is_test else ""),
         description=body[:500],
         customer_id=conv.get("CustomerID"),
         lead_id=conv.get("LeadID"),
@@ -603,9 +676,17 @@ def conversation_reply(conversation_id: int):
         user_id=_uid(),
         user_name=_uname(),
     )
-    resp = {"ok": True, "message_id": msg_id, "delivery_status": delivery_status}
+    resp = {"ok": True, "message_id": msg_id, "delivery_status": delivery_status, "is_test": is_test}
     if send_result and not send_result.get("ok") and channel in {"WhatsApp", "Email"}:
         resp["warning"] = send_result.get("error")
+    AuditService().log(
+        action_name="MessageSent",
+        entity_type="CrmMessage",
+        entity_id=msg_id,
+        new_value={"channel": channel, "is_test": is_test, "status": delivery_status},
+        user_id=_uid(),
+        user_name=_uname(),
+    )
     return jsonify(resp)
 
 
@@ -716,6 +797,8 @@ def conversation_attachments(conversation_id: int):
 @crm_api_bp.route("/conversations/<int:conversation_id>", methods=["PATCH"])
 @login_required
 def conversation_update(conversation_id: int):
+    if not CommunicationService().get_conversation(conversation_id):
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
     payload = request.get_json(silent=True) or {}
     if payload.get("status") == "Closed" and not user_has_capability("crm.close"):
         return jsonify({"ok": False, "error": "Permission denied"}), 403
@@ -727,11 +810,309 @@ def conversation_update(conversation_id: int):
         priority=payload.get("priority"),
         assigned_user_id=payload.get("assigned_user_id"),
         assign_set="assigned_user_id" in payload,
+        assigned_by_user_id=_uid(),
+        assigned_by_name=_uname(),
         is_pinned=payload.get("is_pinned") if "is_pinned" in payload else None,
         is_archived=payload.get("is_archived") if "is_archived" in payload else None,
         is_starred=payload.get("is_starred") if "is_starred" in payload else None,
     )
     return jsonify({"ok": True})
+
+
+@crm_api_bp.route("/staff", methods=["GET"])
+@login_required
+def staff_list():
+    from sqlalchemy import text
+    from app.extensions import db
+
+    rows = db.session.execute(
+        text(
+            """
+            SELECT UserID, FullName, Role
+            FROM dbo.Users
+            WHERE ISNULL(IsActive, 1) = 1
+              AND UserStatus IN (N'Active', N'Approved')
+            ORDER BY FullName
+            """
+        )
+    ).mappings().all()
+    return jsonify({"ok": True, "rows": [dict(r) for r in rows]})
+
+
+@crm_api_bp.route("/labels", methods=["GET"])
+@login_required
+def labels_list():
+    return jsonify({"ok": True, "rows": LabelService().list_labels()})
+
+
+@crm_api_bp.route("/conversations/<int:conversation_id>/labels", methods=["GET", "POST"])
+@login_required
+def conversation_labels(conversation_id: int):
+    if request.method == "GET":
+        return jsonify({"ok": True, "rows": LabelService().conversation_labels(conversation_id)})
+    payload = request.get_json(silent=True) or {}
+    ids = payload.get("label_ids") or []
+    rows = LabelService().set_labels(conversation_id, ids)
+    AuditService().log(
+        action_name="ConversationLabelsUpdated",
+        entity_type="CrmConversation",
+        entity_id=conversation_id,
+        new_value={"label_ids": ids},
+        user_id=_uid(),
+        user_name=_uname(),
+    )
+    return jsonify({"ok": True, "rows": rows})
+
+
+@crm_api_bp.route("/conversations/<int:conversation_id>/link", methods=["POST"])
+@login_required
+def conversation_link(conversation_id: int):
+    """Link a WhatsApp conversation: customer, lead, keep unlinked, or ignore."""
+    conv = CommunicationService().get_conversation(conversation_id)
+    if not conv:
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    action = (payload.get("action") or "").strip().lower()
+    mobile = conv.get("ContactMobile") or conv.get("LeadMobile") or ""
+    display = (
+        (payload.get("full_name") or "").strip()
+        or conv.get("CustomerName")
+        or conv.get("Subject")
+        or f"WhatsApp {str(mobile)[-10:]}"
+    )
+    link = CustomerLinkService()
+    previous_customer_id = int(conv["CustomerID"]) if conv.get("CustomerID") else None
+
+    if action == "ignore":
+        CommunicationService().update_conversation(
+            conversation_id,
+            status="Closed",
+            match_status="Unknown",
+            assigned_by_user_id=_uid(),
+            assigned_by_name=_uname(),
+        )
+        AuditService().log(
+            action_name="UnknownContactIgnored",
+            entity_type="CrmConversation",
+            entity_id=conversation_id,
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        return jsonify({"ok": True, "action": "ignore"})
+
+    if action == "keep_unlinked":
+        CommunicationService().update_conversation(
+            conversation_id,
+            customer_id=None,
+            customer_set=True,
+            match_status="Unlinked",
+            subject="Unlinked WhatsApp Contact",
+            assigned_by_user_id=_uid(),
+            assigned_by_name=_uname(),
+        )
+        AuditService().log(
+            action_name="WhatsAppKeepUnlinked",
+            entity_type="CrmConversation",
+            entity_id=conversation_id,
+            old_value=previous_customer_id,
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        return jsonify({"ok": True, "action": "keep_unlinked"})
+
+    if action == "create_lead":
+        result = CrmLeadService().create_lead(
+            source="WhatsApp",
+            request_type="WhatsApp",
+            full_name=display,
+            mobile=mobile or None,
+            message=conv.get("LastMessagePreview"),
+            priority=conv.get("Priority") or "Normal",
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        lead_id = int(result.get("lead_id") or result.get("LeadID") or 0)
+        CommunicationService().update_conversation(
+            conversation_id,
+            lead_id=lead_id,
+            match_status="Linked",
+            subject=display,
+            assigned_by_user_id=_uid(),
+            assigned_by_name=_uname(),
+        )
+        link.upsert_whatsapp_mapping(
+            mobile,
+            lead_id=lead_id,
+            conversation_id=conversation_id,
+            confirmed=True,
+            user_id=_uid(),
+            overwrite=True,
+        )
+        AuditService().log(
+            action_name="LeadCreatedFromWhatsApp",
+            entity_type="CrmLead",
+            entity_id=lead_id,
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        return jsonify({"ok": True, "action": "create_lead", "lead_id": lead_id})
+
+    if action in {"create_customer", "link_customer"}:
+        customer_id = payload.get("customer_id")
+        matches = link.find_customers_by_mobile(mobile) if mobile else []
+        if action == "link_customer":
+            if not customer_id:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Select a customer to link. Multiple Customer Master records may share this mobile.",
+                        "candidates": matches,
+                    }
+                ), 400
+            customer_id = int(customer_id)
+            if matches and not any(int(c["CustomerID"]) == customer_id for c in matches):
+                return jsonify({"ok": False, "error": "Selected customer does not match this WhatsApp number."}), 400
+        elif not customer_id:
+            if len(matches) > 1:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "Multiple customers share this mobile. Select one to link.",
+                        "ambiguous": True,
+                        "candidates": matches,
+                    }
+                ), 409
+            if len(matches) == 1:
+                customer_id = int(matches[0]["CustomerID"])
+            else:
+                from app.repositories.customer_repository import CustomerRepository
+
+                repo = CustomerRepository()
+                digits = "".join(ch for ch in str(mobile or "") if ch.isdigit())
+                mobile_10 = digits[-10:] if len(digits) >= 10 else digits
+                record = repo.save_full(
+                    {
+                        "customer_group": CrmLeadService()._resolve_customer_group(),
+                        "customer_type": "Individual",
+                        "customer_name": display if display not in {"Unknown WhatsApp Contact", "Multiple Customers Found"} else f"WhatsApp {mobile_10}",
+                        "mobile_number": mobile_10 or None,
+                        "whatsapp_number": mobile_10 or mobile or None,
+                        "customer_status": "Active",
+                        "remarks": "Source: WhatsApp",
+                    }
+                )
+                customer_id = int(record["customer_id"])
+        else:
+            customer_id = int(customer_id)
+
+        selected = next((c for c in matches if int(c["CustomerID"]) == int(customer_id)), None)
+        subject = (selected or {}).get("CustomerName") or display
+        CommunicationService().update_conversation(
+            conversation_id,
+            customer_id=int(customer_id),
+            customer_set=True,
+            match_status="Linked",
+            subject=subject,
+            assigned_by_user_id=_uid(),
+            assigned_by_name=_uname(),
+        )
+        link.upsert_whatsapp_mapping(
+            mobile,
+            customer_id=int(customer_id),
+            conversation_id=conversation_id,
+            confirmed=True,
+            user_id=_uid(),
+            overwrite=True,
+        )
+        TimelineService().reassign_conversation(
+            conversation_id,
+            customer_id=int(customer_id),
+        )
+        AuditService().log(
+            action_name="CustomerLinkedFromWhatsApp" if previous_customer_id else "CustomerCreatedFromWhatsApp",
+            entity_type="CustomerMaster",
+            entity_id=int(customer_id),
+            old_value=previous_customer_id,
+            new_value=int(customer_id),
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        TimelineService().add_event(
+            event_type="CustomerLinked",
+            title="Customer linked from WhatsApp",
+            customer_id=int(customer_id),
+            entity_type="CrmConversation",
+            entity_id=conversation_id,
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        return jsonify({"ok": True, "action": action, "customer_id": int(customer_id)})
+
+    return jsonify(
+        {
+            "ok": False,
+            "error": "Unknown action. Use create_lead, create_customer, link_customer, keep_unlinked, or ignore.",
+        }
+    ), 400
+
+
+@crm_api_bp.route("/whatsapp/simulate-inbound", methods=["POST"])
+@login_required
+@require_crm_capability("crm.reply")
+def whatsapp_simulate_inbound():
+    payload = request.get_json(silent=True) or {}
+    mobile = (payload.get("mobile") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not mobile or not body:
+        return jsonify({"ok": False, "error": "mobile and body are required"}), 400
+    external_id = (payload.get("external_message_id") or "").strip() or (
+        f"TEST-IN-{mobile[-10:]}-{int(datetime.utcnow().timestamp())}"
+    )
+    result = WhatsAppWebhookService().ingest_inbound(
+        mobile=mobile,
+        body=body,
+        display_name=(payload.get("display_name") or "").strip() or None,
+        external_message_id=external_id,
+        is_test=True,
+    )
+    return jsonify(result)
+
+
+@crm_api_bp.route("/whatsapp/simulate-status", methods=["POST"])
+@login_required
+@require_crm_capability("crm.reply")
+def whatsapp_simulate_status():
+    payload = request.get_json(silent=True) or {}
+    external_id = (payload.get("external_message_id") or "").strip()
+    status = (payload.get("status") or "").strip()
+    if not external_id or not status:
+        return jsonify({"ok": False, "error": "external_message_id and status are required"}), 400
+    ok = CommunicationService().update_delivery_status(
+        external_message_id=external_id,
+        status=status,
+        error_detail=payload.get("error_detail"),
+    )
+    AuditService().log(
+        action_name="MessageStatusChanged",
+        entity_type="CrmMessage",
+        new_value={"external_message_id": external_id, "status": status, "simulated": True},
+        user_id=_uid(),
+        user_name=_uname(),
+    )
+    return jsonify({"ok": ok})
+
+
+@crm_api_bp.route("/whatsapp/test-mode", methods=["GET"])
+@login_required
+def whatsapp_test_mode():
+    svc = MetaWhatsAppService()
+    return jsonify(
+        {
+            "ok": True,
+            "test_mode": svc.is_test_mode(),
+            "configured": svc.is_configured(),
+        }
+    )
 
 
 @crm_api_bp.route("/tasks", methods=["GET"])
@@ -765,6 +1146,8 @@ def tasks_create():
             assigned_user_name=payload.get("assigned_user_name"),
             user_id=_uid(),
             user_name=_uname(),
+            conversation_id=payload.get("conversation_id"),
+            source=payload.get("source") or ("WhatsApp" if payload.get("conversation_id") else None),
         )
         return jsonify({"ok": True, "task_id": _entity_id(result, "TaskID") or _entity_id(result, "task_id"), "result": result}), 201
     except ValueError as exc:
@@ -842,6 +1225,7 @@ def followups_create():
             assigned_user_name=payload.get("assigned_user_name"),
             user_id=_uid(),
             user_name=_uname(),
+            conversation_id=payload.get("conversation_id"),
         )
         return jsonify(
             {
