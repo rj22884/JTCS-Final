@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import func, select
-
 from app.extensions import db
-from app.models.transactions import JTCSDailyTransaction, JtcsBankAccountMaster
+from app.models.transactions import JTCSDailyTransaction
+from app.utils.shcil_bank_accounts import find_ecourt_purchase_bank
 from app.repositories.ecourt_repository import ECourtRepository
 from app.repositories.transaction_repository import (
     BankTransactionRepository,
@@ -1086,23 +1085,19 @@ class ECourtService:
         return lines
 
     def _resolve_ecourt_purchase_bank(self):
-        """HDFC · SHCILECourt — e-Court buy value (purchase) is paid from this account.
+        """e-Court buy-value wallet (alias SHCILECourt).
 
-        Looks up the bank directly (does not call list_active_bank_accounts, which
-        commits the session and can drop in-flight purchase ledger rows).
+        Account Number / Bank Name may be real bank details. Match alias on
+        Masked Account Number and other master fields, then fall back to the
+        last e-Court Purchase ledger row. Does not call list_active_bank_accounts
+        (that commits the session and can drop in-flight purchase ledger rows).
         """
-        account = self.master_repo.session.scalars(
-            select(JtcsBankAccountMaster)
-            .where(JtcsBankAccountMaster.ActiveStatus == True)  # noqa: E712
-            .where(
-                func.upper(func.ltrim(func.rtrim(JtcsBankAccountMaster.AccountNumber)))
-                == "SHCILECOURT"
-            )
-            .limit(1)
-        ).first()
+        account = find_ecourt_purchase_bank(self.master_repo.session)
         if account is None:
             raise ValueError(
-                "e-Court purchase bank account 'SHCILECourt' not found in Bank Master."
+                "e-Court purchase bank account not found in Bank Master. "
+                "Keep 'SHCILECourt' in Masked Account Number for the e-Court "
+                "purchase account (Account Number and Bank Name can be the real bank details)."
             )
         return self.master_repo.resolve_bank_account_by_id(account.JtcsBankAccountID)
 

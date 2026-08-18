@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.services.dashboard_service import METRIC_LABELS, DashboardMetrics, DashboardService
+from app.utils.shcil_bank_accounts import stamp_purchase_account_id
 from app.utils.smtp_health import mask_email
 
 
@@ -65,6 +66,7 @@ class AdminDashboardService:
         return value
 
     def list_bank_closings(self, *, as_of: date) -> list[AdminBankClosing]:
+        stamp_account_id = stamp_purchase_account_id(db.session) or 0
         rows = db.session.execute(
             text(
                 """
@@ -90,7 +92,7 @@ class AdminDashboardService:
                               )
                     ), 0) AS movement_net,
                     CASE
-                        WHEN UPPER(LTRIM(RTRIM(ISNULL(a.AccountNumber, N'')))) = N'SHCILSTAMP'
+                        WHEN a.JtcsBankAccountID = :stamp_account_id AND :stamp_account_id <> 0
                         THEN ISNULL((
                             SELECT SUM(ISNULL(o.Amount, 0))
                             FROM OthersBankCashTransaction o
@@ -118,7 +120,7 @@ class AdminDashboardService:
                     a.JtcsBankAccountID
                 """
             ),
-            {"as_of": as_of},
+            {"as_of": as_of, "stamp_account_id": stamp_account_id},
         ).mappings().all()
 
         result: list[AdminBankClosing] = []
@@ -425,9 +427,8 @@ class AdminDashboardService:
         txn_sql += " ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC"
         txn_rows = db.session.execute(text(txn_sql), txn_params).mappings().all()
 
-        is_shcil_stamp = (
-            (account["AccountNumber"] or "").strip().upper() == "SHCILSTAMP"
-        )
+        stamp_account_id = stamp_purchase_account_id(db.session)
+        is_shcil_stamp = stamp_account_id is not None and int(account_id) == int(stamp_account_id)
         orphan_obc_rows = []
         if is_shcil_stamp:
             orphan_obc_rows = db.session.execute(

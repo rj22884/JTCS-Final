@@ -18,6 +18,8 @@ from app.models.transactions import (
     JtcsBankAccountMaster,
     JtcsBankTransaction,
 )
+from app.utils.shcil_bank_accounts import stamp_purchase_account_id
+
 
 @dataclass
 class StampGridFilters:
@@ -290,10 +292,10 @@ class StampRepository:
         return Decimal(str(self.session.scalar(stmt) or 0))
 
     def _shcil_stamp_account_match(self):
-        return (
-            func.upper(func.ltrim(func.rtrim(func.coalesce(JtcsBankAccountMaster.AccountNumber, ""))))
-            == "SHCILSTAMP"
-        )
+        account_id = stamp_purchase_account_id(self.session)
+        if account_id is None:
+            return JtcsBankAccountMaster.JtcsBankAccountID == 0
+        return JtcsBankAccountMaster.JtcsBankAccountID == account_id
 
     def _sum_shcil_stamp_deposits(self, filters: StampGridFilters) -> Decimal:
         """Jama (Debit/In) into SHCILStamp for the period.

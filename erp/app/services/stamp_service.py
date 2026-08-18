@@ -7,12 +7,12 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from flask import request
-from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.exceptions.stamp_exceptions import StampDuplicateError
-from app.models.transactions import JTCSDailyTransaction, JtcsBankAccountMaster
+from app.models.transactions import JTCSDailyTransaction
+from app.utils.shcil_bank_accounts import find_stamp_purchase_bank
 from app.repositories.stamp_ocr_repository import StampOcrRepository
 from app.repositories.stamp_repository import StampGridFilters, StampRepository
 from app.repositories.transaction_repository import (
@@ -215,23 +215,19 @@ class StampService:
         return loaded
 
     def _resolve_stamp_purchase_bank(self):
-        """Axis Bank · SHCILStamp — stamp duty purchase is paid from this account.
+        """Stamp duty purchase wallet (alias SHCILStamp).
 
-        Looks up the bank directly (does not call list_active_bank_accounts, which
-        commits the session and breaks begin_nested() during save).
+        Account Number / Bank Name may be real bank details. Match alias on
+        Masked Account Number and other master fields, then fall back to the
+        last Stamp Purchase ledger row. Does not call list_active_bank_accounts
+        (that commits the session and breaks begin_nested() during save).
         """
-        account = self.master_repo.session.scalars(
-            select(JtcsBankAccountMaster)
-            .where(JtcsBankAccountMaster.ActiveStatus == True)  # noqa: E712
-            .where(
-                func.upper(func.ltrim(func.rtrim(JtcsBankAccountMaster.AccountNumber)))
-                == "SHCILSTAMP"
-            )
-            .limit(1)
-        ).first()
+        account = find_stamp_purchase_bank(self.master_repo.session)
         if account is None:
             raise ValueError(
-                "Stamp purchase bank account 'SHCILStamp' (Axis Bank) not found in Bank Master."
+                "Stamp purchase bank account not found in Bank Master. "
+                "Keep 'SHCILStamp' in Masked Account Number for the stamp-duty "
+                "purchase account (Account Number and Bank Name can be the real bank details)."
             )
         return self.master_repo.resolve_bank_account_by_id(account.JtcsBankAccountID)
 

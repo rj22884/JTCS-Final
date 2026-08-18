@@ -15,6 +15,7 @@ from app.models.transactions import (
     JtcsBankAccountMaster,
     JtcsBankTransaction,
 )
+from app.utils.shcil_bank_accounts import ecourt_purchase_account_id
 
 
 class ECourtRepository:
@@ -359,6 +360,12 @@ class ECourtRepository:
             func.lower(func.coalesce(JtcsBankAccountMaster.MaskedAccountNumber, "")) == "cash",
         )
 
+    def _shcil_ecourt_account_match(self):
+        account_id = ecourt_purchase_account_id(self.session)
+        if account_id is None:
+            return JtcsBankAccountMaster.JtcsBankAccountID == 0
+        return JtcsBankAccountMaster.JtcsBankAccountID == account_id
+
     def activity_summary(self) -> dict:
         """Summary cards for e-Court Activity (sale / payments / SHCILECourt deposits)."""
         sale_stmt = self._ecourt_daily_filter(
@@ -436,10 +443,7 @@ class ECourtRepository:
                 == OthersBankCashTransaction.DebitBankAccountID,
             )
             .where(OthersBankCashTransaction.IsActive == True)  # noqa: E712
-            .where(
-                func.upper(func.ltrim(func.rtrim(func.coalesce(JtcsBankAccountMaster.AccountNumber, ""))))
-                == "SHCILECOURT"
-            )
+            .where(self._shcil_ecourt_account_match())
         )
         shcil_ecourt_deposit = Decimal(str(self.session.scalar(deposit_stmt) or 0))
 
