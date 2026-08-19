@@ -172,6 +172,15 @@ class AdminDashboardService:
                 Decimal("0.00"), debit, credit, credit_normal=credit_normal
             )
             movement = self._money(signed_movement + self._money(row["orphan_shcil_deposits"]))
+            closing = self._money(
+                apply_account_running(
+                    opening, debit, credit, credit_normal=credit_normal
+                )
+                + self._money(row["orphan_shcil_deposits"])
+            )
+            if credit_normal:
+                closing = -closing
+                movement = -movement
             result.append(
                 AdminBankClosing(
                     account_id=int(row["account_id"]),
@@ -181,12 +190,7 @@ class AdminDashboardService:
                     label=" ".join(label_parts),
                     opening_balance=opening,
                     movement_net=movement,
-                    closing_balance=self._money(
-                        apply_account_running(
-                            opening, debit, credit, credit_normal=credit_normal
-                        )
-                        + self._money(row["orphan_shcil_deposits"])
-                    ),
+                    closing_balance=closing,
                     is_cash=bank_name.lower() == "cash",
                 )
             )

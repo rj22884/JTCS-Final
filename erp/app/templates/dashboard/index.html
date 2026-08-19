@@ -3,7 +3,8 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260817charts1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260819ledger1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260819dash">
 {% endblock %}
 
 {% block content %}
@@ -102,6 +103,31 @@
     </div>
 
     <div class="dash-period-bar-wrap">
+      <div class="dash-ledger-search" id="dashLedgerSearchBox">
+        <label class="dash-ledger-search-title" for="dashLedgerSearch">Search Ledger Here</label>
+        <div class="dash-ledger-search-dates">
+          <div>
+            <span class="dash-period-label">From Date</span>
+            <input type="date" class="form-control form-control-sm dash-period-input" id="dashLedgerDateFrom"
+                   value="{{ date_from.isoformat() }}" aria-label="From Date">
+          </div>
+          <div>
+            <span class="dash-period-label">To Date</span>
+            <input type="date" class="form-control form-control-sm dash-period-input" id="dashLedgerDateTo"
+                   value="{{ date_to.isoformat() }}" aria-label="To Date">
+          </div>
+        </div>
+        <div class="dash-ledger-search-field">
+          <div class="input-group input-group-sm">
+            <input type="search" class="form-control" id="dashLedgerSearch"
+                   placeholder="search ledger here" autocomplete="off" aria-label="Search Ledger Here">
+            <button type="button" class="btn btn-outline-secondary" id="dashLedgerSearchBtn" title="Search">
+              <i class="bi bi-search"></i>
+            </button>
+          </div>
+          <div class="dash-ledger-search-results d-none" id="dashLedgerResults" role="listbox"></div>
+        </div>
+      </div>
       <form method="get" action="{{ url_for('dashboard.index') }}" class="dash-period-bar" id="dashPeriodForm">
         <div class="dash-period-row dash-period-row-dates">
           <span class="dash-period-label">Period from</span>
@@ -181,16 +207,16 @@
     <div class="col-6 col-md-4 col-xl">
       <div class="dash-bank-closing-wrap">
         <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-bank w-100 text-start"
-                data-metric="bank_closing_balance" data-label="Bank Closing Balance"
-                aria-describedby="dashBankClosingHover">
+                data-metric="bank_closing_balance" data-label="Bank Asset Closing Balance"
+                aria-describedby="dashBankAssetClosingHover">
           <span class="dash-metric-copy">
-            <span class="jtcs-metric-label">Bank Closing Balance</span>
-            <strong class="jtcs-metric-value{% if metrics.bank_closing_balance < 0 %} is-negative{% endif %}" data-metric-value="bank_closing_balance">₹ {{ '%.2f'|format(metrics.bank_closing_balance) }}</strong>
+            <span class="jtcs-metric-label">Bank Asset Closing Balance</span>
+            <strong class="jtcs-metric-value{% if bank_asset_closing_total < 0 %} is-negative{% endif %}" data-metric-value="bank_asset_closing_balance">₹ {{ '%.2f'|format(bank_asset_closing_total) }}</strong>
           </span>
           <span class="jtcs-illu-host" data-jtcs-icon="bank" aria-hidden="true"></span>
         </button>
-        <div class="dash-bank-closing-hover" id="dashBankClosingHover" role="tooltip">
-          <div class="dash-bank-closing-hover-title">As of {{ date_to|display_date }}</div>
+        <div class="dash-bank-closing-hover" id="dashBankAssetClosingHover" role="tooltip">
+          <div class="dash-bank-closing-hover-title">Asset banks · {{ date_to|display_date }}</div>
           <table class="dash-bank-closing-table">
             <thead>
               <tr>
@@ -199,7 +225,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for row in bank_account_closings %}
+              {% for row in bank_asset_closings %}
               <tr>
                 <td title="{{ row.bank_name }}">{{ row.account_number }}</td>
                 <td class="text-end{% if row.closing_balance < 0 %} is-negative{% endif %}">
@@ -208,17 +234,47 @@
               </tr>
               {% else %}
               <tr>
-                <td colspan="2" class="text-muted">No bank accounts found.</td>
+                <td colspan="2" class="text-muted">No asset bank accounts found.</td>
               </tr>
               {% endfor %}
-              {% if bank_closing_manual and bank_closing_manual != 0 %}
-              <tr class="dash-bank-closing-manual">
-                <td>Manual adjustments</td>
-                <td class="text-end{% if bank_closing_manual < 0 %} is-negative{% endif %}">
-                  ₹ {{ '%.2f'|format(bank_closing_manual) }}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl">
+      <div class="dash-bank-closing-wrap">
+        <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-bank-liability w-100 text-start"
+                data-metric="bank_closing_balance" data-label="Bank Liability Closing Balance"
+                aria-describedby="dashBankLiabilityClosingHover">
+          <span class="dash-metric-copy">
+            <span class="jtcs-metric-label">Bank Liability Closing Balance</span>
+            <strong class="jtcs-metric-value{% if bank_liability_closing_total < 0 %} is-negative{% endif %}" data-metric-value="bank_liability_closing_balance">₹ {{ '%.2f'|format(bank_liability_closing_total) }}</strong>
+          </span>
+          <span class="jtcs-illu-host" data-jtcs-icon="bank" aria-hidden="true"></span>
+        </button>
+        <div class="dash-bank-closing-hover" id="dashBankLiabilityClosingHover" role="tooltip">
+          <div class="dash-bank-closing-hover-title">Liability / OD · {{ date_to|display_date }}</div>
+          <table class="dash-bank-closing-table">
+            <thead>
+              <tr>
+                <th>Account number</th>
+                <th class="text-end">Closing balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in bank_liability_closings %}
+              <tr>
+                <td title="{{ row.bank_name }}">{{ row.account_number }}</td>
+                <td class="text-end{% if row.closing_balance < 0 %} is-negative{% endif %}">
+                  ₹ {{ '%.2f'|format(row.closing_balance) }}
                 </td>
               </tr>
-              {% endif %}
+              {% else %}
+              <tr>
+                <td colspan="2" class="text-muted">No liability bank accounts found.</td>
+              </tr>
+              {% endfor %}
             </tbody>
           </table>
         </div>
@@ -555,6 +611,57 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="ledgerPreviewModal" tabindex="-1" aria-labelledby="ledgerPreviewModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl" id="ledgerPreviewDialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ledgerPreviewModalTitle">Ledger Preview</h5>
+        <div class="d-flex align-items-center gap-2 ms-auto">
+          <div class="dropdown">
+            <button class="btn btn-outline-success btn-sm dropdown-toggle" type="button"
+                    id="ledgerExportBtn" data-bs-toggle="dropdown" aria-expanded="false" disabled>
+              <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="ledgerExportBtn">
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="pdf">
+                  <i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xlsx">
+                  <i class="bi bi-file-earmark-excel text-success me-2"></i> Excel (XLSX)
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="csv">
+                  <i class="bi bi-filetype-csv text-primary me-2"></i> CSV
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xml">
+                  <i class="bi bi-filetype-xml text-warning me-2"></i> XML
+                </button>
+              </li>
+            </ul>
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="ledgerMaximizeBtn"
+                  title="Maximize" aria-label="Maximize">
+            <i class="bi bi-arrows-fullscreen" id="ledgerMaximizeIcon"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body" id="ledgerPreviewBody">
+        <div class="text-muted small text-center py-4">Loading preview…</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -596,8 +703,14 @@
       gst: {{ url_for('gst_followup.delete_record', entry_id=0) | tojson }}
     }
   };
+  window.LEDGER_REPORT = {
+    searchUrl: {{ url_for('ledger_report.search')|tojson }},
+    previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
+    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }}
+  };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260812bankcolor"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
+<script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash1"></script>
 {% endblock %}

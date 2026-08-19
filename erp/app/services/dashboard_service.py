@@ -73,6 +73,7 @@ class BankAccountClosingLine:
     account_number: str
     bank_name: str
     closing_balance: Decimal
+    credit_normal: bool = False
 
 
 @dataclass
@@ -384,7 +385,9 @@ class DashboardService:
         """
         Non-cash bank accounts with closing balance as of date_to (dashboard period end).
 
-        Same Chart of Account Group rule as Bank Account Ledger.
+        Ledger magnitude uses Chart of Account Group (Asset +Dr−Cr, Liability +Cr−Dr).
+        Liability / Capital / Income accounts are then signed negative so Bank Closing
+        is net cash at bank (OD reduces the total and shows in red).
         """
         group_select = """
                     CAST(NULL AS NVARCHAR(20)) AS UnderType,
@@ -455,14 +458,20 @@ class DashboardService:
             debit = Decimal(str(row["debit_sum"] or 0))
             credit = Decimal(str(row["credit_sum"] or 0))
             credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
+            closing = apply_account_running(
+                opening, debit, credit, credit_normal=credit_normal
+            )
+            # Dashboard Bank Closing = net cash at bank. Liability/OD (Cr-normal)
+            # outstanding is shown negative so it reduces the card total and turns red.
+            if credit_normal:
+                closing = -closing
             result.append(
                 BankAccountClosingLine(
                     account_id=int(row["account_id"]),
                     account_number=account_number,
                     bank_name=bank_name,
-                    closing_balance=apply_account_running(
-                        opening, debit, credit, credit_normal=credit_normal
-                    ),
+                    closing_balance=closing,
+                    credit_normal=credit_normal,
                 )
             )
         return result

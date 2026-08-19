@@ -1,5 +1,6 @@
 from calendar import monthrange
 from datetime import date, timedelta
+from decimal import Decimal
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
@@ -89,6 +90,14 @@ def index():
     bank_closing_hover = dashboard_service.get_bank_closing_hover(as_of=date_to)
     bank_account_closings = bank_closing_hover["accounts"]
     bank_closing_manual = bank_closing_hover["manual"]
+    bank_asset_closings = [row for row in bank_account_closings if not row.credit_normal]
+    bank_liability_closings = [row for row in bank_account_closings if row.credit_normal]
+    bank_asset_closing_total = sum(
+        (row.closing_balance for row in bank_asset_closings), Decimal("0")
+    )
+    bank_liability_closing_total = sum(
+        (row.closing_balance for row in bank_liability_closings), Decimal("0")
+    )
     today_activity = dashboard_service.get_today_activity_summary(today)
     recent = dashboard_service.recent_daily_transactions()
     fy_from, fy_to = dashboard_service.fiscal_year_bounds(today)
@@ -125,6 +134,10 @@ def index():
         breadcrumb=menu_service.get_breadcrumb("/dashboard", session.get("role")),
         metrics=metrics,
         bank_account_closings=bank_account_closings,
+        bank_asset_closings=bank_asset_closings,
+        bank_liability_closings=bank_liability_closings,
+        bank_asset_closing_total=bank_asset_closing_total,
+        bank_liability_closing_total=bank_liability_closing_total,
         bank_closing_manual=bank_closing_manual,
         today_activity=today_activity,
         recent=recent,
