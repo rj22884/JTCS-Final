@@ -1,0 +1,190 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/website_analytics.css') }}?v=20260819wa1">
+{% endblock %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('dashboard.index') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap align-items-end gap-2">
+    <div>
+      <h3 class="h5 mb-1">Website Analytics</h3>
+      <p class="small text-muted mb-0">Public website traffic · unique visitors vs page views. Charts and tables follow the selected period.</p>
+    </div>
+    <form method="get" class="ms-auto d-flex flex-wrap align-items-end gap-2" id="waPeriodForm">
+      <div>
+        <label class="form-label small mb-0" for="waPeriod">Period</label>
+        <select class="form-select form-select-sm" id="waPeriod" name="period">
+          <option value="today" {% if period_preset == 'today' %}selected{% endif %}>Today</option>
+          <option value="yesterday" {% if period_preset == 'yesterday' %}selected{% endif %}>Yesterday</option>
+          <option value="last7" {% if period_preset == 'last7' %}selected{% endif %}>Last 7 Days</option>
+          <option value="last30" {% if period_preset == 'last30' %}selected{% endif %}>Last 30 Days</option>
+          <option value="last90" {% if period_preset == 'last90' %}selected{% endif %}>Last 90 Days</option>
+          <option value="this_month" {% if period_preset == 'this_month' %}selected{% endif %}>This Month</option>
+          <option value="last_month" {% if period_preset == 'last_month' %}selected{% endif %}>Last Month</option>
+          <option value="this_year" {% if period_preset == 'this_year' %}selected{% endif %}>This Year</option>
+          <option value="custom" {% if period_preset == 'custom' %}selected{% endif %}>Custom Range</option>
+        </select>
+      </div>
+      <div>
+        <label class="form-label small mb-0" for="waFrom">From</label>
+        <input type="date" class="form-control form-control-sm" id="waFrom" name="date_from" value="{{ date_from }}">
+      </div>
+      <div>
+        <label class="form-label small mb-0" for="waTo">To</label>
+        <input type="date" class="form-control form-control-sm" id="waTo" name="date_to" value="{{ date_to }}">
+      </div>
+      <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+      <div class="dropdown">
+        <button class="btn btn-sm btn-outline-success dropdown-toggle" type="button" data-bs-toggle="dropdown">
+          <i class="bi bi-download"></i> Export
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><a class="dropdown-item wa-export" href="#" data-fmt="pdf">PDF</a></li>
+          <li><a class="dropdown-item wa-export" href="#" data-fmt="xlsx">Excel (XLSX)</a></li>
+          <li><a class="dropdown-item wa-export" href="#" data-fmt="csv">CSV</a></li>
+        </ul>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="row g-2 mb-3" id="waCards">
+  {% set cards = data.cards or {} %}
+  {% set items = [
+    ('Total Visitors', cards.total_visitors),
+    ('Today Visitors', cards.today_visitors),
+    ('Yesterday Visitors', cards.yesterday_visitors),
+    ('This Week', cards.week_visitors),
+    ('This Month', cards.month_visitors),
+    ('Total Page Views', cards.total_page_views),
+    ("Today's Page Views", cards.today_page_views),
+    ('Active Visitors', cards.active_visitors),
+    ('New Visitors', cards.new_visitors),
+    ('Returning Visitors', cards.returning_visitors)
+  ] %}
+  {% for label, value in items %}
+  <div class="col-6 col-md-4 col-lg-2">
+    <div class="jtcs-metric-card w-100">
+      <span class="jtcs-metric-label">{{ label }}</span>
+      <strong class="jtcs-metric-value">{{ '{:,}'.format(value or 0) }}</strong>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<p class="small text-muted mb-3">Active visitors = unique visitors in the last {{ data.active_window_minutes or 5 }} minutes.</p>
+
+<div class="row g-3 mb-3">
+  <div class="col-lg-8">
+    <div class="jtcs-card h-100">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <h4 class="h6 mb-0">Visitor trend</h4>
+        <div class="btn-group btn-group-sm ms-auto" role="group">
+          <button type="button" class="btn btn-outline-primary active" data-wa-series="visitors">Visitors</button>
+          <button type="button" class="btn btn-outline-primary" data-wa-series="views">Page Views</button>
+        </div>
+      </div>
+      <canvas id="waTrendChart" height="120"></canvas>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="jtcs-card h-100">
+      <h4 class="h6 mb-2">Device usage</h4>
+      <canvas id="waDeviceChart" height="180"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="jtcs-card h-100">
+      <h4 class="h6 mb-2">Browsers</h4>
+      <canvas id="waBrowserChart" height="180"></canvas>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="jtcs-card h-100">
+      <h4 class="h6 mb-2">Operating systems</h4>
+      <canvas id="waOsChart" height="180"></canvas>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="jtcs-card h-100">
+      <h4 class="h6 mb-2">Traffic sources</h4>
+      <canvas id="waSourceChart" height="180"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="jtcs-card">
+      <h4 class="h6 mb-2">Most viewed pages</h4>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead><tr><th>Page</th><th class="text-end">Views</th></tr></thead>
+          <tbody>
+            {% for row in data.pages or [] %}
+            <tr>
+              <td>
+                <div>{{ row.title }}</div>
+                <div class="small text-muted">{{ row.path }}</div>
+              </td>
+              <td class="text-end">{{ '{:,}'.format(row.views) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="2" class="text-muted text-center py-3">No page views in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="jtcs-card">
+      <h4 class="h6 mb-2">Recent visitors</h4>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead><tr><th>Time</th><th>Page</th><th>Device</th><th>Source</th></tr></thead>
+          <tbody>
+            {% for row in data.recent or [] %}
+            <tr>
+              <td class="text-nowrap">{{ row.time }}</td>
+              <td>{{ row.page }}</td>
+              <td>{{ row.device }}</td>
+              <td>{{ row.source }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-muted text-center py-3">No recent visits in this period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.WEBSITE_ANALYTICS = {
+    trend: {{ (data.trend or []) | tojson }},
+    devices: {{ (data.devices or []) | tojson }},
+    browsers: {{ (data.browsers or []) | tojson }},
+    operatingSystems: {{ (data.operating_systems or []) | tojson }},
+    sources: {{ (data.sources or []) | tojson }},
+    exportBase: {{ export_url | tojson }}
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/website_analytics.js') }}?v=20260819wa1"></script>
+{% endblock %}

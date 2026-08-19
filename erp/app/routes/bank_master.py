@@ -86,7 +86,8 @@ def delete_record(account_id: int):
         message = BankMasterService().delete_record(account_id)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        status = 404 if "not found" in str(exc).lower() else 400
+        return jsonify({"ok": False, "error": str(exc)}), status
     except Exception as exc:
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 

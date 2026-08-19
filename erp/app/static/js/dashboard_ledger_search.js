@@ -6,8 +6,6 @@
   if (!cfg || !box) return;
 
   const els = {
-    dateFrom: document.getElementById("dashLedgerDateFrom"),
-    dateTo: document.getElementById("dashLedgerDateTo"),
     search: document.getElementById("dashLedgerSearch"),
     searchBtn: document.getElementById("dashLedgerSearchBtn"),
     results: document.getElementById("dashLedgerResults"),
@@ -65,11 +63,12 @@
   }
 
   function dateQuery() {
+    if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.dateQuery === "function") {
+      return window.JTCSLedgerPreview.dateQuery();
+    }
     const params = new URLSearchParams();
-    const from = (els.dateFrom?.value || "").trim();
-    const to = (els.dateTo?.value || "").trim();
-    if (from) params.set("date_from", from);
-    if (to) params.set("date_to", to);
+    if (cfg.fyStart) params.set("date_from", cfg.fyStart);
+    if (cfg.today) params.set("date_to", cfg.today);
     const q = params.toString();
     return q ? "?" + q : "";
   }
@@ -177,11 +176,12 @@
     setExportEnabled(false);
     setMaximized(false);
     if (els.previewTitle) els.previewTitle.textContent = "Ledger Preview";
+    const qs = dateQuery();
     els.previewBody.innerHTML =
       '<div class="text-muted small py-4 text-center">Loading preview…</div>';
     previewModal.show();
     try {
-      const res = await fetch(url + dateQuery(), {
+      const res = await fetch(url + qs, {
         headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
       });
       const data = await res.json();
@@ -193,6 +193,9 @@
         els.previewTitle.textContent = bits.join(" — ");
       }
       setExportEnabled(true);
+      if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.afterRender === "function") {
+        window.JTCSLedgerPreview.afterRender();
+      }
     } catch (err) {
       currentKind = "";
       currentId = "";
@@ -266,4 +269,10 @@
   document.addEventListener("click", function (event) {
     if (!box.contains(event.target)) hideResults();
   });
+
+  if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
+    window.JTCSLedgerPreview.setReloader(function () {
+      if (currentKind && currentId) openPreview(currentKind, currentId);
+    });
+  }
 })();

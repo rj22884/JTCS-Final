@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260819grid1">
 {% endblock %}
 
 {% block content %}
@@ -131,8 +131,25 @@
   window.LEDGER_REPORT = {
     searchUrl: {{ url_for('ledger_report.search')|tojson }},
     previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
-    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }}
+    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }},
+    fyStart: {{ fy_start | tojson }},
+    today: {{ today | tojson }},
+    csrfToken: {{ csrf_token() | tojson }},
+    deleteUrls: {
+      stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
+      ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
+      income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
+      printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      itr: {{ url_for('itr_followup.delete_record', entry_id=0) | tojson }},
+      dsc: {{ url_for('dsc_followup.delete_record', entry_id=0) | tojson }},
+      tds: {{ url_for('tds_followup.delete_record', entry_id=0) | tojson }},
+      gst: {{ url_for('gst_followup.delete_record', entry_id=0) | tojson }},
+      invoice: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0) | tojson }}
+    }
   };
 </script>
-<script src="{{ url_for('static', filename='js/ledger_report.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260819grid1"></script>
+<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260819grid1"></script>
 {% endblock %}

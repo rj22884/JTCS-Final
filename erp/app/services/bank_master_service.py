@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy.exc import IntegrityError
+
 from app.repositories.bank_master_repository import BankMasterRepository
 from app.services.account_type_master_service import AccountTypeMasterService
 from app.utils.db_session import persist
@@ -342,12 +344,19 @@ class BankMasterService:
                 raise ValueError("Bank account not found.")
             usage = self.repo.usage_count(account_id)
             if usage > 0:
-                self.repo.update(row, {"ActiveStatus": False})
-                return (
-                    "Bank account is used in transactions and was marked inactive "
-                    "instead of deleted."
+                raise ValueError(
+                    "This bank account is used in transactions and cannot be "
+                    "permanently deleted from the database. Set Status to Inactive "
+                    "to hide it from the dashboard."
                 )
-            self.repo.delete(row)
-            return "Bank account deleted successfully."
+            try:
+                self.repo.delete(row)
+            except IntegrityError as exc:
+                raise ValueError(
+                    "This bank account is used in related records and cannot be "
+                    "permanently deleted from the database. Set Status to Inactive "
+                    "to hide it from the dashboard."
+                ) from exc
+            return "Bank account permanently deleted from the database."
 
         return persist(_write)

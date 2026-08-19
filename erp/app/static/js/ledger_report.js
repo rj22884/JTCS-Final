@@ -67,6 +67,9 @@
   }
 
   function dateQuery() {
+    if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.dateQuery === "function") {
+      return window.JTCSLedgerPreview.dateQuery();
+    }
     const params = new URLSearchParams();
     const from = (els.dateFrom?.value || "").trim();
     const to = (els.dateTo?.value || "").trim();
@@ -215,11 +218,12 @@
     setExportEnabled(false);
     setMaximized(false);
     if (els.previewTitle) els.previewTitle.textContent = "Ledger Preview";
+    const qs = dateQuery();
     els.previewBody.innerHTML =
       '<div class="text-muted small py-4 text-center">Loading preview…</div>';
     previewModal.show();
     try {
-      const res = await fetch(url + dateQuery(), {
+      const res = await fetch(url + qs, {
         headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
       });
       const data = await res.json();
@@ -231,6 +235,9 @@
         els.previewTitle.textContent = bits.join(" — ");
       }
       setExportEnabled(true);
+      if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.afterRender === "function") {
+        window.JTCSLedgerPreview.afterRender();
+      }
     } catch (err) {
       currentKind = "";
       currentId = "";
@@ -309,4 +316,10 @@
   });
 
   loadLedgers();
+
+  if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
+    window.JTCSLedgerPreview.setReloader(function () {
+      if (currentKind && currentId) openPreview(currentKind, currentId);
+    });
+  }
 })();

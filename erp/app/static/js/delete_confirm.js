@@ -13,6 +13,7 @@
   var DEFAULT_CHROME = {
     title: "Confirm Delete",
     confirmLabel: "Confirm Delete",
+    cancelLabel: "Cancel",
     confirmIcon: "bi-trash",
     variant: "danger",
   };
@@ -97,11 +98,13 @@
     var inferred = inferChrome(options);
     var title = options.title || inferred.title;
     var confirmLabel = options.confirmLabel || inferred.confirmLabel;
+    var cancelLabel = options.cancelLabel || inferred.cancelLabel || DEFAULT_CHROME.cancelLabel;
     var confirmIcon = options.confirmIcon || inferred.confirmIcon;
     var variant = options.variant || inferred.variant;
     if (!VARIANT_BTN[variant]) variant = inferred.variant || "danger";
 
     if (els.title) els.title.textContent = title;
+    if (els.cancelBtn) els.cancelBtn.textContent = cancelLabel;
     if (els.header) {
       els.header.className = "modal-header py-2 bg-" + variant + "-subtle";
     }

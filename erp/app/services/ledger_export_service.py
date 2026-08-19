@@ -15,7 +15,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
@@ -512,6 +512,8 @@ class LedgerExportService:
                     "description": desc,
                     "reference": ref,
                     "source": (row["SourceTable"] or row["SourceType"] or "").strip(),
+                    "source_record_id": int(row["SourceRecordID"]) if row["SourceRecordID"] else None,
+                    "bank_transaction_id": int(row["JtcsBankTransactionID"]),
                     "ledger_kind": (row["LedgerKind"] or "").strip(),
                     "debit": debit,
                     "credit": credit,
@@ -676,6 +678,8 @@ class LedgerExportService:
                     "description": desc,
                     "reference": ref,
                     "source": (row["SourceTable"] or row["SourceType"] or "").strip(),
+                    "source_record_id": int(row["SourceRecordID"]) if row["SourceRecordID"] else None,
+                    "bank_transaction_id": int(row["JtcsBankTransactionID"]),
                     "ledger_kind": (row["LedgerKind"] or "").strip(),
                     "debit": debit,
                     "credit": credit,
@@ -833,6 +837,7 @@ class LedgerExportService:
                     "TransactionDate": r.get("WorkDate"),
                     "WorkType": "Others",
                     "SubWorkType": f"Other Bank/Cash Transactions - {purpose}",
+                    "StampID": None,
                     "ReferenceNo": voucher,
                     "Description": desc,
                     "Remarks": (r.get("Remarks") or "").strip(),
@@ -840,6 +845,7 @@ class LedgerExportService:
                     "IncomeAmount": Decimal("0.00"),
                     "BankDebit": amount if is_credit_side else Decimal("0.00"),
                     "PaymentTotal": Decimal("0.00"),
+                    "ObcEntryID": int(r["EntryID"] or 0),
                 }
             )
 
@@ -1013,6 +1019,7 @@ class LedgerExportService:
                             ISNULL(f.BillDate, f.WorkDate) AS TransactionDate,
                             f.ModuleCode AS WorkType,
                             CONCAT(f.ModuleCode, N' Followup') AS SubWorkType,
+                            CAST(NULL AS INT) AS StampID,
                             f.BillNo AS ReferenceNo,
                             CONCAT(
                                 f.ModuleCode, N' Followup — ',
@@ -1086,7 +1093,7 @@ class LedgerExportService:
                     """
                     SELECT
                         d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
-                        d.ReferenceNo, d.Description, d.Remarks,
+                        d.StampID, d.ReferenceNo, d.Description, d.Remarks,
                         ISNULL(d.SaleAmount, 0) AS SaleAmount,
                         ISNULL(d.IncomeAmount, 0) AS IncomeAmount,
                         ISNULL(b.Debit, 0) AS BankDebit,
@@ -1159,6 +1166,11 @@ class LedgerExportService:
                     "credit": receipt,
                     "balance": running,
                     "kind": "txn",
+                    "transaction_id": row.get("TransactionID"),
+                    "work_type": row.get("WorkType"),
+                    "sub_work_type": row.get("SubWorkType"),
+                    "stamp_id": row.get("StampID"),
+                    "obc_entry_id": row.get("ObcEntryID"),
                 }
             )
 
@@ -1679,7 +1691,7 @@ class LedgerExportService:
 
     def _styled_pdf(self, data: dict[str, Any]) -> tuple[bytes, str]:
         buffer = io.BytesIO()
-        pagesize = landscape(A4)
+        pagesize = A4
         doc = BaseDocTemplate(
             buffer,
             pagesize=pagesize,
@@ -1842,9 +1854,9 @@ class LedgerExportService:
         table_data.append(close_row)
 
         if data["kind"] == "bank":
-            col_widths = [70, 160, 90, 80, 60, 65, 65, 75]
+            col_widths = [48, 110, 58, 52, 42, 50, 50, 58]
         else:
-            col_widths = [70, 75, 110, 170, 70, 80, 75]
+            col_widths = [48, 55, 78, 118, 52, 52, 58]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
         style_cmds = [

@@ -3,8 +3,8 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260819ledger1">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260819dash">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260819ledger2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260819grid1">
 {% endblock %}
 
 {% block content %}
@@ -105,18 +105,6 @@
     <div class="dash-period-bar-wrap">
       <div class="dash-ledger-search" id="dashLedgerSearchBox">
         <label class="dash-ledger-search-title" for="dashLedgerSearch">Search Ledger Here</label>
-        <div class="dash-ledger-search-dates">
-          <div>
-            <span class="dash-period-label">From Date</span>
-            <input type="date" class="form-control form-control-sm dash-period-input" id="dashLedgerDateFrom"
-                   value="{{ date_from.isoformat() }}" aria-label="From Date">
-          </div>
-          <div>
-            <span class="dash-period-label">To Date</span>
-            <input type="date" class="form-control form-control-sm dash-period-input" id="dashLedgerDateTo"
-                   value="{{ date_to.isoformat() }}" aria-label="To Date">
-          </div>
-        </div>
         <div class="dash-ledger-search-field">
           <div class="input-group input-group-sm">
             <input type="search" class="form-control" id="dashLedgerSearch"
@@ -706,11 +694,28 @@
   window.LEDGER_REPORT = {
     searchUrl: {{ url_for('ledger_report.search')|tojson }},
     previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
-    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }}
+    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }},
+    fyStart: {{ fy_from.isoformat() | tojson }},
+    today: {{ system_date.isoformat() | tojson }},
+    csrfToken: {{ csrf_token() | tojson }},
+    deleteUrls: {
+      stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
+      ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
+      income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
+      printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      itr: {{ url_for('itr_followup.delete_record', entry_id=0) | tojson }},
+      dsc: {{ url_for('dsc_followup.delete_record', entry_id=0) | tojson }},
+      tds: {{ url_for('tds_followup.delete_record', entry_id=0) | tojson }},
+      gst: {{ url_for('gst_followup.delete_record', entry_id=0) | tojson }},
+      invoice: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0) | tojson }}
+    }
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260812bankcolor"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
-<script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260819grid1"></script>
+<script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>
 {% endblock %}

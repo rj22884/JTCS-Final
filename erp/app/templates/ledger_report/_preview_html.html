@@ -3,6 +3,8 @@
 {% macro money(v) -%}
   {%- if v is none -%}{{ dash }}{%- else -%}{{ '%.2f'|format(v|float) }}{%- endif -%}
 {%- endmacro %}
+{% set from_iso = ledger.date_from_iso or '' %}
+{% set to_iso = ledger.date_to_iso or '' %}
 
 <div class="ledger-html-preview">
   <div class="ledger-html-top">
@@ -27,29 +29,75 @@
     {% endfor %}
   </div>
 
+  <div class="ledger-preview-toolbar">
+    <div class="ledger-preview-dates">
+      <label>
+        <span>From Date</span>
+        <input type="date" class="form-control form-control-sm" id="ledgerPreviewDateFrom"
+               value="{{ from_iso }}" aria-label="From Date">
+      </label>
+      <label>
+        <span>To Date</span>
+        <input type="date" class="form-control form-control-sm" id="ledgerPreviewDateTo"
+               value="{{ to_iso }}" aria-label="To Date">
+      </label>
+      <button type="button" class="btn btn-sm btn-primary" id="ledgerPreviewApplyDates">
+        <i class="bi bi-funnel"></i> Apply
+      </button>
+    </div>
+    <div class="ledger-preview-filter">
+      <input type="search" class="form-control form-control-sm" id="ledgerPreviewFilter"
+             placeholder="Filter grid…" aria-label="Filter ledger grid">
+    </div>
+  </div>
+
   <div class="table-responsive">
-    <table class="ledger-html-items">
+    <table class="ledger-html-items" id="ledgerPreviewGrid">
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Description</th>
-          <th class="text-end">Debit</th>
-          <th class="text-end">Credit</th>
-          <th class="text-end">Closing Balance</th>
+          <th class="ledger-sort" data-sort="date" role="button">Date <i class="bi bi-arrow-down-up"></i></th>
+          <th class="ledger-sort" data-sort="description" role="button">Description <i class="bi bi-arrow-down-up"></i></th>
+          <th class="ledger-sort text-end" data-sort="debit" data-sort-type="num" role="button">Debit <i class="bi bi-arrow-down-up"></i></th>
+          <th class="ledger-sort text-end" data-sort="credit" data-sort-type="num" role="button">Credit <i class="bi bi-arrow-down-up"></i></th>
+          <th class="ledger-sort text-end" data-sort="balance" data-sort-type="num" role="button">Closing Balance <i class="bi bi-arrow-down-up"></i></th>
+          <th class="text-end">Actions</th>
         </tr>
       </thead>
       <tbody>
         {% for line in ledger.lines or [] %}
-        <tr class="ledger-row-{{ line.kind or 'txn' }}">
-          <td>{{ line.date or dash }}</td>
-          <td>{{ line.description or dash }}</td>
-          <td class="text-end">{{ money(line.debit) }}</td>
-          <td class="text-end">{{ money(line.credit) }}</td>
-          <td class="text-end">{{ money(line.balance) }}</td>
+        <tr class="ledger-row-{{ line.kind or 'txn' }}"
+            data-kind="{{ line.kind or 'txn' }}"
+            data-source-url="{{ line.source_url or '' }}"
+            data-source-module="{{ line.source_module or '' }}"
+            data-source-module-id="{{ line.source_module_id or '' }}"
+            data-work-type="{{ line.work_type or '' }}"
+            data-can-edit="{{ '1' if line.can_edit else '0' }}"
+            data-can-delete="{{ '1' if line.can_delete else '0' }}">
+          <td data-col="date" data-sort-value="{{ line.sort_date or '' }}">{{ line.date or dash }}</td>
+          <td data-col="description">{{ line.description or dash }}</td>
+          <td class="text-end" data-col="debit" data-sort-value="{{ line.debit if line.debit is not none else '' }}">{{ money(line.debit) }}</td>
+          <td class="text-end" data-col="credit" data-sort-value="{{ line.credit if line.credit is not none else '' }}">{{ money(line.credit) }}</td>
+          <td class="text-end" data-col="balance" data-sort-value="{{ line.balance if line.balance is not none else '' }}">{{ money(line.balance) }}</td>
+          <td class="text-end text-nowrap">
+            {% if line.kind == 'txn' %}
+            <button type="button" class="btn btn-outline-primary btn-sm ledger-row-edit"
+                    {% if not line.can_edit %}disabled{% endif %}
+                    title="Edit">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm ledger-row-delete"
+                    {% if not line.can_delete %}disabled{% endif %}
+                    title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+            {% else %}
+            —
+            {% endif %}
+          </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" class="text-center text-muted">No ledger rows for this period.</td>
+          <td colspan="6" class="text-center text-muted">No ledger rows for this period.</td>
         </tr>
         {% endfor %}
       </tbody>

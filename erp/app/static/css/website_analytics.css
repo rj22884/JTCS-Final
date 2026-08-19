@@ -1,0 +1,20 @@
+#waCards .jtcs-metric-card {
+  padding: 0.75rem 0.85rem;
+}
+
+#waCards .jtcs-metric-value {
+  font-size: 1.15rem;
+}
+
+#waPeriodForm .form-select,
+#waPeriodForm .form-control {
+  min-width: 9.5rem;
+}
+
+@media (max-width: 767.98px) {
+  #waPeriodForm .form-select,
+  #waPeriodForm .form-control {
+    min-width: 0;
+    width: 100%;
+  }
+}

@@ -229,11 +229,14 @@ class DashboardService:
         cash_received = db.session.execute(
             text(
                 """
-                SELECT ISNULL(SUM(ISNULL(Debit, 0)), 0)
-                FROM JtcsBankTransaction
-                WHERE BankName = N'Cash'
-                  AND TransactionDate >= :date_from
-                  AND TransactionDate <= :date_to
+                SELECT ISNULL(SUM(ISNULL(t.Debit, 0)), 0)
+                FROM JtcsBankTransaction t
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = t.JtcsBankAccountID
+                WHERE a.BankName = N'Cash'
+                  AND ISNULL(a.ActiveStatus, 1) = 1
+                  AND t.TransactionDate >= :date_from
+                  AND t.TransactionDate <= :date_to
                 """
             ),
             {"date_from": date_from, "date_to": date_to},
@@ -242,11 +245,14 @@ class DashboardService:
         bank_received = db.session.execute(
             text(
                 """
-                SELECT ISNULL(SUM(ISNULL(Debit, 0)), 0)
-                FROM JtcsBankTransaction
-                WHERE BankName <> N'Cash'
-                  AND TransactionDate >= :date_from
-                  AND TransactionDate <= :date_to
+                SELECT ISNULL(SUM(ISNULL(t.Debit, 0)), 0)
+                FROM JtcsBankTransaction t
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = t.JtcsBankAccountID
+                WHERE a.BankName <> N'Cash'
+                  AND ISNULL(a.ActiveStatus, 1) = 1
+                  AND t.TransactionDate >= :date_from
+                  AND t.TransactionDate <= :date_to
                 """
             ),
             {"date_from": date_from, "date_to": date_to},
@@ -274,8 +280,15 @@ class DashboardService:
             date_to=date_to,
         )
 
-    def _ledger_bank_filter(self, *, cash_only: bool) -> str:
-        return "BankName = N'Cash'" if cash_only else "BankName <> N'Cash'"
+    @staticmethod
+    def _active_account_sql(alias: str = "") -> str:
+        col = f"{alias}.ActiveStatus" if alias else "ActiveStatus"
+        return f"ISNULL({col}, 1) = 1"
+
+    def _ledger_bank_filter(self, *, cash_only: bool, alias: str = "") -> str:
+        name_col = f"{alias}.BankName" if alias else "BankName"
+        name = f"{name_col} = N'Cash'" if cash_only else f"{name_col} <> N'Cash'"
+        return f"{name} AND {self._active_account_sql(alias)}"
 
     def _master_opening_balance(self, *, cash_only: bool, as_of: date) -> Decimal:
         """Sum of account opening balances effective on/before as_of."""
@@ -300,9 +313,7 @@ class DashboardService:
         Only movements on/after each account's OpeningBalanceDate are included so
         Bank Master Opening Balance is never double-counted with pre-opening rows.
         """
-        bank_filter = (
-            "a.BankName = N'Cash'" if cash_only else "a.BankName <> N'Cash'"
-        )
+        bank_filter = self._ledger_bank_filter(cash_only=cash_only, alias="a")
         clauses = [bank_filter, BANK_MOVEMENT_SINCE_OPENING_SQL]
         params: dict = {}
         if before is not None:
@@ -383,7 +394,7 @@ class DashboardService:
 
     def list_bank_account_closings(self, *, as_of: date) -> list[BankAccountClosingLine]:
         """
-        Non-cash bank accounts with closing balance as of date_to (dashboard period end).
+        Active non-cash bank accounts with closing balance as of date_to (dashboard period end).
 
         Ledger magnitude uses Chart of Account Group (Asset +Dr−Cr, Liability +Cr−Dr).
         Liability / Capital / Income accounts are then signed negative so Bank Closing
@@ -438,6 +449,7 @@ class DashboardService:
                 FROM JtcsBankAccountMaster a
                 {group_join}
                 WHERE a.BankName <> N'Cash'
+                  AND {self._active_account_sql("a")}
                 ORDER BY
                     ISNULL(a.DisplayOrder, 2147483647),
                     a.BankName,
@@ -1519,9 +1531,7 @@ class DashboardService:
         date_from: date,
         date_to: date,
     ) -> list[dict]:
-        bank_filter = (
-            "a.BankName = N'Cash'" if cash_only else "a.BankName <> N'Cash'"
-        )
+        bank_filter = self._ledger_bank_filter(cash_only=cash_only, alias="a")
         if mode == "received":
             amount_sql = "ISNULL(t.Debit, 0)"
             where_extra = "AND ISNULL(t.Debit, 0) <> 0"

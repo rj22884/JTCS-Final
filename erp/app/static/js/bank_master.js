@@ -365,13 +365,21 @@
       alert("Select a bank account to delete.");
       return;
     }
+    if (!window.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No.")) {
+      return;
+    }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete selected bank account?")) return;
-    } else {
-      creds = await window.JTCSDeleteConfirm.ask({ message: "Delete selected bank account?" });
-      if (!creds) return;
+      alert("User ID and password are required to delete.");
+      return;
     }
+    creds = await window.JTCSDeleteConfirm.ask({
+      title: "Confirm Delete",
+      message: "Enter your User ID and password to permanently delete this bank account from the database.",
+      confirmLabel: "Yes",
+      cancelLabel: "No",
+    });
+    if (!creds) return;
     setSelected(id);
     try {
       const body = new FormData();

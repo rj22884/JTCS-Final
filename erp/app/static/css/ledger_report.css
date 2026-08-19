@@ -10,7 +10,7 @@
 
 /* Preview modal — invoice-style ledger statement */
 #ledgerPreviewModal .modal-dialog {
-  max-width: 980px;
+  max-width: 1100px;
 }
 
 #ledgerPreviewModal .modal-header .btn-close {
@@ -115,8 +115,60 @@
   background: #f4f6f7;
   border: 1px solid #85929e;
   padding: 10px 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
   border-radius: 4px;
+}
+
+.ledger-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+  margin-bottom: 10px;
+}
+
+.ledger-preview-dates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.ledger-preview-dates label {
+  margin: 0;
+}
+
+.ledger-preview-dates label span {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5d6d7e;
+  margin-bottom: 2px;
+}
+
+.ledger-preview-dates input[type="date"] {
+  min-width: 9.5rem;
+}
+
+.ledger-preview-filter {
+  min-width: 12rem;
+  flex: 1 1 12rem;
+  max-width: 18rem;
+}
+
+.ledger-html-items th.ledger-sort {
+  cursor: pointer;
+  user-select: none;
+}
+
+.ledger-html-items th.ledger-sort:hover {
+  background: #1a5a96;
+}
+
+.ledger-html-items .ledger-row-edit,
+.ledger-html-items .ledger-row-delete {
+  padding: 0.1rem 0.35rem;
 }
 
 .ledger-html-items {

@@ -8,7 +8,7 @@ from datetime import datetime
 
 from openpyxl import Workbook
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
@@ -136,7 +136,7 @@ def export_applications_xlsx(applications, detailed: bool = False) -> bytes:
 
 def export_applications_pdf(applications, detailed: bool = False) -> bytes:
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=24, rightMargin=24, topMargin=28, bottomMargin=28)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=28, bottomMargin=28)
     styles = getSampleStyleSheet()
     story = [
         Paragraph("JTCS Xpert — Job Applications", styles["Heading2"]),
@@ -166,7 +166,7 @@ def export_applications_pdf(applications, detailed: bool = False) -> bytes:
 
 def export_pdf(logs) -> bytes:
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=24, rightMargin=24, topMargin=28, bottomMargin=28)
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=24, rightMargin=24, topMargin=28, bottomMargin=28)
     styles = getSampleStyleSheet()
     story = [
         Paragraph("JTCS Xpert — Recruitment Audit Trail", styles["Heading2"]),

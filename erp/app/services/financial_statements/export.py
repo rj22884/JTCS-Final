@@ -8,7 +8,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, Side
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -231,7 +231,7 @@ class FinancialStatementsExport:
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
             buf,
-            pagesize=landscape(A4),
+            pagesize=A4,
             leftMargin=12 * mm,
             rightMargin=12 * mm,
             topMargin=12 * mm,

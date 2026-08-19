@@ -14,7 +14,7 @@ from xml.dom import minidom
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
@@ -22,6 +22,14 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.services.ledger_export_service import LedgerExportService
+
+
+def _iso(value) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 class LedgerReportService:
@@ -51,6 +59,50 @@ class LedgerReportService:
     ) -> tuple[date, date]:
         today = date.today()
         return date_from or date(2000, 1, 1), date_to or today
+
+    def _sort_date_value(self, date_str: str) -> str:
+        raw = (date_str or "").strip()
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(raw, fmt).date().isoformat()
+            except ValueError:
+                continue
+        return raw
+
+    def _decorate_line(self, line: dict[str, Any], *, link: dict[str, Any] | None = None) -> dict[str, Any]:
+        line["sort_date"] = self._sort_date_value(str(line.get("date") or ""))
+        kind = (line.get("kind") or "txn").strip()
+        if kind != "txn":
+            line["can_edit"] = False
+            line["can_delete"] = False
+            line["source_url"] = ""
+            line["source_module"] = ""
+            line["source_module_id"] = ""
+            line["work_type"] = ""
+            return line
+        link = link or {}
+        module = (link.get("source_module") or "").strip()
+        mid = link.get("source_module_id")
+        line["can_edit"] = bool(link.get("can_open") and link.get("source_url"))
+        line["can_delete"] = bool(module and mid)
+        line["source_url"] = link.get("source_url") or ""
+        line["source_module"] = module
+        line["source_module_id"] = mid or ""
+        line["work_type"] = (link.get("work_type") or "").strip()
+        return line
+
+    def _period_fields(self, date_from: date | None, date_to: date | None) -> dict[str, Any]:
+        return {
+            "date_from": date_from,
+            "date_to": date_to,
+            "date_from_iso": _iso(date_from),
+            "date_to_iso": _iso(date_to),
+        }
+
+    def _dash(self):
+        from app.services.dashboard_service import DashboardService
+
+        return DashboardService()
 
     @staticmethod
     def _fy_start(today: date | None = None) -> date:
@@ -261,6 +313,8 @@ class LedgerReportService:
 
     def _simplify_export_ledger(self, data: dict[str, Any], *, title: str) -> dict[str, Any]:
         """Map admin export ledger rows to Date / Description / Debit / Credit / Closing Balance."""
+        dash = self._dash()
+        kind_key = (data.get("kind") or "").strip().lower()
         lines: list[dict[str, Any]] = []
         for line in data.get("lines") or []:
             kind = (line.get("kind") or "txn").strip()
@@ -275,16 +329,41 @@ class LedgerReportService:
                 desc_parts.append(str(line["work"]).strip())
             if line.get("reference") and kind == "txn":
                 desc_parts.append(str(line["reference"]).strip())
-            lines.append(
-                {
-                    "date": line.get("date") or "",
-                    "description": " · ".join([p for p in desc_parts if p]) or "—",
-                    "debit": line.get("debit"),
-                    "credit": line.get("credit"),
-                    "balance": line.get("balance"),
-                    "kind": kind,
-                }
-            )
+            out = {
+                "date": line.get("date") or "",
+                "description": " · ".join([p for p in desc_parts if p]) or "—",
+                "debit": line.get("debit"),
+                "credit": line.get("credit"),
+                "balance": line.get("balance"),
+                "kind": kind,
+            }
+            link = None
+            if kind == "txn":
+                try:
+                    if kind_key == "bank":
+                        rec_id = line.get("source_record_id")
+                        link = dash._source_link_for_bank_leg(
+                            source_table=line.get("source"),
+                            source_record_id=int(rec_id) if rec_id else None,
+                            bank_transaction_id=line.get("bank_transaction_id"),
+                        )
+                    elif kind_key == "customer":
+                        txn_id = line.get("transaction_id")
+                        stamp_id = line.get("stamp_id")
+                        txn_int = int(txn_id) if txn_id not in (None, "") else 0
+                        link = dash._source_link_for_daily(
+                            transaction_id=txn_int if txn_int > 0 else None,
+                            work_type=line.get("work_type"),
+                            sub_work_type=line.get("sub_work_type"),
+                            stamp_id=int(stamp_id) if stamp_id else None,
+                            reference=line.get("bill") or line.get("reference"),
+                        )
+                        if not link.get("can_open") and line.get("obc_entry_id"):
+                            link = dash._source_link_for_bank_cash_entry(int(line["obc_entry_id"]))
+                except Exception:
+                    link = None
+            lines.append(self._decorate_line(out, link=link))
+        period = self._period_fields(data.get("date_from"), data.get("date_to"))
         return {
             "kind": data.get("kind") or "ledger",
             "title": title,
@@ -294,8 +373,7 @@ class LedgerReportService:
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,
             "closing": data.get("closing") or Decimal("0.00"),
-            "date_from": data.get("date_from"),
-            "date_to": data.get("date_to"),
+            **period,
         }
 
     def _work_ledger_data(
@@ -362,7 +440,7 @@ class LedgerReportService:
                 """
                 SELECT
                     d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
-                    d.ReferenceNo, d.Description, d.Remarks,
+                    d.StampID, d.ReferenceNo, d.Description, d.Remarks,
                     ISNULL(d.SaleAmount, 0) AS SaleAmount,
                     ISNULL(d.IncomeAmount, 0) AS IncomeAmount,
                     ISNULL(d.ExpenseAmount, 0) AS ExpenseAmount,
@@ -389,16 +467,19 @@ class LedgerReportService:
         lines: list[dict[str, Any]] = []
         running = opening
         lines.append(
-            {
-                "date": date_from.strftime("%d/%m/%Y"),
-                "description": "Opening Balance",
-                "debit": Decimal("0.00"),
-                "credit": Decimal("0.00"),
-                "balance": running,
-                "kind": "opening",
-            }
+            self._decorate_line(
+                {
+                    "date": date_from.strftime("%d/%m/%Y"),
+                    "description": "Opening Balance",
+                    "debit": Decimal("0.00"),
+                    "credit": Decimal("0.00"),
+                    "balance": running,
+                    "kind": "opening",
+                }
+            )
         )
 
+        dash = self._dash()
         for row in rows:
             income = self._money(row["SaleAmount"]) + self._money(row["IncomeAmount"])
             expense = self._money(row["ExpenseAmount"])
@@ -427,16 +508,26 @@ class LedgerReportService:
             ]
             txn_date = row["TransactionDate"]
             lines.append(
-                {
-                    "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
-                    "description": " · ".join([b for b in desc_bits if b]) or "Transaction",
-                    "debit": debit,
-                    "credit": credit,
-                    "balance": running,
-                    "kind": "txn",
-                }
+                self._decorate_line(
+                    {
+                        "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
+                        "description": " · ".join([b for b in desc_bits if b]) or "Transaction",
+                        "debit": debit,
+                        "credit": credit,
+                        "balance": running,
+                        "kind": "txn",
+                    },
+                    link=dash._source_link_for_daily(
+                        transaction_id=row["TransactionID"],
+                        work_type=row["WorkType"],
+                        sub_work_type=row["SubWorkType"],
+                        stamp_id=row["StampID"],
+                        reference=row["ReferenceNo"],
+                    ),
+                )
             )
 
+        period = self._period_fields(date_from, date_to)
         return {
             "kind": "work",
             "title": "Work / Category Ledger",
@@ -450,8 +541,7 @@ class LedgerReportService:
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,
             "closing": running,
-            "date_from": date_from,
-            "date_to": date_to,
+            **period,
         }
 
     def _item_ledger_data(
@@ -530,15 +620,19 @@ class LedgerReportService:
         lines: list[dict[str, Any]] = []
         running = opening
         lines.append(
-            {
-                "date": date_from.strftime("%d/%m/%Y"),
-                "description": "Opening Balance",
-                "debit": Decimal("0.00"),
-                "credit": Decimal("0.00"),
-                "balance": running,
-                "kind": "opening",
-            }
+            self._decorate_line(
+                {
+                    "date": date_from.strftime("%d/%m/%Y"),
+                    "description": "Opening Balance",
+                    "debit": Decimal("0.00"),
+                    "credit": Decimal("0.00"),
+                    "balance": running,
+                    "kind": "opening",
+                }
+            )
         )
+
+        from flask import url_for
 
         for row in rows:
             credit = self._money(row["TaxableValue"])
@@ -555,17 +649,30 @@ class LedgerReportService:
             if qty:
                 desc = f"{desc} · Qty {qty}" + (f" {unit}" if unit else "")
             txn_date = row["InvoiceDate"]
+            invoice_id = int(row["InvoiceID"])
             lines.append(
-                {
-                    "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
-                    "description": desc,
-                    "debit": debit,
-                    "credit": credit,
-                    "balance": running,
-                    "kind": "txn",
-                }
+                self._decorate_line(
+                    {
+                        "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
+                        "description": desc,
+                        "debit": debit,
+                        "credit": credit,
+                        "balance": running,
+                        "kind": "txn",
+                    },
+                    link={
+                        "can_open": True,
+                        "source_module": "invoice",
+                        "source_module_id": invoice_id,
+                        "source_url": url_for(
+                            "accounting_invoice.invoice_sale", edit=invoice_id
+                        ),
+                        "work_type": "",
+                    },
+                )
             )
 
+        period = self._period_fields(date_from, date_to)
         return {
             "kind": "item",
             "title": "Item Ledger",
@@ -580,8 +687,7 @@ class LedgerReportService:
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,
             "closing": running,
-            "date_from": date_from,
-            "date_to": date_to,
+            **period,
         }
 
     # ── Export (PDF / XLSX / CSV / XML) ─────────────────────────────────────
@@ -792,7 +898,7 @@ class LedgerReportService:
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer,
-            pagesize=landscape(A4),
+            pagesize=A4,
             leftMargin=12 * mm,
             rightMargin=12 * mm,
             topMargin=12 * mm,
@@ -872,7 +978,7 @@ class LedgerReportService:
                 ]
             )
 
-        table = Table(table_data, colWidths=[70, 320, 70, 70, 85])
+        table = Table(table_data, colWidths=[55, 250, 58, 58, 72])
         style_cmds = [
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#154375")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

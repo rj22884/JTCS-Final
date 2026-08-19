@@ -52,6 +52,8 @@ from app.routes.software_update import bp as software_update_bp
 from app.routes.utility import bp as utility_bp
 from app.routes.seo_keywords import bp as seo_keywords_bp
 from app.routes.seo_api import bp as seo_api_bp
+from app.routes.website_analytics import bp as website_analytics_bp
+from app.routes.website_analytics_public import bp as website_analytics_public_bp
 from app.routes.recruitment_applications import bp as recruitment_applications_bp
 from app.routes.hr import bp as hr_bp
 from app.modules.crm.routes import (
@@ -86,6 +88,7 @@ SETUP_PUBLIC_ENDPOINTS = {
     "dashboard.health",
     "public_intake.website_intake",
     "seo_api.keywords",
+    "website_analytics_public.visit",
     "customer_portal.login_page",
     "customer_portal.login_api",
     "customer_portal.login_start_api",
@@ -152,6 +155,8 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(utility_bp)
     app.register_blueprint(seo_keywords_bp)
     app.register_blueprint(seo_api_bp)
+    app.register_blueprint(website_analytics_bp)
+    app.register_blueprint(website_analytics_public_bp)
     app.register_blueprint(recruitment_applications_bp)
     app.register_blueprint(hr_bp)
     app.register_blueprint(crm_bp)
@@ -167,6 +172,8 @@ def create_app(config_class: type = Config) -> Flask:
     csrf.exempt(public_intake_bp)
     # Public SEO keywords for the marketing website (CORS + no CSRF).
     csrf.exempt(seo_api_bp)
+    # Public website visitor ingest (CORS + no CSRF). Admin analytics stay CSRF-protected.
+    csrf.exempt(website_analytics_public_bp)
 
     # Integration Settings (and JSON clients): CSRF failures as JSON, not HTML.
     from app.modules.settings.routes import register_integration_csrf_json_handler
@@ -257,6 +264,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("SEO keywords bootstrap skipped: %s", exc)
+
+        try:
+            from app.routes.website_analytics import ensure_website_analytics_bootstrap
+
+            ensure_website_analytics_bootstrap()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Website analytics bootstrap skipped: %s", exc)
 
         try:
             from app.modules.system_health.routes import ensure_system_health_menus
