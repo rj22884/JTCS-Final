@@ -33,6 +33,22 @@ from sqlalchemy import text
 
 from app.extensions import db
 
+# Credit-normal natures increase with Credit (Tally-style). Asset/Expense stay debit-normal.
+_CREDIT_NORMAL_NATURES = frozenset({
+    "liability",
+    "liabilities",
+    "capital",
+    "equity",
+    "income",
+    "revenue",
+})
+_DEBIT_NORMAL_NATURES = frozenset({
+    "asset",
+    "assets",
+    "expense",
+    "expenses",
+})
+
 # Brand palette (professional, colourful — not purple/glow AI defaults)
 COLOR_NAVY = "1B4F72"
 COLOR_TEAL = "148F77"
@@ -75,6 +91,30 @@ class LedgerExportService:
     @staticmethod
     def _fmt_money(value: Decimal | float | int) -> str:
         return f"{Decimal(str(value or 0)):.2f}"
+
+    @staticmethod
+    def _is_credit_normal_nature(nature: str | None, under_type: str | None = None) -> bool:
+        """True for Liability / Capital / Income; False for Asset / Expense (default)."""
+        n = (nature or "").strip().casefold()
+        if n in _CREDIT_NORMAL_NATURES:
+            return True
+        if n in _DEBIT_NORMAL_NATURES:
+            return False
+        u = (under_type or "").strip().casefold()
+        return u in {"liabilities", "liability"}
+
+    def _apply_bank_running(
+        self,
+        previous: Decimal,
+        debit: Decimal,
+        credit: Decimal,
+        *,
+        credit_normal: bool,
+    ) -> Decimal:
+        """Running/closing balance from Chart of Account Group nature."""
+        if credit_normal:
+            return self._money(previous + credit - debit)
+        return self._money(previous + debit - credit)
 
     def list_bank_accounts(self, *, search: str | None = None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
@@ -274,6 +314,60 @@ class LedgerExportService:
         today = date.today()
         return date_from or date(2000, 1, 1), date_to or today
 
+    def _load_bank_account_for_ledger(self, account_id: int):
+        """Bank Master row plus Chart of Group nature (Asset/Liability/Income/Expense)."""
+        has_group = db.session.execute(
+            text(
+                """
+                SELECT CASE
+                    WHEN COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'ChartGroupID') IS NULL THEN 0
+                    WHEN OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NULL THEN 0
+                    ELSE 1
+                END
+                """
+            )
+        ).scalar()
+        if has_group:
+            return db.session.execute(
+                text(
+                    """
+                    SELECT
+                        a.JtcsBankAccountID, a.BankName, a.MaskedAccountNumber, a.AccountNumber,
+                        a.AccountType, a.AccountHolderName, a.OpeningBalance, a.OpeningBalanceDate,
+                        a.ChartGroupID,
+                        g.GroupName,
+                        g.UnderType,
+                        ISNULL(
+                            NULLIF(g.GroupNature, N''),
+                            CASE
+                                WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                                WHEN g.UnderType = N'Assets' THEN N'Asset'
+                                ELSE N'Asset'
+                            END
+                        ) AS GroupNature
+                    FROM dbo.JtcsBankAccountMaster a
+                    LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID
+                    WHERE a.JtcsBankAccountID = :account_id
+                    """
+                ),
+                {"account_id": account_id},
+            ).mappings().first()
+        return db.session.execute(
+            text(
+                """
+                SELECT JtcsBankAccountID, BankName, MaskedAccountNumber, AccountNumber,
+                       AccountType, AccountHolderName, OpeningBalance, OpeningBalanceDate,
+                       CAST(NULL AS INT) AS ChartGroupID,
+                       CAST(NULL AS NVARCHAR(150)) AS GroupName,
+                       CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                       CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+                FROM dbo.JtcsBankAccountMaster
+                WHERE JtcsBankAccountID = :account_id
+                """
+            ),
+            {"account_id": account_id},
+        ).mappings().first()
+
     def _bank_ledger_data(
         self,
         account_id: int,
@@ -281,19 +375,13 @@ class LedgerExportService:
         date_from: date | None,
         date_to: date | None,
     ) -> dict[str, Any]:
-        account = db.session.execute(
-            text(
-                """
-                SELECT JtcsBankAccountID, BankName, MaskedAccountNumber, AccountNumber,
-                       AccountType, AccountHolderName, OpeningBalance, OpeningBalanceDate
-                FROM dbo.JtcsBankAccountMaster
-                WHERE JtcsBankAccountID = :account_id
-                """
-            ),
-            {"account_id": account_id},
-        ).mappings().first()
+        account = self._load_bank_account_for_ledger(account_id)
         if account is None:
             raise ValueError("Bank account not found.")
+
+        credit_normal = self._is_credit_normal_nature(
+            account.get("GroupNature"), account.get("UnderType")
+        )
 
         date_from, date_to = self._resolve_period(date_from, date_to)
         bank_name = (account["BankName"] or "Account").strip() or "Account"
@@ -313,7 +401,9 @@ class LedgerExportService:
         # Prior movements only on/after OpeningBalanceDate — never double-count
         # Bank Master Opening Balance with pre-opening (or corrupt-dated) rows.
         prior_sql = """
-                SELECT ISNULL(SUM(ISNULL(Debit, 0) - ISNULL(Credit, 0)), 0)
+                SELECT
+                    ISNULL(SUM(ISNULL(Debit, 0)), 0) AS prior_debit,
+                    ISNULL(SUM(ISNULL(Credit, 0)), 0) AS prior_credit
                 FROM dbo.JtcsBankTransaction
                 WHERE JtcsBankAccountID = :account_id
                   AND TransactionDate < :date_from
@@ -322,8 +412,12 @@ class LedgerExportService:
         if ob_date is not None:
             prior_sql += " AND TransactionDate >= :ob_date"
             prior_params["ob_date"] = ob_date
-        prior = db.session.execute(text(prior_sql), prior_params).scalar()
-        opening = self._money(opening + self._money(prior))
+        prior_row = db.session.execute(text(prior_sql), prior_params).mappings().first()
+        prior_debit = self._money(prior_row["prior_debit"] if prior_row else 0)
+        prior_credit = self._money(prior_row["prior_credit"] if prior_row else 0)
+        opening = self._apply_bank_running(
+            opening, prior_debit, prior_credit, credit_normal=credit_normal
+        )
 
         txn_sql = """
                 SELECT
@@ -428,7 +522,9 @@ class LedgerExportService:
             month_debit = self._money(month_debit + debit)
             month_credit = self._money(month_credit + credit)
 
-            running = self._money(running + debit - credit)
+            running = self._apply_bank_running(
+                running, debit, credit, credit_normal=credit_normal
+            )
             desc = (row["Description"] or row["Remarks"] or "Bank transaction").strip()
             ref = f"BT-{row['JtcsBankTransactionID']}"
             if row["SourceRecordID"]:
@@ -453,7 +549,10 @@ class LedgerExportService:
             lines.append(_month_total_row(cur_month[0], cur_month[1], month_debit, month_credit))
 
         grouped_lines = self._bank_desc_group_lines(
-            txn_rows, opening=opening, date_from=date_from
+            txn_rows,
+            opening=opening,
+            date_from=date_from,
+            credit_normal=credit_normal,
         )
         pivot = self._bank_pivot_matrix(txn_rows)
 
@@ -519,6 +618,7 @@ class LedgerExportService:
         *,
         opening: Decimal,
         date_from: date,
+        credit_normal: bool = False,
     ) -> list[dict[str, Any]]:
         """Sheet-2 view: sort by date then description; group totals per date+description."""
         lines: list[dict[str, Any]] = []
@@ -586,7 +686,9 @@ class LedgerExportService:
             cur_key = key
             group_debit = self._money(group_debit + debit)
             group_credit = self._money(group_credit + credit)
-            running = self._money(running + debit - credit)
+            running = self._apply_bank_running(
+                running, debit, credit, credit_normal=credit_normal
+            )
 
             ref = f"BT-{row['JtcsBankTransactionID']}"
             if row["SourceRecordID"]:
