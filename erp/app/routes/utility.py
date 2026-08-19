@@ -22,7 +22,7 @@ from sqlalchemy import text
 from app.decorators import admin_required, login_required
 from app.extensions import db
 from app.services.menu_service import MenuService
-from app.services.utility_service import UtilityService
+from app.services.utility_service import DEPLOY_TARGETS, UtilityService
 from app.utils.runtime_env import (
     is_vps_runtime,
     sync_menu_description,
@@ -322,11 +322,15 @@ def api_deploy():
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password") or "")
     commit_message = str(payload.get("commit_message") or "").strip()
+    target = str(payload.get("target") or "app").strip().lower()
+    if target not in DEPLOY_TARGETS:
+        return jsonify(ok=False, error="Invalid upload target. Use app, web, or both."), 400
     try:
         result = UtilityService().deploy_to_vps(
             password=password,
             commit_message=commit_message,
             created_by=_actor(),
+            target=target,
         )
         return jsonify(result)
     except Exception as exc:
@@ -344,6 +348,9 @@ def api_deploy_stream():
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password") or "")
     commit_message = str(payload.get("commit_message") or "").strip()
+    target = str(payload.get("target") or "app").strip().lower()
+    if target not in DEPLOY_TARGETS:
+        return jsonify(ok=False, error="Invalid upload target. Use app, web, or both."), 400
     actor = _actor()
 
     @stream_with_context
@@ -353,6 +360,7 @@ def api_deploy_stream():
                 password=password,
                 commit_message=commit_message,
                 created_by=actor,
+                target=target,
             ):
                 yield json.dumps(event, ensure_ascii=False) + "\n"
         except Exception as exc:

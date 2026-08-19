@@ -149,6 +149,43 @@ def test_live_reports() -> dict:
         assert "Direct Income" in titles
         assert "Indirect Expenses" in titles
 
+        from app.services.ledger_export_service import LedgerExportService
+
+        d1, d2 = svc.resolve_period("2026-04-01", "2026-08-19")
+        jamrani = next(
+            (
+                led
+                for led in svc.engine.compute_ledger_balances(
+                    date_from=d1, date_to=d2, search="jamrani property"
+                )
+                if (led.get("ledger_name") or "").strip().casefold() == "jamrani property"
+            ),
+            None,
+        )
+        assert jamrani is not None, "Jamrani Property ledger missing from FS engine"
+        assert (jamrani.get("group_name") or "").strip().casefold() == "investments"
+        preview = LedgerExportService().customer_ledger_preview_data(
+            int(jamrani["customer_id"]), date_from=d1, date_to=d2
+        )
+        assert abs(svc.engine.money(jamrani["closing"]) - svc.engine.money(preview.get("closing"))) < Decimal("0.01")
+        found_path = []
+
+        def walk(nodes, path):
+            for n in nodes:
+                here = path + [n.get("GroupName") or ""]
+                for led in n.get("ledgers") or []:
+                    if (led.get("ledger_name") or "").strip().casefold() == "jamrani property":
+                        found_path.extend(here)
+                walk(n.get("children") or [], here)
+
+        bs_j = svc.balance_sheet(d1, d2)
+        walk((bs_j.get("right") or {}).get("nodes") or [], ["Assets"])
+        assert found_path, "Jamrani Property missing on Balance Sheet"
+        assert any(p.casefold() == "investments" for p in found_path), found_path
+        out["jamrani_group"] = jamrani.get("group_name")
+        out["jamrani_closing"] = str(jamrani.get("closing"))
+        out["jamrani_bs_path"] = " / ".join(found_path)
+
         trading = svc.trading_account(*svc.resolve_period(None, None))
         t_titles = [s.get("title") for s in trading.get("sections") or []]
         assert "Direct Income" in t_titles

@@ -60,9 +60,21 @@
   var sync = window.UTILITY_SYNC;
   if (sync) {
     var status = $("utilityStatus");
-    var deployBtn = $("utilityDeployBtn");
+    var deployBtns = document.querySelectorAll("[data-deploy-target]");
     var downloadBtn = $("utilityDownloadBtn");
     var clearBtn = $("utilityLogClearBtn");
+    var deployLabels = {
+      app: "App",
+      web: "Web",
+      both: "App + Web",
+    };
+
+    function setDeployButtonsDisabled(disabled) {
+      deployBtns.forEach(function (btn) {
+        btn.disabled = disabled;
+      });
+    }
+
     if (clearBtn) {
       clearBtn.addEventListener("click", function () {
         clearLog();
@@ -70,112 +82,118 @@
       });
     }
 
-    if (deployBtn) {
-      deployBtn.addEventListener("click", async function () {
-        var password = ($("utilityVpsPass") && $("utilityVpsPass").value) || "";
-        var commitMessage = ($("utilityCommitMsg") && $("utilityCommitMsg").value) || "";
-        if (!password) {
-          showStatus(status, false, "VPS password required.");
-          return;
-        }
-        deployBtn.disabled = true;
-        clearLog();
-        showStatus(status, null, "Deploying to VPS… neeche live log dekhte raho.");
-        appendLog("Starting deploy…", "info");
-        try {
-          var res = await fetch(sync.deployStreamUrl || sync.deployUrl, {
-            method: "POST",
-            headers: headers(sync.csrf),
-            body: JSON.stringify({
-              password: password,
-              commit_message: commitMessage,
-            }),
-            credentials: "same-origin",
+    async function runDeploy(target) {
+      var password = ($("utilityVpsPass") && $("utilityVpsPass").value) || "";
+      var commitMessage = ($("utilityCommitMsg") && $("utilityCommitMsg").value) || "";
+      if (!password) {
+        showStatus(status, false, "VPS password required. App aur Web dono ke liye same password.");
+        return;
+      }
+      var label = deployLabels[target] || target;
+      setDeployButtonsDisabled(true);
+      clearLog();
+      showStatus(status, null, "Uploading " + label + "… neeche live log dekhte raho.");
+      appendLog("Starting upload (" + label + ")…", "info");
+      try {
+        var res = await fetch(sync.deployStreamUrl || sync.deployUrl, {
+          method: "POST",
+          headers: headers(sync.csrf),
+          body: JSON.stringify({
+            password: password,
+            commit_message: commitMessage,
+            target: target,
+          }),
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          var errBody = await res.json().catch(function () {
+            return {};
           });
-          if (!res.ok) {
-            var errBody = await res.json().catch(function () {
-              return {};
-            });
-            throw new Error(errBody.error || ("HTTP " + res.status));
-          }
-
-          // Streaming NDJSON
-          if (res.body && sync.deployStreamUrl) {
-            var reader = res.body.getReader();
-            var decoder = new TextDecoder();
-            var buffer = "";
-            var finalOk = null;
-            var finalMsg = "";
-            while (true) {
-              var chunk = await reader.read();
-              if (chunk.done) break;
-              buffer += decoder.decode(chunk.value, { stream: true });
-              var parts = buffer.split("\n");
-              buffer = parts.pop() || "";
-              for (var i = 0; i < parts.length; i++) {
-                var raw = parts[i].trim();
-                if (!raw) continue;
-                var event;
-                try {
-                  event = JSON.parse(raw);
-                } catch (e) {
-                  appendLog(raw, "warn");
-                  continue;
-                }
-                if (event.type === "log") {
-                  appendLog(event.line || "", event.level || "info");
-                } else if (event.type === "done") {
-                  finalOk = true;
-                  finalMsg = event.message || "Deploy complete.";
-                  appendLog(finalMsg, "ok");
-                } else if (event.type === "error") {
-                  finalOk = false;
-                  finalMsg = event.error || "Deploy failed.";
-                  appendLog(finalMsg, "error");
-                }
-              }
-            }
-            if (buffer.trim()) {
-              try {
-                var last = JSON.parse(buffer.trim());
-                if (last.type === "done") {
-                  finalOk = true;
-                  finalMsg = last.message || "Deploy complete.";
-                  appendLog(finalMsg, "ok");
-                } else if (last.type === "error") {
-                  finalOk = false;
-                  finalMsg = last.error || "Deploy failed.";
-                  appendLog(finalMsg, "error");
-                } else if (last.type === "log") {
-                  appendLog(last.line || "", last.level || "info");
-                }
-              } catch (e2) {
-                appendLog(buffer.trim(), "warn");
-              }
-            }
-            if (finalOk === true) {
-              showStatus(status, true, finalMsg || "Deploy complete.");
-              if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
-            } else if (finalOk === false) {
-              showStatus(status, false, finalMsg || "Deploy failed.");
-            } else {
-              showStatus(status, false, "Deploy ended without SUCCESS marker — log check karo.");
-            }
-          } else {
-            var data = await res.json();
-            if (data.ok === false) throw new Error(data.error || "Deploy failed");
-            appendLog(data.message || "Deploy complete.", "ok");
-            showStatus(status, true, data.message || "Deploy complete.");
-            if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
-          }
-        } catch (err) {
-          appendLog(err.message || String(err), "error");
-          showStatus(status, false, err.message || String(err));
-        } finally {
-          deployBtn.disabled = false;
+          throw new Error(errBody.error || ("HTTP " + res.status));
         }
-      });
+
+        // Streaming NDJSON
+        if (res.body && sync.deployStreamUrl) {
+          var reader = res.body.getReader();
+          var decoder = new TextDecoder();
+          var buffer = "";
+          var finalOk = null;
+          var finalMsg = "";
+          while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var parts = buffer.split("\n");
+            buffer = parts.pop() || "";
+            for (var i = 0; i < parts.length; i++) {
+              var raw = parts[i].trim();
+              if (!raw) continue;
+              var event;
+              try {
+                event = JSON.parse(raw);
+              } catch (e) {
+                appendLog(raw, "warn");
+                continue;
+              }
+              if (event.type === "log") {
+                appendLog(event.line || "", event.level || "info");
+              } else if (event.type === "done") {
+                finalOk = true;
+                finalMsg = event.message || "Upload complete.";
+                appendLog(finalMsg, "ok");
+              } else if (event.type === "error") {
+                finalOk = false;
+                finalMsg = event.error || "Upload failed.";
+                appendLog(finalMsg, "error");
+              }
+            }
+          }
+          if (buffer.trim()) {
+            try {
+              var last = JSON.parse(buffer.trim());
+              if (last.type === "done") {
+                finalOk = true;
+                finalMsg = last.message || "Upload complete.";
+                appendLog(finalMsg, "ok");
+              } else if (last.type === "error") {
+                finalOk = false;
+                finalMsg = last.error || "Upload failed.";
+                appendLog(finalMsg, "error");
+              } else if (last.type === "log") {
+                appendLog(last.line || "", last.level || "info");
+              }
+            } catch (e2) {
+              appendLog(buffer.trim(), "warn");
+            }
+          }
+          if (finalOk === true) {
+            showStatus(status, true, finalMsg || "Upload complete.");
+            if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
+          } else if (finalOk === false) {
+            showStatus(status, false, finalMsg || "Upload failed.");
+          } else {
+            showStatus(status, false, "Upload ended without SUCCESS marker — log check karo.");
+          }
+        } else {
+          var data = await res.json();
+          if (data.ok === false) throw new Error(data.error || "Upload failed");
+          appendLog(data.message || "Upload complete.", "ok");
+          showStatus(status, true, data.message || "Upload complete.");
+          if ($("utilityVpsPass")) $("utilityVpsPass").value = "";
+        }
+      } catch (err) {
+        appendLog(err.message || String(err), "error");
+        showStatus(status, false, err.message || String(err));
+      } finally {
+        setDeployButtonsDisabled(false);
+      }
     }
+
+    deployBtns.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        runDeploy(btn.getAttribute("data-deploy-target") || "app");
+      });
+    });
 
     if (downloadBtn) {
       downloadBtn.addEventListener("click", async function () {

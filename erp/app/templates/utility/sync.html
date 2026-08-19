@@ -16,8 +16,9 @@
       </p>
       {% else %}
       <p class="text-muted small mb-0">
-        Local se GitHub push + VPS <code>deploy.sh</code> chalega.
-        Password har baar type karo (save nahi hota).
+        Local se GitHub/website push + VPS deploy.
+        Password har baar type karo (save nahi hota). App aur Web dono ke liye
+        <strong>ek hi VPS password</strong> use hota hai.
       </p>
       {% endif %}
     </div>
@@ -28,7 +29,8 @@
     <div><span class="utility-meta-label">App URL</span> {{ info.app_base_url }}</div>
     <div><span class="utility-meta-label">Database</span> {{ info.db_server }}\{{ info.db_name }}</div>
     {% if not is_vps %}
-    <div><span class="utility-meta-label">VPS</span> {{ info.vps_host }}:{{ info.vps_path }}</div>
+    <div><span class="utility-meta-label">VPS App</span> {{ info.vps_host }}:{{ info.vps_path }}</div>
+    <div><span class="utility-meta-label">VPS Web</span> {{ info.vps_host }}:{{ info.vps_web_dir }}</div>
     {% endif %}
   </div>
 
@@ -49,9 +51,22 @@
       <input type="password" class="form-control" id="utilityVpsPass" autocomplete="current-password">
     </div>
   </div>
-  <button type="button" class="btn btn-primary" id="utilityDeployBtn">
-    <i class="bi bi-cloud-arrow-up"></i> Upload / Deploy to VPS
-  </button>
+  <div class="d-flex flex-wrap gap-2">
+    <button type="button" class="btn btn-primary" id="utilityDeployAppBtn" data-deploy-target="app">
+      <i class="bi bi-cloud-arrow-up"></i> Upload App
+    </button>
+    <button type="button" class="btn btn-primary" id="utilityDeployWebBtn" data-deploy-target="web">
+      <i class="bi bi-globe"></i> Upload Web
+    </button>
+    <button type="button" class="btn btn-outline-primary" id="utilityDeployBothBtn" data-deploy-target="both">
+      <i class="bi bi-cloud-check"></i> Upload Both
+    </button>
+  </div>
+  <div class="form-text mt-2">
+    <strong>Upload App</strong> = ERP (<code>app.jtcsxpert.com</code>).
+    <strong>Upload Web</strong> = website (<code>jtcsxpert.com</code>).
+    Dono ke liye same VPS password.
+  </div>
   {% endif %}
 
   <div class="utility-log-wrap mt-3" id="utilityLogWrap">
@@ -75,5 +90,5 @@
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/utility.js') }}"></script>
+<script src="{{ url_for('static', filename='js/utility.js') }}?v=20260819up4"></script>
 {% endblock %}

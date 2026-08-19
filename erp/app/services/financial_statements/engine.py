@@ -783,6 +783,7 @@ class FinancialReportEngine:
                        SUM(ISNULL(Credit, 0)) AS CreditAmt
                 FROM dbo.JtcsBankTransaction
                 WHERE TransactionDate >= :d1 AND TransactionDate <= :d2
+                  AND JtcsBankAccountID > 0
                 GROUP BY JtcsBankAccountID
                 """
             ),
@@ -922,7 +923,114 @@ class FinancialReportEngine:
         except Exception:
             db.session.rollback()
 
+        self._merge_obc_coa_movements(moves, date_from, date_to)
         return moves
+
+    def _obc_ledger_keys_ready(self) -> bool:
+        try:
+            if not db.session.execute(
+                text("SELECT OBJECT_ID(N'dbo.OthersBankCashTransaction', N'U')")
+            ).scalar():
+                return False
+            return bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
+                        "N'CreditLedgerKey') IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            return False
+
+    def _merge_obc_coa_movements(
+        self,
+        moves: dict[str, dict[str, Decimal]],
+        date_from: date,
+        date_to: date,
+    ) -> None:
+        """Post Other Bank/Cash CoA legs onto chart ledgers (same as Customer Ledger).
+
+        Bank-* legs are already in JtcsBankTransaction — do not double-count them.
+        """
+        if not self._obc_ledger_keys_ready():
+            return
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT DebitLedgerKey, CreditLedgerKey, Amount
+                    FROM dbo.OthersBankCashTransaction
+                    WHERE ISNULL(IsActive, 1) = 1
+                      AND WorkDate >= :d1
+                      AND WorkDate <= :d2
+                    """
+                ),
+                {"d1": date_from, "d2": date_to},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return
+        for r in rows:
+            amt = self.money(r.get("Amount"))
+            if amt == ZERO:
+                continue
+            debit_key = (r.get("DebitLedgerKey") or "").strip()
+            credit_key = (r.get("CreditLedgerKey") or "").strip()
+            if debit_key.startswith("coa-"):
+                moves[debit_key]["debit"] += amt
+            if credit_key.startswith("coa-"):
+                moves[credit_key]["credit"] += amt
+
+    def _obc_coa_net(
+        self,
+        account_id: int,
+        *,
+        before: date,
+        after: date | None,
+    ) -> Decimal:
+        """Net Other Bank/Cash posted to a CoA ledger before `before` (optional after OB date)."""
+        if not account_id or not self._obc_ledger_keys_ready():
+            return ZERO
+        key = f"coa-{int(account_id)}"
+        sql = """
+                SELECT
+                    ISNULL(SUM(CASE WHEN e.DebitLedgerKey = :k THEN e.Amount ELSE 0 END), 0) AS DrAmt,
+                    ISNULL(SUM(CASE WHEN e.CreditLedgerKey = :k THEN e.Amount ELSE 0 END), 0) AS CrAmt
+                FROM dbo.OthersBankCashTransaction e
+                WHERE ISNULL(e.IsActive, 1) = 1
+                  AND (e.DebitLedgerKey = :k OR e.CreditLedgerKey = :k)
+                  AND e.WorkDate < :before
+            """
+        params: dict[str, Any] = {"k": key, "before": before}
+        if after is not None:
+            sql += " AND e.WorkDate > :after"
+            params["after"] = after
+        try:
+            row = db.session.execute(text(sql), params).mappings().first()
+        except Exception:
+            db.session.rollback()
+            return ZERO
+        return self.money(row["DrAmt"] if row else 0) - self.money(row["CrAmt"] if row else 0)
+
+    def _customer_ob_date(self, customer_id: int) -> date | None:
+        if not self._customer_has_opening_cols():
+            return None
+        row = db.session.execute(
+            text(
+                """
+                SELECT OpeningBalanceDate
+                FROM dbo.CustomerMaster
+                WHERE CustomerID = :cid
+                """
+            ),
+            {"cid": customer_id},
+        ).mappings().first()
+        ob_date = row.get("OpeningBalanceDate") if row else None
+        if isinstance(ob_date, datetime):
+            return ob_date.date()
+        return ob_date if isinstance(ob_date, date) else None
 
     def compute_ledger_balances(
         self,
@@ -969,6 +1077,22 @@ class FinancialReportEngine:
                     )
                     if abs(cust_open) >= Decimal("0.01"):
                         opening = cust_open
+            if led.get("source") == "coa" and led.get("account_id"):
+                ob_cut = None
+                if led.get("customer_id"):
+                    ob_cut = self._customer_ob_date(int(led["customer_id"]))
+                else:
+                    ob_cut = led.get("opening_date")
+                    if isinstance(ob_cut, datetime):
+                        ob_cut = ob_cut.date()
+                opening = self.money(
+                    opening
+                    + self._obc_coa_net(
+                        int(led["account_id"]),
+                        before=date_from,
+                        after=ob_cut,
+                    )
+                )
             mv = moves.get(led["ledger_key"], {"debit": ZERO, "credit": ZERO})
             debit = self.money(mv["debit"])
             credit = self.money(mv["credit"])
