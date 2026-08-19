@@ -222,9 +222,10 @@ class AdminDashboardService:
 
     def get_admin_metrics(self, *, date_from: date, date_to: date) -> DashboardMetrics:
         """Admin cards: project-wide totals (IncomeAmount + SaleAmount for Total Income)."""
+        # Same formula as reports: IncomeAmount + SaleAmount.
         base = self.dashboard.get_metrics(date_from, date_to)
         return DashboardMetrics(
-            total_income=self._project_income_total(date_from, date_to),
+            total_income=base.total_income,
             total_expenses=base.total_expenses,
             total_sales=base.total_sales,
             cash_closing_balance=base.cash_closing_balance,

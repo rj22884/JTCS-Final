@@ -186,7 +186,8 @@ thead svg,
   min-width: 0;
 }
 
-.dash-metric-btn .jtcs-illu-host {
+.dash-metric-btn .jtcs-illu-host,
+.dash-bank-balance-card .jtcs-illu-host {
   flex-shrink: 0;
   width: 2.5rem;
   height: 2.5rem;
@@ -203,11 +204,14 @@ thead svg,
 .dash-metric-sales .jtcs-illu-host { background: var(--icon-bg-blue); }
 .dash-metric-cash .jtcs-illu-host,
 .dash-metric-cash-recv .jtcs-illu-host { background: var(--icon-bg-orange); }
-.dash-metric-bank .jtcs-illu-host { background: var(--icon-bg-teal); }
+.dash-metric-bank .jtcs-illu-host,
+.dash-bank-balance-card .jtcs-illu-host { background: var(--icon-bg-teal); }
 .dash-metric-bank-recv .jtcs-illu-host { background: var(--icon-bg-purple); }
 
 .dash-metric-btn .jtcs-illu-host .jtcs-illu-svg,
-.dash-metric-btn .jtcs-illu-host svg {
+.dash-metric-btn .jtcs-illu-host svg,
+.dash-bank-balance-card .jtcs-illu-host .jtcs-illu-svg,
+.dash-bank-balance-card .jtcs-illu-host svg {
   width: 100%;
   height: 100%;
 }
@@ -219,7 +223,8 @@ thead svg,
     height: 2.2rem !important;
   }
 
-  .dash-metric-btn .jtcs-illu-host {
+  .dash-metric-btn .jtcs-illu-host,
+  .dash-bank-balance-card .jtcs-illu-host {
     width: 2.1rem;
     height: 2.1rem;
   }

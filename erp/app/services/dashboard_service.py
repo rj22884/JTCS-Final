@@ -261,8 +261,12 @@ class DashboardService:
         cash_closing = self._ledger_closing_balance(cash_only=True, as_of=date_to)
         bank_closing = self._ledger_closing_balance(cash_only=False, as_of=date_to)
 
+        # Reports / Admin Dashboard: Total Income = IncomeAmount + SaleAmount.
+        # Service modules post receipts into SaleAmount; IncomeAmount is often 0.
+        posted_income = Decimal(str(daily["income_total"])) + Decimal(str(daily["sale_total"]))
+
         return DashboardMetrics(
-            total_income=Decimal(str(daily["income_total"]))
+            total_income=posted_income
             + self._manual_sum("total_income", date_from=date_from, date_to=date_to),
             total_expenses=Decimal(str(daily["expense_total"]))
             + self._manual_sum("total_expenses", date_from=date_from, date_to=date_to),
@@ -1523,6 +1527,64 @@ class DashboardService:
             result.append(item)
         return result
 
+    def _posted_income_rows(self, date_from: date, date_to: date) -> list[dict]:
+        """Total Income drill-down: IncomeAmount + SaleAmount (same as reports)."""
+        rows = db.session.execute(
+            text(
+                """
+                SELECT TOP 500
+                    TransactionID,
+                    TransactionDate,
+                    WorkType,
+                    SubWorkType,
+                    StampID,
+                    CustomerName,
+                    ReferenceNo,
+                    Description,
+                    ISNULL(IncomeAmount, 0) AS IncomeValue,
+                    ISNULL(SaleAmount, 0) AS SaleValue,
+                    ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0) AS AmountValue
+                FROM JTCSDailyTransaction
+                WHERE TransactionDate >= :date_from
+                  AND TransactionDate <= :date_to
+                  AND Status = N'Posted'
+                  AND (ISNULL(IncomeAmount, 0) + ISNULL(SaleAmount, 0)) <> 0
+                ORDER BY TransactionDate DESC, TransactionID DESC
+                """
+            ),
+            {"date_from": date_from, "date_to": date_to},
+        ).mappings().all()
+        result = []
+        for row in rows:
+            work = row["WorkType"] or ""
+            if row["SubWorkType"]:
+                work = f"{work} / {row['SubWorkType']}" if work else row["SubWorkType"]
+            reference = row["ReferenceNo"] or f"DT-{row['TransactionID']}"
+            item = {
+                "row_key": f"daily-income-{row['TransactionID']}",
+                "entry_id": None,
+                "source": "system",
+                "can_edit": False,
+                "can_delete": False,
+                "entry_date": row["TransactionDate"].isoformat() if row["TransactionDate"] else "",
+                "description": row["Description"] or "Income",
+                "reference": reference,
+                "work": work or "—",
+                "customer": row["CustomerName"] or "—",
+                "amount": str(row["AmountValue"]),
+            }
+            item.update(
+                self._source_link_for_daily(
+                    transaction_id=row["TransactionID"],
+                    work_type=row["WorkType"],
+                    sub_work_type=row["SubWorkType"],
+                    stamp_id=row["StampID"],
+                    reference=row["ReferenceNo"],
+                )
+            )
+            result.append(item)
+        return result
+
     def _bank_metric_rows(
         self,
         *,
@@ -1649,7 +1711,7 @@ class DashboardService:
 
         opening_row = None
         if metric_key == "total_income":
-            system_rows = self._daily_metric_rows("IncomeAmount", date_from, date_to)
+            system_rows = self._posted_income_rows(date_from, date_to)
             manual_rows = self._manual_rows(metric_key, date_from=date_from, date_to=date_to)
         elif metric_key == "total_expenses":
             system_rows = self._daily_metric_rows("ExpenseAmount", date_from, date_to)

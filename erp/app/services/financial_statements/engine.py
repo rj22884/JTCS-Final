@@ -105,6 +105,45 @@ NATURE_BY_NAME: dict[str, str] = {
     "Expenses (Indirect)": "Expense",
 }
 
+TALLY_ASSET_ROOT_ORDER = (
+    "Fixed Assets",
+    "Investments",
+    "Current Assets",
+    "Misc. Expenses (ASSET)",
+)
+TALLY_LIABILITY_ROOT_ORDER = (
+    "Capital Account",
+    "Reserves & Surplus",
+    "Loans (Liability)",
+    "Current Liabilities",
+)
+
+# Higher rank wins when a ledger is linked to multiple groups.
+PLACEMENT_RANK = {
+    "investments": 100,
+    "fixed assets": 95,
+    "immovable property": 94,
+    "computers printers & electric items": 94,
+    "capital account": 90,
+    "loans (liability)": 88,
+    "secured loans": 87,
+    "unsecured loans": 87,
+    "bank od a/c": 87,
+    "current liabilities": 80,
+    "sundry creditors": 79,
+    "deposits (asset)": 72,
+    "loans & advances (asset)": 72,
+    "stock holding corporation of india": 71,
+    "bank accounts": 70,
+    "cash-in-hand": 70,
+    "sundry debtors": 60,
+    "current assets": 20,
+    "suspense a/c": 15,
+    "individual client": 10,
+}
+
+RECEIVABLE_GROUP_NAMES = {"individual client", "sundry debtors"}
+
 
 class FinancialReportEngine:
     """
@@ -287,7 +326,101 @@ class FinancialReportEngine:
                 by_id[int(pid)]["children"].append(node)
             else:
                 roots.append(node)
+        for node in by_id.values():
+            node["children"].sort(key=lambda n: (n.get("GroupName") or "").lower())
+        roots.sort(key=lambda n: (n.get("GroupName") or "").lower())
         return roots
+
+    def _nature_from_group(self, group: dict | None, by_id: dict[int, dict]) -> str:
+        if not group:
+            return "Asset"
+        cur = group
+        seen: set[int] = set()
+        hops = 0
+        while cur and hops < 40:
+            gid = int(cur["GroupID"])
+            if gid in seen:
+                break
+            seen.add(gid)
+            name = (cur.get("GroupName") or "").strip()
+            mapped = NATURE_BY_NAME.get(name)
+            if mapped:
+                return mapped
+            n = (cur.get("GroupNature") or "").strip()
+            if n in {"Asset", "Liability", "Income", "Expense"}:
+                return n
+            pid = cur.get("ParentGroupID")
+            cur = by_id.get(int(pid)) if pid else None
+            hops += 1
+        under = ((group or {}).get("UnderType") or "").strip()
+        return "Asset" if under == "Assets" else "Liability"
+
+    def _group_rank(self, group: dict, by_id: dict[int, dict]) -> int:
+        best = 0
+        cur = group
+        seen: set[int] = set()
+        hops = 0
+        while cur and hops < 40:
+            gid = int(cur["GroupID"])
+            if gid in seen:
+                break
+            seen.add(gid)
+            name = (cur.get("GroupName") or "").strip().casefold()
+            best = max(best, int(PLACEMENT_RANK.get(name, 40)))
+            pid = cur.get("ParentGroupID")
+            cur = by_id.get(int(pid)) if pid else None
+            hops += 1
+        return best
+
+    def _pick_placement_group(
+        self, candidate_ids: list[int], by_id: dict[int, dict]
+    ) -> int | None:
+        best_id = None
+        best_rank = -1
+        for gid in candidate_ids:
+            if gid is None:
+                continue
+            group = by_id.get(int(gid))
+            if not group:
+                continue
+            rank = self._group_rank(group, by_id)
+            if rank > best_rank:
+                best_rank = rank
+                best_id = int(gid)
+        return best_id
+
+    def _group_is_receivable(self, group_id: int | None, by_id: dict[int, dict]) -> bool:
+        cur = by_id.get(int(group_id)) if group_id else None
+        seen: set[int] = set()
+        hops = 0
+        under_investments = False
+        is_receivable = False
+        while cur and hops < 40:
+            gid = int(cur["GroupID"])
+            if gid in seen:
+                break
+            seen.add(gid)
+            name = (cur.get("GroupName") or "").strip().casefold()
+            if name == "investments":
+                under_investments = True
+            if name in RECEIVABLE_GROUP_NAMES:
+                is_receivable = True
+            pid = cur.get("ParentGroupID")
+            cur = by_id.get(int(pid)) if pid else None
+            hops += 1
+        if under_investments:
+            return False
+        return is_receivable
+
+    def sort_tally_roots(self, nodes: list[dict], *, side: str) -> list[dict]:
+        order = TALLY_ASSET_ROOT_ORDER if side == "asset" else TALLY_LIABILITY_ROOT_ORDER
+        rank = {name.casefold(): i for i, name in enumerate(order)}
+
+        def key(node: dict) -> tuple:
+            name = (node.get("GroupName") or "").strip()
+            return (rank.get(name.casefold(), 80), name.casefold())
+
+        return sorted(nodes, key=key)
 
     def _signed_opening(self, amount, dr_cr: str | None, nature: str) -> Decimal:
         amt = abs(self.money(amount))
@@ -304,6 +437,24 @@ class FinancialReportEngine:
         """Unified ledger list: CoA rows + bank accounts mapped by ChartGroupID."""
         self.ensure_schema()
         ledgers: list[dict[str, Any]] = []
+        groups = self.load_groups(active_only=False)
+        groups_by_id = {int(g["GroupID"]): g for g in groups}
+
+        links_by_account: dict[int, list[int]] = defaultdict(list)
+        try:
+            link_rows = db.session.execute(
+                text(
+                    """
+                    SELECT AccountID, GroupID, DisplayOrder
+                    FROM dbo.ChartOfAccountGroupLink
+                    ORDER BY DisplayOrder, GroupID
+                    """
+                )
+            ).mappings().all()
+            for lr in link_rows:
+                links_by_account[int(lr["AccountID"])].append(int(lr["GroupID"]))
+        except Exception:
+            db.session.rollback()
 
         coa = db.session.execute(
             text(
@@ -330,18 +481,25 @@ class FinancialReportEngine:
             )
         ).mappings().all()
         for r in coa:
-            nature = (r.get("GroupNature") or "Asset").strip()
+            primary_gid = int(r["GroupID"])
+            aid = int(r["AccountID"])
+            candidates = links_by_account.get(aid) or [primary_gid]
+            if primary_gid not in candidates:
+                candidates = [primary_gid] + candidates
+            placed_gid = self._pick_placement_group(candidates, groups_by_id) or primary_gid
+            placed = groups_by_id.get(placed_gid) or groups_by_id.get(primary_gid)
+            nature = self._nature_from_group(placed, groups_by_id)
             ledgers.append(
                 {
-                    "ledger_key": f"coa-{r['AccountID']}",
+                    "ledger_key": f"coa-{aid}",
                     "source": "coa",
-                    "account_id": int(r["AccountID"]),
+                    "account_id": aid,
                     "bank_account_id": None,
                     "customer_id": int(r["CustomerID"]) if r.get("CustomerID") else None,
                     "work_id": int(r["WorkID"]) if r.get("WorkID") else None,
                     "ledger_name": (r.get("AccountName") or "").strip(),
-                    "group_id": int(r["GroupID"]),
-                    "group_name": r.get("GroupName") or "",
+                    "group_id": placed_gid,
+                    "group_name": (placed or {}).get("GroupName") or (r.get("GroupName") or ""),
                     "nature": nature,
                     "opening_raw": r.get("OpeningBalance"),
                     "opening_date": r.get("OpeningBalanceDate"),
@@ -723,6 +881,7 @@ class FinancialReportEngine:
         self.ensure_schema()
         ledgers = self.load_ledger_rows()
         moves = self._period_movements(date_from=date_from, date_to=date_to)
+        groups_by_id = {int(g["GroupID"]): g for g in self.load_groups(active_only=False)}
         needle = (search or "").strip().lower()
         result = []
         for led in ledgers:
@@ -733,8 +892,10 @@ class FinancialReportEngine:
                 # Align Balance Sheet bank totals with Ledger Export
                 # (master OB + prior Dr−Cr, then period Dr−Cr).
                 opening = self._bank_opening_as_of(int(led["bank_account_id"]), date_from)
-            elif led.get("customer_id"):
-                # Align with Customer Ledger / Ledger Export closing.
+            elif led.get("customer_id") and self._group_is_receivable(
+                led.get("group_id"), groups_by_id
+            ):
+                # Sundry debtors / Individual Client — Customer Ledger closing.
                 opening = self._customer_opening_as_of(int(led["customer_id"]), date_from)
             else:
                 opening = self._signed_opening(
@@ -745,6 +906,15 @@ class FinancialReportEngine:
                     ob_date = ob_date.date()
                 if ob_date and ob_date > date_to:
                     opening = ZERO
+                if (
+                    led.get("customer_id")
+                    and abs(opening) < Decimal("0.01")
+                ):
+                    cust_open = self._customer_opening_as_of(
+                        int(led["customer_id"]), date_from
+                    )
+                    if abs(cust_open) >= Decimal("0.01"):
+                        opening = cust_open
             mv = moves.get(led["ledger_key"], {"debit": ZERO, "credit": ZERO})
             debit = self.money(mv["debit"])
             credit = self.money(mv["credit"])

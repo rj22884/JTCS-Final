@@ -18,13 +18,15 @@
     form: document.getElementById("cgmForm"),
     id: document.getElementById("cgmId"),
     name: document.getElementById("cgmName"),
-    underAssets: document.getElementById("cgmUnderAssets"),
-    underLiabilities: document.getElementById("cgmUnderLiabilities"),
+    parent: document.getElementById("cgmParent"),
     isActive: document.getElementById("cgmIsActive"),
   };
 
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
   let searchTimer = null;
+  let allGroups = Array.isArray(window.CHART_GROUP_INITIAL_ROWS)
+    ? window.CHART_GROUP_INITIAL_ROWS.slice()
+    : [];
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -38,15 +40,47 @@
       .replace(/"/g, "&quot;");
   }
 
-  function selectedUnder() {
-    if (els.underLiabilities && els.underLiabilities.checked) return "Liabilities";
-    return "Assets";
+  function fillParentOptions(excludeId, selectedValue) {
+    if (!els.parent) return;
+    const current = selectedValue != null ? String(selectedValue) : "Assets";
+    const skip = excludeId != null && excludeId !== "" ? String(excludeId) : "";
+    let html =
+      '<option value="Assets">Assets (Primary)</option>' +
+      '<option value="Liabilities">Liabilities (Primary)</option>';
+    const groups = (allGroups || []).slice().sort(function (a, b) {
+      return String(a.group_name || "").localeCompare(String(b.group_name || ""));
+    });
+    groups.forEach(function (g) {
+      if (!g || String(g.group_id) === skip) return;
+      if (g.is_active === false) return;
+      const label = (g.group_name || "") + " (" + (g.under_label || g.parent_group_name || g.under_type || "") + ")";
+      html +=
+        '<option value="' +
+        escapeHtml(String(g.group_id)) +
+        '">' +
+        escapeHtml(label) +
+        "</option>";
+    });
+    els.parent.innerHTML = html;
+    if (current && Array.prototype.some.call(els.parent.options, function (opt) { return opt.value === current; })) {
+      els.parent.value = current;
+    } else {
+      els.parent.value = "Assets";
+    }
   }
 
-  function setUnder(value) {
-    const isLiab = String(value || "") === "Liabilities";
-    if (els.underAssets) els.underAssets.checked = !isLiab;
-    if (els.underLiabilities) els.underLiabilities.checked = isLiab;
+  function selectedParentPayload() {
+    const v = (els.parent && els.parent.value) || "Assets";
+    if (v === "Assets" || v === "Liabilities") {
+      return { under_type: v, parent_group_id: null };
+    }
+    const gid = parseInt(v, 10);
+    return { parent_group_id: gid || null };
+  }
+
+  function parentSelectValue(record) {
+    if (record && record.parent_group_id) return String(record.parent_group_id);
+    return record && record.under_type === "Liabilities" ? "Liabilities" : "Assets";
   }
 
   function showStatus(message, type) {
@@ -74,8 +108,11 @@
       els.count.textContent = rows.length + " record" + (rows.length === 1 ? "" : "s");
     }
     rows.forEach(function (row) {
+      const underLabel = row.under_label || row.parent_group_name || row.under_type || "";
       const underBadge =
-        row.under_type === "Liabilities"
+        row.parent_group_id
+          ? '<span class="badge text-bg-primary">' + escapeHtml(underLabel) + "</span>"
+          : row.under_type === "Liabilities"
           ? '<span class="badge text-bg-warning">Liabilities</span>'
           : '<span class="badge text-bg-info">Assets</span>';
       const tr = document.createElement("tr");
@@ -106,11 +143,24 @@
     });
   }
 
+  function filteredRows() {
+    const q = (els.search?.value || "").trim().toLowerCase();
+    if (!q) return allGroups;
+    return allGroups.filter(function (row) {
+      const blob = [
+        row.group_name,
+        row.under_label,
+        row.parent_group_name,
+        row.under_type,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return blob.indexOf(q) >= 0;
+    });
+  }
+
   function loadRows() {
-    const params = new URLSearchParams();
-    const q = (els.search?.value || "").trim();
-    if (q) params.set("search", q);
-    return fetch(api.list + "?" + params.toString(), {
+    return fetch(api.list, {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
       .then(function (res) {
@@ -120,7 +170,8 @@
         });
       })
       .then(function (data) {
-        renderRows(data.rows || []);
+        allGroups = data.rows || [];
+        renderRows(filteredRows());
       })
       .catch(function (err) {
         showStatus(err.message || "Load failed.", "danger");
@@ -130,7 +181,7 @@
   function openAdd() {
     if (els.id) els.id.value = "";
     if (els.name) els.name.value = "";
-    setUnder("Assets");
+    fillParentOptions("", "Assets");
     if (els.isActive) els.isActive.checked = true;
     if (els.modalTitle) els.modalTitle.textContent = "Add Group";
     modal?.show();
@@ -150,7 +201,7 @@
       .then(function (record) {
         if (els.id) els.id.value = String(record.group_id || "");
         if (els.name) els.name.value = record.group_name || "";
-        setUnder(record.under_type || "Assets");
+        fillParentOptions(record.group_id, parentSelectValue(record));
         if (els.isActive) els.isActive.checked = !!record.is_active;
         if (els.modalTitle) els.modalTitle.textContent = "Edit Group";
         modal?.show();
@@ -163,11 +214,13 @@
   function save(event) {
     event.preventDefault();
     const id = (els.id?.value || "").trim();
-    const payload = {
-      group_name: (els.name?.value || "").trim(),
-      under_type: selectedUnder(),
-      is_active: els.isActive?.checked ? "1" : "0",
-    };
+    const payload = Object.assign(
+      {
+        group_name: (els.name?.value || "").trim(),
+        is_active: els.isActive?.checked ? "1" : "0",
+      },
+      selectedParentPayload()
+    );
     if (!payload.group_name) {
       alert("Group Name is required.");
       return;
@@ -240,7 +293,9 @@
   els.form?.addEventListener("submit", save);
   els.search?.addEventListener("input", function () {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadRows, 250);
+    searchTimer = setTimeout(function () {
+      renderRows(filteredRows());
+    }, 250);
   });
   els.body?.addEventListener("click", function (event) {
     const editBtn = event.target.closest(".cgm-edit");
@@ -252,5 +307,5 @@
     if (delBtn) remove(delBtn.getAttribute("data-id"));
   });
 
-  renderRows(window.CHART_GROUP_INITIAL_ROWS || []);
+  renderRows(filteredRows());
 })();

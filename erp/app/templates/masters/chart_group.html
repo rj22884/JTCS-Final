@@ -31,8 +31,8 @@
   </div>
 
   <p class="small text-muted mb-3">
-    Tally-style <strong>List of Groups</strong>. Each group is under <strong>Assets</strong> or <strong>Liabilities</strong>.
-    Used by Chart of Account Master.
+    Tally-style <strong>List of Groups</strong>. <strong>Under</strong> is the parent group
+    (e.g. Investments, Current Assets), same as Tally. Ledgers in that group appear on the Balance Sheet under that head.
   </p>
   <div id="cgmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
@@ -70,15 +70,12 @@
                    placeholder="e.g. Sundry Debtors">
           </div>
           <div class="mb-3">
-            <span class="form-label d-block">Under *</span>
-            <div class="form-check form-check-inline">
-              <input class="form-check-input" type="radio" name="cgmUnder" id="cgmUnderAssets" value="Assets" checked>
-              <label class="form-check-label" for="cgmUnderAssets">Assets</label>
-            </div>
-            <div class="form-check form-check-inline">
-              <input class="form-check-input" type="radio" name="cgmUnder" id="cgmUnderLiabilities" value="Liabilities">
-              <label class="form-check-label" for="cgmUnderLiabilities">Liabilities</label>
-            </div>
+            <label class="form-label" for="cgmParent">Under *</label>
+            <select class="form-select" id="cgmParent" required>
+              <option value="Assets">Assets (Primary)</option>
+              <option value="Liabilities">Liabilities (Primary)</option>
+            </select>
+            <div class="form-text">Same as Tally: choose the parent group, e.g. Investments.</div>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="checkbox" id="cgmIsActive" checked>
@@ -109,5 +106,5 @@
   window.CHART_GROUP_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.CHART_GROUP_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/chart_group_master.js') }}?v=20260804cgm"></script>
+<script src="{{ url_for('static', filename='js/chart_group_master.js') }}?v=20260819cgm2"></script>
 {% endblock %}

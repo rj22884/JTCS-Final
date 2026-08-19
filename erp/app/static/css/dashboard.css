@@ -491,11 +491,123 @@
   background: linear-gradient(180deg, #ea580c, #fbbf24);
 }
 
-#dashMetricCards .dash-metric-bank {
+#dashMetricCards .dash-metric-bank,
+#dashMetricCards .dash-bank-balance-card {
   background: linear-gradient(145deg, #f0fdfa 0%, #fff 55%);
 }
-#dashMetricCards .dash-metric-bank::before {
+#dashMetricCards .dash-metric-bank::before,
+#dashMetricCards .dash-bank-balance-card::before {
   background: linear-gradient(180deg, #0f766e, #14b8a6);
+}
+
+#dashMetricCards .dash-bank-balance-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem 0.65rem;
+  height: 100%;
+  overflow: visible;
+  z-index: 1;
+}
+
+#dashMetricCards .dash-bank-balance-card:hover,
+#dashMetricCards .dash-bank-balance-card:focus-within {
+  z-index: 50;
+}
+
+#dashMetricCards .dash-bank-balance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+#dashMetricCards .dash-bank-balance-head .jtcs-illu-host {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+}
+
+#dashMetricCards .dash-bank-balance-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.45rem;
+  overflow: visible;
+  background: #fff;
+}
+
+#dashMetricCards .dash-bank-balance-col-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+#dashMetricCards .dash-bank-balance-col-wrap:hover,
+#dashMetricCards .dash-bank-balance-col-wrap:focus-within {
+  z-index: 51;
+}
+
+#dashMetricCards .dash-bank-balance-col-wrap .dash-bank-closing-hover {
+  min-width: 16.5rem;
+  left: 0;
+  right: auto;
+}
+
+#dashMetricCards .dash-bank-balance-col-wrap.is-liability .dash-bank-closing-hover {
+  left: auto;
+  right: 0;
+}
+
+#dashMetricCards .dash-bank-balance-col-wrap + .dash-bank-balance-col-wrap {
+  border-left: 1px solid #dbe4ee;
+}
+
+#dashMetricCards .dash-bank-balance-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0.4rem 0.5rem 0.45rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  text-align: left;
+  min-width: 0;
+}
+
+#dashMetricCards .dash-bank-balance-col + .dash-bank-balance-col {
+  border-left: 0;
+}
+
+#dashMetricCards .dash-bank-balance-col:hover,
+#dashMetricCards .dash-bank-balance-col:focus {
+  background: #f8fafc;
+  box-shadow: none;
+  transform: none;
+  border-color: transparent;
+}
+
+#dashMetricCards .dash-bank-balance-col-label {
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+#dashMetricCards .dash-bank-balance-col.is-liability .dash-bank-balance-col-label {
+  color: #be123c;
+}
+
+#dashMetricCards .dash-bank-balance-col .jtcs-metric-value {
+  font-size: 0.95rem;
+  line-height: 1.2;
+  word-break: break-word;
 }
 
 #dashMetricCards .dash-metric-bank-liability {

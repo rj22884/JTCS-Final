@@ -90,8 +90,14 @@ class FinancialStatementsService:
             for led in ledgers
             if abs(self.engine.money(led.get("closing"))) >= Decimal("0.01")
         ]
-        liabilities = self.engine.rollup_groups(ledgers, natures={"Liability"})
-        assets = self.engine.rollup_groups(ledgers, natures={"Asset"})
+        liabilities = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(ledgers, natures={"Liability"}),
+            side="liability",
+        )
+        assets = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(ledgers, natures={"Asset"}),
+            side="asset",
+        )
         # P&L net transferred to BS
         pl = self._pl_net(ledgers)
         if pl != ZERO:
