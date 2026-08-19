@@ -10,7 +10,12 @@ from typing import Any
 from sqlalchemy import text
 
 from app.extensions import db
-from app.utils.opening_balance import default_dr_cr_for_under_type
+from app.utils.opening_balance import (
+    BANK_MOVEMENT_SINCE_OPENING_SQL,
+    apply_account_running,
+    default_dr_cr_for_under_type,
+    is_credit_normal_nature,
+)
 
 ZERO = Decimal("0.00")
 
@@ -615,13 +620,25 @@ class FinancialReportEngine:
         return ledgers
 
     def _bank_opening_as_of(self, bank_account_id: int, date_from: date) -> Decimal:
-        """Master OB + prior Debit−Credit on/after OpeningBalanceDate only."""
+        """Master OB + prior movements on/after OpeningBalanceDate (same as Ledger Export)."""
         row = db.session.execute(
             text(
                 """
-                SELECT OpeningBalance, OpeningBalanceDate
-                FROM dbo.JtcsBankAccountMaster
-                WHERE JtcsBankAccountID = :bid
+                SELECT
+                    b.OpeningBalance,
+                    b.OpeningBalanceDate,
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+                FROM dbo.JtcsBankAccountMaster b
+                LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = b.ChartGroupID
+                WHERE b.JtcsBankAccountID = :bid
                 """
             ),
             {"bid": bank_account_id},
@@ -634,8 +651,11 @@ class FinancialReportEngine:
             ob_date = ob_date.date()
         if ob_date is None or ob_date <= date_from:
             opening = self.money(row.get("OpeningBalance"))
+        credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
         prior_sql = """
-                SELECT ISNULL(SUM(ISNULL(Debit, 0) - ISNULL(Credit, 0)), 0)
+                SELECT
+                    ISNULL(SUM(ISNULL(Debit, 0)), 0) AS prior_debit,
+                    ISNULL(SUM(ISNULL(Credit, 0)), 0) AS prior_credit
                 FROM dbo.JtcsBankTransaction
                 WHERE JtcsBankAccountID = :bid
                   AND TransactionDate < :d1
@@ -644,8 +664,13 @@ class FinancialReportEngine:
         if ob_date is not None:
             prior_sql += " AND TransactionDate >= :ob_date"
             prior_params["ob_date"] = ob_date
-        prior = db.session.execute(text(prior_sql), prior_params).scalar()
-        return self.money(opening + self.money(prior))
+        prior = db.session.execute(text(prior_sql), prior_params).mappings().first()
+        return apply_account_running(
+            opening,
+            self.money(prior["prior_debit"] if prior else 0),
+            self.money(prior["prior_credit"] if prior else 0),
+            credit_normal=credit_normal,
+        )
 
     def _customer_has_opening_cols(self) -> bool:
         try:
@@ -774,17 +799,20 @@ class FinancialReportEngine:
             lambda: {"debit": ZERO, "credit": ZERO}
         )
 
-        # Bank transactions → bank ledgers
+        # Bank transactions → bank ledgers (same date floor as Ledger Export)
         bank_rows = db.session.execute(
             text(
-                """
-                SELECT JtcsBankAccountID,
-                       SUM(ISNULL(Debit, 0)) AS DebitAmt,
-                       SUM(ISNULL(Credit, 0)) AS CreditAmt
-                FROM dbo.JtcsBankTransaction
-                WHERE TransactionDate >= :d1 AND TransactionDate <= :d2
-                  AND JtcsBankAccountID > 0
-                GROUP BY JtcsBankAccountID
+                f"""
+                SELECT t.JtcsBankAccountID,
+                       SUM(ISNULL(t.Debit, 0)) AS DebitAmt,
+                       SUM(ISNULL(t.Credit, 0)) AS CreditAmt
+                FROM dbo.JtcsBankTransaction t
+                INNER JOIN dbo.JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = t.JtcsBankAccountID
+                WHERE t.TransactionDate >= :d1 AND t.TransactionDate <= :d2
+                  AND t.JtcsBankAccountID > 0
+                  AND {BANK_MOVEMENT_SINCE_OPENING_SQL}
+                GROUP BY t.JtcsBankAccountID
                 """
             ),
             {"d1": date_from, "d2": date_to},
@@ -1096,13 +1124,16 @@ class FinancialReportEngine:
             mv = moves.get(led["ledger_key"], {"debit": ZERO, "credit": ZERO})
             debit = self.money(mv["debit"])
             credit = self.money(mv["credit"])
-            # Closing signed balance. Bank + customer books use Debit−Credit
-            # (same as Ledger Export), even when group nature differs.
-            if (
-                led.get("source") == "bank"
-                or led.get("customer_id")
-                or nature in {"Asset", "Expense"}
-            ):
+            # Bank books follow Ledger Export / dashboard: Asset = +Dr−Cr,
+            # Bank OD / liability = +Cr−Dr. Customer books stay +Dr−Cr.
+            if led.get("source") == "bank":
+                closing = apply_account_running(
+                    opening,
+                    debit,
+                    credit,
+                    credit_normal=is_credit_normal_nature(nature),
+                )
+            elif led.get("customer_id") or nature in {"Asset", "Expense"}:
                 closing = opening + debit - credit
             else:
                 closing = opening + credit - debit
@@ -1122,7 +1153,9 @@ class FinancialReportEngine:
                         )
                         else "Cr"
                     ),
-                    "display_closing": abs(closing),
+                    "display_closing": (
+                        closing if led.get("source") == "bank" else abs(closing)
+                    ),
                     "preview_kind": pref_kind,
                     "preview_id": pref_id,
                 }
