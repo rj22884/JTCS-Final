@@ -119,17 +119,7 @@
 
           <div class="cm-group-bar mb-3">
             <div class="row g-2 align-items-end">
-              <div class="col-md-4 col-lg-3">
-                <label class="form-label cm-required mb-1" for="cm_customer_group">Customer Group</label>
-                <select class="form-select cm-group-select" id="cm_customer_group" name="customer_group"
-                        data-cm-field="customer_group" required>
-                  <option value="">-- Select Group --</option>
-                  {% for g in customer_groups %}
-                  <option value="{{ g.code }}">{{ g.label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-8 col-lg-6 d-none" id="cmChartGroupBar">
+              <div class="col-md-8 col-lg-6" id="cmChartGroupBar">
                 <label class="form-label cm-required mb-1" for="cm_chart_groups">
                   Chart of Account Group
                 </label>
@@ -140,14 +130,26 @@
                   {% endfor %}
                 </select>
               </div>
+              <div class="col-md-4 col-lg-3">
+                <label class="form-label cm-required mb-1" for="cm_customer_group">Customer Group</label>
+                <select class="form-select cm-group-select" id="cm_customer_group" name="customer_group"
+                        data-cm-field="customer_group" required>
+                  <option value="">-- Select Group --</option>
+                  {% for g in customer_groups %}
+                  <option value="{{ g.code }}">{{ g.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
             </div>
             <div class="form-text mt-1">
-              Customer groups:
-              <a href="{{ url_for('masters_group.index') }}">Customer Group Master</a>.
               Chart groups:
               <a href="{{ url_for('masters_chart_group.index') }}">Chart of Group Master</a>
-              (select one after Customer Group).
+              (select first).
+              Customer groups:
+              <a href="{{ url_for('masters_group.index') }}">Customer Group Master</a>
+              (filtered by Chart of Account Group).
             </div>
+            <div id="cmGroupComboWarn" class="alert alert-warning py-2 small d-none mt-2 mb-0" role="alert"></div>
           </div>
 
           <div class="cm-ie-work-bar mb-3 d-none" id="cmIeWorkBar">
@@ -438,6 +440,8 @@
   window.CM_PLACEHOLDER_PAN = {{ ui_config.placeholder_pan|tojson }};
   window.CM_CHART_GROUPS = {{ chart_of_groups|tojson }};
   window.CM_DEFAULT_CHART_GROUP_ID = {{ default_chart_group_id|tojson }};
+  window.CM_CUSTOMER_GROUPS = {{ customer_groups|tojson }};
+  window.CM_GROUP_CHART_FILTER = {{ customer_group_filter|tojson }};
   window.CM_IE_WORKS = {{ income_expense_works|tojson }};
   window.CM_PORTALS = {
     incomeTaxLogin: "https://eportal.incometax.gov.in/iec/foservices/#/login",
@@ -445,5 +449,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260818usage1"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260819coa1"></script>
 {% endblock %}

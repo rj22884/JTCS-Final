@@ -544,6 +544,8 @@ class LedgerExportService:
             "meta": [
                 ("Account", label),
                 ("Account Holder", (account["AccountHolderName"] or "").strip() or "—"),
+                ("Chart of Account Group", (account.get("GroupName") or "").strip() or "—"),
+                ("Ledger Balance", f"{running:,.2f}"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),
             ],
             "headers": [
@@ -920,7 +922,14 @@ class LedgerExportService:
                 SELECT CustomerID, CustomerName, MobileNumber, PANNumber,
                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
                        OpeningBalanceDate,
-                       OpeningBalanceDrCr
+                       OpeningBalanceDrCr,
+                       CustomerGroup
+                FROM dbo.CustomerMaster
+                WHERE CustomerID = :customer_id
+            """
+        else:
+            customer_sql = """
+                SELECT CustomerID, CustomerName, MobileNumber, PANNumber, CustomerGroup
                 FROM dbo.CustomerMaster
                 WHERE CustomerID = :customer_id
             """
@@ -1128,6 +1137,29 @@ class LedgerExportService:
             )
 
         name = (customer["CustomerName"] or f"Customer {customer_id}").strip()
+        chart_group_name = ""
+        try:
+            chart_row = db.session.execute(
+                text(
+                    """
+                    SELECT TOP 1 g.GroupName
+                    FROM dbo.ChartOfAccountMaster a
+                    INNER JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                    WHERE a.CustomerID = :cid AND ISNULL(a.IsActive, 1) = 1
+                    ORDER BY a.AccountID
+                    """
+                ),
+                {"cid": customer_id},
+            ).mappings().first()
+            if chart_row:
+                chart_group_name = (chart_row.get("GroupName") or "").strip()
+        except Exception:
+            db.session.rollback()
+        customer_group = ""
+        try:
+            customer_group = (customer.get("CustomerGroup") or "").strip()
+        except Exception:
+            customer_group = ""
         lines: list[dict[str, Any]] = []
         running = opening
         lines.append(
@@ -1183,6 +1215,9 @@ class LedgerExportService:
             "meta": [
                 ("Customer", name),
                 ("Customer ID", str(customer_id)),
+                ("Chart of Account Group", chart_group_name or "—"),
+                ("Customer Group", customer_group or "—"),
+                ("Ledger Balance", f"{running:,.2f}"),
                 ("Mobile", (customer["MobileNumber"] or "").strip() or "—"),
                 ("PAN", (customer["PANNumber"] or "").strip() or "—"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),

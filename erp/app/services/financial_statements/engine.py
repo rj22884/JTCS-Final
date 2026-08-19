@@ -355,6 +355,57 @@ class FinancialReportEngine:
         under = ((group or {}).get("UnderType") or "").strip()
         return "Asset" if under == "Assets" else "Liability"
 
+    def _ancestor_names(self, group: dict | None, by_id: dict[int, dict]) -> list[str]:
+        names: list[str] = []
+        cur = group
+        seen: set[int] = set()
+        hops = 0
+        while cur and hops < 40:
+            gid = int(cur["GroupID"])
+            if gid in seen:
+                break
+            seen.add(gid)
+            names.append((cur.get("GroupName") or "").strip().casefold())
+            pid = cur.get("ParentGroupID")
+            cur = by_id.get(int(pid)) if pid else None
+            hops += 1
+        return names
+
+    def group_ids_under_names(self, names: set[str]) -> set[int]:
+        """Chart of Account Group IDs whose self or ancestor name is in `names`."""
+        wanted = {n.strip().casefold() for n in names if n}
+        groups = self.load_groups(active_only=False)
+        by_id = {int(g["GroupID"]): g for g in groups}
+        out: set[int] = set()
+        for g in groups:
+            if any(n in wanted for n in self._ancestor_names(g, by_id)):
+                out.add(int(g["GroupID"]))
+        return out
+
+    def is_trading_group(self, group_id: int | None, by_id: dict[int, dict] | None = None) -> bool:
+        """Direct trading Income/Expense groups from Chart of Account Group Master."""
+        if not group_id:
+            return False
+        by_id = by_id if by_id is not None else {
+            int(g["GroupID"]): g for g in self.load_groups(active_only=False)
+        }
+        group = by_id.get(int(group_id))
+        if not group:
+            return False
+        nature = self._nature_from_group(group, by_id)
+        if nature not in {"Income", "Expense"}:
+            return False
+        names = self._ancestor_names(group, by_id)
+        if any("indirect" in n for n in names):
+            return False
+        return any(
+            "direct" in n
+            or n.startswith("sales")
+            or n.startswith("purchase")
+            or n in {"commission income", "salary and wages"}
+            for n in names
+        )
+
     def _group_rank(self, group: dict, by_id: dict[int, dict]) -> int:
         best = 0
         cur = group
@@ -473,9 +524,11 @@ class FinancialReportEngine:
                     g.UnderType,
                     ISNULL(NULLIF(g.GroupNature, N''),
                            CASE WHEN g.UnderType = N'Assets' THEN N'Asset' ELSE N'Liability' END
-                    ) AS GroupNature
+                    ) AS GroupNature,
+                    c.CustomerGroup
                 FROM dbo.ChartOfAccountMaster a
                 INNER JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                LEFT JOIN dbo.CustomerMaster c ON c.CustomerID = a.CustomerID
                 WHERE a.IsActive = 1
                 """
             )
@@ -501,6 +554,7 @@ class FinancialReportEngine:
                     "group_id": placed_gid,
                     "group_name": (placed or {}).get("GroupName") or (r.get("GroupName") or ""),
                     "nature": nature,
+                    "customer_group": (r.get("CustomerGroup") or "").strip(),
                     "opening_raw": r.get("OpeningBalance"),
                     "opening_date": r.get("OpeningBalanceDate"),
                     "opening_dr_cr": r.get("OpeningBalanceDrCr"),
@@ -956,10 +1010,16 @@ class FinancialReportEngine:
     ) -> list[dict[str, Any]]:
         """Attach ledgers to group tree and sum closing balances recursively."""
         groups = self.load_groups()
+        by_id = {int(g["GroupID"]): g for g in groups}
         if natures:
-            allowed = {g["GroupID"] for g in groups if (g.get("GroupNature") or "") in natures}
-            # keep ancestors of allowed
-            by_id = {int(g["GroupID"]): g for g in groups}
+            allowed = {
+                g["GroupID"]
+                for g in groups
+                if self._nature_from_group(g, by_id) in natures
+            }
+            for led in ledgers:
+                if led.get("nature") in natures and led.get("group_id"):
+                    allowed.add(int(led["group_id"]))
             keep = set(allowed)
             for gid in list(allowed):
                 cur = by_id.get(int(gid))
@@ -1108,15 +1168,19 @@ class FinancialReportEngine:
         )
         opening = ZERO
         name = ledger_key
+        chart_group_name = ""
+        customer_group_name = ""
         if ledger_key.startswith("coa-"):
             aid = int(ledger_key.split("-", 1)[1])
             info = db.session.execute(
                 text(
                     """
                     SELECT AccountName, OpeningBalance, OpeningBalanceDate, OpeningBalanceDrCr,
-                           CustomerID, WorkID, g.GroupNature, g.UnderType
+                           CustomerID, WorkID, a.GroupID, g.GroupName, g.GroupNature, g.UnderType,
+                           c.CustomerGroup
                     FROM dbo.ChartOfAccountMaster a
                     LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                    LEFT JOIN dbo.CustomerMaster c ON c.CustomerID = a.CustomerID
                     WHERE a.AccountID = :aid
                     """
                 ),
@@ -1130,6 +1194,8 @@ class FinancialReportEngine:
                 opening = self._signed_opening(
                     info.get("OpeningBalance"), info.get("OpeningBalanceDrCr"), nature
                 )
+                chart_group_name = (info.get("GroupName") or "").strip()
+                customer_group_name = (info.get("CustomerGroup") or "").strip()
                 if info.get("CustomerID"):
                     try:
                         from app.services.ledger_export_service import LedgerExportService
@@ -1289,6 +1355,9 @@ class FinancialReportEngine:
             "entity_name": name,
             "meta": [
                 {"label": "Account", "value": name},
+                {"label": "Chart of Account Group", "value": chart_group_name or "—"},
+                {"label": "Customer Group", "value": customer_group_name or "—"},
+                {"label": "Ledger Balance", "value": str(self.money(running))},
                 {
                     "label": "Period",
                     "value": f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}",

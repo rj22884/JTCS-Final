@@ -70,6 +70,14 @@ def index():
             default_chart_group_id = g.get("group_id")
             break
     try:
+        customer_group_filter = group_service.customer_form_filter_payload()
+    except Exception:
+        customer_group_filter = {
+            "groups": ui["groups"],
+            "usage": {},
+            "chart_natures": {},
+        }
+    try:
         income_expense_works = WorkMasterService().list_records()
     except Exception:
         income_expense_works = []
@@ -80,6 +88,7 @@ def index():
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=service.list_records(),
         customer_groups=ui["groups"],
+        customer_group_filter=customer_group_filter,
         chart_of_groups=chart_of_groups,
         default_chart_group_id=default_chart_group_id,
         income_expense_works=income_expense_works,

@@ -49,6 +49,8 @@ class ChartGroupService:
         ]
 
     def list_active_for_dropdown(self) -> list[dict]:
+        from app.services.financial_statements.engine import NATURE_BY_NAME
+
         by_id = self._parent_lookup()
         rows = []
         for row in self.repo.list_all(active_only=True):
@@ -58,6 +60,27 @@ class ChartGroupService:
                 if parent is not None:
                     parent_name = parent.GroupName or ""
             under = parent_name or row.UnderType or ""
+            nature = ""
+            cur = row
+            hops = 0
+            seen: set[int] = set()
+            while cur is not None and hops < 40:
+                gid = int(cur.GroupID)
+                if gid in seen:
+                    break
+                seen.add(gid)
+                mapped = NATURE_BY_NAME.get((cur.GroupName or "").strip())
+                if mapped:
+                    nature = mapped
+                    break
+                stored = (getattr(cur, "GroupNature", None) or "").strip()
+                if stored in {"Asset", "Liability", "Income", "Expense"}:
+                    nature = stored
+                    break
+                cur = by_id.get(int(cur.ParentGroupID)) if cur.ParentGroupID else None
+                hops += 1
+            if nature not in {"Asset", "Liability", "Income", "Expense"}:
+                nature = "Asset" if (row.UnderType or "") == "Assets" else "Liability"
             rows.append(
                 {
                     "group_id": row.GroupID,
@@ -65,6 +88,7 @@ class ChartGroupService:
                     "under_type": row.UnderType,
                     "parent_group_id": int(row.ParentGroupID) if row.ParentGroupID else None,
                     "parent_group_name": parent_name,
+                    "group_nature": nature,
                     "label": f"{row.GroupName} ({under})",
                 }
             )

@@ -275,6 +275,23 @@ class CustomerMasterService:
         if group not in active_codes:
             raise ValueError("Select a valid customer group.")
 
+        chart_ids = self._parse_id_list(
+            payload.get("chart_group_ids")
+            if payload.get("chart_group_ids") is not None
+            else payload.get("group_ids")
+        )
+        if not chart_ids:
+            single = payload.get("group_id")
+            if single is None:
+                single = payload.get("GroupID")
+            chart_ids = self._parse_id_list([single] if single not in (None, "") else [])
+        if not chart_ids:
+            raise ValueError("Select Chart of Account Group.")
+        if not self.group_service.is_group_valid_for_chart(group, chart_ids[0]):
+            raise ValueError(
+                "Selected Customer Group is not valid for the selected Chart of Account Group."
+            )
+
         gst_number = (payload.get("gst_number") or "").strip()
         filing_frequency = (payload.get("filing_frequency") or "").strip()
         if not gst_number:

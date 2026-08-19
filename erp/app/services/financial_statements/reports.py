@@ -141,22 +141,14 @@ class FinancialStatementsService:
         ledgers = self.engine.compute_ledger_balances(
             date_from=date_from, date_to=date_to, search=search
         )
-        direct_income_names = {
-            "direct incomes",
-            "income (direct)",
-            "sales accounts",
-            "commission income",
-            "purchase accounts",
-            "direct expenses",
-            "expenses (direct)",
-            "salary and wages",
-        }
         incomes = [l for l in ledgers if l.get("nature") == "Income"]
         expenses = [l for l in ledgers if l.get("nature") == "Expense"]
+        groups_by_id = {
+            int(g["GroupID"]): g for g in self.engine.load_groups(active_only=False)
+        }
 
         def is_direct(led: dict) -> bool:
-            g = (led.get("group_name") or "").strip().lower()
-            return g in direct_income_names or "direct" in g or g.startswith("sales") or g.startswith("purchase")
+            return self.engine.is_trading_group(led.get("group_id"), groups_by_id)
 
         direct_income = self.engine.rollup_groups(
             [l for l in incomes if is_direct(l)], natures={"Income"}
@@ -223,6 +215,7 @@ class FinancialStatementsService:
                     "credit": cr,
                     "period_debit": led["debit"],
                     "period_credit": led["credit"],
+                    "customer_group": led.get("customer_group") or "",
                 }
             )
             total_dr += dr
@@ -283,9 +276,19 @@ class FinancialStatementsService:
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
         self.engine.ensure_schema()
+        cash_group_ids = self.engine.group_ids_under_names({"cash-in-hand", "bank accounts"})
+        gid_sql = "1 = 0"
+        params: dict[str, Any] = {"d1": date_from, "d2": date_to}
+        if cash_group_ids:
+            placeholders = []
+            for i, gid in enumerate(sorted(cash_group_ids)):
+                key = f"cg{i}"
+                placeholders.append(f":{key}")
+                params[key] = gid
+            gid_sql = "g.GroupID IN (" + ", ".join(placeholders) + ")"
         rows = db.session.execute(
             text(
-                """
+                f"""
                 SELECT
                     ISNULL(t.LedgerKind, N'OTHER') AS kind,
                     SUM(ISNULL(t.Debit, 0)) AS debit,
@@ -298,12 +301,12 @@ class FinancialStatementsService:
                   AND (
                         LOWER(LTRIM(RTRIM(ISNULL(b.BankName, N'')))) = N'cash'
                      OR LOWER(LTRIM(RTRIM(ISNULL(b.AccountNumber, N'')))) = N'cash'
-                     OR ISNULL(g.GroupName, N'') IN (N'Cash-in-Hand', N'Bank Accounts')
+                     OR {gid_sql}
                   )
                 GROUP BY ISNULL(t.LedgerKind, N'OTHER')
                 """
             ),
-            {"d1": date_from, "d2": date_to},
+            params,
         ).mappings().all()
         operating_in = ZERO
         operating_out = ZERO
@@ -376,6 +379,7 @@ class FinancialStatementsService:
         self.engine.ensure_schema()
         self._recompute_depreciation(date_to)
         needle = (search or "").strip().lower()
+        fa_group_ids = self.engine.group_ids_under_names({"fixed assets"})
         rows = db.session.execute(
             text(
                 """
@@ -388,10 +392,39 @@ class FinancialStatementsService:
                 """
             )
         ).mappings().all()
+        account_group: dict[int, int] = {}
+        try:
+            coa_rows = db.session.execute(
+                text("SELECT AccountID, GroupID FROM dbo.ChartOfAccountMaster WHERE IsActive = 1")
+            ).mappings().all()
+            account_group = {
+                int(r["AccountID"]): int(r["GroupID"])
+                for r in coa_rows
+                if r.get("AccountID") and r.get("GroupID")
+            }
+        except Exception:
+            db.session.rollback()
         out = []
+        seen_accounts: set[int] = set()
         for r in rows:
             if needle and needle not in (r.get("AssetName") or "").lower():
                 continue
+            gid = r.get("GroupID")
+            aid = r.get("AccountID")
+            mapped_gid = account_group.get(int(aid)) if aid else None
+            in_fa = False
+            if not fa_group_ids:
+                in_fa = True
+            elif gid and int(gid) in fa_group_ids:
+                in_fa = True
+            elif mapped_gid and mapped_gid in fa_group_ids:
+                in_fa = True
+            elif not gid and not mapped_gid:
+                in_fa = True
+            if not in_fa:
+                continue
+            if aid:
+                seen_accounts.add(int(aid))
             out.append(
                 {
                     "asset_id": r["AssetID"],
@@ -406,6 +439,36 @@ class FinancialStatementsService:
                     "method": r.get("Method") or "WDV",
                 }
             )
+        if fa_group_ids:
+            ledgers = self.engine.compute_ledger_balances(
+                date_from=date_from, date_to=date_to, search=search
+            )
+            for led in ledgers:
+                aid = led.get("account_id")
+                if not aid or int(aid) in seen_accounts:
+                    continue
+                if int(led.get("group_id") or 0) not in fa_group_ids:
+                    continue
+                if abs(self.engine.money(led.get("closing"))) < Decimal("0.01") and abs(
+                    self.engine.money(led.get("opening"))
+                ) < Decimal("0.01"):
+                    continue
+                opening = self.engine.money(led.get("opening"))
+                closing = self.engine.money(led.get("closing"))
+                out.append(
+                    {
+                        "asset_id": None,
+                        "asset_name": led.get("ledger_name") or "",
+                        "purchase_date": "",
+                        "purchase_value": abs(opening) if opening else abs(closing),
+                        "depreciation_rate": ZERO,
+                        "opening_accumulated": ZERO,
+                        "current_year_depreciation": ZERO,
+                        "accumulated_depreciation": ZERO,
+                        "wdv": abs(closing),
+                        "method": "WDV",
+                    }
+                )
         return {
             "layout": "depreciation",
             "rows": out,
@@ -539,6 +602,8 @@ class FinancialStatementsService:
                 {
                     "ledger_key": l.get("ledger_key"),
                     "ledger_name": l.get("ledger_name"),
+                    "group_name": l.get("group_name"),
+                    "customer_group": l.get("customer_group") or "",
                     "closing": str(self.engine.money(l.get("closing"))),
                     "display_closing": str(self.engine.money(l.get("display_closing"))),
                     "debit": str(self.engine.money(l.get("debit"))),

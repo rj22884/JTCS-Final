@@ -46,6 +46,150 @@ class CustomerGroupService:
             for row in self.repository.list_dicts(active_only=True)
         ]
 
+    def chart_group_usage_map(self) -> dict[str, list[int]]:
+        """Existing Customer Group → Chart of Account Group IDs (read-only)."""
+        from sqlalchemy import text
+
+        from app.extensions import db
+
+        usage: dict[str, list[int]] = {}
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT DISTINCT
+                        UPPER(LTRIM(RTRIM(c.CustomerGroup))) AS CustomerGroup,
+                        a.GroupID
+                    FROM dbo.CustomerMaster c
+                    INNER JOIN dbo.ChartOfAccountMaster a ON a.CustomerID = c.CustomerID
+                    WHERE c.CustomerGroup IS NOT NULL
+                      AND LTRIM(RTRIM(c.CustomerGroup)) <> N''
+                      AND a.GroupID IS NOT NULL
+                      AND ISNULL(a.IsActive, 1) = 1
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return usage
+        for row in rows:
+            code = (row.get("CustomerGroup") or "").strip().upper()
+            try:
+                gid = int(row.get("GroupID"))
+            except (TypeError, ValueError):
+                continue
+            if not code or gid <= 0:
+                continue
+            bucket = usage.setdefault(code, [])
+            if gid not in bucket:
+                bucket.append(gid)
+        return usage
+
+    @staticmethod
+    def filter_codes_for_chart(
+        *,
+        active_codes: list[str],
+        chart_group_id: int | None,
+        chart_nature: str | None,
+        usage: dict[str, list[int]] | dict[str, set[int]],
+        nature_by_chart_id: dict[int, str],
+        include_code: str | None = None,
+    ) -> list[str]:
+        """Customer Groups allowed for a Chart of Account Group.
+
+        Unused groups stay available (new combinations). Groups already used
+        with other natures are hidden unless include_code keeps a legacy value.
+        """
+        if not chart_group_id:
+            return []
+        selected_nature = (chart_nature or "").strip()
+        include = (include_code or "").strip().upper()
+        allowed: list[str] = []
+        for raw in active_codes:
+            code = (raw or "").strip()
+            if not code:
+                continue
+            key = code.upper()
+            if include and key == include:
+                if code not in allowed:
+                    allowed.append(code)
+                continue
+            used_ids = {int(gid) for gid in (usage.get(key) or usage.get(code) or []) if gid}
+            if not used_ids:
+                allowed.append(code)
+                continue
+            if int(chart_group_id) in used_ids:
+                allowed.append(code)
+                continue
+            used_natures = {
+                (nature_by_chart_id.get(int(gid)) or "").strip()
+                for gid in used_ids
+            }
+            used_natures.discard("")
+            if selected_nature and selected_nature in used_natures:
+                allowed.append(code)
+        return allowed
+
+    def allowed_group_codes(
+        self,
+        chart_group_id: int | None,
+        *,
+        include_code: str | None = None,
+    ) -> list[str]:
+        active = [g["code"] for g in self.list_active_groups()]
+        if not chart_group_id:
+            return []
+        natures: dict[int, str] = {}
+        selected_nature = ""
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            for item in ChartGroupService().list_active_for_dropdown():
+                gid = int(item.get("group_id") or 0)
+                if gid <= 0:
+                    continue
+                natures[gid] = (item.get("group_nature") or "").strip()
+            selected_nature = natures.get(int(chart_group_id), "")
+        except Exception:
+            natures = {}
+        return self.filter_codes_for_chart(
+            active_codes=active,
+            chart_group_id=int(chart_group_id),
+            chart_nature=selected_nature,
+            usage=self.chart_group_usage_map(),
+            nature_by_chart_id=natures,
+            include_code=include_code,
+        )
+
+    def is_group_valid_for_chart(
+        self,
+        customer_group: str | None,
+        chart_group_id: int | None,
+    ) -> bool:
+        code = (customer_group or "").strip().upper()
+        if not code or not chart_group_id:
+            return False
+        allowed = {c.upper() for c in self.allowed_group_codes(int(chart_group_id))}
+        return code in allowed
+
+    def customer_form_filter_payload(self) -> dict:
+        natures: dict[str, str] = {}
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            for item in ChartGroupService().list_active_for_dropdown():
+                gid = item.get("group_id")
+                if gid is None:
+                    continue
+                natures[str(int(gid))] = (item.get("group_nature") or "").strip()
+        except Exception:
+            natures = {}
+        return {
+            "groups": self.list_active_groups(),
+            "usage": self.chart_group_usage_map(),
+            "chart_natures": natures,
+        }
+
     def build_group_tabs_map(self) -> dict[str, list[str]]:
         result = {}
         for row in self.repository.list_dicts(active_only=True):
