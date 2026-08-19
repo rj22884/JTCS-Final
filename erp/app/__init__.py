@@ -90,7 +90,6 @@ SETUP_PUBLIC_ENDPOINTS = {
     "public_intake.website_intake",
     "seo_api.keywords",
     "website_analytics_public.visit",
-    "website_snapshot_public.snapshot",
     "customer_portal.login_page",
     "customer_portal.login_api",
     "customer_portal.login_start_api",
@@ -177,8 +176,6 @@ def create_app(config_class: type = Config) -> Flask:
     csrf.exempt(seo_api_bp)
     # Public website visitor ingest (CORS + no CSRF). Admin analytics stay CSRF-protected.
     csrf.exempt(website_analytics_public_bp)
-    # Public login-page Business Snapshot (CORS + no CSRF). Aggregates only.
-    csrf.exempt(website_snapshot_public_bp)
 
     # Integration Settings (and JSON clients): CSRF failures as JSON, not HTML.
     from app.modules.settings.routes import register_integration_csrf_json_handler

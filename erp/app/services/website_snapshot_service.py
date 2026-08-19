@@ -165,7 +165,7 @@ class WebsiteSnapshotService:
             },
             "cards": {
                 "sales": self._card(metrics.total_sales),
-                "income": self._card(sum(series["income"])),
+                "income": self._card(metrics.total_income),
                 "expense": self._card(metrics.total_expenses),
                 "profit": profit,
                 "bank": self._card(metrics.bank_closing_balance),
@@ -177,7 +177,11 @@ class WebsiteSnapshotService:
                 "sales_income": {
                     "labels": series["labels"],
                     "sales": series["sales"],
-                    "income": series["income"],
+                    # Same as dashboard Total Income: IncomeAmount + SaleAmount.
+                    "income": [
+                        round(s + i, 2)
+                        for s, i in zip(series["sales"], series["income"])
+                    ],
                 },
                 "income_expense": {
                     "labels": series["labels"],
