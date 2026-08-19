@@ -108,11 +108,11 @@
   });
 
   document.querySelectorAll('.seo-delete-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
+    btn.addEventListener('click', async function () {
       var id = btn.getAttribute('data-id');
       var keyword = btn.getAttribute('data-keyword') || '';
       if (!id) return;
-      if (!window.confirm('Delete keyword "' + keyword + '"?')) return;
+      if (!(await JTCSDialog.confirm('Delete keyword "' + keyword + '"?'))) return;
       var url = deleteUrlTpl.replace('999999', String(id));
       fetch(url, {
         method: 'DELETE',

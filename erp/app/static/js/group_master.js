@@ -231,7 +231,7 @@
       'Mark "' + label + '" as Inactive?\n\nIt will be hidden from Customer Master dropdown.';
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm(message)) return;
+      if (!(await JTCSDialog.confirm(message))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: message });
       if (!creds) return;
@@ -258,11 +258,11 @@
       });
   }
 
-  function activateGroup(groupId) {
+  async function activateGroup(groupId) {
     const id = groupId || selectedId;
     const row = rows.find(function (r) { return r.group_id === id; });
     const label = row ? row.group_name : "this group";
-    if (!id || !confirm('Activate "' + label + '"?')) return;
+    if (!id || !(await JTCSDialog.confirm('Activate "' + label + '"?'))) return;
     fetch(apiUrl(window.GM_API.activate, id), {
       method: "POST",
       headers: { Accept: "application/json", "X-CSRFToken": csrfToken() },

@@ -137,7 +137,7 @@
   async function deleteRecord(purposeId) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete / deactivate this purpose?")) return;
+      if (!(await JTCSDialog.confirm("Delete / deactivate this purpose?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete / deactivate this purpose?" });
       if (!creds) return;

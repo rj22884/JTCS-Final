@@ -180,7 +180,7 @@
   async function deleteRecord(credentialId) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete / deactivate this credential?")) return;
+      if (!(await JTCSDialog.confirm("Delete / deactivate this credential?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete / deactivate this credential?" });
       if (!creds) return;

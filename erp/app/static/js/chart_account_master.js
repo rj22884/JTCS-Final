@@ -461,7 +461,7 @@
       : "Delete this account?";
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm(message)) return;
+      if (!(await JTCSDialog.confirm(message))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: message });
       if (!creds) return;

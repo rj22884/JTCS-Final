@@ -69,16 +69,24 @@
   }
 
   async function createBackup() {
-    if (!cfg.createUrl) return;
-    if (
-      !window.confirm(
-        cfg.kind === "full"
-          ? "Create a full backup (database + application ZIP)? This may take a minute."
-          : "Create a SQL Server database backup (.bak) now?"
-      )
-    ) {
+    if (!cfg.createUrl) {
+      setStatus("Backup URL missing. Refresh the page (Ctrl+F5) and try again.", "danger");
       return;
     }
+    const confirmed =
+      window.JTCSDialog && typeof window.JTCSDialog.confirm === "function"
+        ? await window.JTCSDialog.confirm(
+            cfg.kind === "full"
+              ? "Create a full backup (database + application ZIP)? This may take a minute."
+              : "Create a SQL Server database backup (.bak) now?",
+            { title: "Create backup", okLabel: "Create" }
+          )
+        : window.confirm(
+            cfg.kind === "full"
+              ? "Create a full backup (database + application ZIP)? This may take a minute."
+              : "Create a SQL Server database backup (.bak) now?"
+          );
+    if (!confirmed) return;
     createBtn.disabled = true;
     setStatus("Creating backup… please wait.", "info");
     try {
@@ -106,7 +114,7 @@
     if (!fileName || !cfg.deleteUrl) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete backup file " + fileName + "?")) return;
+      if (!(await window.JTCSDialog.confirm("Delete backup file " + fileName + "?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Delete backup file " + fileName + "?",
@@ -136,7 +144,12 @@
     }
   }
 
-  createBtn?.addEventListener("click", createBackup);
+  createBtn?.addEventListener("click", function () {
+    createBackup().catch(function (err) {
+      setStatus(err.message || String(err), "danger");
+      if (createBtn) createBtn.disabled = false;
+    });
+  });
   bodyEl?.addEventListener("click", function (e) {
     const btn = e.target.closest(".backup-delete-btn");
     if (!btn) return;

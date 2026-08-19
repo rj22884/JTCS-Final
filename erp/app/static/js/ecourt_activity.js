@@ -1671,7 +1671,7 @@
       "Import " + rows.length + " receipt(s)?\n\n" +
       "Only rows with stationery number filled will be saved.\n" +
       "Blank stationery rows are not imported.";
-    if (!window.confirm(confirmMsg)) return;
+    if (!(await JTCSDialog.confirm(confirmMsg))) return;
 
     if (els.confirmImportBtn) els.confirmImportBtn.disabled = true;
     try {
@@ -1737,7 +1737,7 @@
       alert("No sold receipts selected to unsell.");
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = await JTCSDialog.confirm(
       "Mark as Unsold?\n\nThis rolls back the sale batch (daily + bank ledger).\n" +
       "Receipts sold together in the same sale will also become Unsold.\n\n" +
       "Selected: " + receipts.length + " receipt(s)."
@@ -1772,7 +1772,7 @@
       "Permanently delete stationery " + stationery + " and all linked records? This cannot be undone.";
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm(message)) return;
+      if (!(await JTCSDialog.confirm(message))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: message });
       if (!creds) return;

@@ -149,7 +149,7 @@
   async function deleteReportInvoice(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete this invoice?")) return;
+      if (!(await JTCSDialog.confirm("Delete this invoice?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this invoice?" });
       if (!creds) return;

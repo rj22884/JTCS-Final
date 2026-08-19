@@ -376,9 +376,9 @@
     });
   }
 
-  function resetPortalPassword(customerId) {
+  async function resetPortalPassword(customerId) {
     if (!customerId || !window.CM_API.resetPortalPassword) return;
-    if (!window.confirm("Clear Customer Portal password? Customer must verify PAN/Aadhaar and create a new password on next login.")) return;
+    if (!(await JTCSDialog.confirm("Clear Customer Portal password? Customer must verify PAN/Aadhaar and create a new password on next login."))) return;
     const url = apiUrl(window.CM_API.resetPortalPassword, customerId);
     fetch(url, {
       method: "POST",
@@ -1551,7 +1551,7 @@
       'Delete "' + name + '"?\n\nSoft delete — customer will be marked Inactive.';
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm(message)) return;
+      if (!(await JTCSDialog.confirm(message))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: message });
       if (!creds) return;
@@ -1585,12 +1585,12 @@
       });
   }
 
-  function restoreCustomer(id) {
+  async function restoreCustomer(id) {
     const customerId = id || selectedId;
     if (!customerId || !window.CM_API.restore) return;
     const row = rows.find(function (r) { return r.customer_id === customerId; });
     const name = row ? row.customer_name : "this customer";
-    if (!confirm('Restore "' + name + '" to Active?')) return;
+    if (!(await JTCSDialog.confirm('Restore "' + name + '" to Active?'))) return;
     fetch(apiUrl(window.CM_API.restore, customerId), {
       method: "POST",
       headers: { Accept: "application/json", "X-CSRFToken": csrfToken() },

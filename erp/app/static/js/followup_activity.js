@@ -1547,7 +1547,7 @@
   async function deleteEntry(entryId) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete this followup entry?")) return;
+      if (!(await JTCSDialog.confirm("Delete this followup entry?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this followup entry?" });
       if (!creds) return;

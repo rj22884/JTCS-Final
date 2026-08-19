@@ -1106,6 +1106,7 @@ class FinancialReportEngine:
                 closing = opening + debit - credit
             else:
                 closing = opening + credit - debit
+            pref_kind, pref_id = self.preview_ref_for_ledger(led)
             result.append(
                 {
                     **led,
@@ -1122,9 +1123,28 @@ class FinancialReportEngine:
                         else "Cr"
                     ),
                     "display_closing": abs(closing),
+                    "preview_kind": pref_kind,
+                    "preview_id": pref_id,
                 }
             )
         return result
+
+    @staticmethod
+    def preview_ref_for_ledger(led: dict[str, Any]) -> tuple[str, int | None]:
+        """Map a FS ledger row to Ledger Report preview kind/id (dashboard path)."""
+        key = str(led.get("ledger_key") or "")
+        if led.get("bank_account_id"):
+            return "bank", int(led["bank_account_id"])
+        if key.startswith("bank-"):
+            try:
+                return "bank", int(key.split("-", 1)[1])
+            except (TypeError, ValueError):
+                pass
+        if led.get("customer_id"):
+            return "customer", int(led["customer_id"])
+        if led.get("work_id"):
+            return "work", int(led["work_id"])
+        return "", None
 
     def rollup_groups(
         self,
@@ -1299,8 +1319,10 @@ class FinancialReportEngine:
             info = db.session.execute(
                 text(
                     """
-                    SELECT AccountName, OpeningBalance, OpeningBalanceDate, OpeningBalanceDrCr,
-                           CustomerID, WorkID, a.GroupID, g.GroupName, g.GroupNature, g.UnderType,
+                    SELECT a.AccountName,
+                           a.OpeningBalance, a.OpeningBalanceDate, a.OpeningBalanceDrCr,
+                           a.CustomerID, a.WorkID, a.GroupID,
+                           g.GroupName, g.GroupNature, g.UnderType,
                            c.CustomerGroup
                     FROM dbo.ChartOfAccountMaster a
                     LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID

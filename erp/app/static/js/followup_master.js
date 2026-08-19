@@ -197,7 +197,7 @@
       'Delete "' + label + '"?\n\nThis is a soft delete — the stage will be marked Inactive and hidden from followup entry checkboxes.';
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm(message)) return;
+      if (!(await JTCSDialog.confirm(message))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: message });
       if (!creds) return;

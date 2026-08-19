@@ -216,6 +216,8 @@ class FinancialStatementsService:
                     "period_debit": led["debit"],
                     "period_credit": led["credit"],
                     "customer_group": led.get("customer_group") or "",
+                    "preview_kind": led.get("preview_kind") or "",
+                    "preview_id": led.get("preview_id") or "",
                 }
             )
             total_dr += dr
@@ -610,6 +612,8 @@ class FinancialStatementsService:
                     "credit": str(self.engine.money(l.get("credit"))),
                     "opening": str(self.engine.money(l.get("opening"))),
                     "closing_dr_cr": l.get("closing_dr_cr"),
+                    "preview_kind": l.get("preview_kind") or "",
+                    "preview_id": l.get("preview_id") or "",
                 }
                 for l in node.get("ledgers") or []
             ],

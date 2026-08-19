@@ -236,7 +236,7 @@
     if (enabled) syncLineMonthOptions(tr, tr.querySelector(".inv-month")?.value || "");
   }
 
-  function servicePeriodReviewWarning() {
+  async function servicePeriodReviewWarning() {
     const missing = [];
     els.body?.querySelectorAll(".inv-line").forEach(function (tr, idx) {
       const id = tr.querySelector(".inv-item")?.value || "";
@@ -252,7 +252,7 @@
       }
     });
     if (!missing.length) return true;
-    return window.confirm(
+    return JTCSDialog.confirm(
       "Review warning: Service item line(s) " +
         missing.join(", ") +
         " have no Tax Year / Quarter / Month selected.\n\n" +
@@ -635,7 +635,7 @@
       els.payBank?.focus();
       return;
     }
-    if (!servicePeriodReviewWarning()) {
+    if (!(await servicePeriodReviewWarning())) {
       showStatus("Save cancelled. Select Tax Year / Quarter / Month for service item review.", "warning");
       return;
     }
@@ -668,7 +668,7 @@
   async function deleteInvoice(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete this invoice?")) return;
+      if (!(await JTCSDialog.confirm("Delete this invoice?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this invoice?" });
       if (!creds) return;

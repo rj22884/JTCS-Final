@@ -168,7 +168,7 @@
     if (!workId) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Deactivate this work type?")) return;
+      if (!(await JTCSDialog.confirm("Deactivate this work type?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Deactivate this work type?" });
       if (!creds) return;

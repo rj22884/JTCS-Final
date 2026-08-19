@@ -109,7 +109,7 @@
       }
     }
     if (delBtn) {
-      if (!window.confirm("Delete this document?")) return;
+      if (!(await JTCSDialog.confirm("Delete this document?"))) return;
       try {
         await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.delete, delBtn.dataset.id), { method: "DELETE" });
         loadDocuments();

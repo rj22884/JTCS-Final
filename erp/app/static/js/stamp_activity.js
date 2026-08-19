@@ -809,7 +809,7 @@
     if (!stampId || !window.STAMP_DELETE_URL) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Permanently delete this stamp record and all linked transactions? This cannot be undone.")) return;
+      if (!(await JTCSDialog.confirm("Permanently delete this stamp record and all linked transactions? This cannot be undone."))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Permanently delete this stamp record and all linked transactions? This cannot be undone.",
@@ -1139,7 +1139,7 @@
     if (!window.STAMP_DELETE_URL) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Permanently delete this stamp record and all linked transactions? This cannot be undone.")) return;
+      if (!(await JTCSDialog.confirm("Permanently delete this stamp record and all linked transactions? This cannot be undone."))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Permanently delete this stamp record and all linked transactions? This cannot be undone.",
@@ -1807,7 +1807,7 @@
       setOcrReason("Administrator login required to install OCR engine.");
       return;
     }
-    if (!confirm("Install EasyOCR and dependencies? This may take several minutes.")) return;
+    if (!(await JTCSDialog.confirm("Install EasyOCR and dependencies? This may take several minutes."))) return;
 
     els.installOcrBtn.disabled = true;
     els.installOcrBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Installing...';

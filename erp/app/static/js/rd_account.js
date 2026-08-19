@@ -160,7 +160,7 @@
   async function deleteRecord(rdAccountId) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete this RD account?")) return;
+      if (!(await JTCSDialog.confirm("Delete this RD account?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this RD account?" });
       if (!creds) return;

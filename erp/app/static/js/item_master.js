@@ -283,7 +283,7 @@
   async function deleteItem(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete this item?")) return;
+      if (!(await JTCSDialog.confirm("Delete this item?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this item?" });
       if (!creds) return;

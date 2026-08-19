@@ -363,7 +363,7 @@
     if (!entryId) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Delete this printing & scanning bill and linked transactions?")) return;
+      if (!(await JTCSDialog.confirm("Delete this printing & scanning bill and linked transactions?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Delete this printing & scanning bill and linked transactions?",
@@ -623,7 +623,7 @@
     if (!workId) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Deactivate this work type?")) return;
+      if (!(await JTCSDialog.confirm("Deactivate this work type?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Deactivate this work type?" });
       if (!creds) return;

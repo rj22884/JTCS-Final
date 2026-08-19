@@ -1339,7 +1339,7 @@
   async function deleteEntry(entryId) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete this income / expense record?")) return;
+      if (!(await JTCSDialog.confirm("Delete this income / expense record?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this income / expense record?" });
       if (!creds) return;

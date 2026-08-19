@@ -107,7 +107,7 @@
     }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete " + ids.length + " selected client(s)?")) return;
+      if (!(await JTCSDialog.confirm("Delete " + ids.length + " selected client(s)?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Delete " + ids.length + " selected client(s)?",

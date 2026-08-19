@@ -1,7 +1,8 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/financial_statements.css') }}?v=20260805fs3">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financial_statements.css') }}?v=20260819fs1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260819grid1">
 {% endblock %}
 
 {% block content %}
@@ -71,6 +72,57 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="ledgerPreviewModal" tabindex="-1" aria-labelledby="ledgerPreviewModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl" id="ledgerPreviewDialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ledgerPreviewModalTitle">Ledger Preview</h5>
+        <div class="d-flex align-items-center gap-2 ms-auto">
+          <div class="dropdown">
+            <button class="btn btn-outline-success btn-sm dropdown-toggle" type="button"
+                    id="ledgerExportBtn" data-bs-toggle="dropdown" aria-expanded="false" disabled>
+              <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="ledgerExportBtn">
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="pdf">
+                  <i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xlsx">
+                  <i class="bi bi-file-earmark-excel text-success me-2"></i> Excel (XLSX)
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="csv">
+                  <i class="bi bi-filetype-csv text-primary me-2"></i> CSV
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xml">
+                  <i class="bi bi-filetype-xml text-warning me-2"></i> XML
+                </button>
+              </li>
+            </ul>
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="ledgerMaximizeBtn"
+                  title="Maximize" aria-label="Maximize">
+            <i class="bi bi-arrows-fullscreen" id="ledgerMaximizeIcon"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body" id="ledgerPreviewBody">
+        <div class="text-muted small text-center py-4">Loading preview…</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -82,7 +134,29 @@
     export: {{ url_for('financial_statements.api_export', report_key='__KEY__') | tojson }}
   };
   window.FS_ACTIVE_REPORT = {{ active_report | tojson }};
+  window.LEDGER_REPORT = {
+    searchUrl: {{ url_for('ledger_report.search')|tojson }},
+    previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
+    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }},
+    fyStart: {{ default_from | tojson }},
+    today: {{ default_to | tojson }},
+    csrfToken: {{ csrf_token() | tojson }},
+    deleteUrls: {
+      stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
+      ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
+      income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
+      printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
+      itr: {{ url_for('itr_followup.delete_record', entry_id=0) | tojson }},
+      dsc: {{ url_for('dsc_followup.delete_record', entry_id=0) | tojson }},
+      tds: {{ url_for('tds_followup.delete_record', entry_id=0) | tojson }},
+      gst: {{ url_for('gst_followup.delete_record', entry_id=0) | tojson }},
+      invoice: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0) | tojson }}
+    }
+  };
 </script>
-<script src="{{ url_for('static', filename='js/financial_view_manager.js') }}?v=20260805fs3"></script>
-<script src="{{ url_for('static', filename='js/financial_statements.js') }}?v=20260805fs3"></script>
+<script src="{{ url_for('static', filename='js/financial_view_manager.js') }}?v=20260819fs1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260819fs1"></script>
+<script src="{{ url_for('static', filename='js/financial_statements.js') }}?v=20260819fs1"></script>
 {% endblock %}

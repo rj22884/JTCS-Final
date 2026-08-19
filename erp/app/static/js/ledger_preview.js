@@ -37,14 +37,22 @@
     const els = toolbar();
     const pageFrom = document.getElementById("ledgerDateFrom");
     const pageTo = document.getElementById("ledgerDateTo");
+    const fsFrom = document.getElementById("fsDateFrom");
+    const fsTo = document.getElementById("fsDateTo");
+    const dashFrom = document.getElementById("dashDateFrom");
+    const dashTo = document.getElementById("dashDateTo");
     const from =
       (els.from && els.from.value) ||
       (pageFrom && pageFrom.value) ||
+      (fsFrom && fsFrom.value) ||
+      (dashFrom && dashFrom.value) ||
       cfg.fyStart ||
       "";
     const to =
       (els.to && els.to.value) ||
       (pageTo && pageTo.value) ||
+      (fsTo && fsTo.value) ||
+      (dashTo && dashTo.value) ||
       cfg.today ||
       "";
     const params = new URLSearchParams();
@@ -190,7 +198,7 @@
     const label = row.description || "this entry";
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No.")) {
+      if (!(await JTCSDialog.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No."))) {
         return;
       }
     } else {

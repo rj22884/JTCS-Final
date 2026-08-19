@@ -102,6 +102,28 @@
     return { getMode: getMode, setMode: setMode, sync: syncUi };
   }
 
+  function ledgerClickAttrs(led) {
+    var key = (led && (led.ledger_key || led.ledgerKey)) || "";
+    var name = (led && (led.ledger_name || led.name)) || "";
+    var kind = (led && led.preview_kind) || "";
+    var id = led && led.preview_id != null && led.preview_id !== "" ? String(led.preview_id) : "";
+    if (!kind && String(key).indexOf("bank-") === 0) {
+      kind = "bank";
+      id = String(key).split("-")[1] || "";
+    }
+    return (
+      ' data-ledger="' +
+      escapeHtml(key) +
+      '" data-name="' +
+      escapeHtml(name) +
+      '" data-preview-kind="' +
+      escapeHtml(kind) +
+      '" data-preview-id="' +
+      escapeHtml(id) +
+      '"'
+    );
+  }
+
   function renderTreeNodes(nodes, depth, idPrefix) {
     depth = depth || 0;
     idPrefix = idPrefix || "fsn";
@@ -129,11 +151,9 @@
           html +=
             '<div class="fs-ledger fs-indent-' +
             Math.min(depth + 1, 4) +
-            '" data-ledger="' +
-            escapeHtml(led.ledger_key) +
-            '" data-name="' +
-            escapeHtml(led.ledger_name) +
-            '"><span>' +
+            '"' +
+            ledgerClickAttrs(led) +
+            "><span>" +
             escapeHtml(led.ledger_name) +
             "</span><span>" +
             money(led.display_closing != null ? led.display_closing : led.closing) +
@@ -343,18 +363,32 @@
     (report.rows || []).forEach(function (row) {
       var dr = moneyNum(row.debit);
       var cr = moneyNum(row.credit);
-      if (dr > 0) drRows.push({ name: row.ledger_name, amount: dr, ledger_key: row.ledger_key });
-      if (cr > 0) crRows.push({ name: row.ledger_name, amount: cr, ledger_key: row.ledger_key });
+      if (dr > 0) {
+        drRows.push({
+          name: row.ledger_name,
+          amount: dr,
+          ledger_key: row.ledger_key,
+          preview_kind: row.preview_kind,
+          preview_id: row.preview_id,
+        });
+      }
+      if (cr > 0) {
+        crRows.push({
+          name: row.ledger_name,
+          amount: cr,
+          ledger_key: row.ledger_key,
+          preview_kind: row.preview_kind,
+          preview_id: row.preview_id,
+        });
+      }
     });
     function sideList(rows, prefix) {
       var html = '<div class="fs-tree">';
       rows.forEach(function (r) {
         html +=
-          '<div class="fs-ledger" data-ledger="' +
-          escapeHtml(r.ledger_key || "") +
-          '" data-name="' +
-          escapeHtml(r.name || "") +
-          '"><span>' +
+          '<div class="fs-ledger"' +
+          ledgerClickAttrs(r) +
+          "><span>" +
           escapeHtml(r.name) +
           "</span><span>" +
           money(r.amount) +
@@ -389,11 +423,9 @@
       '<table class="fs-table"><thead><tr><th>Ledger Name</th><th>Group</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>';
     (report.rows || []).forEach(function (row) {
       html +=
-        '<tr class="fs-clickable" data-ledger="' +
-        escapeHtml(row.ledger_key || "") +
-        '" data-name="' +
-        escapeHtml(row.ledger_name || "") +
-        '"><td>' +
+        '<tr class="fs-clickable"' +
+        ledgerClickAttrs(row) +
+        "><td>" +
         escapeHtml(row.ledger_name) +
         "</td><td>" +
         escapeHtml(row.group_name) +

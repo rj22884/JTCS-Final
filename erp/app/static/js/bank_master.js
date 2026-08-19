@@ -365,7 +365,7 @@
       alert("Select a bank account to delete.");
       return;
     }
-    if (!window.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No.")) {
+    if (!(await JTCSDialog.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No."))) {
       return;
     }
     let creds = null;

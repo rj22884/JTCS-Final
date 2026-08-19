@@ -323,7 +323,7 @@
     }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!confirm("Mark selected work type as Inactive?")) return;
+      if (!(await JTCSDialog.confirm("Mark selected work type as Inactive?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: "Mark selected work type as Inactive?",

@@ -1051,6 +1051,16 @@ body.jtcs-dialog-open {
   box-shadow: none;
 }
 
+.jtcs-dialog-cancel {
+  min-width: 5.5rem;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.jtcs-dialog-prompt {
+  margin-top: 0.7rem;
+}
+
 .jtcs-dialog[data-type="warning"] .jtcs-dialog-ok,
 .jtcs-dialog[data-type="invalid"] .jtcs-dialog-ok {
   color: #1a1f36;

@@ -200,7 +200,7 @@
   async function remove(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete this account type?")) return;
+      if (!(await JTCSDialog.confirm("Delete this account type?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this account type?" });
       if (!creds) return;

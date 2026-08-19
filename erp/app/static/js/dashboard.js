@@ -901,7 +901,7 @@
     const label = row.reference || row.work || "this entry";
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Confirm delete: " + label + " ?")) return;
+      if (!(await JTCSDialog.confirm("Confirm delete: " + label + " ?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Confirm delete: " + label + " ?" });
       if (!creds) return;

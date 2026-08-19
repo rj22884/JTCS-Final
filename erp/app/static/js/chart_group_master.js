@@ -255,7 +255,7 @@
   async function remove(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete this group?")) return;
+      if (!(await JTCSDialog.confirm("Delete this group?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this group?" });
       if (!creds) return;

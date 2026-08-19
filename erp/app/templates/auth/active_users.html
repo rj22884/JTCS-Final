@@ -26,8 +26,8 @@
           <td>{{ user.MobileNumber }}</td>
           <td>{{ user.Role }}</td>
           <td class="text-end">
-            <form method="post" action="{{ url_for('auth.deactivate_user', user_id=user.UserID) }}" class="d-inline"
-                  onsubmit="return confirm('Deactivate this user? They will not be able to sign in.');">
+            <form method="post" action="{{ url_for('auth.deactivate_user', user_id=user.UserID) }}" class="d-inline jtcs-confirm-form"
+                  data-confirm-message="Deactivate this user? They will not be able to sign in.">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit" class="btn btn-sm btn-outline-danger">Deactivate</button>
             </form>

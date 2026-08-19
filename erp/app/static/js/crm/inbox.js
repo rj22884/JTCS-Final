@@ -485,7 +485,7 @@
   });
 
   document.getElementById("crmDetailCloseBtn").addEventListener("click", async function () {
-    if (!activeConvId || !window.confirm("Close this conversation?")) return;
+    if (!activeConvId || !(await JTCSDialog.confirm("Close this conversation?"))) return;
     try {
       await patchConv({ status: "Closed" });
       loadConversations();
@@ -645,7 +645,10 @@
       const btn = e.target.closest("[data-link-action]");
       if (!btn || !activeConvId || !api.link) return;
       const action = btn.getAttribute("data-link-action");
-      const name = window.prompt("Name for this contact", activeConvMeta && (activeConvMeta.Subject || "")) || "";
+      const name = (await JTCSDialog.prompt(
+        "Name for this contact",
+        activeConvMeta && (activeConvMeta.Subject || "")
+      )) || "";
       try {
         await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, activeConvId), {
           method: "POST",

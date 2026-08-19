@@ -383,7 +383,7 @@
     const row = selectedRow();
     if (!row || row.protected) return;
     const label = parentId == null ? "main menu ribbon" : "submenu list";
-    if (!window.confirm('Remove "' + row.name + '" from the ' + label + "?")) {
+    if (!(await JTCSDialog.confirm('Remove "' + row.name + '" from the ' + label + "?"))) {
       return;
     }
     try {

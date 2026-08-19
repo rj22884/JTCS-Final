@@ -114,7 +114,7 @@
     const assignBtn = e.target.closest(".crm-lead-assign");
     if (convertBtn) {
       const id = convertBtn.dataset.id;
-      if (!window.confirm("Convert this lead to customer?")) return;
+      if (!(await JTCSDialog.confirm("Convert this lead to customer?"))) return;
       try {
         await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.convert, id), { method: "POST", body: {} });
         loadLeads();

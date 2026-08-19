@@ -292,7 +292,7 @@
   async function remove(id) {
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm("Delete this sub work?")) return;
+      if (!(await JTCSDialog.confirm("Delete this sub work?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this sub work?" });
       if (!creds) return;

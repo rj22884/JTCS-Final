@@ -167,7 +167,7 @@
     btn.addEventListener("click", async function () {
       const version = btn.dataset.version || "";
       if (!version) return;
-      if (!confirm("Prepare rollback instructions for Version " + version + "?")) return;
+      if (!(await JTCSDialog.confirm("Prepare rollback instructions for Version " + version + "?"))) return;
       try {
         const res = await fetch("{{ url_for('software_update.api_request_rollback') }}", {
           method: "POST",

@@ -160,7 +160,7 @@
 
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!window.confirm(confirmMsg)) return;
+      if (!(await JTCSDialog.confirm(confirmMsg))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
         message: confirmMsg,

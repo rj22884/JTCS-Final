@@ -18,7 +18,7 @@
 
   if (convertBtn) {
     convertBtn.addEventListener("click", async function () {
-      if (!window.confirm("Convert this lead to customer?")) return;
+      if (!(await JTCSDialog.confirm("Convert this lead to customer?"))) return;
       convertBtn.disabled = true;
       try {
         const data = await CrmCommon.apiFetch(api.convert, { method: "POST", body: {} });

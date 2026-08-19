@@ -143,16 +143,20 @@
       "This will delete the selected record. Enter your password to confirm.";
 
     if (!els.modal) {
-      var userId = window.prompt(
-        "User ID:",
-        window.JTCS_CURRENT_LOGIN_ID || ""
-      );
-      if (userId == null) return Promise.resolve(null);
-      var password = window.prompt("Password:");
-      if (password == null) return Promise.resolve(null);
-      return Promise.resolve({
-        user_id: String(userId || "").trim(),
-        password: String(password || ""),
+      var promptFn =
+        window.JTCSDialog && typeof window.JTCSDialog.prompt === "function"
+          ? window.JTCSDialog.prompt
+          : null;
+      if (!promptFn) return Promise.resolve(null);
+      return promptFn("User ID:", window.JTCS_CURRENT_LOGIN_ID || "").then(function (userId) {
+        if (userId == null) return null;
+        return promptFn("Password:", "", { inputType: "password", title: "Password" }).then(function (password) {
+          if (password == null) return null;
+          return {
+            user_id: String(userId || "").trim(),
+            password: String(password || ""),
+          };
+        });
       });
     }
 
