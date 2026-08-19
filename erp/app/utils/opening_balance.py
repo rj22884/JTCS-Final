@@ -14,11 +14,54 @@ BANK_MOVEMENT_SINCE_OPENING_SQL = (
 )
 
 
+CREDIT_NORMAL_NATURES = frozenset({
+    "liability",
+    "liabilities",
+    "capital",
+    "equity",
+    "income",
+    "revenue",
+})
+DEBIT_NORMAL_NATURES = frozenset({
+    "asset",
+    "assets",
+    "expense",
+    "expenses",
+})
+
+
 def default_dr_cr_for_under_type(under_type: str | None) -> str:
     """Assets → Dr, Liabilities → Cr (Tally-style nature)."""
     if (under_type or "").strip().casefold() == "liabilities":
         return "Cr"
     return "Dr"
+
+
+def is_credit_normal_nature(nature: str | None, under_type: str | None = None) -> bool:
+    """True for Liability / Capital / Income; False for Asset / Expense (default)."""
+    n = (nature or "").strip().casefold()
+    if n in CREDIT_NORMAL_NATURES:
+        return True
+    if n in DEBIT_NORMAL_NATURES:
+        return False
+    u = (under_type or "").strip().casefold()
+    return u in {"liabilities", "liability"}
+
+
+def apply_account_running(
+    previous: Decimal,
+    debit: Decimal,
+    credit: Decimal,
+    *,
+    credit_normal: bool,
+) -> Decimal:
+    """Running/closing: Asset/Expense = +Dr−Cr; Liability/Capital/Income = +Cr−Dr."""
+    prev = Decimal(str(previous or 0)).quantize(Decimal("0.01"))
+    dr = Decimal(str(debit or 0)).quantize(Decimal("0.01"))
+    cr = Decimal(str(credit or 0)).quantize(Decimal("0.01"))
+    if credit_normal:
+        return (prev + cr - dr).quantize(Decimal("0.01"))
+    return (prev + dr - cr).quantize(Decimal("0.01"))
 
 
 def normalize_dr_cr(raw) -> str | None:

@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.services.dashboard_service import METRIC_LABELS, DashboardMetrics, DashboardService
+from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 from app.utils.shcil_bank_accounts import stamp_purchase_account_id
 from app.utils.smtp_health import mask_email
 
@@ -67,9 +68,27 @@ class AdminDashboardService:
 
     def list_bank_closings(self, *, as_of: date) -> list[AdminBankClosing]:
         stamp_account_id = stamp_purchase_account_id(db.session) or 0
+        group_select = """
+                    CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                    CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+        """
+        group_join = ""
+        if DashboardService._has_bank_chart_group():
+            group_select = """
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+            """
+            group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
         rows = db.session.execute(
             text(
-                """
+                f"""
                 SELECT
                     a.JtcsBankAccountID AS account_id,
                     a.BankName,
@@ -82,7 +101,7 @@ class AdminDashboardService:
                         ELSE 0
                     END AS opening_balance,
                     ISNULL((
-                        SELECT SUM(ISNULL(t.Debit, 0) - ISNULL(t.Credit, 0))
+                        SELECT SUM(ISNULL(t.Debit, 0))
                         FROM JtcsBankTransaction t
                         WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
                           AND t.TransactionDate <= :as_of
@@ -90,7 +109,17 @@ class AdminDashboardService:
                                 a.OpeningBalanceDate IS NULL
                                 OR t.TransactionDate >= a.OpeningBalanceDate
                               )
-                    ), 0) AS movement_net,
+                    ), 0) AS debit_sum,
+                    ISNULL((
+                        SELECT SUM(ISNULL(t.Credit, 0))
+                        FROM JtcsBankTransaction t
+                        WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
+                          AND t.TransactionDate <= :as_of
+                          AND (
+                                a.OpeningBalanceDate IS NULL
+                                OR t.TransactionDate >= a.OpeningBalanceDate
+                              )
+                    ), 0) AS credit_sum,
                     CASE
                         WHEN a.JtcsBankAccountID = :stamp_account_id AND :stamp_account_id <> 0
                         THEN ISNULL((
@@ -110,8 +139,10 @@ class AdminDashboardService:
                               )
                         ), 0)
                         ELSE 0
-                    END AS orphan_shcil_deposits
+                    END AS orphan_shcil_deposits,
+                    {group_select}
                 FROM JtcsBankAccountMaster a
+                {group_join}
                 WHERE ISNULL(a.ActiveStatus, 1) = 1
                 ORDER BY
                     CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) = N'cash' THEN 0 ELSE 1 END,
@@ -134,7 +165,13 @@ class AdminDashboardService:
             if account_type:
                 label_parts.append(f"[{account_type}]")
             opening = self._money(row["opening_balance"])
-            movement = self._money(row["movement_net"]) + self._money(row["orphan_shcil_deposits"])
+            debit = self._money(row["debit_sum"])
+            credit = self._money(row["credit_sum"])
+            credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
+            signed_movement = apply_account_running(
+                Decimal("0.00"), debit, credit, credit_normal=credit_normal
+            )
+            movement = self._money(signed_movement + self._money(row["orphan_shcil_deposits"]))
             result.append(
                 AdminBankClosing(
                     account_id=int(row["account_id"]),
@@ -144,7 +181,12 @@ class AdminDashboardService:
                     label=" ".join(label_parts),
                     opening_balance=opening,
                     movement_net=movement,
-                    closing_balance=self._money(opening + movement),
+                    closing_balance=self._money(
+                        apply_account_running(
+                            opening, debit, credit, credit_normal=credit_normal
+                        )
+                        + self._money(row["orphan_shcil_deposits"])
+                    ),
                     is_cash=bank_name.lower() == "cash",
                 )
             )

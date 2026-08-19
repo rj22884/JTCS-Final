@@ -10,7 +10,11 @@ from sqlalchemy import select, text
 
 from app.extensions import db
 from app.models.transactions import JTCSDailyTransaction
-from app.utils.opening_balance import BANK_MOVEMENT_SINCE_OPENING_SQL
+from app.utils.opening_balance import (
+    BANK_MOVEMENT_SINCE_OPENING_SQL,
+    apply_account_running,
+    is_credit_normal_nature,
+)
 
 
 METRIC_LABELS = {
@@ -337,10 +341,35 @@ class DashboardService:
         )
 
     def _ledger_closing_balance(self, *, cash_only: bool, as_of: date) -> Decimal:
-        """Closing = master OB (on/before as_of) + post-opening movements through as_of."""
+        """Closing = master OB (on/before as_of) + post-opening movements through as_of.
+
+        Bank (non-cash) uses Chart of Account Group nature, same as Bank Account Ledger:
+        Asset/Expense = Opening + Debit − Credit; Liability/Capital/Income = Opening + Credit − Debit.
+        """
+        if not cash_only:
+            return sum(
+                (line.closing_balance for line in self.list_bank_account_closings(as_of=as_of)),
+                Decimal("0"),
+            )
         return (
-            self._master_opening_balance(cash_only=cash_only, as_of=as_of)
-            + self._ledger_txn_net(cash_only=cash_only, date_to=as_of)
+            self._master_opening_balance(cash_only=True, as_of=as_of)
+            + self._ledger_txn_net(cash_only=True, date_to=as_of)
+        )
+
+    @staticmethod
+    def _has_bank_chart_group() -> bool:
+        return bool(
+            db.session.execute(
+                text(
+                    """
+                    SELECT CASE
+                        WHEN COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'ChartGroupID') IS NULL THEN 0
+                        WHEN OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NULL THEN 0
+                        ELSE 1
+                    END
+                    """
+                )
+            ).scalar()
         )
 
     def get_bank_closing_hover(self, *, as_of: date) -> dict:
@@ -355,8 +384,26 @@ class DashboardService:
         """
         Non-cash bank accounts with closing balance as of date_to (dashboard period end).
 
-        Uses the same OB + post-opening movement rule as bank_closing_balance.
+        Same Chart of Account Group rule as Bank Account Ledger.
         """
+        group_select = """
+                    CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                    CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+        """
+        group_join = ""
+        if self._has_bank_chart_group():
+            group_select = """
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+            """
+            group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
         rows = db.session.execute(
             text(
                 f"""
@@ -371,13 +418,22 @@ class DashboardService:
                         ELSE 0
                     END AS opening_balance,
                     ISNULL((
-                        SELECT SUM(ISNULL(t.Debit, 0) - ISNULL(t.Credit, 0))
+                        SELECT SUM(ISNULL(t.Debit, 0))
                         FROM JtcsBankTransaction t
                         WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
                           AND t.TransactionDate <= :as_of
                           AND {BANK_MOVEMENT_SINCE_OPENING_SQL}
-                    ), 0) AS movement_net
+                    ), 0) AS debit_sum,
+                    ISNULL((
+                        SELECT SUM(ISNULL(t.Credit, 0))
+                        FROM JtcsBankTransaction t
+                        WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
+                          AND t.TransactionDate <= :as_of
+                          AND {BANK_MOVEMENT_SINCE_OPENING_SQL}
+                    ), 0) AS credit_sum,
+                    {group_select}
                 FROM JtcsBankAccountMaster a
+                {group_join}
                 WHERE a.BankName <> N'Cash'
                 ORDER BY
                     ISNULL(a.DisplayOrder, 2147483647),
@@ -396,13 +452,17 @@ class DashboardService:
                 or bank_name
             )
             opening = Decimal(str(row["opening_balance"] or 0))
-            movement = Decimal(str(row["movement_net"] or 0))
+            debit = Decimal(str(row["debit_sum"] or 0))
+            credit = Decimal(str(row["credit_sum"] or 0))
+            credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
             result.append(
                 BankAccountClosingLine(
                     account_id=int(row["account_id"]),
                     account_number=account_number,
                     bank_name=bank_name,
-                    closing_balance=opening + movement,
+                    closing_balance=apply_account_running(
+                        opening, debit, credit, credit_normal=credit_normal
+                    ),
                 )
             )
         return result

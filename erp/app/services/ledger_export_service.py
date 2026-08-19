@@ -32,22 +32,7 @@ from reportlab.platypus import (
 from sqlalchemy import text
 
 from app.extensions import db
-
-# Credit-normal natures increase with Credit (Tally-style). Asset/Expense stay debit-normal.
-_CREDIT_NORMAL_NATURES = frozenset({
-    "liability",
-    "liabilities",
-    "capital",
-    "equity",
-    "income",
-    "revenue",
-})
-_DEBIT_NORMAL_NATURES = frozenset({
-    "asset",
-    "assets",
-    "expense",
-    "expenses",
-})
+from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 
 # Brand palette (professional, colourful — not purple/glow AI defaults)
 COLOR_NAVY = "1B4F72"
@@ -94,14 +79,7 @@ class LedgerExportService:
 
     @staticmethod
     def _is_credit_normal_nature(nature: str | None, under_type: str | None = None) -> bool:
-        """True for Liability / Capital / Income; False for Asset / Expense (default)."""
-        n = (nature or "").strip().casefold()
-        if n in _CREDIT_NORMAL_NATURES:
-            return True
-        if n in _DEBIT_NORMAL_NATURES:
-            return False
-        u = (under_type or "").strip().casefold()
-        return u in {"liabilities", "liability"}
+        return is_credit_normal_nature(nature, under_type)
 
     def _apply_bank_running(
         self,
@@ -111,10 +89,9 @@ class LedgerExportService:
         *,
         credit_normal: bool,
     ) -> Decimal:
-        """Running/closing balance from Chart of Account Group nature."""
-        if credit_normal:
-            return self._money(previous + credit - debit)
-        return self._money(previous + debit - credit)
+        return apply_account_running(
+            previous, debit, credit, credit_normal=credit_normal
+        )
 
     def list_bank_accounts(self, *, search: str | None = None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {}
