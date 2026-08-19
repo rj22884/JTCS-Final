@@ -1,0 +1,42 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block body_extra_class %}sa-auth{% endblock %}
+{% block auth_logo_icon %}bi-person-fill{% endblock %}
+{% block title %}Server Login{% endblock %}
+{% block subtitle %}Enter your Server User ID to continue{% endblock %}
+{% block content %}
+{% if dialog_error %}
+<div id="saDialogBoot" hidden
+     data-message="{{ dialog_error }}"
+     data-type="{{ dialog_type or 'invalid' }}"></div>
+{% endif %}
+<p class="text-muted small mb-2">
+  Signed in as <strong>{{ user_name }}</strong>. Server login is required to open the app.
+</p>
+<form id="saLoginForm" method="post" action="{{ url_for('server_auth.login') }}" class="vstack gap-2" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <div>
+    <label class="form-label" for="login_id">Server User ID</label>
+    <input type="text" class="form-control" id="login_id" name="login_id" autofocus
+           autocomplete="username" value="{{ login_id or '' }}">
+  </div>
+  <div>
+    <label class="form-label" for="password">Server Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="password" name="password"
+             autocomplete="current-password" value="{{ password or '' }}">
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary w-100">Continue</button>
+  <a href="{{ url_for('server_auth.forgot') }}" class="text-center small">Forgot User ID / Password</a>
+  <a href="{{ url_for('auth.logout') }}" class="text-center small text-muted">Sign out of JTCS</a>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/server_auth.js') }}?v=20260819val1"></script>
+{% endblock %}

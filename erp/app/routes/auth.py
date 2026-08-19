@@ -3,7 +3,7 @@ import logging
 from flask import Blueprint, flash, redirect, render_template, request, session, url_for
 from sqlalchemy import text
 
-from app.decorators import admin_required, login_required, require_delete_reauth
+from app.decorators import admin_required, login_required, require_delete_reauth, server_auth_exempt
 from app.extensions import db
 from app.services.auth_service import AuthService
 from app.utils.roles import has_admin_role
@@ -132,7 +132,9 @@ def _client_ip() -> str | None:
 def login():
     auth = AuthService()
     if session.get("user_id"):
-        return redirect(url_for("dashboard.index"))
+        if session.get("server_user_id"):
+            return redirect(url_for("dashboard.index"))
+        return redirect(url_for("server_auth.gate"))
 
     if not auth.administrator_exists():
         return redirect(url_for("setup.index"))
@@ -202,6 +204,9 @@ def login():
             session["user_id"] = data["user_id"]
             session["user_name"] = data["user_name"]
             session["role"] = data["role"]
+            session.pop("server_user_id", None)
+            session.pop("server_login_id", None)
+            session.pop("server_auth_at", None)
             if data.get("login_session_id"):
                 session["login_session_id"] = data["login_session_id"]
             session.permanent = data["remember"]
@@ -226,7 +231,10 @@ def login():
                         )
             except Exception:
                 pass
-            return redirect(request.args.get("next") or url_for("dashboard.index"))
+            next_url = (request.args.get("next") or "").strip()
+            if next_url.startswith("/") and not next_url.startswith("//"):
+                return redirect(url_for("server_auth.gate", next=next_url))
+            return redirect(url_for("server_auth.gate"))
 
     return render_template(
         "auth/login.html",
@@ -362,8 +370,15 @@ def forgot_user_id():
 
 @bp.route("/logout")
 @login_required
+@server_auth_exempt
 def logout():
     login_session_id = session.get("login_session_id")
+    try:
+        from app.services.server_auth_service import ServerAuthService
+
+        ServerAuthService().log_logout()
+    except Exception:
+        logger.exception("Server logout audit skipped")
     try:
         from app.services.login_activity_service import LoginActivityService
 

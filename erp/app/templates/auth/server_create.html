@@ -1,0 +1,55 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block body_extra_class %}sa-auth{% endblock %}
+{% block auth_logo_icon %}bi-person-fill{% endblock %}
+{% block title %}Create Server User{% endblock %}{% block subtitle %}First-time Server User setup{% endblock %}
+
+{% block content %}
+{% if dialog_error %}
+<div id="saDialogBoot" hidden
+     data-message="{{ dialog_error }}"
+     data-type="{{ dialog_type or 'invalid' }}"></div>
+{% endif %}
+<p class="text-muted small mb-3">
+  Welcome, <strong>{{ user_name }}</strong>. Create a Server User ID and password.
+  After saving you must sign in with them before the application opens.
+</p>
+<form id="saCreateForm" method="post" action="{{ url_for('server_auth.create') }}" class="vstack gap-3" novalidate
+      data-app-login="{{ email or '' }}"
+      data-app-login-local="{{ (email.split('@')[0] if email else '') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <div>
+    <label class="form-label" for="login_id">Server User ID</label>
+    <input type="text" class="form-control" id="login_id" name="login_id" autofocus
+           maxlength="80" autocomplete="username" value="{{ login_id or '' }}"
+           spellcheck="false">
+    <div class="form-text">Letters and numbers only. Special characters are not allowed. Must not match your application login ID.</div>
+  </div>
+  <div>
+    <label class="form-label" for="password">Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="password" name="password" autocomplete="new-password">
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+    <div class="form-text">Must not match your application password.</div>
+  </div>
+  <div>
+    <label class="form-label" for="confirm_password">Confirm Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="confirm_password" name="confirm_password" autocomplete="new-password">
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#confirm_password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary w-100">Create Server User</button>
+  <a href="{{ url_for('auth.logout') }}" class="text-center small text-muted">Sign out of JTCS</a>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/server_auth.js') }}?v=20260819val1"></script>
+{% endblock %}

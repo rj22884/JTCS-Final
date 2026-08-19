@@ -1,0 +1,47 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block body_extra_class %}sa-auth{% endblock %}
+{% block auth_logo_icon %}bi-person-fill{% endblock %}
+{% block title %}Reset Server Password{% endblock %}{% block subtitle %}Choose a new Server password{% endblock %}
+
+{% block content %}
+{% if dialog_error %}
+<div id="saDialogBoot" hidden
+     data-message="{{ dialog_error }}"
+     data-type="{{ dialog_type or 'invalid' }}"></div>
+{% endif %}
+{% if login_id %}
+<div class="alert alert-info py-2 small" role="status">
+  Your Server User ID is <strong>{{ login_id }}</strong>
+</div>
+{% endif %}
+<form id="saResetForm" method="post" class="vstack gap-3" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  <div>
+    <label class="form-label" for="password">New Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="password" name="password" autofocus autocomplete="new-password">
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+    <div class="form-text">Must not match your application password.</div>
+  </div>
+  <div>
+    <label class="form-label" for="confirm_password">Confirm Password</label>
+    <div class="input-group">
+      <input type="password" class="form-control" id="confirm_password" name="confirm_password" autocomplete="new-password">
+      <button class="btn btn-outline-secondary" type="button" data-toggle-password="#confirm_password">
+        <i class="bi bi-eye"></i>
+      </button>
+    </div>
+  </div>
+  <button type="submit" class="btn btn-primary w-100">Save Password</button>
+  <a href="{{ url_for('server_auth.gate') if session.get('user_id') else url_for('auth.login') }}" class="text-center small">Back</a>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/server_auth.js') }}?v=20260819val1"></script>
+{% endblock %}

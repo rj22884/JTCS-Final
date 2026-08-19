@@ -816,6 +816,103 @@ body.jtcs-body .modal textarea.form-control {
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
+/* Server auth — customer-portal purple/pink, smaller card */
+.sa-auth.jtcs-auth-page {
+  background-color: #2a1680;
+  background-image: linear-gradient(
+    145deg,
+    rgba(94, 52, 241, 0.94) 0%,
+    rgba(74, 40, 199, 0.9) 42%,
+    rgba(255, 57, 100, 0.82) 100%
+  );
+  background-attachment: fixed;
+}
+
+.sa-auth .jtcs-auth-card {
+  width: min(100%, 340px);
+  padding: 1.2rem 1.25rem 1.15rem;
+  border-radius: 1.1rem;
+  box-shadow: 0 14px 34px rgba(94, 52, 241, 0.22);
+}
+
+.sa-auth .sa-auth-head {
+  margin-bottom: 0.85rem !important;
+}
+
+.sa-auth .jtcs-login-logo,
+.sa-auth .jtcs-company-logo {
+  max-height: 44px;
+  max-width: 120px;
+}
+
+.sa-auth .jtcs-login-logo {
+  width: 44px;
+  height: 44px;
+  font-size: 1.15rem;
+  margin-bottom: 0.5rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #5e34f1, #ff3964);
+}
+
+.sa-auth .jtcs-auth-card h1 {
+  font-size: 1.12rem;
+  font-weight: 800;
+  color: #151528;
+}
+
+.sa-auth .jtcs-auth-card .text-muted,
+.sa-auth .jtcs-auth-card .form-text {
+  color: #5c5c78 !important;
+  font-size: 0.82rem;
+}
+
+.sa-auth .form-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #3a3a55;
+  margin-bottom: 0.25rem;
+}
+
+.sa-auth .form-control {
+  background: #f6f7fc;
+  border-color: #d8d4f0;
+  font-size: 0.9rem;
+}
+
+.sa-auth .form-control:focus {
+  background: #fff;
+  border-color: rgba(94, 52, 241, 0.55);
+  box-shadow: 0 0 0 0.2rem rgba(94, 52, 241, 0.15);
+}
+
+.sa-auth .btn-primary {
+  --bs-btn-bg: #5e34f1;
+  --bs-btn-border-color: #5e34f1;
+  --bs-btn-hover-bg: #4a28c7;
+  --bs-btn-hover-border-color: #4a28c7;
+  --bs-btn-active-bg: #3f22ad;
+  --bs-btn-active-border-color: #3f22ad;
+  font-weight: 700;
+}
+
+.sa-auth .btn-outline-secondary {
+  border-color: #d8d4f0;
+  color: #5e34f1;
+}
+
+.sa-auth a {
+  color: #5e34f1;
+}
+
+.sa-auth .alert {
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+}
+
+.sa-auth .jtcs-auth-footer {
+  color: rgba(255, 255, 255, 0.88);
+}
+
 .jtcs-seo-services {
   line-height: 1.45;
   font-size: 0.82rem;

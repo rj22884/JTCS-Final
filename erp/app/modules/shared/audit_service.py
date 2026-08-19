@@ -25,6 +25,8 @@ class AuditService:
         user_name: str | None = None,
         ip_address: str | None = None,
         browser: str | None = None,
+        module: str | None = None,
+        status: str | None = None,
     ) -> int:
         ensure_crm_schema()
         if has_request_context():
@@ -47,11 +49,12 @@ class AuditService:
             text(
                 """
                 INSERT INTO dbo.AuditLog
-                    (UserID, UserName, ActionName, EntityType, EntityID, OldValue, NewValue, IPAddress, Browser)
+                    (UserID, UserName, ActionName, EntityType, EntityID, OldValue, NewValue,
+                     IPAddress, Browser, Module, Status)
                 OUTPUT INSERTED.AuditID
                 VALUES
                     (:user_id, :user_name, :action_name, :entity_type, :entity_id, :old_value, :new_value,
-                     :ip_address, :browser)
+                     :ip_address, :browser, :module, :status)
                 """
             ),
             {
@@ -64,6 +67,8 @@ class AuditService:
                 "new_value": _dump(new_value),
                 "ip_address": (ip_address or "")[:64] or None,
                 "browser": (browser or "")[:500] or None,
+                "module": (module or entity_type or "")[:100] or None,
+                "status": (status or "SUCCESS")[:30],
             },
         ).first()
         db.session.commit()

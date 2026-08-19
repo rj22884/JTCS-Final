@@ -13,6 +13,16 @@ def create_signed_token(user_id: int, email: str, purpose: str) -> str:
 
 
 def load_signed_token(token: str, purpose: str, max_age: int | None = None) -> dict | None:
+    return load_payload(token, purpose, max_age=max_age)
+
+
+def dump_payload(payload: dict, purpose: str) -> str:
+    return _serializer(purpose).dumps(payload)
+
+
+def load_payload(token: str, purpose: str, max_age: int | None = None) -> dict | None:
+    if not token:
+        return None
     if max_age is None:
         max_age = current_app.config.get("AUTH_TOKEN_EXPIRY_SECONDS", 1800)
     try:

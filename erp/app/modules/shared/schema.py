@@ -189,6 +189,14 @@ _STATEMENTS: tuple[str, ...] = (
     END;
     """,
     """
+    IF COL_LENGTH(N'dbo.AuditLog', N'Module') IS NULL
+        ALTER TABLE dbo.AuditLog ADD Module NVARCHAR(100) NULL;
+    """,
+    """
+    IF COL_LENGTH(N'dbo.AuditLog', N'Status') IS NULL
+        ALTER TABLE dbo.AuditLog ADD Status NVARCHAR(30) NULL;
+    """,
+    """
     IF OBJECT_ID(N'dbo.CrmDocument', N'U') IS NULL
     BEGIN
         CREATE TABLE dbo.CrmDocument (

@@ -5,6 +5,7 @@ from app.config import Config
 from app.extensions import db, mail, csrf
 from app.routes.auth import bp as auth_bp
 from app.routes.dashboard import bp as dashboard_bp
+from app.routes.server_auth import bp as server_auth_bp
 from app.routes.menu_admin import bp as menu_admin_bp
 from app.routes.pages import bp as pages_bp
 from app.routes.reports import bp as reports_bp
@@ -86,6 +87,7 @@ SETUP_PUBLIC_ENDPOINTS = {
     "auth.verify_token",
     "auth.verify_email_link",
     "auth.verify_success",
+    "server_auth.reset_password",
     "dashboard.health",
     "public_intake.website_intake",
     "seo_api.keywords",
@@ -110,6 +112,7 @@ def create_app(config_class: type = Config) -> Flask:
 
     app.register_blueprint(setup_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(server_auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(transactions_bp)
     app.register_blueprint(stamp_bp)
@@ -218,6 +221,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Login activity schema ensure skipped: %s", exc)
+
+        try:
+            from app.services.server_auth_service import ServerAuthService
+
+            ServerAuthService().ensure_schema()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Server User schema ensure skipped: %s", exc)
 
         from app.utils.smtp_health import check_smtp_from_config, log_mail_config
 
@@ -579,5 +590,15 @@ def create_app(config_class: type = Config) -> Flask:
         from app.services.menu_service import MenuService
 
         return MenuService.normalize_menu_url(menu_url)
+
+    @app.after_request
+    def audit_authenticated_mutations(response):
+        try:
+            from app.services.server_audit_service import ServerAuditService
+
+            ServerAuditService().log_request(response)
+        except Exception:
+            app.logger.debug("Mutation audit skipped", exc_info=True)
+        return response
 
     return app

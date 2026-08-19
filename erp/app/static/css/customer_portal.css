@@ -81,6 +81,33 @@
   padding-top: 1.25rem;
 }
 
+.cp-login-hint-blink {
+  color: #5e34f1;
+  font-weight: 600;
+  line-height: 1.45;
+  animation: cp-hint-blink 1.6s ease-in-out infinite;
+}
+
+@keyframes cp-hint-blink {
+  0%,
+  100% {
+    opacity: 1;
+    color: #5e34f1;
+  }
+  50% {
+    opacity: 0.45;
+    color: #ff3964;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-login-hint-blink {
+    animation: none;
+    color: #5e34f1;
+    opacity: 1;
+  }
+}
+
 .cp-default-password {
   background: rgba(94, 52, 241, 0.08);
   border: 1px solid rgba(94, 52, 241, 0.22);
