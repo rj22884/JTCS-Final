@@ -443,7 +443,7 @@ def _make_activity_blueprint(
 
 itr_followup_bp = _make_activity_blueprint("ITR", "/itr/followup", "itr_followup", allow_customer_create=True)
 dsc_followup_bp = _make_activity_blueprint("DSC", "/dsc/followup", "dsc_followup", allow_customer_create=True)
-tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup", allow_customer_create=True)
+tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup", allow_customer_create=False)
 gst_followup_bp = _make_activity_blueprint("GST", "/gst/followup", "gst_followup", allow_customer_create=True)
 
 # Spec alias: POST /api/itr/sync-status (same handler as ITR Followup Sync)

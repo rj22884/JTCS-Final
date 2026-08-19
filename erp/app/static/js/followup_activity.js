@@ -12,7 +12,7 @@
   const isItrModule = workTypeLabel === "ITR";
   const isTdsModule = workTypeLabel === "TDS" || hasTdsPeriodSplit;
   const isGstModule = workTypeLabel === "GST" || hasGstFields;
-  const paymentLineHasDate = isItrModule || isDscModule || isGstModule;
+  const paymentLineHasDate = isItrModule || isDscModule || isGstModule || isTdsModule;
 
   const els = {
     newEntryBtn: document.getElementById("fuNewEntryBtn"),
@@ -1295,7 +1295,13 @@
     if (els.workDate) els.workDate.value = (record.work_date || "").slice(0, 10);
     if (els.taxPeriod) els.taxPeriod.value = record.tax_period || "";
     if (isTdsModule) {
-      if (els.formType) els.formType.value = record.form_type || "";
+      if (els.formType) {
+        const formType = record.form_type || "";
+        const hasOption = Array.from(els.formType.options).some(function (opt) {
+          return opt.value === formType;
+        });
+        els.formType.value = hasOption ? formType : "";
+      }
       if (els.quarter) els.quarter.value = record.quarter || "";
     }
     if (isDscModule && els.applicationNumber) {
@@ -1463,7 +1469,7 @@
       const formType = (els.formType?.value || "").trim();
       const quarter = (els.quarter?.value || "").trim();
       if (!formType) {
-        alert("Form type is required.");
+        alert("Return type is required.");
         els.formType?.focus();
         return;
       }

@@ -56,7 +56,7 @@ MODULE_META = {
 
 DSC_APPLICATION_STAGE_CODES = frozenset({"application_received", "application_no"})
 
-TDS_FORM_TYPES = ("Salary", "Non-Salary", "Scrap", "NRI TDS")
+TDS_FORM_TYPES = ("Original", "Revised")
 TDS_QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 GST_RETURN_TYPES = ("GSTR1", "GSTR3B", "GSTR7", "GSTR-Others")
 GST_FILING_FREQUENCIES = ("Monthly", "Quarterly", "Yearly")
@@ -995,9 +995,9 @@ class FollowupService:
             form_type = (payload.get("form_type") or payload.get("FormType") or "").strip()
             quarter = (payload.get("quarter") or payload.get("Quarter") or "").strip().upper()
             if not form_type:
-                raise ValueError("Form type is required.")
+                raise ValueError("Return type is required.")
             if form_type not in TDS_FORM_TYPES:
-                raise ValueError("Select a valid form type.")
+                raise ValueError("Select a valid return type (Original or Revised).")
             if not quarter:
                 raise ValueError("Quarter is required.")
             if quarter not in TDS_QUARTERS:
@@ -1206,7 +1206,7 @@ class FollowupService:
                 payment_lines = payment_service.parse_payment_lines(payload, Decimal(str(amount_value)))
                 if not payment_lines:
                     raise ValueError("Add at least one payment mode with amount.")
-                if self.module_code in ("ITR", "DSC", "GST"):
+                if self.module_code in ("ITR", "DSC", "GST", "TDS"):
                     for line in payment_lines:
                         if not line.get("payment_date"):
                             raise ValueError("Each payment line must have a date.")
