@@ -18,6 +18,9 @@
     gridDateTo: document.getElementById("oieGridDateTo"),
     applyFilterBtn: document.getElementById("oieApplyFilterBtn"),
     clearFilterBtn: document.getElementById("oieClearFilterBtn"),
+    pageSize: document.getElementById("oiePageSize"),
+    pageInfo: document.getElementById("oiePageInfo"),
+    pagerNav: document.getElementById("oiePagerNav"),
     statsRow: document.getElementById("oieStatsRow"),
     statIncomeAmount: document.getElementById("oieStatIncomeAmount"),
     statIncomeCount: document.getElementById("oieStatIncomeCount"),
@@ -63,8 +66,34 @@
   let customerSearchSeq = 0;
   let customerSearchTimer = null;
   let searchTimer = null;
+  const PAGE_SIZES = [10, 50, 100, 200, 500, 1000];
+  const PAGE_SIZE_KEY = "oie-page-size";
   let allGridRows = [];
   let sortState = { key: "work_date", dir: "desc" };
+  let pageState = { page: 1, pageSize: 50 };
+
+  function readStoredPageSize() {
+    try {
+      const raw = Number(localStorage.getItem(PAGE_SIZE_KEY) || "");
+      if (PAGE_SIZES.indexOf(raw) !== -1) return raw;
+    } catch (err) {
+      /* ignore */
+    }
+    return 50;
+  }
+
+  function persistPageSize(size) {
+    try {
+      localStorage.setItem(PAGE_SIZE_KEY, String(size));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function currentPageSize() {
+    const raw = Number(els.pageSize?.value || pageState.pageSize);
+    return PAGE_SIZES.indexOf(raw) !== -1 ? raw : 50;
+  }
 
   function apiUrl(template, entryId) {
     return String(template || "").replace("/0", "/" + String(entryId));
@@ -1210,20 +1239,104 @@
     syncStatCardActive();
   }
 
-  function renderGrid() {
+  function pageWindow(current, total) {
+    if (total <= 7) {
+      const pages = [];
+      for (let i = 1; i <= total; i++) pages.push(i);
+      return pages;
+    }
+    const pages = [1];
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    if (start > 2) pages.push("ellipsis");
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (end < total - 1) pages.push("ellipsis");
+    pages.push(total);
+    return pages;
+  }
+
+  function pagerItem(label, page, options) {
+    const opts = options || {};
+    const disabled = !!opts.disabled;
+    const active = !!opts.active;
+    const ellipsis = !!opts.ellipsis;
+    if (ellipsis) {
+      return '<li class="page-item disabled"><span class="page-link">…</span></li>';
+    }
+    const cls = "page-item" + (disabled ? " disabled" : "") + (active ? " active" : "");
+    if (disabled && !active) {
+      return '<li class="' + cls + '"><span class="page-link">' + label + "</span></li>";
+    }
+    return (
+      '<li class="' +
+      cls +
+      '"><button type="button" class="page-link oie-page-btn" data-page="' +
+      page +
+      '"' +
+      (active ? ' aria-current="page"' : "") +
+      ">" +
+      label +
+      "</button></li>"
+    );
+  }
+
+  function renderPager(total, pageSize, page, totalPages) {
+    pageState.page = page;
+    pageState.pageSize = pageSize;
+    if (els.gridCount) {
+      els.gridCount.textContent = total + " record(s)";
+    }
+    if (els.pageInfo) {
+      if (!total) {
+        els.pageInfo.textContent = "Showing 0 of 0";
+      } else {
+        const from = (page - 1) * pageSize + 1;
+        const to = Math.min(page * pageSize, total);
+        els.pageInfo.textContent = "Showing " + from + "–" + to + " of " + total;
+      }
+    }
+    if (!els.pagerNav) return;
+    if (!total) {
+      els.pagerNav.innerHTML = "";
+      return;
+    }
+    const items = [
+      pagerItem("Previous", page - 1, { disabled: page <= 1 }),
+    ];
+    pageWindow(page, totalPages).forEach(function (item) {
+      if (item === "ellipsis") {
+        items.push(pagerItem("", 0, { ellipsis: true }));
+        return;
+      }
+      items.push(pagerItem(String(item), item, { active: item === page }));
+    });
+    items.push(pagerItem("Next", page + 1, { disabled: page >= totalPages }));
+    els.pagerNav.innerHTML = items.join("");
+  }
+
+  function renderGrid(options) {
     if (!els.gridBody) return;
+    const opts = options || {};
     const filtered = sortRows(getFilteredRows());
     updateStats();
     syncSortHeaders();
 
-    if (els.gridCount) {
-      els.gridCount.textContent = filtered.length + " record(s)";
-    }
+    const pageSize = currentPageSize();
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+    let page = opts.resetPage ? 1 : pageState.page;
+    if (page > totalPages) page = totalPages;
+    if (page < 1) page = 1;
+
     if (els.gridEmpty) {
-      els.gridEmpty.classList.toggle("d-none", filtered.length > 0);
+      els.gridEmpty.classList.toggle("d-none", total > 0);
     }
 
-    els.gridBody.innerHTML = filtered
+    const start = total ? (page - 1) * pageSize : 0;
+    const pageRows = filtered.slice(start, start + pageSize);
+    renderPager(total, pageSize, page, totalPages);
+
+    els.gridBody.innerHTML = pageRows
       .map(function (row) {
         const category = row.work_name || "";
         return (
@@ -1274,13 +1387,22 @@
       .join("");
   }
 
+  function renderGridFromStart() {
+    renderGrid({ resetPage: true });
+  }
+
+  function goToPage(page) {
+    pageState.page = page;
+    renderGrid();
+  }
+
   function clearGridFilters() {
     if (els.gridSearch) els.gridSearch.value = "";
     if (els.gridFilterKind) els.gridFilterKind.value = "";
     if (els.gridDateFrom) els.gridDateFrom.value = "";
     if (els.gridDateTo) els.gridDateTo.value = "";
     sortState = { key: "work_date", dir: "desc" };
-    renderGrid();
+    renderGridFromStart();
   }
 
   function loadGrid() {
@@ -1290,7 +1412,7 @@
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
         allGridRows = data.rows || [];
-        renderGrid();
+        renderGridFromStart();
       })
       .catch(function (err) {
         console.error(err);
@@ -1457,16 +1579,16 @@
     els.refreshGridBtn.addEventListener("click", loadGrid);
   }
   if (els.gridFilterKind) {
-    els.gridFilterKind.addEventListener("change", renderGrid);
+    els.gridFilterKind.addEventListener("change", renderGridFromStart);
   }
   if (els.gridDateFrom) {
-    els.gridDateFrom.addEventListener("change", renderGrid);
+    els.gridDateFrom.addEventListener("change", renderGridFromStart);
   }
   if (els.gridDateTo) {
-    els.gridDateTo.addEventListener("change", renderGrid);
+    els.gridDateTo.addEventListener("change", renderGridFromStart);
   }
   if (els.applyFilterBtn) {
-    els.applyFilterBtn.addEventListener("click", renderGrid);
+    els.applyFilterBtn.addEventListener("click", renderGridFromStart);
   }
   if (els.clearFilterBtn) {
     els.clearFilterBtn.addEventListener("click", clearGridFilters);
@@ -1474,7 +1596,27 @@
   if (els.gridSearch) {
     els.gridSearch.addEventListener("input", function () {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(renderGrid, 250);
+      searchTimer = setTimeout(renderGridFromStart, 250);
+    });
+  }
+  if (els.pageSize) {
+    const storedSize = readStoredPageSize();
+    els.pageSize.value = String(storedSize);
+    pageState.pageSize = storedSize;
+    els.pageSize.addEventListener("change", function () {
+      const size = currentPageSize();
+      pageState.pageSize = size;
+      persistPageSize(size);
+      renderGridFromStart();
+    });
+  }
+  if (els.pagerNav) {
+    els.pagerNav.addEventListener("click", function (event) {
+      const btn = event.target.closest(".oie-page-btn");
+      if (!btn || !els.pagerNav.contains(btn)) return;
+      const page = Number(btn.getAttribute("data-page") || "");
+      if (!Number.isFinite(page) || page < 1) return;
+      goToPage(page);
     });
   }
   if (els.statsRow) {
@@ -1484,7 +1626,7 @@
       if (els.gridFilterKind) {
         els.gridFilterKind.value = card.getAttribute("data-kind-filter") || "";
       }
-      renderGrid();
+      renderGridFromStart();
     });
   }
   document.querySelectorAll("#oieDataGrid th.oie-sortable").forEach(function (th) {
@@ -1497,7 +1639,7 @@
         sortState.key = key;
         sortState.dir = key === "work_date" || key === "created_date" || key === "amount" ? "desc" : "asc";
       }
-      renderGrid();
+      renderGridFromStart();
     });
   });
   if (els.workDate) {

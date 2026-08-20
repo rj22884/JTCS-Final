@@ -516,7 +516,7 @@ class OthersIncomeExpenseRepository:
         seq = int(match.group(2)) + 1
         return f"{prefix}-{date_part}/{seq:03d}"
 
-    def list_recent(self, *, ledger_kind: str | None = None, limit: int = 200) -> list[OthersIncomeExpenseMaster]:
+    def list_recent(self, *, ledger_kind: str | None = None, limit: int | None = None) -> list[OthersIncomeExpenseMaster]:
         self.ensure_schema()
         stmt = (
             select(OthersIncomeExpenseMaster)
@@ -531,11 +531,10 @@ class OthersIncomeExpenseRepository:
         )
         if ledger_kind:
             stmt = stmt.where(WorkMaster.LedgerKind == ledger_kind)
-        stmt = (
-            stmt.order_by(
-                OthersIncomeExpenseMaster.WorkDate.desc(),
-                OthersIncomeExpenseMaster.EntryID.desc(),
-            )
-            .limit(limit)
+        stmt = stmt.order_by(
+            OthersIncomeExpenseMaster.WorkDate.desc(),
+            OthersIncomeExpenseMaster.EntryID.desc(),
         )
+        if limit:
+            stmt = stmt.limit(limit)
         return list(self.session.scalars(stmt).unique().all())

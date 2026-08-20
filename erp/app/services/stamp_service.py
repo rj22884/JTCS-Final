@@ -226,8 +226,7 @@ class StampService:
         if account is None:
             raise ValueError(
                 "Stamp purchase bank account not found in Bank Master. "
-                "Keep 'SHCILStamp' in Masked Account Number for the stamp-duty "
-                "purchase account (Account Number and Bank Name can be the real bank details)."
+                "Use account number 0213UK1423304 (SHCILStamp) for stamp-duty purchase."
             )
         return self.master_repo.resolve_bank_account_by_id(account.JtcsBankAccountID)
 

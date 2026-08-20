@@ -442,20 +442,24 @@ class OthersIncomeExpenseService:
         if not normalized:
             return {}
 
-        daily_rows = list(
-            db.session.execute(
-                select(
-                    JTCSDailyTransaction.TransactionID,
-                    JTCSDailyTransaction.ReferenceNo,
-                )
-                .where(
-                    JTCSDailyTransaction.ReferenceNo.in_(normalized),
-                    JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                    JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
-                )
-                .order_by(JTCSDailyTransaction.TransactionID.asc())
-            ).all()
-        )
+        daily_rows = []
+        chunk_size = 400
+        for offset in range(0, len(normalized), chunk_size):
+            chunk = normalized[offset : offset + chunk_size]
+            daily_rows.extend(
+                db.session.execute(
+                    select(
+                        JTCSDailyTransaction.TransactionID,
+                        JTCSDailyTransaction.ReferenceNo,
+                    )
+                    .where(
+                        JTCSDailyTransaction.ReferenceNo.in_(chunk),
+                        JTCSDailyTransaction.WorkType == self.WORK_TYPE,
+                        JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
+                    )
+                    .order_by(JTCSDailyTransaction.TransactionID.asc())
+                ).all()
+            )
         if not daily_rows:
             return {}
 
@@ -466,16 +470,19 @@ class OthersIncomeExpenseService:
                 latest_tid_by_bill[key] = int(transaction_id)
 
         transaction_ids = list(latest_tid_by_bill.values())
-        payment_rows = list(
-            db.session.scalars(
-                select(JTCSDailyTransactionPayment)
-                .where(JTCSDailyTransactionPayment.TransactionID.in_(transaction_ids))
-                .order_by(
-                    JTCSDailyTransactionPayment.TransactionID.asc(),
-                    JTCSDailyTransactionPayment.PaymentSequence.asc(),
-                )
-            ).all()
-        )
+        payment_rows = []
+        for offset in range(0, len(transaction_ids), chunk_size):
+            chunk = transaction_ids[offset : offset + chunk_size]
+            payment_rows.extend(
+                db.session.scalars(
+                    select(JTCSDailyTransactionPayment)
+                    .where(JTCSDailyTransactionPayment.TransactionID.in_(chunk))
+                    .order_by(
+                        JTCSDailyTransactionPayment.TransactionID.asc(),
+                        JTCSDailyTransactionPayment.PaymentSequence.asc(),
+                    )
+                ).all()
+            )
         bank_ids_by_tid: dict[int, list[int]] = {}
         for payment in payment_rows:
             bank_ids_by_tid.setdefault(payment.TransactionID, []).append(int(payment.BankAccountID))

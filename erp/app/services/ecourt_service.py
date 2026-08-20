@@ -1096,8 +1096,7 @@ class ECourtService:
         if account is None:
             raise ValueError(
                 "e-Court purchase bank account not found in Bank Master. "
-                "Keep 'SHCILECourt' in Masked Account Number for the e-Court "
-                "purchase account (Account Number and Bank Name can be the real bank details)."
+                "Use account number HUKECFUK1423304 (SHCIL-e-Court) for e-Court purchase."
             )
         return self.master_repo.resolve_bank_account_by_id(account.JtcsBankAccountID)
 

@@ -311,10 +311,54 @@ class LedgerReportService:
             return self._work_ledger_data(entity_id, date_from=date_from, date_to=date_to)
         return self._item_ledger_data(entity_id, date_from=date_from, date_to=date_to)
 
+    def _prefetch_daily_source_rows(self, record_ids: list[int]) -> dict[int, dict[str, Any]]:
+        ids = []
+        seen: set[int] = set()
+        for raw in record_ids:
+            try:
+                tid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if tid <= 0 or tid in seen:
+                continue
+            seen.add(tid)
+            ids.append(tid)
+        if not ids:
+            return {}
+        result: dict[int, dict[str, Any]] = {}
+        chunk_size = 400
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start : start + chunk_size]
+            placeholders = ", ".join(str(tid) for tid in chunk)
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT TransactionID, WorkType, SubWorkType, StampID, ReferenceNo
+                    FROM JTCSDailyTransaction
+                    WHERE TransactionID IN ({placeholders})
+                    """
+                )
+            ).mappings().all()
+            for row in rows:
+                result[int(row["TransactionID"])] = dict(row)
+        return result
+
     def _simplify_export_ledger(self, data: dict[str, Any], *, title: str) -> dict[str, Any]:
         """Map admin export ledger rows to Date / Description / Debit / Credit / Closing Balance."""
         dash = self._dash()
         kind_key = (data.get("kind") or "").strip().lower()
+        daily_map: dict[int, dict[str, Any]] = {}
+        if kind_key == "bank":
+            daily_map = self._prefetch_daily_source_rows(
+                [
+                    line.get("source_record_id")
+                    for line in (data.get("lines") or [])
+                    if (line.get("kind") or "txn") == "txn"
+                    and (line.get("source") or "").strip().lower()
+                    in {"", "jtcsdailytransaction", "shcil"}
+                    and line.get("source_record_id")
+                ]
+            )
         lines: list[dict[str, Any]] = []
         for line in data.get("lines") or []:
             kind = (line.get("kind") or "txn").strip()
@@ -342,11 +386,22 @@ class LedgerReportService:
                 try:
                     if kind_key == "bank":
                         rec_id = line.get("source_record_id")
-                        link = dash._source_link_for_bank_leg(
-                            source_table=line.get("source"),
-                            source_record_id=int(rec_id) if rec_id else None,
-                            bank_transaction_id=line.get("bank_transaction_id"),
-                        )
+                        rec_int = int(rec_id) if rec_id else 0
+                        daily = daily_map.get(rec_int)
+                        if daily:
+                            link = dash._source_link_for_daily(
+                                transaction_id=int(daily["TransactionID"]),
+                                work_type=daily.get("WorkType"),
+                                sub_work_type=daily.get("SubWorkType"),
+                                stamp_id=daily.get("StampID"),
+                                reference=daily.get("ReferenceNo"),
+                            )
+                        else:
+                            link = dash._source_link_for_bank_leg(
+                                source_table=line.get("source"),
+                                source_record_id=rec_int if rec_int else None,
+                                bank_transaction_id=line.get("bank_transaction_id"),
+                            )
                     elif kind_key == "customer":
                         txn_id = line.get("transaction_id")
                         stamp_id = line.get("stamp_id")

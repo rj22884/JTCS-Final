@@ -6,7 +6,7 @@ import io
 import math
 import re
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -345,6 +345,411 @@ class LedgerExportService:
             {"account_id": account_id},
         ).mappings().first()
 
+    @staticmethod
+    def _to_ledger_date(value) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        text_val = str(value).strip()
+        if not text_val:
+            return None
+        try:
+            return date.fromisoformat(text_val[:10])
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _alias_snapshot_sql(column_prefix: str = "") -> str:
+        col_mask = f"{column_prefix}MaskedAccountNumber" if column_prefix else "MaskedAccountNumber"
+        col_name = f"{column_prefix}BankName" if column_prefix else "BankName"
+        return f"""
+            (
+                REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL({col_mask}, N'')))), N' ', N''), N'-', N'')
+                    LIKE :wallet_alias_like
+                OR REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL({col_name}, N'')))), N' ', N''), N'-', N'')
+                    LIKE :wallet_alias_like
+            )
+        """
+
+    def _wallet_ledger_flags(self, account_id: int) -> dict[str, Any]:
+        from app.utils.shcil_bank_accounts import (
+            account_is_ecourt_purchase_wallet,
+            account_is_stamp_purchase_wallet,
+        )
+
+        is_stamp = False
+        is_ecourt = False
+        try:
+            is_stamp = account_is_stamp_purchase_wallet(db.session, account_id)
+        except Exception:
+            is_stamp = False
+        try:
+            is_ecourt = account_is_ecourt_purchase_wallet(db.session, account_id)
+        except Exception:
+            is_ecourt = False
+        return {"stamp": is_stamp, "ecourt": is_ecourt}
+
+    def _bank_ledger_account_where(
+        self, account_id: int, wallet: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
+        """Match this bank account only.
+
+        Stamp / e-Court wallets also pick up snapshot rows stored with their
+        live account numbers (0213UK1423304 / HUKECFUK1423304). Other banks'
+        transactions are never rewritten or reassigned.
+        """
+        from app.utils.shcil_bank_accounts import (
+            ECOURT_PURCHASE_ACCOUNT_NUMBERS,
+            STAMP_PURCHASE_ACCOUNT_NUMBERS,
+        )
+
+        params: dict[str, Any] = {"account_id": account_id}
+        clauses = ["JtcsBankAccountID = :account_id"]
+        account_numbers: tuple[str, ...] = ()
+        if wallet.get("stamp"):
+            account_numbers = STAMP_PURCHASE_ACCOUNT_NUMBERS
+        elif wallet.get("ecourt"):
+            account_numbers = ECOURT_PURCHASE_ACCOUNT_NUMBERS
+        if account_numbers:
+            number = "".join(ch for ch in account_numbers[0].upper() if ch.isalnum())
+            clauses.append(
+                """
+                (
+                    REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL(MaskedAccountNumber, N'')))), N' ', N''), N'-', N'')
+                        = :wallet_account_number
+                    OR REPLACE(REPLACE(UPPER(LTRIM(RTRIM(ISNULL(BankName, N'')))), N' ', N''), N'-', N'')
+                        = :wallet_account_number
+                )
+                """
+            )
+            params["wallet_account_number"] = number
+        where_sql = "(" + " OR ".join(clauses) + ")"
+        return where_sql, params
+
+    def _missing_purpose_purchase_sql(self) -> str:
+        return """
+            SELECT
+                d.TransactionID,
+                d.TransactionDate,
+                CASE
+                    WHEN ISNULL(d.PurchaseAmount, 0) > 0 THEN ISNULL(d.PurchaseAmount, 0)
+                    ELSE ISNULL(s.StampDutyAmount, 0)
+                END AS PurchaseAmount,
+                d.ReferenceNo,
+                d.Remarks
+            FROM dbo.JTCSDailyTransaction d
+            LEFT JOIN dbo.StampMaster s
+                ON s.StampID = d.StampID
+            WHERE d.WorkType = N'SHCIL'
+              AND d.SubWorkType = :sub_work
+              AND (
+                    ISNULL(d.PurchaseAmount, 0) > 0
+                    OR ISNULL(s.StampDutyAmount, 0) > 0
+                  )
+              AND d.TransactionDate >= :range_from
+              AND d.TransactionDate < :range_to
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM dbo.JtcsBankTransaction t
+                    WHERE (
+                            t.SourceRecordID = d.TransactionID
+                         OR t.SourceID = d.TransactionID
+                      )
+                      AND t.JtcsBankAccountID = :account_id
+                      AND UPPER(LTRIM(RTRIM(ISNULL(t.Description, N'')))) = :purchase_desc
+                      AND ISNULL(t.Credit, 0) > 0
+              )
+            ORDER BY d.TransactionDate ASC, d.TransactionID ASC
+        """
+
+    def _ensure_purpose_purchase_legs(self, account_id: int, wallet: dict[str, Any]) -> None:
+        """Post missing stamp-duty / e-Court purchase credits onto this wallet only.
+
+        Inserts new JtcsBankTransaction rows for this account_id. Does not
+        update, delete, or reassign any other bank account's transactions.
+        """
+        if not wallet.get("stamp") and not wallet.get("ecourt"):
+            return
+
+        account_row = db.session.execute(
+            text(
+                """
+                SELECT BankName, AccountNumber, MaskedAccountNumber
+                FROM dbo.JtcsBankAccountMaster
+                WHERE JtcsBankAccountID = :account_id
+                """
+            ),
+            {"account_id": account_id},
+        ).mappings().first()
+        if account_row is None:
+            return
+
+        if wallet.get("stamp"):
+            from app.utils.shcil_bank_accounts import STAMP_PURCHASE_DESCRIPTION
+
+            sub_work = "Stamp Activity"
+            description = "Stamp Purchase"
+            purchase_desc = STAMP_PURCHASE_DESCRIPTION
+        else:
+            from app.utils.shcil_bank_accounts import ECOURT_PURCHASE_DESCRIPTION
+
+            sub_work = "e-Court Activity"
+            description = "e-Court Purchase"
+            purchase_desc = ECOURT_PURCHASE_DESCRIPTION
+
+        bank_name = (account_row["BankName"] or "").strip() or "Bank"
+        masked = (
+            (account_row["AccountNumber"] or "").strip()
+            or (account_row["MaskedAccountNumber"] or "").strip()
+            or "NA"
+        )
+        payment_mode = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 PaymentModeID
+                FROM dbo.PaymentModeMaster
+                WHERE BankAccountID = :account_id
+                  AND ISNULL(IsActive, 1) = 1
+                ORDER BY PaymentModeID
+                """
+            ),
+            {"account_id": account_id},
+        ).first()
+        payment_mode_id = int(payment_mode[0]) if payment_mode and payment_mode[0] else None
+
+        try:
+            result = db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.JtcsBankTransaction (
+                        JtcsBankAccountID,
+                        BankName,
+                        MaskedAccountNumber,
+                        TransactionDate,
+                        Description,
+                        Debit,
+                        Credit,
+                        ClosingBalance,
+                        ImportedBy,
+                        ImportedDate,
+                        Remarks,
+                        IsLocked,
+                        SourceTable,
+                        SourceRecordID,
+                        SourceType,
+                        SourceID,
+                        LedgerKind,
+                        PaymentModeID,
+                        PaymentSequence
+                    )
+                    SELECT
+                        :account_id,
+                        :bank_name,
+                        :masked,
+                        d.TransactionDate,
+                        :description,
+                        NULL,
+                        CASE
+                            WHEN ISNULL(d.PurchaseAmount, 0) > 0 THEN ISNULL(d.PurchaseAmount, 0)
+                            ELSE ISNULL(s.StampDutyAmount, 0)
+                        END,
+                        0,
+                        N'System',
+                        GETUTCDATE(),
+                        d.ReferenceNo,
+                        0,
+                        N'JTCSDailyTransaction',
+                        d.TransactionID,
+                        N'SHCIL',
+                        d.TransactionID,
+                        N'PAYMENT',
+                        :payment_mode_id,
+                        ISNULL(d.PaymentSplitCount, 1) + 1
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.StampMaster s
+                        ON s.StampID = d.StampID
+                    WHERE d.WorkType = N'SHCIL'
+                      AND d.SubWorkType = :sub_work
+                      AND (
+                            ISNULL(d.PurchaseAmount, 0) > 0
+                            OR ISNULL(s.StampDutyAmount, 0) > 0
+                          )
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.JtcsBankTransaction t
+                            WHERE (
+                                    t.SourceRecordID = d.TransactionID
+                                 OR t.SourceID = d.TransactionID
+                              )
+                              AND t.JtcsBankAccountID = :account_id
+                              AND UPPER(LTRIM(RTRIM(ISNULL(t.Description, N'')))) = :purchase_desc
+                              AND ISNULL(t.Credit, 0) > 0
+                      )
+                    """
+                ),
+                {
+                    "account_id": account_id,
+                    "bank_name": bank_name[:150],
+                    "masked": masked[:50],
+                    "description": description,
+                    "payment_mode_id": payment_mode_id,
+                    "sub_work": sub_work,
+                    "purchase_desc": purchase_desc,
+                },
+            )
+            if result.rowcount:
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    def _append_missing_purpose_purchases(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        account_id: int,
+        sub_work: str,
+        purchase_description: str,
+        description: str,
+        range_from: date,
+        range_to_next: date,
+        ob_date: date | None,
+        seen_ids: set[int],
+    ) -> tuple[Decimal, Decimal]:
+        extra_debit = Decimal("0.00")
+        extra_credit = Decimal("0.00")
+        fetched = db.session.execute(
+            text(self._missing_purpose_purchase_sql()),
+            {
+                "account_id": account_id,
+                "sub_work": sub_work,
+                "purchase_desc": purchase_description,
+                "range_from": range_from,
+                "range_to": range_to_next,
+            },
+        ).mappings().all()
+        for raw in fetched:
+            txn_date = self._to_ledger_date(raw["TransactionDate"])
+            if txn_date is None:
+                continue
+            if ob_date is not None and txn_date < ob_date:
+                continue
+            amount = self._money(raw["PurchaseAmount"])
+            if amount <= 0:
+                continue
+            daily_id = int(raw["TransactionID"] or 0)
+            if daily_id in seen_ids:
+                continue
+            seen_ids.add(daily_id)
+            extra_credit = self._money(extra_credit + amount)
+            rows.append(
+                {
+                    "JtcsBankTransactionID": -daily_id,
+                    "TransactionDate": txn_date,
+                    "Description": description,
+                    "Remarks": (raw["ReferenceNo"] or raw["Remarks"] or "").strip() or None,
+                    "SourceTable": "JTCSDailyTransaction",
+                    "SourceType": "SHCIL",
+                    "SourceRecordID": daily_id,
+                    "LedgerKind": "PAYMENT",
+                    "DebitValue": Decimal("0.00"),
+                    "CreditValue": amount,
+                }
+            )
+        return extra_debit, extra_credit
+
+    def _append_orphan_obc_deposits(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        account_id: int,
+        range_from: date,
+        range_to_next: date,
+        ob_date: date | None,
+    ) -> tuple[Decimal, Decimal]:
+        extra_debit = Decimal("0.00")
+        extra_credit = Decimal("0.00")
+        fetched = db.session.execute(
+            text(
+                """
+                SELECT
+                    o.EntryID,
+                    o.VoucherNo,
+                    o.WorkDate,
+                    o.Amount,
+                    o.Purpose,
+                    o.Remarks
+                FROM dbo.OthersBankCashTransaction o
+                WHERE o.DebitBankAccountID = :account_id
+                  AND ISNULL(o.IsActive, 1) = 1
+                  AND o.WorkDate >= :range_from
+                  AND o.WorkDate < :range_to
+                  AND (
+                        o.InBankTransactionID IS NULL
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.JtcsBankTransaction t2
+                            WHERE t2.JtcsBankTransactionID = o.InBankTransactionID
+                              AND t2.JtcsBankAccountID = :account_id
+                        )
+                  )
+                ORDER BY o.WorkDate ASC, o.EntryID ASC
+                """
+            ),
+            {
+                "account_id": account_id,
+                "range_from": range_from,
+                "range_to": range_to_next,
+            },
+        ).mappings().all()
+        for raw in fetched:
+            txn_date = self._to_ledger_date(raw["WorkDate"])
+            if txn_date is None:
+                continue
+            if ob_date is not None and txn_date < ob_date:
+                continue
+            amount = self._money(raw["Amount"])
+            if amount <= 0:
+                continue
+            extra_debit = self._money(extra_debit + amount)
+            purpose = (raw["Purpose"] or "Bank Transfer").strip()
+            voucher = (raw["VoucherNo"] or "").strip()
+            rows.append(
+                {
+                    "JtcsBankTransactionID": -int(raw["EntryID"] or 0),
+                    "TransactionDate": txn_date,
+                    "Description": f"{purpose} (Debit / In) — OBC deposit",
+                    "Remarks": voucher or (raw["Remarks"] or None),
+                    "SourceTable": "OthersBankCashTransaction",
+                    "SourceType": "OTHERS_BANK_CASH",
+                    "SourceRecordID": int(raw["EntryID"] or 0),
+                    "LedgerKind": "CONTRA_IN",
+                    "DebitValue": amount,
+                    "CreditValue": Decimal("0.00"),
+                }
+            )
+        return extra_debit, extra_credit
+
+    def _dedupe_bank_txn_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[int] = set()
+        unique: list[dict[str, Any]] = []
+        for row in rows:
+            tid = int(row.get("JtcsBankTransactionID") or 0)
+            if tid > 0:
+                if tid in seen:
+                    continue
+                seen.add(tid)
+            unique.append(row)
+        unique.sort(
+            key=lambda r: (
+                self._to_ledger_date(r.get("TransactionDate")) or date.min,
+                int(r.get("JtcsBankTransactionID") or 0),
+            )
+        )
+        return unique
+
     def _bank_ledger_data(
         self,
         account_id: int,
@@ -372,55 +777,141 @@ class LedgerExportService:
         label = " ".join(label_parts)
 
         opening = Decimal("0.00")
-        ob_date = account["OpeningBalanceDate"]
+        ob_date = self._to_ledger_date(account["OpeningBalanceDate"])
         if ob_date is None or ob_date <= date_from:
             opening = self._money(account["OpeningBalance"])
+        wallet = self._wallet_ledger_flags(account_id)
+        self._ensure_purpose_purchase_legs(account_id, wallet)
+        account_where, account_params = self._bank_ledger_account_where(account_id, wallet)
+        date_to_next = date_to + timedelta(days=1)
+        # Inclusive To Date: datetime rows on date_to itself used to be dropped
+        # by TransactionDate <= midnight. Use half-open [from, to+1).
         # Prior movements only on/after OpeningBalanceDate — never double-count
         # Bank Master Opening Balance with pre-opening (or corrupt-dated) rows.
-        prior_sql = """
+        prior_sql = f"""
                 SELECT
                     ISNULL(SUM(ISNULL(Debit, 0)), 0) AS prior_debit,
                     ISNULL(SUM(ISNULL(Credit, 0)), 0) AS prior_credit
                 FROM dbo.JtcsBankTransaction
-                WHERE JtcsBankAccountID = :account_id
-                  AND TransactionDate < :date_from
+                WHERE {account_where}
+                  AND TransactionDate >= :range_from
+                  AND TransactionDate < :range_to
             """
-        prior_params = {"account_id": account_id, "date_from": date_from}
-        if ob_date is not None:
-            prior_sql += " AND TransactionDate >= :ob_date"
-            prior_params["ob_date"] = ob_date
+        prior_from = ob_date or date(2000, 1, 1)
+        prior_params = {
+            **account_params,
+            "range_from": prior_from,
+            "range_to": date_from,
+        }
         prior_row = db.session.execute(text(prior_sql), prior_params).mappings().first()
         prior_debit = self._money(prior_row["prior_debit"] if prior_row else 0)
         prior_credit = self._money(prior_row["prior_credit"] if prior_row else 0)
-        opening = self._apply_bank_running(
-            opening, prior_debit, prior_credit, credit_normal=credit_normal
-        )
 
-        txn_sql = """
+        txn_sql = f"""
                 SELECT
                     JtcsBankTransactionID, TransactionDate, Description, Remarks,
                     SourceTable, SourceType, SourceRecordID, LedgerKind,
                     ISNULL(Debit, 0) AS DebitValue,
                     ISNULL(Credit, 0) AS CreditValue
                 FROM dbo.JtcsBankTransaction
-                WHERE JtcsBankAccountID = :account_id
-                  AND TransactionDate >= :date_from
-                  AND TransactionDate <= :date_to
+                WHERE {account_where}
+                  AND TransactionDate >= :range_from
+                  AND TransactionDate < :range_to
+                ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC
             """
         txn_params = {
-            "account_id": account_id,
-            "date_from": date_from,
-            "date_to": date_to,
+            **account_params,
+            "range_from": date_from if ob_date is None else max(date_from, ob_date),
+            "range_to": date_to_next,
         }
-        if ob_date is not None:
-            # Keep period rows consistent with opening-date floor.
-            txn_sql = txn_sql.replace(
-                "AND TransactionDate >= :date_from",
-                "AND TransactionDate >= :date_from AND TransactionDate >= :ob_date",
+        txn_rows = [
+            {
+                **dict(raw),
+                "TransactionDate": self._to_ledger_date(raw["TransactionDate"]),
+            }
+            for raw in db.session.execute(text(txn_sql), txn_params).mappings().all()
+        ]
+        seen_purchase_dailies = {
+            int(row["SourceRecordID"])
+            for row in txn_rows
+            if row.get("SourceRecordID")
+            and (row.get("Description") or "").strip().upper()
+            in {"STAMP PURCHASE", "E-COURT PURCHASE"}
+        }
+        extra_prior_debit = Decimal("0.00")
+        extra_prior_credit = Decimal("0.00")
+        if wallet.get("stamp"):
+            from app.utils.shcil_bank_accounts import STAMP_PURCHASE_DESCRIPTION
+
+            extra_prior_debit, extra_prior_credit = self._append_missing_purpose_purchases(
+                [],
+                account_id=account_id,
+                sub_work="Stamp Activity",
+                purchase_description=STAMP_PURCHASE_DESCRIPTION,
+                description="Stamp Purchase",
+                range_from=prior_from,
+                range_to_next=date_from,
+                ob_date=ob_date,
+                seen_ids=seen_purchase_dailies,
             )
-            txn_params["ob_date"] = ob_date
-        txn_sql += " ORDER BY TransactionDate ASC, JtcsBankTransactionID ASC"
-        txn_rows = db.session.execute(text(txn_sql), txn_params).mappings().all()
+            self._append_missing_purpose_purchases(
+                txn_rows,
+                account_id=account_id,
+                sub_work="Stamp Activity",
+                purchase_description=STAMP_PURCHASE_DESCRIPTION,
+                description="Stamp Purchase",
+                range_from=txn_params["range_from"],
+                range_to_next=date_to_next,
+                ob_date=ob_date,
+                seen_ids=seen_purchase_dailies,
+            )
+            obc_prior_dr, obc_prior_cr = self._append_orphan_obc_deposits(
+                [],
+                account_id=account_id,
+                range_from=prior_from,
+                range_to_next=date_from,
+                ob_date=ob_date,
+            )
+            extra_prior_debit = self._money(extra_prior_debit + obc_prior_dr)
+            extra_prior_credit = self._money(extra_prior_credit + obc_prior_cr)
+            self._append_orphan_obc_deposits(
+                txn_rows,
+                account_id=account_id,
+                range_from=txn_params["range_from"],
+                range_to_next=date_to_next,
+                ob_date=ob_date,
+            )
+        elif wallet.get("ecourt"):
+            from app.utils.shcil_bank_accounts import ECOURT_PURCHASE_DESCRIPTION
+
+            extra_prior_debit, extra_prior_credit = self._append_missing_purpose_purchases(
+                [],
+                account_id=account_id,
+                sub_work="e-Court Activity",
+                purchase_description=ECOURT_PURCHASE_DESCRIPTION,
+                description="e-Court Purchase",
+                range_from=prior_from,
+                range_to_next=date_from,
+                ob_date=ob_date,
+                seen_ids=seen_purchase_dailies,
+            )
+            self._append_missing_purpose_purchases(
+                txn_rows,
+                account_id=account_id,
+                sub_work="e-Court Activity",
+                purchase_description=ECOURT_PURCHASE_DESCRIPTION,
+                description="e-Court Purchase",
+                range_from=txn_params["range_from"],
+                range_to_next=date_to_next,
+                ob_date=ob_date,
+                seen_ids=seen_purchase_dailies,
+            )
+        prior_debit = self._money(prior_debit + extra_prior_debit)
+        prior_credit = self._money(prior_credit + extra_prior_credit)
+        opening = self._apply_bank_running(
+            opening, prior_debit, prior_credit, credit_normal=credit_normal
+        )
+        txn_rows = self._dedupe_bank_txn_rows(txn_rows)
 
         lines: list[dict[str, Any]] = []
         running = opening
@@ -473,7 +964,7 @@ class LedgerExportService:
         month_credit = Decimal("0.00")
 
         for row in txn_rows:
-            txn_date = row["TransactionDate"]
+            txn_date = self._to_ledger_date(row["TransactionDate"])
             if txn_date is None:
                 continue
             debit = self._money(row["DebitValue"])
@@ -503,17 +994,24 @@ class LedgerExportService:
                 running, debit, credit, credit_normal=credit_normal
             )
             desc = (row["Description"] or row["Remarks"] or "Bank transaction").strip()
-            ref = f"BT-{row['JtcsBankTransactionID']}"
-            if row["SourceRecordID"]:
-                ref = f"{ref} / Rec#{row['SourceRecordID']}"
+            btid = int(row["JtcsBankTransactionID"] or 0)
+            rec_id = int(row["SourceRecordID"]) if row["SourceRecordID"] else None
+            if btid > 0:
+                ref = f"BT-{btid}"
+                if rec_id:
+                    ref = f"{ref} / Rec#{rec_id}"
+            elif rec_id:
+                ref = f"Rec#{rec_id}"
+            else:
+                ref = ""
             lines.append(
                 {
                     "date": txn_date.strftime("%d/%m/%Y"),
                     "description": desc,
                     "reference": ref,
                     "source": (row["SourceTable"] or row["SourceType"] or "").strip(),
-                    "source_record_id": int(row["SourceRecordID"]) if row["SourceRecordID"] else None,
-                    "bank_transaction_id": int(row["JtcsBankTransactionID"]),
+                    "source_record_id": rec_id,
+                    "bank_transaction_id": btid if btid > 0 else None,
                     "ledger_kind": (row["LedgerKind"] or "").strip(),
                     "debit": debit,
                     "credit": credit,
@@ -575,7 +1073,7 @@ class LedgerExportService:
         descs: set[str] = set()
 
         for row in txn_rows:
-            txn_date = row["TransactionDate"]
+            txn_date = self._to_ledger_date(row["TransactionDate"])
             if txn_date is None:
                 continue
             desc = (row["Description"] or row["Remarks"] or "Bank transaction").strip()
@@ -640,7 +1138,7 @@ class LedgerExportService:
         sorted_rows = sorted(
             [r for r in txn_rows if r["TransactionDate"] is not None],
             key=lambda r: (
-                r["TransactionDate"],
+                self._to_ledger_date(r["TransactionDate"]) or date.min,
                 _row_desc(r).lower(),
                 int(r["JtcsBankTransactionID"] or 0),
             ),
@@ -651,7 +1149,9 @@ class LedgerExportService:
         group_credit = Decimal("0.00")
 
         for row in sorted_rows:
-            txn_date = row["TransactionDate"]
+            txn_date = self._to_ledger_date(row["TransactionDate"])
+            if txn_date is None:
+                continue
             desc = _row_desc(row)
             key = (txn_date, desc)
             debit = self._money(row["DebitValue"])
