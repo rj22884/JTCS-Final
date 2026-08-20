@@ -14,6 +14,7 @@
   let sortKey = "date";
   let sortDir = 1;
   let reloadPreview = null;
+  let groupBy = null;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -29,6 +30,8 @@
       to: document.getElementById("ledgerPreviewDateTo"),
       filter: document.getElementById("ledgerPreviewFilter"),
       apply: document.getElementById("ledgerPreviewApplyDates"),
+      groupBtn: document.getElementById("ledgerPreviewGroupByBtn"),
+      removeGroup: document.getElementById("ledgerPreviewRemoveGroup"),
       grid: document.getElementById("ledgerPreviewGrid"),
     };
   }
@@ -62,6 +65,192 @@
     return q ? "?" + q : "";
   }
 
+  function parseMoney(text) {
+    const n = parseFloat(String(text == null ? "" : text).replace(/,/g, ""));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function formatMoney(value) {
+    return Number(value || 0).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function isChromeRow(tr) {
+    return !!(
+      tr &&
+      (tr.classList.contains("ledger-group-header") || tr.classList.contains("ledger-group-total"))
+    );
+  }
+
+  function isDataRow(tr) {
+    return !!(tr && tr.querySelector("td") && !isChromeRow(tr));
+  }
+
+  function markOriginalOrder(tbody) {
+    Array.prototype.forEach.call(tbody.rows, function (tr, index) {
+      if (!tr.hasAttribute("data-orig-idx")) {
+        tr.setAttribute("data-orig-idx", String(index));
+      }
+    });
+  }
+
+  function clearGroupRows(tbody) {
+    tbody.querySelectorAll("tr.ledger-group-header, tr.ledger-group-total").forEach(function (tr) {
+      tr.remove();
+    });
+  }
+
+  function restoreOriginalOrder(tbody) {
+    const rows = Array.prototype.slice.call(tbody.rows);
+    rows.sort(function (a, b) {
+      return Number(a.getAttribute("data-orig-idx") || 0) - Number(b.getAttribute("data-orig-idx") || 0);
+    });
+    rows.forEach(function (tr) {
+      tbody.appendChild(tr);
+    });
+  }
+
+  function rowMoney(tr, col) {
+    const td = tr.querySelector('[data-col="' + col + '"]');
+    if (!td) return 0;
+    const raw = td.getAttribute("data-sort-value");
+    return parseMoney(raw != null && raw !== "" ? raw : td.textContent);
+  }
+
+  function groupKey(tr, mode) {
+    if (mode === "date") {
+      return (tr.querySelector('[data-col="date"]')?.textContent || "").trim() || "—";
+    }
+    return rowMoney(tr, mode === "debit" ? "debit" : "credit").toFixed(2);
+  }
+
+  function groupLabel(mode, key) {
+    if (mode === "date") return "Date: " + key;
+    if (mode === "debit") return "Debit: " + formatMoney(parseFloat(key));
+    return "Credit: " + formatMoney(parseFloat(key));
+  }
+
+  function updateGroupButtons() {
+    const els = toolbar();
+    const labels = { date: "Date", debit: "Debit", credit: "Credit" };
+    if (els.groupBtn) {
+      els.groupBtn.innerHTML = groupBy
+        ? '<i class="bi bi-collection"></i> Group By: ' + (labels[groupBy] || groupBy)
+        : '<i class="bi bi-collection"></i> Group By';
+      els.groupBtn.classList.toggle("active", !!groupBy);
+    }
+    if (els.removeGroup) {
+      els.removeGroup.disabled = !groupBy;
+    }
+    document.querySelectorAll(".ledger-group-by-opt").forEach(function (opt) {
+      opt.classList.toggle("active", opt.getAttribute("data-group-by") === groupBy);
+    });
+  }
+
+  function applyGroup() {
+    const els = toolbar();
+    if (!els.grid) return;
+    const tbody = els.grid.tBodies[0];
+    if (!tbody) return;
+    clearGroupRows(tbody);
+    updateGroupButtons();
+    if (!groupBy) return;
+
+    const opening = [];
+    const rest = [];
+    Array.prototype.forEach.call(tbody.rows, function (tr) {
+      if (!isDataRow(tr)) return;
+      if ((tr.getAttribute("data-kind") || "") === "opening") opening.push(tr);
+      else rest.push(tr);
+    });
+
+    const visible = rest.filter(function (tr) {
+      return !tr.hidden;
+    });
+    const hidden = rest.filter(function (tr) {
+      return tr.hidden;
+    });
+
+    const groups = [];
+    const index = {};
+    visible.forEach(function (tr) {
+      const key = groupKey(tr, groupBy);
+      if (!Object.prototype.hasOwnProperty.call(index, key)) {
+        index[key] = groups.length;
+        groups.push({ key: key, rows: [] });
+      }
+      groups[index[key]].rows.push(tr);
+    });
+
+    opening.forEach(function (tr) {
+      tbody.appendChild(tr);
+    });
+    groups.forEach(function (group) {
+      let debit = 0;
+      let credit = 0;
+      group.rows.forEach(function (tr) {
+        debit += rowMoney(tr, "debit");
+        credit += rowMoney(tr, "credit");
+      });
+      const countLabel =
+        group.rows.length + " record" + (group.rows.length === 1 ? "" : "s");
+      const header = document.createElement("tr");
+      header.className = "ledger-group-header";
+      header.innerHTML =
+        '<td colspan="2"><strong>' +
+        escapeHtml(groupLabel(groupBy, group.key)) +
+        "</strong> <span class=\"text-muted\">(" +
+        countLabel +
+        ")</span></td>" +
+        '<td class="text-end"><strong>' +
+        formatMoney(debit) +
+        "</strong></td>" +
+        '<td class="text-end"><strong>' +
+        formatMoney(credit) +
+        "</strong></td>" +
+        "<td></td><td></td>";
+      tbody.appendChild(header);
+      group.rows.forEach(function (tr) {
+        tbody.appendChild(tr);
+      });
+      const total = document.createElement("tr");
+      total.className = "ledger-group-total";
+      total.innerHTML =
+        '<td colspan="2"><strong>Total Debit / Credit</strong></td>' +
+        '<td class="text-end"><strong>' +
+        formatMoney(debit) +
+        "</strong></td>" +
+        '<td class="text-end"><strong>' +
+        formatMoney(credit) +
+        "</strong></td>" +
+        "<td colspan=\"2\"></td>";
+      tbody.appendChild(total);
+    });
+    hidden.forEach(function (tr) {
+      tbody.appendChild(tr);
+    });
+  }
+
+  function setGroupBy(mode) {
+    groupBy = mode || null;
+    applyGroup();
+  }
+
+  function removeGroup() {
+    groupBy = null;
+    const els = toolbar();
+    const tbody = els.grid && els.grid.tBodies[0];
+    if (tbody) {
+      clearGroupRows(tbody);
+      restoreOriginalOrder(tbody);
+    }
+    updateGroupButtons();
+    applySort();
+    applyFilter();
+  }
+
   function applyFilter() {
     const els = toolbar();
     if (!els.grid) return;
@@ -69,13 +258,14 @@
       .trim()
       .toLowerCase();
     els.grid.querySelectorAll("tbody tr").forEach(function (tr) {
-      if (!tr.querySelector("td")) return;
+      if (!tr.querySelector("td") || isChromeRow(tr)) return;
       if (!needle) {
         tr.hidden = false;
         return;
       }
       tr.hidden = (tr.textContent || "").toLowerCase().indexOf(needle) === -1;
     });
+    applyGroup();
   }
 
   function cellSortValue(tr, key, type) {
@@ -97,10 +287,12 @@
     const type = th ? th.getAttribute("data-sort-type") || "text" : "text";
     const tbody = els.grid.tBodies[0];
     if (!tbody) return;
+    clearGroupRows(tbody);
     const rows = Array.prototype.slice.call(tbody.rows);
     const opening = [];
     const rest = [];
     rows.forEach(function (tr) {
+      if (!isDataRow(tr)) return;
       if ((tr.getAttribute("data-kind") || "") === "opening") opening.push(tr);
       else rest.push(tr);
     });
@@ -239,6 +431,17 @@
       if (typeof reloadPreview === "function") reloadPreview();
       return;
     }
+    const groupOpt = event.target.closest(".ledger-group-by-opt");
+    if (groupOpt && modal.contains(groupOpt)) {
+      event.preventDefault();
+      setGroupBy(groupOpt.getAttribute("data-group-by") || "date");
+      return;
+    }
+    if (event.target.closest("#ledgerPreviewRemoveGroup")) {
+      event.preventDefault();
+      removeGroup();
+      return;
+    }
     const sortTh = event.target.closest("th.ledger-sort");
     if (sortTh && modal.contains(sortTh)) {
       const key = sortTh.getAttribute("data-sort") || "date";
@@ -248,6 +451,7 @@
         sortDir = 1;
       }
       applySort();
+      applyFilter();
       return;
     }
     const editBtn = event.target.closest(".ledger-row-edit");
@@ -278,6 +482,10 @@
     }
   });
 
+  modal.addEventListener("hidden.bs.modal", function () {
+    groupBy = null;
+  });
+
   document.getElementById("dashSourceEntryModal")?.addEventListener(
     "hidden.bs.modal",
     function () {
@@ -293,6 +501,11 @@
       reloadPreview = fn;
     },
     afterRender: function () {
+      const els = toolbar();
+      if (els.grid && els.grid.tBodies[0]) {
+        markOriginalOrder(els.grid.tBodies[0]);
+      }
+      updateGroupButtons();
       applySort();
       applyFilter();
     },

@@ -44,6 +44,20 @@
       <button type="button" class="btn btn-sm btn-primary" id="ledgerPreviewApplyDates">
         <i class="bi bi-funnel"></i> Apply
       </button>
+      <div class="dropdown">
+        <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" id="ledgerPreviewGroupByBtn"
+                data-bs-toggle="dropdown" aria-expanded="false">
+          <i class="bi bi-collection"></i> Group By
+        </button>
+        <ul class="dropdown-menu" aria-labelledby="ledgerPreviewGroupByBtn">
+          <li><button type="button" class="dropdown-item ledger-group-by-opt" data-group-by="date">Date</button></li>
+          <li><button type="button" class="dropdown-item ledger-group-by-opt" data-group-by="debit">Debit</button></li>
+          <li><button type="button" class="dropdown-item ledger-group-by-opt" data-group-by="credit">Credit</button></li>
+        </ul>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="ledgerPreviewRemoveGroup">
+        <i class="bi bi-x-lg"></i> Remove Group
+      </button>
     </div>
     <div class="ledger-preview-filter">
       <input type="search" class="form-control form-control-sm" id="ledgerPreviewFilter"

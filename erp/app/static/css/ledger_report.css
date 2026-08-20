@@ -157,6 +157,18 @@
   max-width: 18rem;
 }
 
+.ledger-html-items tr.ledger-group-header td {
+  background: #d4e6f1;
+  font-weight: 600;
+  border-top: 2px solid #154375;
+}
+
+.ledger-html-items tr.ledger-group-total td {
+  background: #f4f6f7;
+  font-weight: 700;
+  border-bottom: 2px solid #154375;
+}
+
 .ledger-html-items th.ledger-sort {
   cursor: pointer;
   user-select: none;
