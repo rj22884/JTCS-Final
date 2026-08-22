@@ -77,7 +77,7 @@ class StampRepository:
         )
 
     def update_stamp(self, stamp: StampMaster, data: dict, *, modified_by: str) -> StampMaster:
-        preserve = {"CreatedBy", "CreatedDate", "CertificateNumber"}
+        preserve = {"CreatedBy", "CreatedDate"}
         for key, value in data.items():
             if key not in preserve:
                 setattr(stamp, key, value)

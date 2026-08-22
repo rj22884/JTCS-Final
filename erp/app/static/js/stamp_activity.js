@@ -1117,15 +1117,16 @@
     syncEntryModeHidden();
     toggleEntryMode();
     switchingMode = false;
+    if (els.partialOcrAlert) {
+      els.partialOcrAlert.classList.add("d-none");
+      els.partialOcrAlert.textContent = "";
+    }
     if (record.is_ocr_entry) {
-      setOcrFieldLock(true, { preserveAmounts: true });
-      showPartialOcrAlert("Certificate data imported from image. You can edit Transaction Date, Amount, Payment & Remarks only.");
+      // Saved image-import records must stay fully editable on edit.
+      setOcrFieldLock(false);
+      setManualFieldLock(false);
     } else {
       setManualFieldLock(true);
-      if (els.partialOcrAlert) {
-        els.partialOcrAlert.classList.add("d-none");
-        els.partialOcrAlert.textContent = "";
-      }
     }
     enterSaveMode();
     ensureTransactionDateEditable();
@@ -1342,7 +1343,7 @@
     amount.className = "form-control stamp-payment-amount";
     amount.name = "PaymentAmount[]";
     amount.required = true;
-    amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
+    amount.value = options.amount != null && options.amount !== "" ? options.amount : "";
     amount.addEventListener("input", updatePaymentSummary);
     amountWrap.appendChild(amountLabel);
     amountWrap.appendChild(amount);
@@ -1575,7 +1576,7 @@
     form.querySelectorAll(".stamp-field").forEach(function (input) {
       input.value = "";
     });
-    if (els.saleAmount) els.saleAmount.value = "0";
+    if (els.saleAmount) els.saleAmount.value = "";
     setEditStampIds(null);
     els.ocrImageId.value = "";
     if (els.transactionDate) {
@@ -1923,9 +1924,9 @@
   }
 
   function ensureSaleAmountDefault() {
-    if (els.saleAmount) els.saleAmount.value = "0";
+    if (els.saleAmount) els.saleAmount.value = "";
     els.paymentLines?.querySelectorAll(".stamp-payment-amount").forEach(function (input) {
-      input.value = "0";
+      input.value = "";
     });
     updatePaymentSummary();
   }
@@ -2306,21 +2307,29 @@
 
   els.saleAmount?.addEventListener("input", updatePaymentSummary);
   els.saleAmount?.addEventListener("change", function () {
+    const raw = (els.saleAmount?.value || "").trim();
+    if (!raw) {
+      updatePaymentSummary();
+      return;
+    }
     const stampDuty = parseFloat(document.getElementById("StampDutyAmount")?.value || "0");
-    const sale = parseFloat(els.saleAmount?.value || "0");
-    if (Number.isNaN(sale) || sale <= 0 || sale <= stampDuty) {
-      ensureSaleAmountDefault();
+    const sale = parseFloat(raw);
+    if (Number.isNaN(sale) || sale <= 0 || (!Number.isNaN(stampDuty) && stampDuty > 0 && sale <= stampDuty)) {
+      els.saleAmount.value = "";
       alert("Sale Amount must be greater than Stamp Duty Amount.");
       els.saleAmount?.focus();
+      updatePaymentSummary();
       return;
     }
     updatePaymentSummary();
   });
   document.getElementById("StampDutyAmount")?.addEventListener("change", function () {
     const stampDuty = parseFloat(this.value || "0");
-    const sale = parseFloat(els.saleAmount?.value || "0");
-    if (sale > 0 && !Number.isNaN(stampDuty) && sale <= stampDuty) {
-      ensureSaleAmountDefault();
+    const saleRaw = (els.saleAmount?.value || "").trim();
+    const sale = parseFloat(saleRaw);
+    if (saleRaw && sale > 0 && !Number.isNaN(stampDuty) && sale <= stampDuty) {
+      if (els.saleAmount) els.saleAmount.value = "";
+      updatePaymentSummary();
     }
   });
 
