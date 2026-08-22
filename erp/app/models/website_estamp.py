@@ -29,6 +29,7 @@ class WebsiteEStampOrder(db.Model):
     GeoAddress: Mapped[str | None] = mapped_column(Unicode(400), nullable=True)
     LocationUrl: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     PayMethod: Mapped[str | None] = mapped_column(Unicode(40), nullable=True)
+    UtrNumber: Mapped[str | None] = mapped_column(Unicode(40), nullable=True)
     PaymentStatus: Mapped[str] = mapped_column(Unicode(30), nullable=False, default="paid")
     IsPaid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ReviewStatus: Mapped[str] = mapped_column(Unicode(40), nullable=False, default="New")

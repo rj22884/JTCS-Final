@@ -42,6 +42,7 @@ BEGIN
         GeoAddress NVARCHAR(400) NULL,
         LocationUrl NVARCHAR(500) NULL,
         PayMethod NVARCHAR(40) NULL,
+        UtrNumber NVARCHAR(40) NULL,
         PaymentStatus NVARCHAR(30) NOT NULL CONSTRAINT DF_WebsiteEStamp_Pay DEFAULT (N'paid'),
         IsPaid BIT NOT NULL CONSTRAINT DF_WebsiteEStamp_IsPaid DEFAULT (1),
         ReviewStatus NVARCHAR(40) NOT NULL CONSTRAINT DF_WebsiteEStamp_Review DEFAULT (N'New'),
@@ -69,6 +70,8 @@ BEGIN
         ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyName NVARCHAR(160) NULL;
     IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'SecondPartyFatherOrHusbandName') IS NULL
         ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyFatherOrHusbandName NVARCHAR(160) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'UtrNumber') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD UtrNumber NVARCHAR(40) NULL;
 END
 """
 
@@ -241,6 +244,7 @@ class WebsiteEStampService:
         row.GeoAddress = _clean(data.get("geo_address"), 400) or None
         row.LocationUrl = _clean(data.get("location_url"), 500) or None
         row.PayMethod = _clean(data.get("pay_method"), 40) or "upi"
+        row.UtrNumber = _clean(data.get("utr_number") or data.get("utr"), 40) or None
 
     def _new_reference(self) -> str:
         day = datetime.utcnow().strftime("%Y%m%d")
@@ -261,6 +265,7 @@ class WebsiteEStampService:
             "payable_amount": float(row.PayableAmount or row.Amount or 0),
             "delivery_mode": row.DeliveryMode,
             "pay_method": row.PayMethod,
+            "utr_number": row.UtrNumber or "",
             "payment_status": row.PaymentStatus,
             "review_status": row.ReviewStatus,
             "review_notes": row.ReviewNotes or "",
@@ -283,7 +288,8 @@ class WebsiteEStampService:
             f"Article: {row.ArticleLabel}\n"
             f"Stamp: ₹{row.Amount}\n"
             f"Payable: ₹{row.PayableAmount or row.Amount}\n"
-            f"Pay method: {row.PayMethod or 'UPI'}"
+            f"Pay method: {row.PayMethod or 'UPI'}\n"
+            f"UTR: {row.UtrNumber or '-'}"
         )
         try:
             from app.modules.notification.services import NotificationService
@@ -324,3 +330,62 @@ class WebsiteEStampService:
                 get_whatsapp_provider().send_message(mobile, title + "\n" + body)
             except Exception:
                 logger.exception("e-Stamp WhatsApp notification failed")
+
+
+OFFICE_LAT = 29.24016638055615
+OFFICE_LNG = 79.53455680423431
+
+
+def _http_json(url: str, timeout: int = 12) -> dict:
+    import json
+    from urllib.request import Request, urlopen
+
+    req = Request(url, headers={"Accept": "application/json", "User-Agent": "JTCS-eStamp/1.0"})
+    with urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _google_maps_key() -> str:
+    try:
+        from app.modules.settings.services import IntegrationSettingsService
+
+        cfg = IntegrationSettingsService().get_provider_config_decrypted("google") or {}
+        return str(cfg.get("api_key") or "").strip()
+    except Exception:
+        return ""
+
+
+def driving_route_km(lat: float, lng: float) -> tuple[float, str]:
+    """Google driving route first; OSRM road route fallback. Returns (km, source)."""
+    key = _google_maps_key()
+    if key:
+        from urllib.parse import urlencode
+
+        qs = urlencode(
+            {
+                "origin": f"{OFFICE_LAT},{OFFICE_LNG}",
+                "destination": f"{lat},{lng}",
+                "mode": "driving",
+                "key": key,
+            }
+        )
+        try:
+            data = _http_json("https://maps.googleapis.com/maps/api/directions/json?" + qs)
+            routes = data.get("routes") or []
+            legs = (routes[0].get("legs") if routes else None) or []
+            meters = ((legs[0] or {}).get("distance") or {}).get("value")
+            if meters and float(meters) > 0:
+                return round(float(meters) / 1000.0, 2), "google"
+        except Exception:
+            logger.exception("Google driving distance failed")
+
+    osrm = (
+        f"https://router.project-osrm.org/route/v1/driving/"
+        f"{OFFICE_LNG},{OFFICE_LAT};{lng},{lat}?overview=false&alternatives=false"
+    )
+    data = _http_json(osrm)
+    routes = data.get("routes") or []
+    meters = (routes[0] or {}).get("distance") if routes else None
+    if not meters or float(meters) <= 0:
+        raise ValueError("Unable to calculate road distance.")
+    return round(float(meters) / 1000.0, 2), "osrm"

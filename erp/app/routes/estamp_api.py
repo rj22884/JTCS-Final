@@ -22,6 +22,26 @@ def estamp_api_cors(response):
     return _cors(response)
 
 
+@bp.route("/route-km", methods=["GET", "OPTIONS"], strict_slashes=False)
+def route_km():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        lat = float(request.args.get("lat") or "")
+        lng = float(request.args.get("lng") or "")
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Valid lat/lng required."}), 400
+    from app.services.website_estamp_service import driving_route_km
+
+    try:
+        km, source = driving_route_km(lat, lng)
+        return jsonify({"ok": True, "km": km, "source": source})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/articles", methods=["GET", "OPTIONS"], strict_slashes=False)
 def articles():
     if request.method == "OPTIONS":
