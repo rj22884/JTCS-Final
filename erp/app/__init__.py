@@ -53,6 +53,8 @@ from app.routes.software_update import bp as software_update_bp
 from app.routes.utility import bp as utility_bp
 from app.routes.seo_keywords import bp as seo_keywords_bp
 from app.routes.seo_api import bp as seo_api_bp
+from app.routes.estamp_api import bp as estamp_api_bp
+from app.routes.estamp_orders import bp as estamp_orders_bp
 from app.routes.website_analytics import bp as website_analytics_bp
 from app.routes.website_analytics_public import bp as website_analytics_public_bp
 from app.routes.website_snapshot_public import bp as website_snapshot_public_bp
@@ -159,6 +161,8 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(utility_bp)
     app.register_blueprint(seo_keywords_bp)
     app.register_blueprint(seo_api_bp)
+    app.register_blueprint(estamp_api_bp)
+    app.register_blueprint(estamp_orders_bp)
     app.register_blueprint(website_analytics_bp)
     app.register_blueprint(website_analytics_public_bp)
     app.register_blueprint(website_snapshot_public_bp)
@@ -177,6 +181,7 @@ def create_app(config_class: type = Config) -> Flask:
     csrf.exempt(public_intake_bp)
     # Public SEO keywords for the marketing website (CORS + no CSRF).
     csrf.exempt(seo_api_bp)
+    csrf.exempt(estamp_api_bp)
     # Public website visitor ingest (CORS + no CSRF). Admin analytics stay CSRF-protected.
     csrf.exempt(website_analytics_public_bp)
 
@@ -301,6 +306,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Admin Dashboard menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.estamp_orders import ensure_estamp_orders_menu
+
+            ensure_estamp_orders_menu()
+        except Exception as extra:
+            db.session.rollback()
+            app.logger.warning("e-Stamp Orders menu ensure skipped: %s", extra)
 
         try:
             from app.routes.customer_activity import ensure_customer_activity_menu

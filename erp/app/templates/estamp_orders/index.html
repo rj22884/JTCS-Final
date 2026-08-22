@@ -1,0 +1,82 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn" id="estampRefreshBtn" title="Refresh">
+    <i class="bi bi-arrow-clockwise"></i>
+    <span>Refresh</span>
+  </button>
+  <a href="{{ url_for('estamp_orders.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h3 class="h6 mb-0">Paid website e-Stamp orders</h3>
+    <span class="small text-muted ms-auto" id="estampCount"></span>
+  </div>
+  <p class="small text-muted mb-2">Only paid requests from jtcsxpert.com appear here. Draft saves stay on the website until payment.</p>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>First party</th>
+          <th>Second party</th>
+          <th>Mobile</th>
+          <th>Article</th>
+          <th>Amount</th>
+          <th>Pay</th>
+          <th>Status</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody id="estampBody">
+        <tr><td colspan="9" class="text-muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var body = document.getElementById("estampBody");
+  var count = document.getElementById("estampCount");
+  async function load() {
+    try {
+      var res = await fetch("{{ url_for('estamp_orders.list_orders') }}", { headers: { Accept: "application/json" } });
+      var data = await res.json();
+      var rows = data.rows || [];
+      if (count) count.textContent = rows.length + " paid order" + (rows.length === 1 ? "" : "s");
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="text-muted">No paid e-Stamp orders yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(function (row) {
+        return "<tr>" +
+          "<td><strong>" + (row.reference_no || "") + "</strong></td>" +
+          "<td>" + (row.full_name || "") + "</td>" +
+          "<td>" + (row.second_party_name || "") + "</td>" +
+          "<td>" + (row.mobile || "") + "</td>" +
+          "<td>" + (row.article_label || row.article_code || "") + "</td>" +
+          "<td>" + (row.payable_amount || row.amount || "") + "</td>" +
+          "<td>" + (row.pay_method || "") + "</td>" +
+          "<td>" + (row.review_status || "") + "</td>" +
+          "<td>" + (row.created_date || "") + "</td>" +
+          "</tr>";
+      }).join("");
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="9" class="text-danger">Unable to load orders.</td></tr>';
+    }
+  }
+  document.getElementById("estampRefreshBtn")?.addEventListener("click", load);
+  load();
+})();
+</script>
+{% endblock %}

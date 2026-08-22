@@ -1,0 +1,326 @@
+"""Website e-Stamp orders: paid requests only appear in Stamp Orders."""
+
+from __future__ import annotations
+
+import logging
+import secrets
+from datetime import datetime
+
+from flask import current_app
+from flask_mail import Message
+from sqlalchemy import text
+
+from app.extensions import db, mail
+from app.models.auth import CompanyProfile
+from app.models.website_estamp import WebsiteEStampOrder
+from app.repositories.transaction_repository import MasterRepository
+from app.services.website_estamp_articles import article_by_code, article_display, public_articles
+
+logger = logging.getLogger(__name__)
+
+_SCHEMA_SQL = """
+IF OBJECT_ID(N'dbo.WebsiteEStampOrder', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WebsiteEStampOrder (
+        OrderID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+        ReferenceNo NVARCHAR(40) NOT NULL,
+        FullName NVARCHAR(160) NOT NULL,
+        FatherOrHusbandName NVARCHAR(160) NULL,
+        SecondPartyName NVARCHAR(160) NULL,
+        SecondPartyFatherOrHusbandName NVARCHAR(160) NULL,
+        Mobile NVARCHAR(15) NOT NULL,
+        ArticleCode NVARCHAR(40) NOT NULL,
+        ArticleLabel NVARCHAR(240) NULL,
+        Amount DECIMAL(18, 2) NOT NULL,
+        PayableAmount DECIMAL(18, 2) NULL,
+        DeliveryMode NVARCHAR(20) NULL,
+        HouseNo NVARCHAR(80) NULL,
+        Gali NVARCHAR(160) NULL,
+        Mohalla NVARCHAR(160) NULL,
+        Landmark NVARCHAR(200) NULL,
+        AddressNote NVARCHAR(300) NULL,
+        GeoAddress NVARCHAR(400) NULL,
+        LocationUrl NVARCHAR(500) NULL,
+        PayMethod NVARCHAR(40) NULL,
+        PaymentStatus NVARCHAR(30) NOT NULL CONSTRAINT DF_WebsiteEStamp_Pay DEFAULT (N'paid'),
+        IsPaid BIT NOT NULL CONSTRAINT DF_WebsiteEStamp_IsPaid DEFAULT (1),
+        ReviewStatus NVARCHAR(40) NOT NULL CONSTRAINT DF_WebsiteEStamp_Review DEFAULT (N'New'),
+        ReviewNotes NVARCHAR(500) NULL,
+        CustomerID INT NULL,
+        CreatedDate DATETIME2 NOT NULL CONSTRAINT DF_WebsiteEStamp_Created DEFAULT (SYSUTCDATETIME()),
+        ModifiedDate DATETIME2 NULL,
+        CONSTRAINT UX_WebsiteEStamp_Reference UNIQUE (ReferenceNo)
+    );
+END
+"""
+
+_COLUMNS_SQL = """
+IF OBJECT_ID(N'dbo.WebsiteEStampOrder', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'IsPaid') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD IsPaid BIT NOT NULL CONSTRAINT DF_WebsiteEStamp_IsPaid DEFAULT (1);
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PayMethod') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PayMethod NVARCHAR(40) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PaymentStatus') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PaymentStatus NVARCHAR(30) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PayableAmount') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PayableAmount DECIMAL(18, 2) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'SecondPartyName') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyName NVARCHAR(160) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'SecondPartyFatherOrHusbandName') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyFatherOrHusbandName NVARCHAR(160) NULL;
+END
+"""
+
+_MENU_SQL = """
+DECLARE @ParentID INT;
+DECLARE @AdminRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Reception,Operator';
+
+SELECT TOP 1 @ParentID = MenuID
+FROM dbo.MenuMaster
+WHERE MenuName = N'Admin Role' AND ParentMenuID IS NULL
+ORDER BY MenuID;
+
+IF @ParentID IS NOT NULL
+AND NOT EXISTS (
+    SELECT 1 FROM dbo.MenuMaster
+    WHERE MenuURL = N'/admin/estamp-orders'
+)
+BEGIN
+    INSERT INTO dbo.MenuMaster (
+        ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+        Description, IsActive, RoleName
+    )
+    VALUES (
+        @ParentID, N'e-Stamp Orders', N'bi-postage', N'/admin/estamp-orders', 68,
+        N'Paid website e-Stamp purchase requests', 1, @AdminRoles
+    );
+END
+ELSE IF EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuURL = N'/admin/estamp-orders')
+BEGIN
+    UPDATE dbo.MenuMaster
+    SET MenuName = N'e-Stamp Orders',
+        IsActive = 1,
+        Description = N'Paid website e-Stamp purchase requests'
+    WHERE MenuURL = N'/admin/estamp-orders';
+END
+"""
+
+
+def _clean(value, limit: int = 160) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _mobile(value: str) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+class WebsiteEStampService:
+    def ensure_schema(self) -> None:
+        db.session.execute(text(_SCHEMA_SQL))
+        db.session.execute(text(_COLUMNS_SQL))
+        db.session.execute(text(_MENU_SQL))
+        db.session.commit()
+
+    def articles(self) -> list[dict]:
+        return public_articles()
+
+    def list_paid(self, limit: int = 300) -> list[dict]:
+        self.ensure_schema()
+        rows = (
+            db.session.query(WebsiteEStampOrder)
+            .filter(WebsiteEStampOrder.IsPaid == True)  # noqa: E712
+            .order_by(WebsiteEStampOrder.CreatedDate.desc())
+            .limit(limit)
+            .all()
+        )
+        return [self._row(row) for row in rows]
+
+    def get_by_reference(self, reference_no: str) -> WebsiteEStampOrder | None:
+        ref = _clean(reference_no, 40).upper()
+        if not ref:
+            return None
+        return db.session.query(WebsiteEStampOrder).filter(WebsiteEStampOrder.ReferenceNo == ref).one_or_none()
+
+    def create_paid(self, data: dict) -> dict:
+        self.ensure_schema()
+        first = _clean(data.get("name") or data.get("full_name") or data.get("first_party_name"))
+        second = _clean(data.get("second_party_name"))
+        mobile = _mobile(data.get("mobile") or "")
+        article_code = _clean(data.get("article_code"), 40).lower()
+        if len(first) < 2:
+            raise ValueError("Please enter first party name.")
+        if len(second) < 2:
+            raise ValueError("Please enter second party name.")
+        if len(mobile) != 10 or mobile[0] not in "6789":
+            raise ValueError("Please enter a valid 10-digit mobile number.")
+        article = article_by_code(article_code)
+        if article is None:
+            raise ValueError("Please select a stamp article.")
+        try:
+            amount = float(data.get("amount") or data.get("stamp_amount") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Please enter the stamp duty amount.") from exc
+        if amount <= 0:
+            raise ValueError("Please enter the stamp duty amount.")
+
+        paid_flag = str(data.get("payment_status") or "").lower() in {"paid", "upi_paid"} or bool(data.get("paid"))
+        if not paid_flag:
+            raise ValueError("Order is recorded only after payment.")
+
+        reference = _clean(data.get("reference_no"), 40).upper() or self._new_reference()
+        existing = self.get_by_reference(reference)
+        if existing:
+            if not existing.IsPaid:
+                existing.IsPaid = True
+                existing.PaymentStatus = "paid"
+            self._apply(existing, data, first, second, mobile, article, amount)
+            existing.ModifiedDate = datetime.utcnow()
+            db.session.commit()
+            self._notify(existing)
+            return self._public(existing, "Payment received. Reference Number: " + existing.ReferenceNo)
+
+        customer_id = None
+        try:
+            customer = MasterRepository().find_or_create_customer(first, mobile)
+            customer_id = customer.CustomerID
+        except Exception:
+            db.session.rollback()
+            logger.warning("e-Stamp customer link skipped", exc_info=True)
+
+        row = WebsiteEStampOrder(ReferenceNo=reference, CustomerID=customer_id)
+        self._apply(row, data, first, second, mobile, article, amount)
+        row.IsPaid = True
+        row.PaymentStatus = "paid"
+        row.ReviewStatus = "New"
+        row.CreatedDate = datetime.utcnow()
+        db.session.add(row)
+        db.session.commit()
+        self._notify(row)
+        return self._public(row, "Payment received. Reference Number: " + row.ReferenceNo)
+
+    def delete(self, reference_no: str, mobile: str) -> None:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            return
+        if _mobile(mobile) and _mobile(mobile) != _mobile(row.Mobile):
+            raise ValueError("Mobile number does not match this request.")
+        db.session.delete(row)
+        db.session.commit()
+
+    def update_review(self, reference_no: str, status: str, notes: str = "") -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        row.ReviewStatus = _clean(status, 40) or row.ReviewStatus
+        row.ReviewNotes = _clean(notes, 500) or None
+        row.ModifiedDate = datetime.utcnow()
+        db.session.commit()
+        return self._row(row)
+
+    def _apply(self, row: WebsiteEStampOrder, data: dict, first: str, second: str, mobile: str, article: dict, amount: float) -> None:
+        row.FullName = first
+        row.FatherOrHusbandName = _clean(data.get("father_or_husband_name") or data.get("father_name")) or None
+        row.SecondPartyName = second
+        row.SecondPartyFatherOrHusbandName = _clean(data.get("second_party_father_or_husband_name")) or None
+        row.Mobile = mobile
+        row.ArticleCode = article["code"]
+        row.ArticleLabel = article_display(article)
+        row.Amount = amount
+        try:
+            row.PayableAmount = float(data.get("payable_amount") or amount)
+        except (TypeError, ValueError):
+            row.PayableAmount = amount
+        row.DeliveryMode = _clean(data.get("delivery_mode"), 20) or "self"
+        row.HouseNo = _clean(data.get("house_no"), 80) or None
+        row.Gali = _clean(data.get("gali")) or None
+        row.Mohalla = _clean(data.get("mohalla")) or None
+        row.Landmark = _clean(data.get("landmark"), 200) or None
+        row.AddressNote = _clean(data.get("address_note"), 300) or None
+        row.GeoAddress = _clean(data.get("geo_address"), 400) or None
+        row.LocationUrl = _clean(data.get("location_url"), 500) or None
+        row.PayMethod = _clean(data.get("pay_method"), 40) or "upi"
+
+    def _new_reference(self) -> str:
+        day = datetime.utcnow().strftime("%Y%m%d")
+        return f"EST-{day}-{secrets.token_hex(2).upper()}"
+
+    def _row(self, row: WebsiteEStampOrder) -> dict:
+        return {
+            "order_id": row.OrderID,
+            "reference_no": row.ReferenceNo,
+            "full_name": row.FullName,
+            "father_or_husband_name": row.FatherOrHusbandName or "",
+            "second_party_name": row.SecondPartyName or "",
+            "second_party_father_or_husband_name": row.SecondPartyFatherOrHusbandName or "",
+            "mobile": row.Mobile,
+            "article_code": row.ArticleCode,
+            "article_label": row.ArticleLabel,
+            "amount": float(row.Amount or 0),
+            "payable_amount": float(row.PayableAmount or row.Amount or 0),
+            "delivery_mode": row.DeliveryMode,
+            "pay_method": row.PayMethod,
+            "payment_status": row.PaymentStatus,
+            "review_status": row.ReviewStatus,
+            "review_notes": row.ReviewNotes or "",
+            "created_date": row.CreatedDate.strftime("%d/%m/%Y %H:%M") if row.CreatedDate else "",
+        }
+
+    def _public(self, row: WebsiteEStampOrder, message: str) -> dict:
+        data = self._row(row)
+        data["ok"] = True
+        data["message"] = message
+        return data
+
+    def _notify(self, row: WebsiteEStampOrder) -> None:
+        title = f"e-Stamp paid {row.ReferenceNo}"
+        body = (
+            f"Reference: {row.ReferenceNo}\n"
+            f"First party: {row.FullName}\n"
+            f"Second party: {row.SecondPartyName}\n"
+            f"Mobile: {row.Mobile}\n"
+            f"Article: {row.ArticleLabel}\n"
+            f"Stamp: ₹{row.Amount}\n"
+            f"Payable: ₹{row.PayableAmount or row.Amount}\n"
+            f"Pay method: {row.PayMethod or 'UPI'}"
+        )
+        try:
+            from app.modules.notification.services import NotificationService
+
+            NotificationService().notify_roles_or_all(
+                notification_type="Payment",
+                title=title,
+                message=body.replace("\n", " · "),
+                link_url="/admin/estamp-orders",
+                priority="High",
+                entity_type="WebsiteEStampOrder",
+                entity_id=row.OrderID,
+            )
+        except Exception:
+            logger.exception("e-Stamp in-app notification failed")
+
+        company = db.session.query(CompanyProfile).first()
+        email_to = (company.Email if company else None) or current_app.config.get("MAIL_DEFAULT_SENDER")
+        if email_to:
+            try:
+                sender = current_app.config.get("MAIL_DEFAULT_SENDER") or current_app.config.get("MAIL_USERNAME")
+                mail.send(
+                    Message(
+                        subject=title,
+                        recipients=[str(email_to)],
+                        body=body,
+                        sender=sender,
+                    )
+                )
+            except Exception:
+                logger.exception("e-Stamp email notification failed")
+
+        mobile = (company.MobileNumber if company else "") or ""
+        if mobile:
+            try:
+                from app.modules.communication.whatsapp_provider import get_whatsapp_provider
+
+                get_whatsapp_provider().send_message(mobile, title + "\n" + body)
+            except Exception:
+                logger.exception("e-Stamp WhatsApp notification failed")
