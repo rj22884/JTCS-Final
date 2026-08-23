@@ -5,6 +5,17 @@
 .estamp-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
 .estamp-confirm { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; white-space: nowrap; }
 .estamp-confirm label { margin: 0; font-weight: 600; }
+.estamp-poi-cell { min-width: 110px; max-width: 180px; }
+.estamp-poi-thumb { display: block; width: 88px; height: 66px; padding: 0; border: 1px solid #cfd6e0; border-radius: 6px; overflow: hidden; background: #f4f6f8; cursor: pointer; }
+.estamp-poi-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.estamp-poi-thumb .estamp-poi-pdf { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; color: #0d47a1; }
+.estamp-poi-modal-body { min-height: 240px; }
+.estamp-poi-modal-body img { max-width: 100%; max-height: 75vh; display: block; margin: 0 auto; }
+.estamp-poi-modal-body iframe { width: 100%; height: 75vh; border: 0; }
+@media (max-width: 768px) {
+  .estamp-poi-thumb { width: 72px; height: 56px; }
+  .estamp-poi-modal-body iframe { height: 60vh; }
+}
 </style>
 {% endblock %}
 
@@ -69,7 +80,15 @@
           <input class="form-control form-control-sm" id="estampEditFirst" required maxlength="160">
         </div>
         <div class="mb-2">
-          <label class="form-label" for="estampEditFirstFather">First party father / husband</label>
+          <label class="form-label" for="estampEditFirstRelation">First party Father / Husband</label>
+          <select class="form-select form-select-sm" id="estampEditFirstRelation">
+            <option value="">Select</option>
+            <option value="father">Father</option>
+            <option value="husband">Husband</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditFirstFather">First party father / husband name</label>
           <input class="form-control form-control-sm" id="estampEditFirstFather" maxlength="160">
         </div>
         <div class="mb-2">
@@ -77,7 +96,15 @@
           <input class="form-control form-control-sm" id="estampEditSecond" required maxlength="160">
         </div>
         <div class="mb-2">
-          <label class="form-label" for="estampEditSecondFather">Second party father / husband</label>
+          <label class="form-label" for="estampEditSecondRelation">Second party Father / Husband</label>
+          <select class="form-select form-select-sm" id="estampEditSecondRelation">
+            <option value="">Select</option>
+            <option value="father">Father</option>
+            <option value="husband">Husband</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditSecondFather">Second party father / husband name</label>
           <input class="form-control form-control-sm" id="estampEditSecondFather" maxlength="160">
         </div>
         <div class="mb-2">
@@ -100,6 +127,18 @@
     </form>
   </div>
 </div>
+
+<div class="modal fade" id="estampPoiModal" tabindex="-1" aria-labelledby="estampPoiTitle">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="estampPoiTitle">Uploaded proof of identity</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body estamp-poi-modal-body" id="estampPoiBody"></div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -111,6 +150,8 @@
   var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
   var editModalEl = document.getElementById("estampEditModal");
   var editModal = editModalEl && window.bootstrap ? window.bootstrap.Modal.getOrCreateInstance(editModalEl) : null;
+  var poiModalEl = document.getElementById("estampPoiModal");
+  var poiModal = poiModalEl && window.bootstrap ? window.bootstrap.Modal.getOrCreateInstance(poiModalEl) : null;
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -124,6 +165,41 @@
   function post(url, payload) {
     return fetch(url, { method: "POST", headers: headers(), body: JSON.stringify(payload || {}) })
       .then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); });
+  }
+
+  function poiCell(row) {
+    if (!row.poi_has_file) {
+      return '<div class="estamp-poi-cell"><div>' + esc(row.poi_document_type || "—") + "</div></div>";
+    }
+    var view = row.poi_view_url || ("/admin/estamp-orders/" + encodeURIComponent(row.reference_no || "") + "/poi?inline=1");
+    var file = row.poi_file_url || ("/admin/estamp-orders/" + encodeURIComponent(row.reference_no || "") + "/poi");
+    var thumb = row.poi_kind === "image"
+      ? '<img src="' + esc(view) + '" alt="Uploaded POI">'
+      : '<span class="estamp-poi-pdf">PDF</span>';
+    return (
+      '<div class="estamp-poi-cell">' +
+        "<div>" + esc(row.poi_document_type || "POI") + "</div>" +
+        '<button type="button" class="estamp-poi-thumb mt-1" data-act="poi-view" data-kind="' + esc(row.poi_kind || "") + '" data-view="' + esc(view) + '" title="View uploaded file">' +
+          thumb +
+        "</button>" +
+        '<div class="small mt-1"><a href="' + esc(file) + '">Download</a></div>' +
+        (row.poi_file_name ? '<div class="small text-muted">' + esc(row.poi_file_name) + "</div>" : "") +
+      "</div>"
+    );
+  }
+
+  function openPoi(row, btn) {
+    var view = (btn && btn.getAttribute("data-view")) || row.poi_view_url;
+    var kind = (btn && btn.getAttribute("data-kind")) || row.poi_kind || "";
+    var title = document.getElementById("estampPoiTitle");
+    var body = document.getElementById("estampPoiBody");
+    if (title) title.textContent = (row.poi_document_type || "POI") + (row.poi_file_name ? " · " + row.poi_file_name : "");
+    if (body) {
+      if (kind === "image") body.innerHTML = '<img src="' + esc(view) + '" alt="Uploaded proof of identity">';
+      else if (kind === "pdf") body.innerHTML = '<iframe src="' + esc(view) + '" title="Uploaded proof of identity"></iframe>';
+      else body.innerHTML = '<p class="mb-0"><a href="' + esc(row.poi_file_url || view) + '">Download uploaded file</a></p>';
+    }
+    if (poiModal) poiModal.show();
   }
 
   function actionButtons(row) {
@@ -161,7 +237,7 @@
         "<td>" + esc(row.full_name || "") + "</td>" +
         "<td>" + esc(row.second_party_name || "") + "</td>" +
         "<td>" + esc(row.mobile || "") + "</td>" +
-        "<td>" + esc(row.poi_document_type || "") + (row.poi_has_file ? ' <a href="/admin/estamp-orders/' + encodeURIComponent(row.reference_no || "") + '/poi">Download</a>' : "") + "</td>" +
+        "<td>" + poiCell(row) + "</td>" +
         "<td>" + (row.consideration_price !== "" && row.consideration_price != null ? esc(row.consideration_price) : "—") + "</td>" +
         "<td>" + esc(row.description || "—") + "</td>" +
         "<td>" + esc(row.article_label || row.article_code || "") + "</td>" +
@@ -194,8 +270,10 @@
     document.getElementById("estampEditRef").value = row.reference_no || "";
     document.getElementById("estampEditFirst").value = row.full_name || "";
     document.getElementById("estampEditFirstFather").value = row.father_or_husband_name || "";
+    document.getElementById("estampEditFirstRelation").value = row.first_party_relation || "";
     document.getElementById("estampEditSecond").value = row.second_party_name || "";
     document.getElementById("estampEditSecondFather").value = row.second_party_father_or_husband_name || "";
+    document.getElementById("estampEditSecondRelation").value = row.second_party_relation || "";
     document.getElementById("estampEditConsideration").value = row.consideration_price || "";
     document.getElementById("estampEditDescription").value = row.description || "";
     document.getElementById("estampEditAmount").value = row.amount || "";
@@ -236,6 +314,10 @@
         openEdit(row);
         return;
       }
+      if (act === "poi-view") {
+        openPoi(row, btn);
+        return;
+      }
       if (act === "reject" || act === "reject-nopay") {
         if (!window.confirm("Reject this stamp request?")) return;
         var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/reject", {
@@ -271,8 +353,10 @@
       var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/update", {
         full_name: document.getElementById("estampEditFirst").value,
         father_or_husband_name: document.getElementById("estampEditFirstFather").value,
+        first_party_relation: document.getElementById("estampEditFirstRelation").value,
         second_party_name: document.getElementById("estampEditSecond").value,
         second_party_father_or_husband_name: document.getElementById("estampEditSecondFather").value,
+        second_party_relation: document.getElementById("estampEditSecondRelation").value,
         consideration_price: document.getElementById("estampEditConsideration").value,
         description: document.getElementById("estampEditDescription").value,
         amount: document.getElementById("estampEditAmount").value,

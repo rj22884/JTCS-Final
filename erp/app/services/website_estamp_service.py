@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from datetime import datetime
+from pathlib import Path
 
 from flask import current_app
 from flask_mail import Message
@@ -84,6 +86,10 @@ BEGIN
         ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocName NVARCHAR(200) NULL;
     IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PaymentConfirmed') IS NULL
         ALTER TABLE dbo.WebsiteEStampOrder ADD PaymentConfirmed NVARCHAR(10) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'FirstPartyRelation') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD FirstPartyRelation NVARCHAR(20) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'SecondPartyRelation') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyRelation NVARCHAR(20) NULL;
 END
 """
 
@@ -126,6 +132,37 @@ def _clean(value, limit: int = 160) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
+_STAMP_NAME_RE = re.compile(r"[^A-Za-z0-9 ]+")
+_NAME_ERROR = "Only letters (A-Z) and numbers (0-9) are allowed. Special characters are not accepted."
+
+
+def _stamp_alnum(value: str, limit: int = 160) -> str:
+    return " ".join(_STAMP_NAME_RE.sub(" ", str(value or "")).split())[:limit]
+
+
+def _stamp_relation(value: str) -> str:
+    text = _clean(value, 20).lower()
+    if text in {"father", "husband"}:
+        return text
+    return ""
+
+
+def stamp_party_line(name: str, relation: str, parent: str) -> str:
+    person = _stamp_alnum(name)
+    parent_name = _stamp_alnum(parent)
+    if not parent_name:
+        return person
+    tag = "WO" if relation == "husband" else "SO"
+    return f"{person} {tag} {parent_name}".strip()
+
+
+def _require_stamp_name(value: str, label: str) -> str:
+    text = _clean(value)
+    if _STAMP_NAME_RE.search(text):
+        raise ValueError(f"{label}: {_NAME_ERROR}")
+    return _stamp_alnum(text)
+
+
 POI_LABELS = {
     "aadhaar": "Aadhaar Card",
     "pan": "PAN Card",
@@ -143,6 +180,27 @@ POI_LABELS = {
 def _mobile(value: str) -> str:
     digits = "".join(ch for ch in str(value or "") if ch.isdigit())
     return digits[-10:] if len(digits) >= 10 else digits
+
+
+def _poi_kind(name: str) -> str:
+    ext = Path(name or "").suffix.lower()
+    if ext in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+        return "image"
+    if ext == ".pdf":
+        return "pdf"
+    return "file" if name else ""
+
+
+def _poi_url(reference_no: str, *, inline: bool) -> str:
+    path = f"/admin/estamp-orders/{reference_no}/poi"
+    try:
+        from flask import has_request_context, url_for
+
+        if has_request_context():
+            path = url_for("estamp_orders.download_poi", reference_no=reference_no)
+    except Exception:
+        pass
+    return f"{path}?inline=1" if inline else path
 
 
 class WebsiteEStampService:
@@ -174,10 +232,10 @@ class WebsiteEStampService:
 
     def create_paid(self, data: dict) -> dict:
         self.ensure_schema()
-        first = _clean(data.get("name") or data.get("full_name") or data.get("first_party_name"))
-        second = _clean(data.get("second_party_name"))
+        first = _require_stamp_name(data.get("name") or data.get("full_name") or data.get("first_party_name"), "First party name")
+        second = _require_stamp_name(data.get("second_party_name"), "Second party name")
         mobile = _mobile(data.get("mobile") or "")
-        article_code = _clean(data.get("article_code"), 40).lower()
+        article_code = _clean(data.get("article_code"), 40)
         if len(first) < 2:
             raise ValueError("Please enter first party name.")
         if len(second) < 2:
@@ -334,16 +392,27 @@ class WebsiteEStampService:
         row = self.get_by_reference(reference_no)
         if row is None:
             raise ValueError("e-Stamp order not found.")
-        first = _clean(data.get("full_name") or data.get("name") or row.FullName)
-        second = _clean(data.get("second_party_name") or row.SecondPartyName)
+        first = _require_stamp_name(data.get("full_name") or data.get("name") or row.FullName, "First party name")
+        second = _require_stamp_name(data.get("second_party_name") or row.SecondPartyName, "Second party name")
         if len(first) < 2:
             raise ValueError("Please enter first party name.")
         if len(second) < 2:
             raise ValueError("Please enter second party name.")
         row.FullName = first
-        row.FatherOrHusbandName = _clean(data.get("father_or_husband_name")) or None
+        first_parent = _require_stamp_name(data.get("father_or_husband_name") or "", "First party father / husband name")
+        second_parent = _require_stamp_name(
+            data.get("second_party_father_or_husband_name") or "",
+            "Second party father / husband name",
+        )
+        row.FatherOrHusbandName = first_parent or None
+        row.FirstPartyRelation = _stamp_relation(data.get("first_party_relation")) or None
+        if row.FatherOrHusbandName and not row.FirstPartyRelation:
+            raise ValueError("Please select Father or Husband for the first party.")
         row.SecondPartyName = second
-        row.SecondPartyFatherOrHusbandName = _clean(data.get("second_party_father_or_husband_name")) or None
+        row.SecondPartyFatherOrHusbandName = second_parent or None
+        row.SecondPartyRelation = _stamp_relation(data.get("second_party_relation")) or None
+        if row.SecondPartyFatherOrHusbandName and not row.SecondPartyRelation:
+            raise ValueError("Please select Father or Husband for the second party.")
         desc = _clean(data.get("description"), 50)
         row.Description = desc or None
         consideration_raw = data.get("consideration_price")
@@ -376,21 +445,18 @@ class WebsiteEStampService:
         db.session.commit()
         from flask import url_for
 
-        stamp_url = url_for(
-            "stamp.stamp_activity",
-            mobile=row.Mobile or "",
-            first_party=row.FullName or "",
-            second_party=row.SecondPartyName or "",
-            amount=str(row.Amount or ""),
-            sale_amount=str(row.ConsiderationPrice or ""),
-            description=row.Description or "",
-            website_ref=row.ReferenceNo,
-        )
+        stamp_url = url_for("estamp_orders.generate_page", reference_no=row.ReferenceNo)
         data = self._row(row)
         data["ok"] = True
         data["stamp_url"] = stamp_url
-        data["message"] = "Opening Stamp Activity to generate the stamp."
+        data["message"] = "Opening SHCIL login. Enter captcha, then OTP."
         return data
+
+    def get_order_dict(self, reference_no: str) -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        return self._row(row)
 
     def _whatsapp_applicant(self, mobile: str, message: str) -> dict:
         digits = _mobile(mobile)
@@ -422,9 +488,23 @@ class WebsiteEStampService:
 
     def _apply(self, row: WebsiteEStampOrder, data: dict, first: str, second: str, mobile: str, article: dict, amount: float) -> None:
         row.FullName = first
-        row.FatherOrHusbandName = _clean(data.get("father_or_husband_name") or data.get("father_name")) or None
+        first_parent = _require_stamp_name(
+            data.get("father_or_husband_name") or data.get("father_name") or "",
+            "First party father / husband name",
+        )
+        second_parent = _require_stamp_name(
+            data.get("second_party_father_or_husband_name") or "",
+            "Second party father / husband name",
+        )
+        row.FatherOrHusbandName = first_parent or None
+        row.FirstPartyRelation = _stamp_relation(data.get("first_party_relation")) or None
+        if row.FatherOrHusbandName and not row.FirstPartyRelation:
+            raise ValueError("Please select Father or Husband for the first party.")
         row.SecondPartyName = second
-        row.SecondPartyFatherOrHusbandName = _clean(data.get("second_party_father_or_husband_name")) or None
+        row.SecondPartyFatherOrHusbandName = second_parent or None
+        row.SecondPartyRelation = _stamp_relation(data.get("second_party_relation")) or None
+        if row.SecondPartyFatherOrHusbandName and not row.SecondPartyRelation:
+            raise ValueError("Please select Father or Husband for the second party.")
         row.Mobile = mobile
         row.ArticleCode = article["code"]
         row.ArticleLabel = article_display(article)
@@ -443,7 +523,7 @@ class WebsiteEStampService:
         row.LocationUrl = _clean(data.get("location_url"), 500) or None
         row.PayMethod = _clean(data.get("pay_method"), 40) or "upi"
         row.UtrNumber = _clean(data.get("utr_number") or data.get("utr"), 40) or None
-        description = _clean(data.get("description"), 50)
+        description = _require_stamp_name(data.get("description") or "", "Description")[:50]
         row.Description = description or None
         row.PoiDocumentType = _clean(data.get("poi_document_type"), 40).lower() or None
         consideration_raw = data.get("consideration_price")
@@ -465,14 +545,25 @@ class WebsiteEStampService:
             "reference_no": row.ReferenceNo,
             "full_name": row.FullName,
             "father_or_husband_name": row.FatherOrHusbandName or "",
+            "first_party_relation": row.FirstPartyRelation or "",
             "second_party_name": row.SecondPartyName or "",
             "second_party_father_or_husband_name": row.SecondPartyFatherOrHusbandName or "",
+            "second_party_relation": row.SecondPartyRelation or "",
             "mobile": row.Mobile,
             "consideration_price": float(row.ConsiderationPrice) if row.ConsiderationPrice is not None else "",
             "description": row.Description or "",
             "poi_document_type": POI_LABELS.get((row.PoiDocumentType or "").lower(), row.PoiDocumentType or ""),
+            "poi_document_code": (row.PoiDocumentType or "").lower(),
+            "house_no": row.HouseNo or "",
+            "gali": row.Gali or "",
+            "mohalla": row.Mohalla or "",
+            "landmark": row.Landmark or "",
+            "geo_address": row.GeoAddress or "",
             "poi_file_name": row.PoiDocName or "",
             "poi_has_file": bool(row.PoiDocPath),
+            "poi_kind": _poi_kind(row.PoiDocName or row.PoiDocPath or ""),
+            "poi_file_url": _poi_url(row.ReferenceNo, inline=False) if row.PoiDocPath else "",
+            "poi_view_url": _poi_url(row.ReferenceNo, inline=True) if row.PoiDocPath else "",
             "article_code": row.ArticleCode,
             "article_label": row.ArticleLabel,
             "amount": float(row.Amount or 0),

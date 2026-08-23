@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template, request, send_file
+import mimetypes
+
+from flask import Blueprint, jsonify, redirect, render_template, request, send_file, url_for
 
 from app.decorators import login_required
+from app.services.credentials_master_service import CredentialsMasterService
+from app.services.shcil_login_service import SHCIL_LOGIN_URL, ShcilLoginService
 from app.services.website_estamp_service import WebsiteEStampService
 
 bp = Blueprint("estamp_orders", __name__, url_prefix="/admin/estamp-orders")
@@ -52,7 +56,11 @@ def review():
 def download_poi(reference_no: str):
     try:
         path, name = WebsiteEStampService().poi_file(reference_no)
-        return send_file(path, as_attachment=True, download_name=name)
+        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        inline = str(request.args.get("inline") or "").lower() in {"1", "true", "yes"}
+        response = send_file(path, as_attachment=not inline, download_name=name, mimetype=mime)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
 
@@ -104,6 +112,77 @@ def generate_stamp(reference_no: str):
         return jsonify(WebsiteEStampService().generate_stamp(reference_no))
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/generate", methods=["GET"])
+@login_required
+def generate_page(reference_no: str):
+    try:
+        order = WebsiteEStampService().get_order_dict(reference_no)
+    except ValueError:
+        return redirect(url_for("estamp_orders.index"))
+    if (order.get("payment_confirmed") or "").lower() != "yes":
+        return redirect(url_for("estamp_orders.index"))
+    cred = CredentialsMasterService().find_shcil_login()
+    return render_template(
+        "estamp_orders/generate.html",
+        page_title=f"Generate Stamp · {order.get('reference_no')}",
+        order=order,
+        shcil_login_url=SHCIL_LOGIN_URL,
+        credential={
+            "found": bool(cred),
+            "activity": (cred or {}).get("activity") or "",
+            "user_id": (cred or {}).get("user_id") or "",
+            "url": (cred or {}).get("url") or SHCIL_LOGIN_URL,
+            "has_password": bool((cred or {}).get("password")),
+        },
+    )
+
+
+@bp.route("/<reference_no>/shcil-login", methods=["POST"])
+@login_required
+def shcil_login(reference_no: str):
+    try:
+        order = WebsiteEStampService().get_order_dict(reference_no)
+        cred = CredentialsMasterService().find_shcil_login()
+        if not cred:
+            return jsonify({
+                "ok": False,
+                "error": "Add SHCIL / e-Stamp User ID and password in Credentials Master first.",
+            }), 400
+        result = ShcilLoginService().launch(
+            cred.get("user_id") or "",
+            cred.get("password") or "",
+            reference_no=reference_no,
+            order=order,
+        )
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Unable to open SHCIL login: {exc}"}), 500
+
+
+@bp.route("/<reference_no>/shcil-status", methods=["GET"])
+@login_required
+def shcil_status(reference_no: str):
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "job_id is required."}), 400
+    job = ShcilLoginService().get_job(job_id)
+    if not job:
+        return jsonify({"ok": False, "error": "Login job not found."}), 404
+    return jsonify({
+        "ok": True,
+        "job": {
+            "job_id": job_id,
+            "status": job.get("status") or "",
+            "phase": job.get("phase") or "",
+            "message": job.get("message") or "",
+            "user_id": job.get("user_id") or "",
+            "reference_no": job.get("reference_no") or reference_no,
+        },
+    })
 
 
 def ensure_estamp_orders_menu() -> None:
