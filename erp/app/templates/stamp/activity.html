@@ -497,6 +497,7 @@
   {% set auto_load_stamp = load_stamp_id or (duplicate_existing.stamp_id if duplicate_existing else none) %}
   window.STAMP_AUTO_LOAD_STAMP_ID = {{ auto_load_stamp | tojson }};
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
+  window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260822saleblank"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260823webpre1"></script>
 {% endblock %}

@@ -82,6 +82,8 @@ BEGIN
         ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocPath NVARCHAR(400) NULL;
     IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PoiDocName') IS NULL
         ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocName NVARCHAR(200) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PaymentConfirmed') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PaymentConfirmed NVARCHAR(10) NULL;
 END
 """
 
@@ -191,9 +193,6 @@ class WebsiteEStampService:
             raise ValueError("Please enter the stamp duty amount.") from exc
         if amount <= 0:
             raise ValueError("Please enter the stamp duty amount.")
-        description = _clean(data.get("description"), 50)
-        if not description:
-            raise ValueError("Please enter a description (max 50 characters).")
         poi_type = _clean(data.get("poi_document_type"), 40).lower()
         if not poi_type:
             raise ValueError("Please select a proof of identity document type.")
@@ -275,6 +274,13 @@ class WebsiteEStampService:
             raise ValueError("POI file is missing.")
         return path, row.PoiDocName or path.name
 
+    NO_PAYMENT_WHATSAPP = (
+        "Your stamp request has been rejected because you did not make the payment."
+    )
+    REJECT_WHATSAPP = (
+        "Your stamp request has been rejected. Please contact JTCS for more information."
+    )
+
     def update_review(self, reference_no: str, status: str, notes: str = "") -> dict:
         row = self.get_by_reference(reference_no)
         if row is None:
@@ -284,6 +290,135 @@ class WebsiteEStampService:
         row.ModifiedDate = datetime.utcnow()
         db.session.commit()
         return self._row(row)
+
+    def set_payment_confirm(self, reference_no: str, confirmed: str) -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        choice = _clean(confirmed, 10).title()
+        if choice not in {"Yes", "No"}:
+            raise ValueError("Select Yes or No for payment confirm.")
+        row.PaymentConfirmed = choice
+        row.ModifiedDate = datetime.utcnow()
+        if choice == "Yes":
+            row.ReviewStatus = "Payment confirmed"
+            db.session.commit()
+            return self._row(row)
+        return self.reject_order(reference_no, reason="no_payment")
+
+    def reject_order(self, reference_no: str, reason: str = "rejected") -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        no_pay = (reason or "").strip().lower() in {"no_payment", "no", "unpaid"}
+        row.PaymentConfirmed = "No" if no_pay else (row.PaymentConfirmed or "Yes")
+        row.ReviewStatus = "Rejected — no payment" if no_pay else "Rejected"
+        row.ModifiedDate = datetime.utcnow()
+        db.session.commit()
+        message = self.NO_PAYMENT_WHATSAPP if no_pay else self.REJECT_WHATSAPP
+        wa = self._whatsapp_applicant(row.Mobile, message)
+        data = self._row(row)
+        data["whatsapp"] = wa
+        data["ok"] = True
+        data["message"] = "Order rejected. WhatsApp reply prepared for the applicant."
+        return data
+
+    def admin_delete(self, reference_no: str) -> None:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            return
+        db.session.delete(row)
+        db.session.commit()
+
+    def admin_update(self, reference_no: str, data: dict) -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        first = _clean(data.get("full_name") or data.get("name") or row.FullName)
+        second = _clean(data.get("second_party_name") or row.SecondPartyName)
+        if len(first) < 2:
+            raise ValueError("Please enter first party name.")
+        if len(second) < 2:
+            raise ValueError("Please enter second party name.")
+        row.FullName = first
+        row.FatherOrHusbandName = _clean(data.get("father_or_husband_name")) or None
+        row.SecondPartyName = second
+        row.SecondPartyFatherOrHusbandName = _clean(data.get("second_party_father_or_husband_name")) or None
+        desc = _clean(data.get("description"), 50)
+        row.Description = desc or None
+        consideration_raw = data.get("consideration_price")
+        if consideration_raw in (None, ""):
+            row.ConsiderationPrice = None
+        else:
+            try:
+                row.ConsiderationPrice = float(consideration_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Please enter a valid consideration price.") from exc
+        try:
+            amount = float(data.get("amount") if data.get("amount") not in (None, "") else row.Amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Please enter a valid stamp amount.") from exc
+        if amount <= 0:
+            raise ValueError("Please enter a valid stamp amount.")
+        row.Amount = amount
+        row.ModifiedDate = datetime.utcnow()
+        db.session.commit()
+        return self._row(row)
+
+    def generate_stamp(self, reference_no: str) -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        if (row.PaymentConfirmed or "") != "Yes":
+            raise ValueError("Confirm payment as Yes before generating the stamp.")
+        row.ReviewStatus = "Generate stamp"
+        row.ModifiedDate = datetime.utcnow()
+        db.session.commit()
+        from flask import url_for
+
+        stamp_url = url_for(
+            "stamp.stamp_activity",
+            mobile=row.Mobile or "",
+            first_party=row.FullName or "",
+            second_party=row.SecondPartyName or "",
+            amount=str(row.Amount or ""),
+            sale_amount=str(row.ConsiderationPrice or ""),
+            description=row.Description or "",
+            website_ref=row.ReferenceNo,
+        )
+        data = self._row(row)
+        data["ok"] = True
+        data["stamp_url"] = stamp_url
+        data["message"] = "Opening Stamp Activity to generate the stamp."
+        return data
+
+    def _whatsapp_applicant(self, mobile: str, message: str) -> dict:
+        digits = _mobile(mobile)
+        result = {"ok": False, "wa_url": "", "sent": False}
+        if not digits:
+            result["error"] = "Applicant mobile is missing."
+            return result
+        try:
+            from app.modules.communication.whatsapp_provider import get_whatsapp_provider
+
+            provider = get_whatsapp_provider()
+            sent = provider.send_message(digits, message) or {}
+            result["sent"] = bool(sent.get("ok"))
+            result["ok"] = bool(sent.get("ok") or sent.get("wa_url"))
+            result["wa_url"] = sent.get("wa_url") or ""
+            if not result["wa_url"] and hasattr(provider, "open_chat_url"):
+                result["wa_url"] = provider.open_chat_url(digits, message) or ""
+            if sent.get("error"):
+                result["error"] = sent.get("error")
+        except Exception as exc:
+            logger.exception("e-Stamp applicant WhatsApp failed")
+            result["error"] = str(exc)
+        if not result["wa_url"]:
+            from urllib.parse import quote
+
+            result["wa_url"] = "https://wa.me/91" + digits + "?text=" + quote(message)
+            result["ok"] = True
+        return result
 
     def _apply(self, row: WebsiteEStampOrder, data: dict, first: str, second: str, mobile: str, article: dict, amount: float) -> None:
         row.FullName = first
@@ -348,6 +483,7 @@ class WebsiteEStampService:
             "payment_status": row.PaymentStatus,
             "review_status": row.ReviewStatus,
             "review_notes": row.ReviewNotes or "",
+            "payment_confirmed": (row.PaymentConfirmed or "").strip(),
             "created_date": row.CreatedDate.strftime("%d/%m/%Y %H:%M") if row.CreatedDate else "",
         }
 

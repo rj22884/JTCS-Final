@@ -64,6 +64,15 @@ def stamp_activity():
         ocr_status=ocr_status,
         is_admin=has_admin_role(session.get("role")),
         load_stamp_id=load_stamp_id,
+        website_prefill={
+            "mobile": (request.args.get("mobile") or "").strip(),
+            "first_party": (request.args.get("first_party") or "").strip(),
+            "second_party": (request.args.get("second_party") or "").strip(),
+            "amount": (request.args.get("amount") or "").strip(),
+            "sale_amount": (request.args.get("sale_amount") or "").strip(),
+            "description": (request.args.get("description") or "").strip(),
+            "website_ref": (request.args.get("website_ref") or "").strip(),
+        },
     )
 
 

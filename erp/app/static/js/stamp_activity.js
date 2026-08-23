@@ -1664,8 +1664,23 @@
     els.mainWorkspace?.classList.add("d-none");
   }
 
+  function applyWebsitePrefill() {
+    const pre = window.STAMP_WEBSITE_PREFILL || {};
+    const first = document.getElementById("FirstPartyName");
+    const second = document.getElementById("SecondPartyName");
+    const duty = document.getElementById("StampDutyAmount");
+    const sale = document.getElementById("SaleAmount");
+    const desc = document.getElementById("DescriptionOfDocument");
+    if (first && pre.first_party) first.value = pre.first_party;
+    if (second && pre.second_party) second.value = pre.second_party;
+    if (duty && pre.amount) duty.value = pre.amount;
+    if (sale && (pre.sale_amount || pre.amount)) sale.value = pre.sale_amount || pre.amount;
+    if (desc && pre.description) desc.value = pre.description;
+  }
+
   function initMobileFromRepost() {
-    const mobile = window.STAMP_REPOST_MOBILE;
+    const pre = window.STAMP_WEBSITE_PREFILL || {};
+    const mobile = window.STAMP_REPOST_MOBILE || pre.mobile;
     if (!mobile || !els.mobileHidden) return false;
     mobileConfirmed = true;
     els.mobileHidden.value = normalizeMobile(mobile);
@@ -2538,6 +2553,7 @@
       loadStampRecord(window.STAMP_AUTO_LOAD_STAMP_ID);
     } else {
       enterSaveMode();
+      applyWebsitePrefill();
     }
   } else {
     resetToMobileGate();

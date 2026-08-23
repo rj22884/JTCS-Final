@@ -57,5 +57,54 @@ def download_poi(reference_no: str):
         return jsonify({"ok": False, "error": str(exc)}), 404
 
 
+@bp.route("/<reference_no>/payment-confirm", methods=["POST"])
+@login_required
+def payment_confirm(reference_no: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(WebsiteEStampService().set_payment_confirm(reference_no, data.get("confirmed") or ""))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/reject", methods=["POST"])
+@login_required
+def reject_order(reference_no: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify(WebsiteEStampService().reject_order(reference_no, data.get("reason") or "rejected"))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/delete", methods=["POST"])
+@login_required
+def delete_order(reference_no: str):
+    try:
+        WebsiteEStampService().admin_delete(reference_no)
+        return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/update", methods=["POST"])
+@login_required
+def update_order(reference_no: str):
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "row": WebsiteEStampService().admin_update(reference_no, data)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/generate-stamp", methods=["POST"])
+@login_required
+def generate_stamp(reference_no: str):
+    try:
+        return jsonify(WebsiteEStampService().generate_stamp(reference_no))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 def ensure_estamp_orders_menu() -> None:
     WebsiteEStampService().ensure_schema()

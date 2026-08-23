@@ -1,5 +1,13 @@
 {% extends 'layouts/base.html' %}
 
+{% block extra_css %}
+<style>
+.estamp-actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.4rem; }
+.estamp-confirm { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; white-space: nowrap; }
+.estamp-confirm label { margin: 0; font-weight: 600; }
+</style>
+{% endblock %}
+
 {% block ribbon_toolbar %}
 <div class="jtcs-ribbon-group">
   <button type="button" class="jtcs-ribbon-btn" id="estampRefreshBtn" title="Refresh">
@@ -19,7 +27,7 @@
     <h3 class="h6 mb-0">Paid website e-Stamp orders</h3>
     <span class="small text-muted ms-auto" id="estampCount"></span>
   </div>
-  <p class="small text-muted mb-2">Only paid requests from jtcsxpert.com appear here. Draft saves stay on the website until payment.</p>
+  <p class="small text-muted mb-2">Only paid requests from jtcsxpert.com appear here. Draft saves stay on the website until payment. Confirm payment on each row before edit / generate stamp.</p>
   <div class="table-responsive">
     <table class="table table-sm table-hover table-striped align-middle mb-0">
       <thead>
@@ -35,14 +43,61 @@
           <th>Amount</th>
           <th>Pay</th>
           <th>UTR</th>
+          <th>Payment confirm?</th>
           <th>Status</th>
           <th>Date</th>
         </tr>
       </thead>
       <tbody id="estampBody">
-        <tr><td colspan="13" class="text-muted">Loading…</td></tr>
+        <tr><td colspan="14" class="text-muted">Loading…</td></tr>
       </tbody>
     </table>
+  </div>
+</div>
+
+<div class="modal fade" id="estampEditModal" tabindex="-1" aria-labelledby="estampEditTitle">
+  <div class="modal-dialog">
+    <form class="modal-content" id="estampEditForm">
+      <div class="modal-header">
+        <h5 class="modal-title" id="estampEditTitle">Edit e-Stamp order</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="estampEditRef">
+        <div class="mb-2">
+          <label class="form-label" for="estampEditFirst">First party</label>
+          <input class="form-control form-control-sm" id="estampEditFirst" required maxlength="160">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditFirstFather">First party father / husband</label>
+          <input class="form-control form-control-sm" id="estampEditFirstFather" maxlength="160">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditSecond">Second party</label>
+          <input class="form-control form-control-sm" id="estampEditSecond" required maxlength="160">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditSecondFather">Second party father / husband</label>
+          <input class="form-control form-control-sm" id="estampEditSecondFather" maxlength="160">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditConsideration">Consideration price</label>
+          <input class="form-control form-control-sm" id="estampEditConsideration" type="number" min="0" step="0.01">
+        </div>
+        <div class="mb-2">
+          <label class="form-label" for="estampEditDescription">Description</label>
+          <input class="form-control form-control-sm" id="estampEditDescription" maxlength="50" placeholder="Optional, max 50 characters">
+        </div>
+        <div class="mb-0">
+          <label class="form-label" for="estampEditAmount">Stamp amount</label>
+          <input class="form-control form-control-sm" id="estampEditAmount" type="number" min="0.01" step="0.01" required>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      </div>
+    </form>
   </div>
 </div>
 {% endblock %}
@@ -52,37 +107,184 @@
 (function () {
   var body = document.getElementById("estampBody");
   var count = document.getElementById("estampCount");
+  var rowsByRef = {};
+  var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+  var editModalEl = document.getElementById("estampEditModal");
+  var editModal = editModalEl && window.bootstrap ? window.bootstrap.Modal.getOrCreateInstance(editModalEl) : null;
+
+  function esc(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function headers() {
+    return { Accept: "application/json", "Content-Type": "application/json", "X-CSRFToken": csrf, "X-CSRF-Token": csrf };
+  }
+
+  function post(url, payload) {
+    return fetch(url, { method: "POST", headers: headers(), body: JSON.stringify(payload || {}) })
+      .then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); });
+  }
+
+  function actionButtons(row) {
+    var confirmed = (row.payment_confirmed || "").toLowerCase();
+    var yesHidden = confirmed === "yes" ? "" : " hidden";
+    var noHidden = confirmed === "no" ? "" : " hidden";
+    return (
+      '<div class="estamp-confirm">' +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="Yes"' + (confirmed === "yes" ? " checked" : "") + '> Yes</label>' +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="No"' + (confirmed === "no" ? " checked" : "") + '> No</label>' +
+      "</div>" +
+      '<div class="estamp-actions estamp-yes-actions"' + yesHidden + ">" +
+        '<button type="button" class="btn btn-sm btn-outline-primary" data-act="edit">Edit</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-warning" data-act="reject">Reject</button>' +
+        '<button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">Permanent Delete</button>' +
+        '<button type="button" class="btn btn-sm btn-success" data-act="generate">Generate Stamp</button>' +
+      "</div>" +
+      '<div class="estamp-actions estamp-no-actions"' + noHidden + ">" +
+        '<button type="button" class="btn btn-sm btn-outline-warning" data-act="reject-nopay">Reject</button>' +
+      "</div>"
+    );
+  }
+
+  function render(rows) {
+    rowsByRef = {};
+    (rows || []).forEach(function (row) { rowsByRef[row.reference_no] = row; });
+    if (count) count.textContent = rows.length + " paid order" + (rows.length === 1 ? "" : "s");
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="14" class="text-muted">No paid e-Stamp orders yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = rows.map(function (row) {
+      return "<tr data-ref=\"" + esc(row.reference_no) + "\">" +
+        "<td><strong>" + esc(row.reference_no || "") + "</strong></td>" +
+        "<td>" + esc(row.full_name || "") + "</td>" +
+        "<td>" + esc(row.second_party_name || "") + "</td>" +
+        "<td>" + esc(row.mobile || "") + "</td>" +
+        "<td>" + esc(row.poi_document_type || "") + (row.poi_has_file ? ' <a href="/admin/estamp-orders/' + encodeURIComponent(row.reference_no || "") + '/poi">Download</a>' : "") + "</td>" +
+        "<td>" + (row.consideration_price !== "" && row.consideration_price != null ? esc(row.consideration_price) : "—") + "</td>" +
+        "<td>" + esc(row.description || "—") + "</td>" +
+        "<td>" + esc(row.article_label || row.article_code || "") + "</td>" +
+        "<td>" + esc(row.payable_amount || row.amount || "") + "</td>" +
+        "<td>" + esc(row.pay_method || "") + "</td>" +
+        "<td>" + esc(row.utr_number || "") + "</td>" +
+        "<td>" + actionButtons(row) + "</td>" +
+        "<td>" + esc(row.review_status || "") + "</td>" +
+        "<td>" + esc(row.created_date || "") + "</td>" +
+        "</tr>";
+    }).join("");
+  }
+
   async function load() {
     try {
       var res = await fetch("{{ url_for('estamp_orders.list_orders') }}", { headers: { Accept: "application/json" } });
       var data = await res.json();
-      var rows = data.rows || [];
-      if (count) count.textContent = rows.length + " paid order" + (rows.length === 1 ? "" : "s");
-      if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="13" class="text-muted">No paid e-Stamp orders yet.</td></tr>';
-        return;
-      }
-      body.innerHTML = rows.map(function (row) {
-        return "<tr>" +
-          "<td><strong>" + (row.reference_no || "") + "</strong></td>" +
-          "<td>" + (row.full_name || "") + "</td>" +
-          "<td>" + (row.second_party_name || "") + "</td>" +
-          "<td>" + (row.mobile || "") + "</td>" +
-          "<td>" + (row.poi_document_type || "") + (row.poi_has_file ? ' <a href="/admin/estamp-orders/' + encodeURIComponent(row.reference_no || "") + '/poi">Download</a>' : "") + "</td>" +
-          "<td>" + (row.consideration_price !== "" && row.consideration_price != null ? row.consideration_price : "—") + "</td>" +
-          "<td>" + (row.description || "—") + "</td>" +
-          "<td>" + (row.article_label || row.article_code || "") + "</td>" +
-          "<td>" + (row.payable_amount || row.amount || "") + "</td>" +
-          "<td>" + (row.pay_method || "") + "</td>" +
-          "<td>" + (row.utr_number || "") + "</td>" +
-          "<td>" + (row.review_status || "") + "</td>" +
-          "<td>" + (row.created_date || "") + "</td>" +
-          "</tr>";
-      }).join("");
+      render(data.rows || []);
     } catch (err) {
-      body.innerHTML = '<tr><td colspan="10" class="text-danger">Unable to load orders.</td></tr>';
+      body.innerHTML = '<tr><td colspan="14" class="text-danger">Unable to load orders.</td></tr>';
     }
   }
+
+  function openWhatsapp(data) {
+    var url = data && data.whatsapp && data.whatsapp.wa_url;
+    if (url) window.open(url, "_blank", "noopener");
+  }
+
+  function openEdit(row) {
+    document.getElementById("estampEditRef").value = row.reference_no || "";
+    document.getElementById("estampEditFirst").value = row.full_name || "";
+    document.getElementById("estampEditFirstFather").value = row.father_or_husband_name || "";
+    document.getElementById("estampEditSecond").value = row.second_party_name || "";
+    document.getElementById("estampEditSecondFather").value = row.second_party_father_or_husband_name || "";
+    document.getElementById("estampEditConsideration").value = row.consideration_price || "";
+    document.getElementById("estampEditDescription").value = row.description || "";
+    document.getElementById("estampEditAmount").value = row.amount || "";
+    if (editModal) editModal.show();
+  }
+
+  body.addEventListener("change", async function (event) {
+    var radio = event.target.closest('input[type="radio"][name^="pc-"]');
+    if (!radio) return;
+    var tr = radio.closest("tr");
+    var ref = tr && tr.getAttribute("data-ref");
+    if (!ref) return;
+    if (radio.value === "No" && !window.confirm("Payment not received. Reject this stamp request and WhatsApp the applicant?")) {
+      radio.checked = false;
+      return;
+    }
+    try {
+      var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/payment-confirm", { confirmed: radio.value });
+      if (!result.res.ok || result.data.ok === false) throw new Error(result.data.error || "Unable to save.");
+      if (radio.value === "No") openWhatsapp(result.data);
+      await load();
+    } catch (err) {
+      alert(err.message || "Unable to update payment confirm.");
+      await load();
+    }
+  });
+
+  body.addEventListener("click", async function (event) {
+    var btn = event.target.closest("[data-act]");
+    if (!btn) return;
+    var tr = btn.closest("tr");
+    var ref = tr && tr.getAttribute("data-ref");
+    var row = rowsByRef[ref];
+    if (!ref || !row) return;
+    var act = btn.getAttribute("data-act");
+    try {
+      if (act === "edit") {
+        openEdit(row);
+        return;
+      }
+      if (act === "reject" || act === "reject-nopay") {
+        if (!window.confirm("Reject this stamp request?")) return;
+        var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/reject", {
+          reason: act === "reject-nopay" ? "no_payment" : "rejected",
+        });
+        if (!result.res.ok || result.data.ok === false) throw new Error(result.data.error || "Unable to reject.");
+        openWhatsapp(result.data);
+        await load();
+        return;
+      }
+      if (act === "delete") {
+        if (!window.confirm("Permanently delete this e-Stamp order? This cannot be undone.")) return;
+        var del = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/delete", {});
+        if (!del.res.ok || del.data.ok === false) throw new Error(del.data.error || "Unable to delete.");
+        await load();
+        return;
+      }
+      if (act === "generate") {
+        var gen = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/generate-stamp", {});
+        if (!gen.res.ok || gen.data.ok === false) throw new Error(gen.data.error || "Unable to generate stamp.");
+        if (gen.data.stamp_url) window.location.href = gen.data.stamp_url;
+        else await load();
+      }
+    } catch (err) {
+      alert(err.message || "Action failed.");
+    }
+  });
+
+  document.getElementById("estampEditForm").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var ref = document.getElementById("estampEditRef").value;
+    try {
+      var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/update", {
+        full_name: document.getElementById("estampEditFirst").value,
+        father_or_husband_name: document.getElementById("estampEditFirstFather").value,
+        second_party_name: document.getElementById("estampEditSecond").value,
+        second_party_father_or_husband_name: document.getElementById("estampEditSecondFather").value,
+        consideration_price: document.getElementById("estampEditConsideration").value,
+        description: document.getElementById("estampEditDescription").value,
+        amount: document.getElementById("estampEditAmount").value,
+      });
+      if (!result.res.ok || result.data.ok === false) throw new Error(result.data.error || "Unable to save.");
+      if (editModal) editModal.hide();
+      await load();
+    } catch (err) {
+      alert(err.message || "Unable to save.");
+    }
+  });
+
   document.getElementById("estampRefreshBtn")?.addEventListener("click", load);
   load();
 })();

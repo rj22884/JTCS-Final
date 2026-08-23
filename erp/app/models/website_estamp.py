@@ -39,6 +39,7 @@ class WebsiteEStampOrder(db.Model):
     IsPaid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ReviewStatus: Mapped[str] = mapped_column(Unicode(40), nullable=False, default="New")
     ReviewNotes: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
+    PaymentConfirmed: Mapped[str | None] = mapped_column(Unicode(10), nullable=True)
     CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
