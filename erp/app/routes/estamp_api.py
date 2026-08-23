@@ -86,6 +86,24 @@ def delete_order(reference_no: str):
         return jsonify({"ok": False, "error": str(exc)}), 400
 
 
+@bp.route("/orders/<reference_no>/poi", methods=["POST", "OPTIONS"], strict_slashes=False)
+def upload_poi(reference_no: str):
+    if request.method == "OPTIONS":
+        return ("", 204)
+    try:
+        return jsonify(
+            WebsiteEStampService().save_poi(
+                reference_no,
+                request.files.get("file"),
+                request.form.get("poi_document_type") or "",
+            )
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/orders/<reference_no>/pay", methods=["POST", "OPTIONS"], strict_slashes=False)
 @bp.route("/orders/<reference_no>/pay/upi", methods=["POST", "OPTIONS"], strict_slashes=False)
 @bp.route("/orders/<reference_no>/pay/verify", methods=["POST", "OPTIONS"], strict_slashes=False)

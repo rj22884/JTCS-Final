@@ -104,6 +104,7 @@
   }
 
   function fmtDate(iso) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(iso, "");
     if (!iso || iso.length < 10) return iso || "";
     const p = iso.slice(0, 10).split("-");
     return p[2] + "/" + p[1] + "/" + p[0];

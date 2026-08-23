@@ -13,6 +13,7 @@ from flask import has_request_context, request
 from sqlalchemy import text
 
 from app.extensions import db
+from app.utils.date_format import format_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -315,12 +316,12 @@ class LoginActivityService:
             "id": row.get("id"),
             "user_id": row.get("user_id") or "",
             "user_pk": row.get("user_pk"),
-            "login_time": login_time.isoformat(sep=" ", timespec="seconds") if login_time else "",
+            "login_time": format_display_datetime(login_time, empty="") if login_time else "",
             "ip_address": row.get("ip_address") or "—",
             "device": row.get("device") or "—",
             "status": (row.get("status") or "").upper(),
             "session_id": row.get("session_id"),
-            "logout_time": logout_time.isoformat(sep=" ", timespec="seconds") if logout_time else "",
+            "logout_time": format_display_datetime(logout_time, empty="") if logout_time else "",
         }
 
     @staticmethod
@@ -331,5 +332,5 @@ class LoginActivityService:
             "user_id": row.get("user_id") or "",
             "user_pk": row.get("user_pk"),
             "event_type": (row.get("event_type") or "").upper(),
-            "event_time": event_time.isoformat(sep=" ", timespec="seconds") if event_time else "",
+            "event_time": format_display_datetime(event_time, empty="") if event_time else "",
         }

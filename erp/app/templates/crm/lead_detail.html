@@ -75,11 +75,11 @@
       </div>
       <div class="col-md-4">
         <span class="text-muted">Created</span><br>
-        <strong>{{ lead.CreatedDate | display_date if lead.CreatedDate else '—' }}</strong>
+        <strong>{{ lead.CreatedDate | display_value if lead.CreatedDate else '—' }}</strong>
       </div>
       <div class="col-md-4">
         <span class="text-muted">Modified</span><br>
-        <strong>{{ lead.ModifiedDate | display_date if lead.ModifiedDate else '—' }}</strong>
+        <strong>{{ lead.ModifiedDate | display_value if lead.ModifiedDate else '—' }}</strong>
       </div>
       <div class="col-12">
         <span class="text-muted">Message</span><br>

@@ -112,7 +112,7 @@
             {% for row in recent_logins %}
             <tr>
               <td>{{ row.user_id }}</td>
-              <td>{{ row.login_time }}</td>
+              <td>{{ row.login_time | display_value }}</td>
               <td>{{ row.ip_address }}</td>
               <td>
                 {% if row.status == 'SUCCESS' %}
@@ -167,7 +167,7 @@
                 <span class="badge text-bg-warning">RESET</span>
                 {% endif %}
               </td>
-              <td>{{ row.event_time }}</td>
+              <td>{{ row.event_time | display_value }}</td>
             </tr>
             {% else %}
             <tr class="adash-activity-empty"><td colspan="3" class="text-muted small">No password events yet.</td></tr>
@@ -299,5 +299,5 @@
     dateTo: {{ date_to.isoformat() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}?v=20260809loginact"></script>
+<script src="{{ url_for('static', filename='js/admin_dashboard.js') }}?v=20260823dmy1"></script>
 {% endblock %}

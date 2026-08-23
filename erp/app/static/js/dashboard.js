@@ -267,6 +267,8 @@
   }
 
   function formatDisplayDate(value) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(value);
+    if (window.formatDisplayDate) return window.formatDisplayDate(value);
     if (window.JtcsFormatDisplayDate) return window.JtcsFormatDisplayDate(value);
     return value || "";
   }
@@ -674,7 +676,7 @@
           '">' +
           "</td>" +
           "<td>" +
-          escapeHtml(formatDisplayDate(row.entry_date)) +
+          escapeHtml(formatDisplayDate(row.entry_datetime || row.entry_date)) +
           "</td>" +
           "<td><span class=\"dash-source-badge " +
           badgeClass +

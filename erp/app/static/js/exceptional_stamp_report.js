@@ -33,6 +33,7 @@
   }
 
   function formatDate(value) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(value, "—");
     if (!value) return "—";
     const parts = String(value).slice(0, 10).split("-");
     if (parts.length !== 3) return value;

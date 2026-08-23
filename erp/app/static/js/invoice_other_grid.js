@@ -30,6 +30,7 @@
   }
 
   function fmtDate(raw) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(raw, "—");
     if (!raw) return "—";
     const s = String(raw).slice(0, 10);
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);

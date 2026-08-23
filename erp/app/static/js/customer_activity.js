@@ -95,7 +95,7 @@
             escapeHtml(row.mobile_number || "—") +
             "</td>" +
             "<td>" +
-            escapeHtml(row.last_login || "—") +
+            escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.last_login || "—")) +
             "</td>" +
             "</tr>"
           );
@@ -140,7 +140,7 @@
           return (
             "<tr>" +
             "<td>" +
-            escapeHtml(row.created_date || "—") +
+            escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.created_date || "—")) +
             "</td>" +
             "<td>" +
             name +

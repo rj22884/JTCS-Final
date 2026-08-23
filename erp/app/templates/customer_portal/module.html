@@ -54,7 +54,7 @@
             {% for row in section.rows %}
             <tr>
               {% for col_key, col_label in section.columns %}
-              <td>{{ row.get(col_key) if row.get(col_key) not in (None, '') else '—' }}</td>
+              <td>{{ row.get(col_key) | display_value if row.get(col_key) not in (None, '') else '—' }}</td>
               {% endfor %}
             </tr>
             {% endfor %}

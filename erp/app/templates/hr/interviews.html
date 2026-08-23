@@ -24,7 +24,7 @@
         <tr>
           <td>{{ row.ApplicationNumber }}</td>
           <td>{{ row.CandidateName }}</td>
-          <td>{{ row.InterviewDate }}</td>
+          <td>{{ row.InterviewDate | display_date if row.InterviewDate else '—' }}</td>
           <td>{{ row.InterviewTime or '—' }}</td>
           <td>{{ row.InterviewMode or '—' }}</td>
           <td>{{ row.Interviewer or '—' }}</td>

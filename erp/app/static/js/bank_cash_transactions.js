@@ -216,7 +216,7 @@
       const tr = document.createElement("tr");
       tr.innerHTML =
         "<td>" + escapeHtml(row.voucher_no) + "</td>" +
-        "<td>" + escapeHtml(row.work_date) + "</td>" +
+        "<td>" + escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.work_date)) + "</td>" +
         "<td>" + escapeHtml(row.purpose) + "</td>" +
         "<td>" + creditCell + "</td>" +
         "<td>" + debitCell + "</td>" +

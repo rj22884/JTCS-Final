@@ -50,7 +50,7 @@
           <td>{{ row.application_number }}</td>
           <td>{{ row.name }}</td>
           <td>{{ row.job_title }}</td>
-          <td>{{ row.submitted_at }}</td>
+          <td>{{ row.submitted_at | display_value if row.submitted_at else '—' }}</td>
           <td>{{ row.total_work_experience or '—' }}</td>
           <td>{{ row.effective_status }}</td>
           <td>{{ row.interview_status or '—' }}</td>

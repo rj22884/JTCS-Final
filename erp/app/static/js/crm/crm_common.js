@@ -14,18 +14,24 @@
 
   function formatDate(value, options) {
     if (value == null || value === "") return "—";
+    if (options && options.dateOnly && global.formatDisplayDate) {
+      return global.formatDisplayDate(value, "—");
+    }
+    if (global.formatDisplaySmart) return global.formatDisplaySmart(value, "—");
+    if (global.formatDisplayDate) return global.formatDisplayDate(value, "—");
     const d = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     const opts = options || { dateStyle: "medium", timeStyle: "short" };
     try {
-      return new Intl.DateTimeFormat(undefined, opts).format(d);
+      return new Intl.DateTimeFormat("en-GB", opts).format(d);
     } catch (_e) {
-      return d.toLocaleString();
+      return d.toLocaleString("en-GB");
     }
   }
 
   function formatDateOnly(value) {
-    return formatDate(value, { dateStyle: "medium" });
+    if (global.formatDisplayDate) return global.formatDisplayDate(value, "—");
+    return formatDate(value, { dateOnly: true, dateStyle: "medium" });
   }
 
   function escapeHtml(text) {

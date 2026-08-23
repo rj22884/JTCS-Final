@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.repositories.customer_repository import CustomerRepository
+from app.utils.date_format import format_display_datetime
 
 
 class CustomerActivityService:
@@ -147,8 +148,8 @@ class CustomerActivityService:
         if value is None:
             return ""
         if isinstance(value, datetime):
-            return value.strftime("%Y-%m-%d %H:%M:%S")
-        return str(value)
+            return format_display_datetime(value, empty="")
+        return format_display_datetime(value, empty=str(value))
 
     def _customer_row(self, row: Any) -> dict[str, Any]:
         return {

@@ -189,7 +189,7 @@
       const debitClass = debitVal > 0 ? " text-end adash-debit-in" : " text-end";
       const creditClass = creditVal > 0 ? " text-end adash-credit-out" : " text-end";
       tr.innerHTML =
-        "<td>" + escapeHtml(row.entry_date) + "</td>" +
+        "<td>" + escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.entry_date)) + "</td>" +
         "<td>" + escapeHtml(row.description) + "</td>" +
         "<td>" + escapeHtml(row.source_module) + "</td>" +
         "<td>" + escapeHtml(row.source_type) + "</td>" +
@@ -258,7 +258,7 @@
             '" target="_blank" rel="noopener noreferrer" title="Open source entry"><i class="bi bi-box-arrow-up-right"></i></a>'
           : '<span class="text-muted">—</span>';
       tr.innerHTML =
-        "<td>" + escapeHtml(row.entry_date) + "</td>" +
+        "<td>" + escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.entry_date)) + "</td>" +
         "<td>" + escapeHtml(row.source || "") + "</td>" +
         "<td>" + escapeHtml(row.reference || "") + "</td>" +
         "<td>" + escapeHtml(row.work || "") + "</td>" +
@@ -473,7 +473,7 @@
               "</td><td>" +
               statusBadge(r.event_type) +
               "</td><td>" +
-              escapeHtml(r.event_time) +
+              escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(r.event_time)) +
               "</td></tr>"
             );
           })
@@ -485,7 +485,7 @@
               "<tr><td>" +
               escapeHtml(r.user_id) +
               "</td><td>" +
-              escapeHtml(r.login_time) +
+              escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(r.login_time)) +
               "</td><td>" +
               escapeHtml(r.ip_address) +
               "</td><td>" +

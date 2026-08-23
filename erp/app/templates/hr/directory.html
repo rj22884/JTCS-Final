@@ -22,7 +22,7 @@
           <td>{{ row.Name }}</td>
           <td>{{ row.designation_name or '—' }}</td>
           <td>{{ row.department_name or '—' }}</td>
-          <td>{{ row.JoiningDate or '—' }}</td>
+          <td>{{ row.JoiningDate | display_date if row.JoiningDate else '—' }}</td>
           <td>{{ row.EmploymentStatus }}</td>
           <td class="text-nowrap">
             <a class="btn btn-sm btn-outline-primary" href="{{ url_for('hr.employee_profile', employee_id=row.EmployeeID) }}">View</a>

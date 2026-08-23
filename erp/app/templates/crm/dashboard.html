@@ -93,7 +93,7 @@
           {% for ev in comm_stats.recent_activities|default([]) %}
           <li class="crm-timeline-item">
             <div class="crm-timeline-title">{{ ev.Title or ev.EventType }}</div>
-            <div class="crm-timeline-meta">{{ ev.CreatedDate }}</div>
+            <div class="crm-timeline-meta">{{ ev.CreatedDate | display_value }}</div>
             {% if ev.Description %}<div class="crm-timeline-desc">{{ ev.Description[:180] }}</div>{% endif %}
           </li>
           {% else %}

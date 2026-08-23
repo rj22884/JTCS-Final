@@ -38,22 +38,56 @@
     return pad2(dateValue.getDate()) + "/" + pad2(dateValue.getMonth() + 1) + "/" + dateValue.getFullYear();
   }
 
+  function hasTimeComponent(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (/[T ]\d{1,2}:\d{2}/.test(raw)) return true;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.getHours() !== 0 || value.getMinutes() !== 0 || value.getSeconds() !== 0;
+    }
+    return false;
+  }
+
   function formatDisplayDateTime(value, empty) {
     const emptyText = empty == null ? "—" : empty;
     if (value == null || value === "") return emptyText;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return formatClockParts(value);
+    }
     const raw = String(value).trim();
-    const isoDateTime = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+    const isoDateTime = raw.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (isoDateTime) {
       const datePart = formatDisplayDate(
         isoDateTime[1] + "-" + isoDateTime[2] + "-" + isoDateTime[3],
         emptyText
       );
-      const seconds = isoDateTime[6] != null ? isoDateTime[6] : "00";
-      return datePart + " " + isoDateTime[4] + ":" + isoDateTime[5] + ":" + seconds;
+      const seconds = isoDateTime[6] != null ? pad2(isoDateTime[6]) : "00";
+      return datePart + " " + pad2(isoDateTime[4]) + ":" + pad2(isoDateTime[5]) + ":" + seconds;
+    }
+    const displayDateTime = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (displayDateTime) {
+      const seconds = displayDateTime[6] != null ? pad2(displayDateTime[6]) : "00";
+      return (
+        pad2(displayDateTime[1]) +
+        "/" +
+        pad2(displayDateTime[2]) +
+        "/" +
+        displayDateTime[3] +
+        " " +
+        pad2(displayDateTime[4]) +
+        ":" +
+        pad2(displayDateTime[5]) +
+        ":" +
+        seconds
+      );
     }
     const dateOnly = formatDisplayDate(value, "");
     if (dateOnly) return dateOnly;
     return raw;
+  }
+
+  function formatDisplaySmart(value, empty) {
+    if (hasTimeComponent(value)) return formatDisplayDateTime(value, empty);
+    return formatDisplayDate(value, empty);
   }
 
   function toIsoDate(value) {
@@ -115,6 +149,8 @@
     parseDateValue: parseDateValue,
     formatDisplayDate: formatDisplayDate,
     formatDisplayDateTime: formatDisplayDateTime,
+    formatDisplaySmart: formatDisplaySmart,
+    hasTimeComponent: hasTimeComponent,
     toIsoDate: toIsoDate,
     startLiveClocks: startLiveClocks,
   };
@@ -123,6 +159,9 @@
   global.JTCS.date = api;
   global.formatDisplayDate = formatDisplayDate;
   global.formatDisplayDateTime = formatDisplayDateTime;
+  global.formatDisplaySmart = formatDisplaySmart;
+  global.JtcsFormatDisplayDate = formatDisplaySmart;
+  global.JtcsFormatDisplayDateTime = formatDisplayDateTime;
   global.toIsoDate = toIsoDate;
 
   if (typeof document !== "undefined") {

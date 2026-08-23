@@ -28,6 +28,7 @@ from app.modules.shared.audit_service import AuditService
 from app.repositories.customer_repository import CustomerRepository
 from app.utils.db_session import persist
 from app.utils.security import hash_password, verify_password
+from app.utils.date_format import format_display_date, format_display_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -886,7 +887,9 @@ class CustomerPortalService:
         record["customer_id"] = cid
         record["masked_pan"] = self.mask_pan(record.get("pan_number") or auth.get("pan_number"))
         record["last_login"] = (
-            auth.get("last_login").isoformat() if auth.get("last_login") else None
+            format_display_datetime(auth.get("last_login"), empty="")
+            if auth.get("last_login")
+            else None
         )
         record["password_changed"] = bool(auth.get("password_changed"))
         record["readonly_fields"] = sorted(PORTAL_READONLY_FIELDS)
@@ -1124,9 +1127,9 @@ class CustomerPortalService:
         if value is None:
             return None
         if isinstance(value, datetime):
-            return value.isoformat(sep=" ", timespec="minutes")
+            return format_display_datetime(value, empty="")
         if isinstance(value, date):
-            return value.isoformat()
+            return format_display_date(value, empty="")
         if isinstance(value, Decimal):
             return f"{value.quantize(Decimal('0.01')):.2f}"
         return value

@@ -15,6 +15,7 @@ from app.utils.opening_balance import (
     apply_account_running,
     is_credit_normal_nature,
 )
+from app.utils.date_format import format_display_date
 
 
 METRIC_LABELS = {
@@ -1677,7 +1678,7 @@ class DashboardService:
             "can_edit": False,
             "can_delete": False,
             "entry_date": date_from.isoformat(),
-            "description": f"Opening Balance (Bank Master as on {date_from.isoformat()})",
+            "description": f"Opening Balance (Bank Master as on {format_display_date(date_from, empty=date_from.isoformat())})",
             "reference": "OPENING",
             "work": label,
             "customer": "—",

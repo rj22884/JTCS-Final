@@ -402,6 +402,9 @@
   }
 
   function formatDate(value) {
+    if (typeof window.formatDisplaySmart === "function") {
+      return window.formatDisplaySmart(value);
+    }
     if (typeof window.formatDisplayDate === "function") {
       return window.formatDisplayDate(value);
     }

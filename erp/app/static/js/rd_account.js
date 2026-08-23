@@ -98,8 +98,8 @@
         "<td>" + escapeHtml(row.rd_name) + "</td>" +
         "<td>" + escapeHtml(row.rd_number) + "</td>" +
         "<td>" + escapeHtml(row.bank_name) + "</td>" +
-        "<td>" + escapeHtml(row.opening_date) + "</td>" +
-        "<td>" + escapeHtml(row.maturity_date) + "</td>" +
+        "<td>" + escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.opening_date)) + "</td>" +
+        "<td>" + escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.maturity_date)) + "</td>" +
         '<td class="text-end">' + escapeHtml(formatMoney(row.installment_amount)) + "</td>" +
         '<td class="text-end">' + escapeHtml(formatMoney(row.opening_balance)) + "</td>" +
         "<td>" + (row.active_status ? '<span class="badge text-bg-success">Active</span>' : '<span class="badge text-bg-secondary">Inactive</span>') + "</td>" +

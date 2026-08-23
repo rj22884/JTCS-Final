@@ -51,9 +51,9 @@
     const base =
       (meta.fy_label || "") +
       "  ·  " +
-      (meta.date_from || "") +
+      (window.formatDisplaySmart || window.formatDisplayDate || String)(meta.date_from || "") +
       " to " +
-      (meta.date_to || "");
+      (window.formatDisplaySmart || window.formatDisplayDate || String)(meta.date_to || "");
     els.meta.textContent =
       base +
       "  ·  " +
@@ -159,9 +159,9 @@
         els.meta.textContent =
           (meta.fy_label || "") +
           "  ·  " +
-          (meta.date_from || "") +
+          (window.formatDisplaySmart || window.formatDisplayDate || String)(meta.date_from || "") +
           " to " +
-          (meta.date_to || "") +
+          (window.formatDisplaySmart || window.formatDisplayDate || String)(meta.date_to || "") +
           "  ·  " +
           (ViewManager.getMode() === ViewManager.VERTICAL ? "Vertical" : "Horizontal") +
           " view";
@@ -472,7 +472,7 @@
       (data.rows || data.vouchers || []).forEach(function (row) {
         html +=
           "<tr><td>" +
-          escapeHtml(row.date || row.voucher_date || "") +
+          escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.date || row.voucher_date || "")) +
           "</td><td>" +
           escapeHtml(row.voucher_no || row.source || "") +
           "</td><td>" +

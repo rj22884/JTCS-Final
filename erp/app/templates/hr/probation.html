@@ -19,9 +19,9 @@
         {% for row in rows %}
         <tr>
           <td><a href="{{ url_for('hr.employee_profile', employee_id=row.employee.EmployeeID) }}">{{ row.employee.Name }}</a></td>
-          <td>{{ row.employee.JoiningDate or '—' }}</td>
+          <td>{{ row.employee.JoiningDate | display_date if row.employee.JoiningDate else '—' }}</td>
           <td>{{ row.employee.ProbationPeriod or '—' }}</td>
-          <td>{{ row.employee.ProbationEndDate or '—' }}</td>
+          <td>{{ row.employee.ProbationEndDate | display_date if row.employee.ProbationEndDate else '—' }}</td>
           <td>{{ row.days_remaining }}</td>
           <td>{{ row.status }}</td>
         </tr>

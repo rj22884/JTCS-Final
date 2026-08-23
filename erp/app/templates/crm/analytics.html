@@ -80,7 +80,7 @@
               <tr>
                 <td>{{ f.FollowUpType or '—' }}</td>
                 <td>{{ f.Subject or f.CustomerName or f.LeadName or '—' }}</td>
-                <td>{{ f.DueAt | display_date if f.DueAt else '—' }}</td>
+                <td>{{ f.DueAt | display_value if f.DueAt else '—' }}</td>
                 <td>{{ f.Priority or '—' }}</td>
               </tr>
               {% else %}

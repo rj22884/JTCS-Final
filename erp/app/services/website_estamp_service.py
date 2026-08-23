@@ -72,6 +72,16 @@ BEGIN
         ALTER TABLE dbo.WebsiteEStampOrder ADD SecondPartyFatherOrHusbandName NVARCHAR(160) NULL;
     IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'UtrNumber') IS NULL
         ALTER TABLE dbo.WebsiteEStampOrder ADD UtrNumber NVARCHAR(40) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'ConsiderationPrice') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD ConsiderationPrice DECIMAL(18, 2) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'Description') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD Description NVARCHAR(50) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PoiDocumentType') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocumentType NVARCHAR(40) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PoiDocPath') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocPath NVARCHAR(400) NULL;
+    IF COL_LENGTH(N'dbo.WebsiteEStampOrder', N'PoiDocName') IS NULL
+        ALTER TABLE dbo.WebsiteEStampOrder ADD PoiDocName NVARCHAR(200) NULL;
 END
 """
 
@@ -112,6 +122,20 @@ END
 
 def _clean(value, limit: int = 160) -> str:
     return " ".join(str(value or "").split())[:limit]
+
+
+POI_LABELS = {
+    "aadhaar": "Aadhaar Card",
+    "pan": "PAN Card",
+    "driving_licence": "Driving Licence",
+    "voter_id": "Voter ID (EPIC)",
+    "passport": "Passport",
+    "ration_card": "Ration Card",
+    "govt_photo_id": "Government Photo ID",
+    "bank_passbook": "Bank Passbook",
+    "pension_card": "Pension Card / PPO",
+    "nrega_job_card": "NREGA Job Card",
+}
 
 
 def _mobile(value: str) -> str:
@@ -167,6 +191,12 @@ class WebsiteEStampService:
             raise ValueError("Please enter the stamp duty amount.") from exc
         if amount <= 0:
             raise ValueError("Please enter the stamp duty amount.")
+        description = _clean(data.get("description"), 50)
+        if not description:
+            raise ValueError("Please enter a description (max 50 characters).")
+        poi_type = _clean(data.get("poi_document_type"), 40).lower()
+        if not poi_type:
+            raise ValueError("Please select a proof of identity document type.")
 
         paid_flag = str(data.get("payment_status") or "").lower() in {"paid", "upi_paid"} or bool(data.get("paid"))
         if not paid_flag:
@@ -212,6 +242,39 @@ class WebsiteEStampService:
         db.session.delete(row)
         db.session.commit()
 
+    def save_poi(self, reference_no: str, file_storage, poi_type: str = "") -> dict:
+        self.ensure_schema()
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        from pathlib import Path
+
+        from app.services.dsc_documents import _save_upload
+
+        folder = Path(current_app.config["UPLOAD_FOLDER"]) / "estamp_poi"
+        path, name = _save_upload(folder, f"{row.ReferenceNo}_poi", file_storage)
+        ext = Path(name).suffix.lower()
+        if ext not in {".pdf", ".jpg", ".jpeg", ".png"}:
+            raise ValueError("POI must be a PDF or image (JPG / PNG).")
+        row.PoiDocPath = path
+        row.PoiDocName = name
+        if poi_type:
+            row.PoiDocumentType = _clean(poi_type, 40).lower() or row.PoiDocumentType
+        row.ModifiedDate = datetime.utcnow()
+        db.session.commit()
+        return self._public(row, "POI uploaded.")
+
+    def poi_file(self, reference_no: str):
+        row = self.get_by_reference(reference_no)
+        if row is None or not row.PoiDocPath:
+            raise ValueError("POI file not found.")
+        from app.services.dsc_documents import _resolve_stored_path
+
+        path = _resolve_stored_path(row.PoiDocPath)
+        if not path.exists():
+            raise ValueError("POI file is missing.")
+        return path, row.PoiDocName or path.name
+
     def update_review(self, reference_no: str, status: str, notes: str = "") -> dict:
         row = self.get_by_reference(reference_no)
         if row is None:
@@ -245,6 +308,17 @@ class WebsiteEStampService:
         row.LocationUrl = _clean(data.get("location_url"), 500) or None
         row.PayMethod = _clean(data.get("pay_method"), 40) or "upi"
         row.UtrNumber = _clean(data.get("utr_number") or data.get("utr"), 40) or None
+        description = _clean(data.get("description"), 50)
+        row.Description = description or None
+        row.PoiDocumentType = _clean(data.get("poi_document_type"), 40).lower() or None
+        consideration_raw = data.get("consideration_price")
+        if consideration_raw in (None, ""):
+            row.ConsiderationPrice = None
+        else:
+            try:
+                row.ConsiderationPrice = float(consideration_raw)
+            except (TypeError, ValueError):
+                row.ConsiderationPrice = None
 
     def _new_reference(self) -> str:
         day = datetime.utcnow().strftime("%Y%m%d")
@@ -259,6 +333,11 @@ class WebsiteEStampService:
             "second_party_name": row.SecondPartyName or "",
             "second_party_father_or_husband_name": row.SecondPartyFatherOrHusbandName or "",
             "mobile": row.Mobile,
+            "consideration_price": float(row.ConsiderationPrice) if row.ConsiderationPrice is not None else "",
+            "description": row.Description or "",
+            "poi_document_type": POI_LABELS.get((row.PoiDocumentType or "").lower(), row.PoiDocumentType or ""),
+            "poi_file_name": row.PoiDocName or "",
+            "poi_has_file": bool(row.PoiDocPath),
             "article_code": row.ArticleCode,
             "article_label": row.ArticleLabel,
             "amount": float(row.Amount or 0),
@@ -285,6 +364,9 @@ class WebsiteEStampService:
             f"First party: {row.FullName}\n"
             f"Second party: {row.SecondPartyName}\n"
             f"Mobile: {row.Mobile}\n"
+            f"POI: {row.PoiDocumentType or '-'} ({row.PoiDocName or 'not uploaded'})\n"
+            f"Consideration: {row.ConsiderationPrice if row.ConsiderationPrice is not None else '-'}\n"
+            f"Description: {row.Description or '-'}\n"
             f"Article: {row.ArticleLabel}\n"
             f"Stamp: ₹{row.Amount}\n"
             f"Payable: ₹{row.PayableAmount or row.Amount}\n"

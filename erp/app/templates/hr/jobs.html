@@ -23,7 +23,7 @@
           <td>{{ row.location }}</td>
           <td>{{ row.employment_type }}</td>
           <td>{{ row.status }}</td>
-          <td>{{ row.closing_date or '—' }}</td>
+          <td>{{ row.closing_date | display_date if row.closing_date else '—' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="6" class="text-muted">No jobs found in the existing recruitment store.</td></tr>

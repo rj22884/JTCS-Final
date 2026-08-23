@@ -87,7 +87,7 @@
             data-work-type="{{ line.work_type or '' }}"
             data-can-edit="{{ '1' if line.can_edit else '0' }}"
             data-can-delete="{{ '1' if line.can_delete else '0' }}">
-          <td data-col="date" data-sort-value="{{ line.sort_date or '' }}">{{ line.date or dash }}</td>
+          <td data-col="date" data-sort-value="{{ line.sort_date or '' }}">{{ line.date | display_value if line.date else dash }}</td>
           <td data-col="description">{{ line.description or dash }}</td>
           <td class="text-end" data-col="debit" data-sort-value="{{ line.debit if line.debit is not none else '' }}">{{ money(line.debit) }}</td>
           <td class="text-end" data-col="credit" data-sort-value="{{ line.credit if line.credit is not none else '' }}">{{ money(line.credit) }}</td>

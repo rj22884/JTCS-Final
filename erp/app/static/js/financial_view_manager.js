@@ -527,7 +527,7 @@
         "<tr><td>" +
         escapeHtml(row.asset_name) +
         "</td><td>" +
-        escapeHtml(row.purchase_date) +
+        escapeHtml((window.formatDisplaySmart || window.formatDisplayDate || String)(row.purchase_date)) +
         '</td><td class="num">' +
         money(row.purchase_value) +
         '</td><td class="num">' +

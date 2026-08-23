@@ -54,7 +54,7 @@
   <div class="row g-2 small">
     <div class="col-md-4"><strong>Name</strong><div>{{ app.name }}</div></div>
     <div class="col-md-4"><strong>Father's Name</strong><div>{{ app.father_name or '—' }}</div></div>
-    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob or '—' }}</div></div>
+    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob | display_date if app.dob else '—' }}</div></div>
     <div class="col-md-4"><strong>Gender</strong><div>{{ app.gender or '—' }}</div></div>
     <div class="col-md-4"><strong>Mobile</strong><div>{{ app.mobile }}</div></div>
     <div class="col-md-4"><strong>Email</strong><div>{{ app.email }}</div></div>
@@ -88,7 +88,7 @@
 {% if app.interview %}
 <div class="jtcs-card mb-3">
   <h2 class="h6">Interview (internal)</h2>
-  <p class="small mb-1">{{ app.interview.InterviewDate }} {{ app.interview.InterviewTime or '' }} · {{ app.interview.InterviewMode }} · {{ app.interview.InterviewResult }}</p>
+  <p class="small mb-1">{{ app.interview.InterviewDate | display_date if app.interview.InterviewDate else '' }} {{ app.interview.InterviewTime or '' }} · {{ app.interview.InterviewMode }} · {{ app.interview.InterviewResult }}</p>
   <p class="small text-muted mb-0">Internal notes are not shown to candidates.</p>
   <p class="small mt-2">{{ app.interview.InterviewNotes or '—' }}</p>
 </div>

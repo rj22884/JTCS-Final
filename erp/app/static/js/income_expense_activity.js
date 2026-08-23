@@ -1077,6 +1077,8 @@
   }
 
   function formatDisplayDate(value) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(value);
+    if (window.formatDisplayDate) return window.formatDisplayDate(value);
     if (window.JtcsFormatDisplayDate) return window.JtcsFormatDisplayDate(value);
     return value || "";
   }

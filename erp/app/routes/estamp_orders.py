@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, send_file
 
 from app.decorators import login_required
 from app.services.website_estamp_service import WebsiteEStampService
@@ -45,6 +45,16 @@ def review():
         return jsonify({"ok": True, "row": row})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/poi", methods=["GET"])
+@login_required
+def download_poi(reference_no: str):
+    try:
+        path, name = WebsiteEStampService().poi_file(reference_no)
+        return send_file(path, as_attachment=True, download_name=name)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
 
 
 def ensure_estamp_orders_menu() -> None:

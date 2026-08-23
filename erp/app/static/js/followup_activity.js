@@ -708,6 +708,7 @@
   }
 
   function formatDate(value) {
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(value, "—");
     if (!value) return "—";
     const raw = String(value).slice(0, 10);
     const parts = raw.split("-");

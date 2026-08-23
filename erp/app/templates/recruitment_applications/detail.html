@@ -28,7 +28,7 @@
   <div class="row g-2 small">
     <div class="col-md-4"><strong>Name</strong><div>{{ app.name }}</div></div>
     <div class="col-md-4"><strong>Father's Name</strong><div>{{ app.father_name }}</div></div>
-    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob }}</div></div>
+    <div class="col-md-4"><strong>Date of Birth</strong><div>{{ app.dob | display_date if app.dob else '—' }}</div></div>
     <div class="col-md-4"><strong>Gender</strong><div>{{ app.gender }}</div></div>
     <div class="col-md-4"><strong>Mobile</strong><div>{{ app.mobile }}</div></div>
     <div class="col-md-4"><strong>Email</strong><div>{{ app.email }}</div></div>

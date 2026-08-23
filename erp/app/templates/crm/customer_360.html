@@ -68,7 +68,7 @@
               <td>{{ c.Channel or '—' }}</td>
               <td>{{ c.Status or '—' }}</td>
               <td>{{ c.UnreadCount or 0 }}</td>
-              <td>{{ c.LastMessageAt | display_date if c.LastMessageAt else '—' }}</td>
+              <td>{{ c.LastMessageAt | display_value if c.LastMessageAt else '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -91,7 +91,7 @@
               <td>{{ e.module or e.Module or '—' }}</td>
               <td>{{ e.period or e.Period or '—' }}</td>
               <td>{{ e.status or e.Status or '—' }}</td>
-              <td>{{ e.updated | display_date if e.updated else '—' }}</td>
+              <td>{{ e.updated | display_value if e.updated else '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -156,7 +156,7 @@
         {% for ev in data.timeline %}
         <li class="crm-timeline-item">
           <div class="crm-timeline-title">{{ ev.Title or ev.EventType or 'Event' }}</div>
-          <div class="crm-timeline-meta">{{ ev.CreatedDate | display_date if ev.CreatedDate else '' }}{% if ev.UserName %} · {{ ev.UserName }}{% endif %}</div>
+          <div class="crm-timeline-meta">{{ ev.CreatedDate | display_value if ev.CreatedDate else '' }}{% if ev.UserName %} · {{ ev.UserName }}{% endif %}</div>
           {% if ev.Description %}<div class="crm-timeline-desc">{{ ev.Description }}</div>{% endif %}
         </li>
         {% else %}
@@ -177,7 +177,7 @@
               <td>{{ t.Title or '—' }}</td>
               <td>{{ t.Priority or '—' }}</td>
               <td>{{ t.Status or '—' }}</td>
-              <td>{{ t.Deadline | display_date if t.Deadline else '—' }}</td>
+              <td>{{ t.Deadline | display_value if t.Deadline else '—' }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -199,7 +199,7 @@
             <tr>
               <td>{{ f.FollowUpType or '—' }}</td>
               <td>{{ f.Subject or '—' }}</td>
-              <td>{{ f.DueAt | display_date if f.DueAt else '—' }}</td>
+              <td>{{ f.DueAt | display_value if f.DueAt else '—' }}</td>
               <td>{{ f.Status or '—' }}</td>
             </tr>
             {% endfor %}

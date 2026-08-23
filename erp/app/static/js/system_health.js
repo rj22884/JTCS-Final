@@ -378,7 +378,7 @@
             "<tr><td>" +
             esc(u.user_name) +
             "</td><td>" +
-            esc(u.last_login) +
+            esc((window.formatDisplaySmart || window.formatDisplayDate || String)(u.last_login)) +
             "</td><td>" +
             esc(u.status) +
             "</td></tr>"

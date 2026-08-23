@@ -101,6 +101,7 @@
       csrfToken: {{ csrf_token()|tojson }}
     };
   </script>
+  <script src="{{ url_for('static', filename='js/date_format.js') }}?v=20260823dmy1"></script>
   <script src="{{ url_for('static', filename='js/jtcs_icons.js') }}?v=20260813illu1"></script>
   <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260823dsc1"></script>
   {% block extra_js %}{% endblock %}
