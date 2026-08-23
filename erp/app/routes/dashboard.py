@@ -152,6 +152,7 @@ def index():
         month_end=month_end,
         fy_from=fy_from,
         fy_to=min(fy_to, today),
+        fy_end=fy_to,
         prev_fy_from=prev_fy_from,
         prev_fy_to=prev_fy_to,
         whats_new=list_whats_new(limit=6),

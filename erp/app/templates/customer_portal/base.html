@@ -97,11 +97,12 @@
       profilePage: {{ url_for('customer_portal.profile_page')|tojson }},
       dashboard: {{ url_for('customer_portal.dashboard')|tojson }},
       logout: {{ url_for('customer_portal.logout')|tojson }},
+      dscDoc: {{ url_for('customer_portal.dsc_document', kind='KIND')|tojson }},
       csrfToken: {{ csrf_token()|tojson }}
     };
   </script>
   <script src="{{ url_for('static', filename='js/jtcs_icons.js') }}?v=20260813illu1"></script>
-  <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260809idverify1"></script>
+  <script src="{{ url_for('static', filename='js/customer_portal.js') }}?v=20260823dsc1"></script>
   {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,90 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn" id="dscRefreshBtn" title="Refresh">
+    <i class="bi bi-arrow-clockwise"></i>
+    <span>Refresh</span>
+  </button>
+  <a href="{{ url_for('dsc_orders.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card">
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h3 class="h6 mb-0">Website DSC applications</h3>
+    <span class="small text-muted ms-auto" id="dscCount"></span>
+  </div>
+  <p class="small text-muted mb-2">Applications from jtcsxpert.com Apply DSC. Invoice is available after payment.</p>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>DSC</th>
+          <th>Years</th>
+          <th>Mobile</th>
+          <th>Amount</th>
+          <th>Pay</th>
+          <th>UTR</th>
+          <th>Status</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody id="dscBody">
+        <tr><td colspan="11" class="text-muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var body = document.getElementById("dscBody");
+  var count = document.getElementById("dscCount");
+  function esc(v) {
+    return String(v == null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  async function load() {
+    try {
+      var res = await fetch("{{ url_for('dsc_orders.list_orders') }}", { headers: { Accept: "application/json" } });
+      var data = await res.json();
+      var rows = data.rows || [];
+      if (count) count.textContent = rows.length + " application" + (rows.length === 1 ? "" : "s");
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="11" class="text-muted">No DSC applications yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.map(function (row) {
+        return "<tr>" +
+          "<td><strong>" + esc(row.reference_no) + "</strong></td>" +
+          "<td>" + esc(row.full_name) + "</td>" +
+          "<td>" + esc(row.applicant_type) + "</td>" +
+          "<td>" + esc(row.dsc_type) + "</td>" +
+          "<td>" + esc(row.validity_years) + "</td>" +
+          "<td>" + esc(row.mobile) + "</td>" +
+          "<td>" + esc(row.payable_amount) + "</td>" +
+          "<td>" + esc(row.pay_method || row.payment_status) + "</td>" +
+          "<td>" + esc(row.utr_number) + "</td>" +
+          "<td>" + esc(row.review_status) + "</td>" +
+          "<td>" + esc(row.created_date) + "</td>" +
+          "</tr>";
+      }).join("");
+    } catch (err) {
+      body.innerHTML = '<tr><td colspan="11" class="text-danger">Unable to load applications.</td></tr>';
+    }
+  }
+  document.getElementById("dscRefreshBtn")?.addEventListener("click", load);
+  load();
+})();
+</script>
+{% endblock %}

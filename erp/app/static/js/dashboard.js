@@ -38,6 +38,11 @@
     entrySaveBtn: document.getElementById("dashEntrySaveBtn"),
     dateFrom: document.getElementById("dashDateFrom"),
     dateTo: document.getElementById("dashDateTo"),
+    metricPeriodBar: document.getElementById("dashMetricPeriodBar"),
+    metricDateFrom: document.getElementById("dashMetricDateFrom"),
+    metricDateTo: document.getElementById("dashMetricDateTo"),
+    metricPeriodApply: document.getElementById("dashMetricPeriodApply"),
+    metricPeriodHint: document.getElementById("dashMetricPeriodHint"),
     grid: document.getElementById("dashMetricGrid"),
     sourceTitle: document.getElementById("dashSourceEntryModalTitle"),
     sourceSub: document.getElementById("dashSourceEntryModalSub"),
@@ -276,6 +281,32 @@
     return { from: from, to: to };
   }
 
+  function fyBounds() {
+    if (cfg.fyFrom && cfg.fyTo) {
+      return { from: cfg.fyFrom, to: cfg.fyTo };
+    }
+    const today = cfg.systemDate ? new Date(cfg.systemDate + "T00:00:00") : new Date();
+    const year = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
+    return { from: year + "-04-01", to: (year + 1) + "-03-31" };
+  }
+
+  function detailPeriodParams() {
+    if (
+      isClosingMetric() &&
+      els.metricDateFrom &&
+      els.metricDateTo &&
+      els.metricDateFrom.value &&
+      els.metricDateTo.value
+    ) {
+      return { from: els.metricDateFrom.value, to: els.metricDateTo.value };
+    }
+    return periodParams();
+  }
+
+  function showMetricPeriodBar(show) {
+    if (els.metricPeriodBar) els.metricPeriodBar.hidden = !show;
+  }
+
   function isClosingMetric() {
     return (
       currentMetric === "cash_closing_balance" ||
@@ -356,6 +387,7 @@
     if (els.addBtn) els.addBtn.classList.toggle("d-none", todayActivityMode);
     if (els.editBtn) els.editBtn.classList.toggle("d-none", todayActivityMode);
     if (els.deleteBtn) els.deleteBtn.classList.toggle("d-none", todayActivityMode);
+    if (todayActivityMode) showMetricPeriodBar(false);
     syncActionButtons();
   }
 
@@ -722,7 +754,7 @@
       }
     } else {
       if (!cfg.detailsUrl) return Promise.resolve();
-      const period = periodParams();
+      const period = detailPeriodParams();
       url =
         cfg.detailsUrl +
         "?metric=" +
@@ -767,7 +799,7 @@
             (isClosingMetric() ? "Closing: " : "Total: ") + formatMoney(totalNum);
           els.totalLabel.classList.toggle("dash-total-expense", isExpenseMetric());
         }
-        if (!todayActivityMode) {
+        if (!todayActivityMode && !isClosingMetric()) {
           updateCardTotal(currentMetric, data.total);
         }
         resetFilters();
@@ -788,6 +820,17 @@
     currentLabel = label || metric;
     currentAccountId = "";
     setTodayActivityMode(false);
+    const closing = metric === "cash_closing_balance" || metric === "bank_closing_balance";
+    showMetricPeriodBar(closing);
+    if (closing && els.metricDateFrom && els.metricDateTo) {
+      const fy = fyBounds();
+      els.metricDateFrom.value = fy.from;
+      els.metricDateTo.value = fy.to;
+      if (els.metricPeriodHint) {
+        els.metricPeriodHint.textContent =
+          "Default current FY " + formatDisplayDate(fy.from) + " — " + formatDisplayDate(fy.to);
+      }
+    }
     if (els.title) els.title.textContent = currentLabel;
     if (els.sub) els.sub.textContent = "Loading...";
     setModalMaximized(false);
@@ -1112,6 +1155,21 @@
       btn.classList.remove("active");
     });
     els.dateFrom?.focus();
+  });
+
+  els.metricPeriodApply?.addEventListener("click", function () {
+    const from = (els.metricDateFrom?.value || "").trim();
+    const to = (els.metricDateTo?.value || "").trim();
+    if (!from || !to) {
+      alert("From aur To dono dates select karein.");
+      (from ? els.metricDateTo : els.metricDateFrom)?.focus();
+      return;
+    }
+    if (from > to) {
+      alert("From date To date se badi nahi ho sakti.");
+      return;
+    }
+    loadDetails();
   });
 
   els.periodForm?.addEventListener("submit", function (event) {

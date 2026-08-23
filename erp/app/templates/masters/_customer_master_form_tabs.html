@@ -176,6 +176,21 @@
       {{ cm_field('driving_license_number', 'Driving License Number', col='col-md-4', maxlength='30') }}
       {{ cm_field('passport_number', 'Passport Number', col='col-md-4', maxlength='30') }}
       {{ cm_field('voter_id_number', 'Voter ID Number', col='col-md-4', maxlength='30') }}
+      <div class="col-12">
+        <p class="small text-muted mb-1">DSC documents — upload on the matching field. Download opens the saved file.</p>
+      </div>
+      {% for kind, label in [('pan', 'PAN'), ('aadhaar', 'Aadhaar'), ('org_id', 'Organization ID'), ('auth_letter', 'Authorization Letter')] %}
+      <div class="col-md-6 cm-field-wrap">
+        <label class="form-label" for="cm_dsc_{{ kind }}">{{ label }} document</label>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          <input type="file" class="form-control" id="cm_dsc_{{ kind }}" data-cm-dsc-kind="{{ kind }}"
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+          <button type="button" class="btn btn-sm btn-outline-primary" data-cm-dsc-upload="{{ kind }}">Upload</button>
+          <a class="btn btn-sm btn-outline-success d-none" data-cm-dsc-download="{{ kind }}" target="_blank" rel="noopener">Download</a>
+          <span class="small text-muted" data-cm-dsc-name="{{ kind }}"></span>
+        </div>
+      </div>
+      {% endfor %}
     </div>
   </div>
 

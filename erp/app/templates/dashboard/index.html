@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260819bank4">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260823cash2">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260820group1">
 {% endblock %}
 
@@ -59,6 +59,13 @@
                   data-today-metric="cash" data-label="Cash" title="View Cash details">
             <div class="small text-muted">Cash</div>
             <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
+          </button>
+          <button type="button" class="dash-today-metric dash-metric-btn dash-today-closing"
+                  data-metric="cash_closing_balance" data-label="Cash Closing Balance"
+                  title="View Cash Closing Balance">
+            <div class="small text-muted">Cash Closing Balance</div>
+            <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
+                    data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
           </button>
           {% if today_activity.bank_lines %}
             {% for bank in today_activity.bank_lines %}
@@ -180,16 +187,6 @@
           <strong class="jtcs-metric-value{% if metrics.total_sales < 0 %} is-negative{% endif %}" data-metric-value="total_sales">₹ {{ '%.2f'|format(metrics.total_sales) }}</strong>
         </span>
         <span class="jtcs-illu-host" data-jtcs-icon="invoice" aria-hidden="true"></span>
-      </button>
-    </div>
-    <div class="col-6 col-md-4 col-xl">
-      <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-cash w-100 text-start"
-              data-metric="cash_closing_balance" data-label="Cash Closing Balance">
-        <span class="dash-metric-copy">
-          <span class="jtcs-metric-label">Cash Closing Balance</span>
-          <strong class="jtcs-metric-value{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}" data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
-        </span>
-        <span class="jtcs-illu-host" data-jtcs-icon="cash" aria-hidden="true"></span>
       </button>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
@@ -456,6 +453,16 @@
         </div>
       </div>
       <div class="modal-body dash-metric-modal-body">
+        <div class="dash-metric-period" id="dashMetricPeriodBar" hidden>
+          <span class="dash-period-label">From</span>
+          <input type="date" class="form-control form-control-sm dash-period-input" id="dashMetricDateFrom" aria-label="Period from">
+          <span class="dash-period-label">to</span>
+          <input type="date" class="form-control form-control-sm dash-period-input" id="dashMetricDateTo" aria-label="Period to">
+          <button type="button" class="btn btn-sm btn-primary" id="dashMetricPeriodApply">
+            <i class="bi bi-funnel"></i> Apply
+          </button>
+          <span class="small text-muted" id="dashMetricPeriodHint">Default current FY</span>
+        </div>
         <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="dashMetricActions">
           <button type="button" class="btn btn-sm btn-primary" id="dashAddEntryBtn">
             <i class="bi bi-plus-lg"></i> Add
@@ -657,6 +664,8 @@
   window.DASHBOARD = {
     dateFrom: {{ date_from.isoformat() | tojson }},
     dateTo: {{ date_to.isoformat() | tojson }},
+    fyFrom: {{ fy_from.isoformat() | tojson }},
+    fyTo: {{ fy_end.isoformat() | tojson }},
     systemDate: {{ system_date.isoformat() | tojson }},
     csrfToken: {{ csrf_token() | tojson }},
     detailsUrl: {{ url_for('dashboard.metric_details') | tojson }},
@@ -714,7 +723,7 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260812bankcolor"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260823cash2"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260820group1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>

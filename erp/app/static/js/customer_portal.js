@@ -140,7 +140,25 @@
   const userIdInput = document.getElementById("cpUserId");
   if (userIdInput) {
     userIdInput.addEventListener("input", updateDetectedType);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const preset = params.get("userid") || params.get("pan") || "";
+      const next = params.get("next") || "";
+      if (preset && !userIdInput.value) userIdInput.value = preset;
+      if (next && next.indexOf("/customer/") === 0) sessionStorage.setItem("cp_next", next);
+    } catch (err) {}
     updateDetectedType();
+  }
+
+  function portalNextUrl(fallback) {
+    try {
+      const next = sessionStorage.getItem("cp_next");
+      if (next && next.indexOf("/customer/") === 0) {
+        sessionStorage.removeItem("cp_next");
+        return next;
+      }
+    } catch (err) {}
+    return fallback;
   }
 
   // Multi-step login: userId → (password | verify → set password)
@@ -278,7 +296,7 @@
             handleErrorResult(data);
             return;
           }
-          window.location.href = data.redirect || api.dashboard;
+          window.location.href = portalNextUrl(data.redirect || api.dashboard);
           return;
         }
 
@@ -320,7 +338,7 @@
             handleErrorResult(data);
             return;
           }
-          window.location.href = data.redirect || api.dashboard;
+          window.location.href = portalNextUrl(data.redirect || api.dashboard);
         }
       } catch (err) {
         showAlert("Unable to continue. Please try again.", "danger");
@@ -452,4 +470,42 @@
       }
     });
   }
+
+  document.querySelectorAll("[data-cp-dsc-upload]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const kind = btn.getAttribute("data-cp-dsc-upload");
+      const input = document.querySelector('[data-cp-dsc-kind="' + kind + '"]');
+      if (!input || !input.files || !input.files[0]) {
+        showAlert("Choose a " + kind + " file first.", "warning");
+        return;
+      }
+      const url = String(api.dscDoc || "").replace("KIND", encodeURIComponent(kind));
+      const fd = new FormData();
+      fd.append("file", input.files[0]);
+      setLoading(true);
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "X-CSRFToken": api.csrfToken || "",
+            "X-Requested-With": "XMLHttpRequest",
+          },
+          body: fd,
+          credentials: "same-origin",
+        });
+        const data = await response.json();
+        if (!data.ok) {
+          showAlert(data.error || "Upload failed.", "danger");
+          return;
+        }
+        showAlert((data.file_name || kind) + " uploaded.", "success");
+        window.location.reload();
+      } catch (err) {
+        showAlert("Unable to upload document.", "danger");
+      } finally {
+        setLoading(false);
+      }
+    });
+  });
 })();

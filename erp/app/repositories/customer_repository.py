@@ -474,7 +474,13 @@ class CustomerRepository:
         return dict(result)
 
     def get_full(self, customer_id: int) -> dict:
-        return self._map_row_to_form(self.get_detail(customer_id))
+        from app.services.dsc_documents import attach_customer_doc_flags, ensure_dsc_doc_schema
+
+        ensure_dsc_doc_schema()
+        row = self.get_detail(customer_id)
+        data = self._map_row_to_form(row)
+        attach_customer_doc_flags(data, row)
+        return data
 
     def create(self, payload: dict) -> dict:
         """Quick create for followup inline modal (existing validation)."""

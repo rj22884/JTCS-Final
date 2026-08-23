@@ -327,7 +327,9 @@
 }
 
 .dash-today-metric-btn:hover,
-.dash-today-metric-btn:focus {
+.dash-today-metric-btn:focus,
+.dash-today-metric.dash-metric-btn:hover,
+.dash-today-metric.dash-metric-btn:focus {
   background: rgba(36, 59, 123, 0.08);
   box-shadow: inset 0 0 0 1px rgba(36, 59, 123, 0.18);
   outline: none;
@@ -418,6 +420,22 @@
   color: var(--dash-primary);
 }
 
+.dash-today-metric.dash-metric-btn {
+  text-align: center;
+  width: auto;
+  display: inline-block;
+}
+
+.dash-today-closing {
+  min-width: 7.5rem;
+}
+
+.dash-today-closing-amt {
+  font-weight: 800 !important;
+  font-size: 1.08rem;
+  letter-spacing: 0.01em;
+}
+
 .dash-period-bar {
   border: 1px solid rgba(15, 76, 129, 0.14);
   background:
@@ -444,6 +462,27 @@
 .dash-period-apply {
   background: linear-gradient(135deg, #0f4c81, #10b981) !important;
   border: 0 !important;
+}
+
+.dash-metric-period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.6rem;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(15, 76, 129, 0.14);
+  border-radius: 0.65rem;
+  background: linear-gradient(135deg, rgba(15, 76, 129, 0.05), rgba(16, 185, 129, 0.07));
+}
+
+.dash-metric-period[hidden] {
+  display: none !important;
+}
+
+.dash-metric-period .dash-period-input {
+  width: auto;
+  min-width: 9.5rem;
 }
 
 #dashMetricCards .jtcs-metric-card {

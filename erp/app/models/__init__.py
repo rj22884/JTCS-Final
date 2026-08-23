@@ -20,6 +20,7 @@ from app.models.bank_cash import OthersBankCashTransaction, PurposeMaster, RdAcc
 from app.models.credentials_master import CredentialsMaster
 from app.models.seo_keyword import SeoKeyword
 from app.models.website_estamp import WebsiteEStampOrder
+from app.models.website_dsc import WebsiteDscApplication
 from app.models.hr import (
     HrAppointmentLetter,
     HrDepartment,

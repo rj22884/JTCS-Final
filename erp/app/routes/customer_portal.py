@@ -8,6 +8,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
@@ -80,11 +81,19 @@ def _json_error(result: dict):
     return jsonify(payload), int(result.get("status_code") or 400)
 
 
+def _safe_next(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if value.startswith("/customer/") and "//" not in value and "\\" not in value:
+        return value
+    return None
+
+
 @bp.route("/login", methods=["GET"], strict_slashes=False)
 def login_page():
+    nxt = _safe_next(request.args.get("next"))
     if session.get("portal_customer_id"):
         if session.get("portal_password_changed"):
-            return redirect(url_for("customer_portal.dashboard"))
+            return redirect(nxt or url_for("customer_portal.dashboard"))
         return redirect(url_for("customer_portal.change_password_page"))
     return render_template(
         "customer_portal/login.html",
@@ -470,3 +479,29 @@ def module_api(module_key: str):
 @customer_login_required
 def profile_api_legacy():
     return profile_api()
+
+
+@bp.route("/api/dsc-docs/<kind>", methods=["GET", "POST"], strict_slashes=False)
+@customer_password_changed_required
+def dsc_document(kind: str):
+    from app.services import dsc_documents
+
+    cid = _portal_customer_id()
+    if cid is None:
+        return jsonify({"ok": False, "error": "Unauthorized."}), 401
+    if request.method == "POST":
+        try:
+            result = dsc_documents.save_customer_doc(
+                cid,
+                kind,
+                request.files.get("file"),
+                actor=session.get("portal_customer_name") or f"Customer:{cid}",
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+    try:
+        path, name = dsc_documents.customer_doc_file(cid, kind)
+        return send_file(path, as_attachment=True, download_name=name)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404

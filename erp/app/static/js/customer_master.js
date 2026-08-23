@@ -1341,6 +1341,7 @@
     } else {
       setCustomerPhotoPreview("");
     }
+    refreshDscDocs(record);
   }
 
   function openNew() {
@@ -1810,6 +1811,71 @@
       lookupOnBind: false,
     });
   }
+
+  function dscDocUrl(kind) {
+    const id = getCustomerIdForCheck();
+    const tpl = (window.CM_API && window.CM_API.dscDoc) || "";
+    return tpl.replace("/0/", "/" + encodeURIComponent(id || 0) + "/").replace("KIND", encodeURIComponent(kind));
+  }
+
+  function refreshDscDocs(record) {
+    const docs = (record && record.dsc_docs) || [];
+    const byKind = {};
+    docs.forEach(function (doc) { byKind[doc.kind] = doc; });
+    document.querySelectorAll("[data-cm-dsc-download]").forEach(function (link) {
+      const kind = link.getAttribute("data-cm-dsc-download");
+      const doc = byKind[kind] || {};
+      const has = !!doc.has_file;
+      link.classList.toggle("d-none", !has);
+      if (has) link.href = dscDocUrl(kind);
+    });
+    document.querySelectorAll("[data-cm-dsc-name]").forEach(function (el) {
+      const kind = el.getAttribute("data-cm-dsc-name");
+      const doc = byKind[kind] || {};
+      el.textContent = doc.file_name || "";
+    });
+  }
+
+  document.querySelectorAll("[data-cm-dsc-upload]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const kind = btn.getAttribute("data-cm-dsc-upload");
+      const input = document.querySelector('[data-cm-dsc-kind="' + kind + '"]');
+      if (!getCustomerIdForCheck()) {
+        showStatus("Save the customer first, then upload DSC documents.", "warning");
+        return;
+      }
+      if (!input || !input.files || !input.files[0]) {
+        showStatus("Choose a " + kind + " file first.", "warning");
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", input.files[0]);
+      try {
+        const res = await fetch(dscDocUrl(kind), {
+          method: "POST",
+          headers: { "X-CSRFToken": window.CM_CSRF || "", Accept: "application/json" },
+          body: fd,
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Upload failed.");
+        showStatus((data.file_name || kind) + " uploaded.", "success");
+        refreshDscDocs({
+          dsc_docs: Array.from(document.querySelectorAll("[data-cm-dsc-download]")).map(function (link) {
+            const k = link.getAttribute("data-cm-dsc-download");
+            const nameEl = document.querySelector('[data-cm-dsc-name="' + k + '"]');
+            const isThis = k === kind;
+            return {
+              kind: k,
+              has_file: isThis || !link.classList.contains("d-none"),
+              file_name: isThis ? data.file_name : ((nameEl && nameEl.textContent) || ""),
+            };
+          }),
+        });
+      } catch (err) {
+        showStatus(err.message || "Upload failed.", "danger");
+      }
+    });
+  });
 
   renderGrid(rows);
 })();

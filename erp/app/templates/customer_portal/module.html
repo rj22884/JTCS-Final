@@ -23,7 +23,24 @@
     {% for section in module.sections %}
     <div class="cp-glass-panel mb-3">
       <h2 class="h5 mb-3">{{ section.title }}</h2>
-      {% if section.rows %}
+      {% if section.kind == 'dsc_uploads' %}
+      <p class="small text-muted">Upload PAN, Aadhaar, Organization ID and Authorization Letter. Saved files get a Download button.</p>
+      <div class="row g-3">
+        {% for doc in section.dsc_docs or [] %}
+        <div class="col-md-6">
+          <label class="form-label">{{ doc.label }}</label>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <input type="file" class="form-control" data-cp-dsc-kind="{{ doc.kind }}" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx">
+            <button type="button" class="btn btn-sm btn-primary" data-cp-dsc-upload="{{ doc.kind }}">Upload</button>
+            {% if doc.has_file %}
+            <a class="btn btn-sm btn-outline-success" href="{{ url_for('customer_portal.dsc_document', kind=doc.kind) }}" target="_blank" rel="noopener">Download</a>
+            <span class="small text-muted">{{ doc.file_name }}</span>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif section.rows %}
       <div class="table-responsive">
         <table class="table table-sm table-hover align-middle cp-data-table mb-0">
           <thead>

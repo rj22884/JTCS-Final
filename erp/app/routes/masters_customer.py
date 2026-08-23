@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from app.customer_master.constants import (
     COUNTRIES,
@@ -58,6 +58,7 @@ def index():
         "aadhaarEkycStatus": url_for("masters_customer.aadhaar_ekyc_status"),
         "aadhaarEkycUnlock": url_for("masters_customer.aadhaar_ekyc_unlock"),
         "resetPortalPassword": url_for("masters_customer.reset_portal_password", customer_id=0),
+        "dscDoc": url_for("masters_customer.dsc_document", customer_id=0, kind="KIND"),
     }
     is_admin = has_admin_role(session.get("role"))
     try:
@@ -338,7 +339,24 @@ def reset_portal_password(customer_id: int):
     )
 
 
-@bp.route("/exit", strict_slashes=False)
+@bp.route("/api/records/<int:customer_id>/dsc-docs/<kind>", methods=["GET", "POST"], strict_slashes=False)
 @login_required
-def exit_module():
-    return redirect(url_for("dashboard.index"))
+def dsc_document(customer_id: int, kind: str):
+    from app.services import dsc_documents
+
+    if request.method == "POST":
+        try:
+            result = dsc_documents.save_customer_doc(
+                customer_id,
+                kind,
+                request.files.get("file"),
+                actor=session.get("full_name") or session.get("username") or "Staff",
+            )
+            return jsonify(result)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+    try:
+        path, name = dsc_documents.customer_doc_file(customer_id, kind)
+        return send_file(path, as_attachment=True, download_name=name)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404

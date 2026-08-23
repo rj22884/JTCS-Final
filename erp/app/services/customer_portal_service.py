@@ -1158,6 +1158,21 @@ class CustomerPortalService:
         sections: list[dict[str, Any]] = []
         try:
             if module_key == "documents":
+                from app.services.dsc_documents import customer_doc_status
+
+                try:
+                    dsc_docs = customer_doc_status(cid)
+                except Exception:
+                    dsc_docs = []
+                sections.append(
+                    {
+                        "title": "DSC documents",
+                        "kind": "dsc_uploads",
+                        "columns": [],
+                        "rows": [],
+                        "dsc_docs": dsc_docs,
+                    }
+                )
                 if self._table_exists("CrmDocument"):
                     sections.append(
                         {
