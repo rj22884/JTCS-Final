@@ -40,6 +40,8 @@ POI_HINTS = {
 _ACTIVE_SESSIONS: list[Any] = []
 _JOBS: dict[str, dict[str, Any]] = {}
 _LOCK = threading.Lock()
+_CDP_PORT_FILE = Path(tempfile.gettempdir()) / "jtcs-shcil-cdp-port.txt"
+_CDP_PORTS = (9361, 9222, 9333, 9362)
 
 _STEALTH_INIT = """
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -64,6 +66,50 @@ class ShcilLoginService:
             return dict(job) if job else None
 
     @staticmethod
+    def _remember_cdp_port(port: int) -> None:
+        try:
+            _CDP_PORT_FILE.write_text(str(int(port)), encoding="utf-8")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _saved_cdp_port() -> int | None:
+        try:
+            raw = _CDP_PORT_FILE.read_text(encoding="utf-8").strip()
+            port = int(raw)
+            if 1 <= port <= 65535:
+                return port
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _registry_browser_exe() -> tuple[str | None, str | None]:
+        if os.name != "nt":
+            return None, None
+        try:
+            import winreg
+        except ImportError:
+            return None, None
+        keys = (
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe", "chrome"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe", "chrome"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe", "chrome"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe", "msedge"),
+            (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe", "msedge"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe", "msedge"),
+        )
+        for hive, path, channel in keys:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+                if value and Path(value).is_file():
+                    return value, channel
+            except OSError:
+                continue
+        return None, None
+
+    @staticmethod
     def _find_browser_exe() -> tuple[str | None, str | None]:
         candidates = [
             (
@@ -72,6 +118,12 @@ class ShcilLoginService:
                     os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
                     os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
                     os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/google-chrome-stable",
+                    "/usr/bin/chromium",
+                    "/usr/bin/chromium-browser",
                 ],
             ),
             (
@@ -79,6 +131,9 @@ class ShcilLoginService:
                 [
                     os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
                     os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+                    os.path.expandvars(r"%LocalAppData%\Microsoft\Edge\Application\msedge.exe"),
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
                 ],
             ),
         ]
@@ -86,77 +141,166 @@ class ShcilLoginService:
             for path in paths:
                 if path and Path(path).is_file():
                     return path, channel
-        which_chrome = shutil.which("chrome") or shutil.which("google-chrome")
+        users = Path(r"C:\Users")
+        if users.is_dir():
+            for chrome in users.glob(r"*\AppData\Local\Google\Chrome\Application\chrome.exe"):
+                if chrome.is_file():
+                    return str(chrome), "chrome"
+            for edge in users.glob(r"*\AppData\Local\Microsoft\Edge\Application\msedge.exe"):
+                if edge.is_file():
+                    return str(edge), "msedge"
+        from_reg = ShcilLoginService._registry_browser_exe()
+        if from_reg[0]:
+            return from_reg
+        which_chrome = shutil.which("chrome") or shutil.which("google-chrome") or shutil.which("chromium")
         if which_chrome:
             return which_chrome, "chrome"
-        which_edge = shutil.which("msedge")
+        which_edge = shutil.which("msedge") or shutil.which("microsoft-edge")
         if which_edge:
             return which_edge, "msedge"
         return None, None
 
-    def _attach_browser(self, playwright):
-        exe, _channel = self._find_browser_exe()
-        if not exe:
-            raise RuntimeError("Google Chrome / Edge not found.")
-
-        profile_dir = Path(tempfile.gettempdir()) / "jtcs-shcil-estamp-profile"
-        profile_dir.mkdir(parents=True, exist_ok=True)
-        port = 9361
-        last_err: BaseException | None = None
-        try:
-            browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
-            context = browser.contexts[0] if browser.contexts else browser.new_context()
-            page = context.pages[0] if context.pages else context.new_page()
+    def _pick_shcil_page(self, context):
+        pages = list(context.pages) if context is not None else []
+        for page in pages:
             try:
-                page.add_init_script(_STEALTH_INIT)
+                url = (page.url or "").lower()
             except Exception:
-                pass
-            return {
-                "playwright": playwright,
-                "browser": browser,
-                "context": context,
-                "page": page,
-                "proc": None,
-            }
-        except Exception:
-            pass
+                continue
+            if "shcilestamp" in url or "estampindia" in url:
+                return page
+        if pages:
+            return pages[0]
+        return context.new_page()
 
-        proc = subprocess.Popen(
-            [
-                exe,
-                f"--remote-debugging-port={port}",
-                f"--user-data-dir={str(profile_dir)}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                SHCIL_LOGIN_URL,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        browser = None
-        for _ in range(50):
-            time.sleep(0.3)
-            try:
-                browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
-                break
-            except Exception as err:  # noqa: BLE001
-                last_err = err
-                if proc.poll() is not None:
-                    break
-        if browser is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-            raise RuntimeError(f"Could not attach to Chrome/Edge ({last_err})")
-
+    def _session_from_browser(self, playwright, browser, proc=None):
         context = browser.contexts[0] if browser.contexts else browser.new_context()
-        page = context.pages[0] if context.pages else context.new_page()
+        page = self._pick_shcil_page(context)
         try:
             page.add_init_script(_STEALTH_INIT)
         except Exception:
             pass
-        return {"playwright": playwright, "browser": browser, "context": context, "page": page, "proc": proc}
+        return {
+            "playwright": playwright,
+            "browser": browser,
+            "context": context,
+            "page": page,
+            "proc": proc,
+        }
+
+    def _reuse_live_session(self):
+        with _LOCK:
+            sessions = list(_ACTIVE_SESSIONS)
+        for session in reversed(sessions):
+            try:
+                page = session.get("page")
+                browser = session.get("browser")
+                if page is None:
+                    continue
+                if browser is not None and hasattr(browser, "is_connected") and not browser.is_connected():
+                    continue
+                _ = page.url
+                return session
+            except Exception:
+                continue
+        return None
+
+    def _connect_existing_chrome(self, playwright):
+        ports: list[int] = []
+        saved = self._saved_cdp_port()
+        if saved:
+            ports.append(saved)
+        for port in _CDP_PORTS:
+            if port not in ports:
+                ports.append(port)
+        for port in ports:
+            try:
+                browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+            except Exception:
+                continue
+            session = self._session_from_browser(playwright, browser, None)
+            url = ""
+            try:
+                url = ((session.get("page") and session["page"].url) or "").lower()
+            except Exception:
+                url = ""
+            if port == 9361 or "shcilestamp" in url or "estampindia" in url:
+                self._remember_cdp_port(port)
+                return session
+        return None
+
+    def _attach_browser(self, playwright):
+        live = self._reuse_live_session()
+        if live is not None:
+            return live
+
+        existing = self._connect_existing_chrome(playwright)
+        if existing is not None:
+            return existing
+
+        exe, _channel = self._find_browser_exe()
+        profile_dir = Path(tempfile.gettempdir()) / "jtcs-shcil-estamp-profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        port = 9361
+        last_err: BaseException | None = None
+
+        if exe:
+            proc = subprocess.Popen(
+                [
+                    exe,
+                    f"--remote-debugging-port={port}",
+                    f"--user-data-dir={str(profile_dir)}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    SHCIL_LOGIN_URL,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            browser = None
+            for _ in range(50):
+                time.sleep(0.3)
+                try:
+                    browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                    break
+                except Exception as err:  # noqa: BLE001
+                    last_err = err
+                    if proc.poll() is not None:
+                        break
+            if browser is not None:
+                self._remember_cdp_port(port)
+                return self._session_from_browser(playwright, browser, proc)
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        try:
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=False,
+                args=[f"--remote-debugging-port={port}", "--no-first-run", "--no-default-browser-check"],
+            )
+            page = self._pick_shcil_page(context)
+            try:
+                page.add_init_script(_STEALTH_INIT)
+            except Exception:
+                pass
+            self._remember_cdp_port(port)
+            return {
+                "playwright": playwright,
+                "browser": context,
+                "context": context,
+                "page": page,
+                "proc": None,
+            }
+        except Exception as exc:
+            last_err = exc
+
+        raise RuntimeError(
+            "Could not use the already-open SHCIL window, and Chrome/Edge was not found on this computer. "
+            "Run Generate Stamp on the same PC where the SHCIL Chrome window is open."
+        ) from last_err
 
     @staticmethod
     def _page_text(page) -> str:
@@ -205,7 +349,13 @@ class ShcilLoginService:
             if re.search(r"invalid (user|password|login)|login failed|authentication failed", text):
                 return "login_error"
             return "login"
-        if logged_in or ("estampindia" in url and "login" not in url):
+        if (
+            logged_in
+            or ("estampindia" in url and "login" not in url)
+            or "loadstampduty" in url
+            or "list of submissions" in text
+            or re.search(r"\bcreate submission\b", text)
+        ):
             return "success"
         if otp_hint:
             return "otp"
@@ -721,12 +871,15 @@ class ShcilLoginService:
             playwright = None
             session = None
             try:
-                playwright = sync_playwright().start()
-                session = self._attach_browser(playwright)
+                session = self._reuse_live_session()
+                if session is None:
+                    playwright = sync_playwright().start()
+                    session = self._attach_browser(playwright)
                 page = session["page"]
                 self._bind_dialogs(page, job_id)
                 with _LOCK:
-                    _ACTIVE_SESSIONS.append(session)
+                    if session not in _ACTIVE_SESSIONS:
+                        _ACTIVE_SESSIONS.append(session)
 
                 already_in = self._page_phase(page) == "success"
                 if already_in:
@@ -841,21 +994,22 @@ class ShcilLoginService:
                 error_box.append(exc)
                 self._set_job(job_id, status="error", phase="error", message=str(exc))
                 started.set()
-                try:
-                    if session and session.get("browser") is not None:
-                        session["browser"].close()
-                except Exception:
-                    pass
-                try:
-                    if session and session.get("proc") is not None:
+                launched_new = bool(session and session.get("proc"))
+                if launched_new:
+                    try:
+                        if session.get("browser") is not None:
+                            session["browser"].close()
+                    except Exception:
+                        pass
+                    try:
                         session["proc"].terminate()
-                except Exception:
-                    pass
-                try:
-                    if playwright is not None:
+                    except Exception:
+                        pass
+                if playwright is not None and (launched_new or session is None):
+                    try:
                         playwright.stop()
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
         threading.Thread(target=worker, name=f"shcil-login-{job_id[:8]}", daemon=True).start()
         if not started.wait(timeout=90):

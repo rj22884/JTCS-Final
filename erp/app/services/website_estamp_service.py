@@ -163,6 +163,14 @@ def _require_stamp_name(value: str, label: str) -> str:
     return _stamp_alnum(text)
 
 
+def _require_parent_if_relation(relation: str, name: str, label: str) -> None:
+    if not relation:
+        return
+    letters = re.sub(r"\s+", "", name or "")
+    if len(letters) < 3:
+        raise ValueError(f"Enter at least 3 characters in {label}.")
+
+
 POI_LABELS = {
     "aadhaar": "Aadhaar Card",
     "pan": "PAN Card",
@@ -408,11 +416,13 @@ class WebsiteEStampService:
         row.FirstPartyRelation = _stamp_relation(data.get("first_party_relation")) or None
         if row.FatherOrHusbandName and not row.FirstPartyRelation:
             raise ValueError("Please select Father or Husband for the first party.")
+        _require_parent_if_relation(row.FirstPartyRelation, first_parent, "first party father / husband name")
         row.SecondPartyName = second
         row.SecondPartyFatherOrHusbandName = second_parent or None
         row.SecondPartyRelation = _stamp_relation(data.get("second_party_relation")) or None
         if row.SecondPartyFatherOrHusbandName and not row.SecondPartyRelation:
             raise ValueError("Please select Father or Husband for the second party.")
+        _require_parent_if_relation(row.SecondPartyRelation, second_parent, "second party father / husband name")
         desc = _clean(data.get("description"), 50)
         row.Description = desc or None
         consideration_raw = data.get("consideration_price")
@@ -500,11 +510,13 @@ class WebsiteEStampService:
         row.FirstPartyRelation = _stamp_relation(data.get("first_party_relation")) or None
         if row.FatherOrHusbandName and not row.FirstPartyRelation:
             raise ValueError("Please select Father or Husband for the first party.")
+        _require_parent_if_relation(row.FirstPartyRelation, first_parent, "first party father / husband name")
         row.SecondPartyName = second
         row.SecondPartyFatherOrHusbandName = second_parent or None
         row.SecondPartyRelation = _stamp_relation(data.get("second_party_relation")) or None
         if row.SecondPartyFatherOrHusbandName and not row.SecondPartyRelation:
             raise ValueError("Please select Father or Husband for the second party.")
+        _require_parent_if_relation(row.SecondPartyRelation, second_parent, "second party father / husband name")
         row.Mobile = mobile
         row.ArticleCode = article["code"]
         row.ArticleLabel = article_display(article)
