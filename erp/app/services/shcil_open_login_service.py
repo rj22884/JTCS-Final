@@ -59,10 +59,51 @@ class ShcilOpenLoginService:
                 return found
         return None
 
+    @staticmethod
+    def _registry_exe(kind: str) -> str | None:
+        if os.name != "nt":
+            return None
+        try:
+            import winreg
+        except ImportError:
+            return None
+        exe_name = "msedge.exe" if kind == "edge" else "chrome.exe"
+        keys = (
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
+            (winreg.HKEY_CURRENT_USER, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}"),
+        )
+        for hive, path in keys:
+            try:
+                with winreg.OpenKey(hive, path) as key:
+                    value, _ = winreg.QueryValueEx(key, "")
+                if value and Path(value).is_file():
+                    return value
+            except OSError:
+                continue
+        return None
+
     def _find_browser_exe(self, kind: str) -> str | None:
         if kind == "edge":
-            return self._first_existing(_EDGE_PATHS, ("msedge", "microsoft-edge"))
-        return self._first_existing(_CHROME_PATHS, ("chrome", "google-chrome", "chromium"))
+            found = self._first_existing(_EDGE_PATHS, ("msedge", "microsoft-edge"))
+        else:
+            found = self._first_existing(_CHROME_PATHS, ("chrome", "google-chrome", "chromium"))
+        if found:
+            return found
+        found = self._registry_exe(kind)
+        if found:
+            return found
+        users = Path(r"C:\Users")
+        if users.is_dir():
+            pattern = (
+                r"*\AppData\Local\Microsoft\Edge\Application\msedge.exe"
+                if kind == "edge"
+                else r"*\AppData\Local\Google\Chrome\Application\chrome.exe"
+            )
+            for path in users.glob(pattern):
+                if path.is_file():
+                    return str(path)
+        return None
 
     @staticmethod
     def _kind_from_ua(user_agent: str) -> str | None:
@@ -148,15 +189,23 @@ class ShcilOpenLoginService:
                 return kind
             except Exception:
                 continue
-        return self._saved_kind(other)
+        return None
 
     def _pick_browser_kind(self, playwright, role: str) -> str:
         other_kind = self._other_browser_kind(playwright, role)
+        preferred = None
         if other_kind == "chrome":
-            return "edge"
-        if other_kind == "edge":
-            return "chrome"
-        return "chrome" if role == "deo" else "edge"
+            preferred = "edge"
+        elif other_kind == "edge":
+            preferred = "chrome"
+        else:
+            preferred = "chrome" if role == "deo" else "edge"
+        if self._find_browser_exe(preferred):
+            return preferred
+        for kind in ("chrome", "edge"):
+            if kind != preferred and self._find_browser_exe(kind):
+                return kind
+        return preferred
 
     def _reuse(self, role: str):
         with _LOCK:
@@ -210,24 +259,56 @@ class ShcilOpenLoginService:
             return live
 
         kind = self._pick_browser_kind(playwright, role)
+        tried: list[str] = []
+        for candidate in (kind, "chrome", "edge"):
+            if candidate in tried:
+                continue
+            tried.append(candidate)
+            port = _ROLE_KIND_PORTS[(role, candidate)]
+            existing = self._connect_cdp(playwright, port, candidate)
+            if existing is not None:
+                existing["browser_kind"] = existing.get("browser_kind") or candidate
+                self._remember_kind(role, existing["browser_kind"])
+                return existing
+            exe = self._find_browser_exe(candidate)
+            if not exe:
+                continue
+            session = self._launch_exe(playwright, role, candidate, exe, port)
+            if session is not None:
+                self._remember_kind(role, session.get("browser_kind") or candidate)
+                return session
+
+        kind = tried[0] if tried else "chrome"
         port = _ROLE_KIND_PORTS[(role, kind)]
-        existing = self._connect_cdp(playwright, port, kind)
-        if existing is not None and (existing.get("browser_kind") or kind) == kind:
-            existing["browser_kind"] = kind
-            self._remember_kind(role, kind)
-            return existing
-
-        exe = self._find_browser_exe(kind)
-        if not exe:
-            other = "Edge" if kind == "chrome" else "Chrome"
-            raise RuntimeError(
-                f"{role.upper()} must open in {kind.title()} because the other SHCIL login is already in {other}. "
-                f"{kind.title()} was not found on this PC."
-            )
-
         profile_dir = Path(tempfile.gettempdir()) / f"jtcs-shcil-{role}-{kind}-profile"
         profile_dir.mkdir(parents=True, exist_ok=True)
-        last_err: BaseException | None = None
+        try:
+            context = playwright.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=False,
+                args=[f"--remote-debugging-port={port}", "--no-first-run", "--no-default-browser-check"],
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            session = {
+                "playwright": playwright,
+                "browser": context,
+                "context": context,
+                "page": page,
+                "proc": None,
+                "exe": None,
+                "browser_kind": kind,
+            }
+            self._remember_kind(role, kind)
+            return session
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not open a browser for SHCIL {role.upper()} login. "
+                "Install Google Chrome or Microsoft Edge on this PC and try again."
+            ) from exc
+
+    def _launch_exe(self, playwright, role: str, kind: str, exe: str, port: int):
+        profile_dir = Path(tempfile.gettempdir()) / f"jtcs-shcil-{role}-{kind}-profile"
+        profile_dir.mkdir(parents=True, exist_ok=True)
         proc = subprocess.Popen(
             [
                 exe,
@@ -246,22 +327,16 @@ class ShcilOpenLoginService:
             try:
                 browser = playwright.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
                 break
-            except Exception as err:
-                last_err = err
+            except Exception:
                 if proc.poll() is not None:
                     break
-        if browser is not None:
-            session = self._session(playwright, browser, proc, exe, kind)
-            self._remember_kind(role, session.get("browser_kind") or kind)
-            return session
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-        raise RuntimeError(
-            f"Could not open {kind.title()} for SHCIL {role.upper()} login. "
-            "Run Stamp Activity on the same PC where Chrome and Edge are installed."
-        ) from last_err
+        if browser is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            return None
+        return self._session(playwright, browser, proc, exe, kind)
 
     @staticmethod
     def _logged_in(page) -> bool:
