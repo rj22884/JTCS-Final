@@ -75,8 +75,11 @@ class CredentialsMasterService:
             for row in self.repo.list_all(search=search, active_only=active_only)
         ]
 
-    def find_shcil_login(self) -> dict | None:
-        """Use Stamp DEO credentials for SHCIL login, never Stamp Admin when DEO exists."""
+    def find_shcil_login(self, role: str = "deo") -> dict | None:
+        """Return Stamp DEO or Stamp Admin credentials from Credentials Master."""
+        wanted = (role or "deo").strip().lower()
+        if wanted not in {"deo", "admin"}:
+            wanted = "deo"
         stamp_rows: list[tuple[str, object]] = []
         for row in self.repo.list_all(active_only=True):
             if not (row.UserID and row.Password):
@@ -97,13 +100,17 @@ class CredentialsMasterService:
         def is_admin(blob: str) -> bool:
             return bool(re.search(r"\badmin\b|stamp\s*admin", blob)) and not is_deo(blob)
 
+        if wanted == "admin":
+            admin_rows = [row for blob, row in stamp_rows if is_admin(blob)]
+            return self._serialize(admin_rows[0]) if admin_rows else None
+
         deo_rows = [row for blob, row in stamp_rows if is_deo(blob)]
         if deo_rows:
             return self._serialize(deo_rows[0])
         other_rows = [row for blob, row in stamp_rows if not is_admin(blob)]
         if other_rows:
             return self._serialize(other_rows[0])
-        return self._serialize(stamp_rows[0][1])
+        return None
 
     def get_record(self, credential_id: int) -> dict:
         row = self.repo.get_by_id(credential_id)

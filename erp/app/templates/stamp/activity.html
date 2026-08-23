@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260823logins1">
 {% endblock %}
 
 {% block content %}
@@ -55,7 +55,12 @@
       </div>
     </div>
     <div class="col-xl-4 col-lg-5 order-1 order-lg-2">
-      <div id="stampMobileGate" class="jtcs-card stamp-mobile-gate stamp-mobile-gate-top h-100">
+      <div class="stamp-shcil-logins mb-2">
+        <button type="button" class="btn btn-sm stamp-login-deo" id="stampLoginDeoBtn">Login Deo</button>
+        <button type="button" class="btn btn-sm stamp-login-admin" id="stampLoginAdminBtn">Login Admin</button>
+      </div>
+      <div id="stampShcilLoginStatus" class="stamp-shcil-login-status d-none" role="status"></div>
+      <div id="stampMobileGate" class="jtcs-card stamp-mobile-gate stamp-mobile-gate-top">
         <div class="stamp-section-head">Start Stamp Activity</div>
         <p class="small text-muted mb-2">Enter mobile number to begin. The form will clear each new entry.</p>
         <div class="d-flex flex-wrap gap-2 align-items-end">
@@ -498,6 +503,7 @@
   window.STAMP_AUTO_LOAD_STAMP_ID = {{ auto_load_stamp | tojson }};
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
+  window.STAMP_OPEN_LOGIN_URL = {{ url_for('stamp.stamp_open_login') | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260823webpre1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260823logins1"></script>
 {% endblock %}

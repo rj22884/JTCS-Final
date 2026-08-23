@@ -3,6 +3,33 @@
 .stamp-page-topbar { flex-shrink: 0; }
 .stamp-mobile-gate { padding: 0.85rem 1rem !important; }
 .stamp-mobile-gate-top { max-width: none; padding: 0.65rem 0.85rem !important; }
+.stamp-shcil-logins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.stamp-shcil-logins .btn {
+  flex: 1 1 140px;
+  min-height: 36px;
+  font-weight: 700;
+  border: 0;
+}
+.stamp-login-deo { background: #0f766e; color: #fff; }
+.stamp-login-deo:hover,
+.stamp-login-deo:focus { background: #0d9488; color: #fff; }
+.stamp-login-admin { background: #1d4ed8; color: #fff; }
+.stamp-login-admin:hover,
+.stamp-login-admin:focus { background: #2563eb; color: #fff; }
+.stamp-shcil-login-status {
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.stamp-shcil-login-status.is-info { background: #e8f1ff; color: #1e3a8a; }
+.stamp-shcil-login-status.is-ok { background: #e7f7ee; color: #166534; }
+.stamp-shcil-login-status.is-error { background: #fde8ea; color: #9f1239; }
 .stamp-filter-bar { padding: 0.65rem 0.85rem !important; }
 .stamp-filter-bar .form-label { font-size: 11px; font-weight: 600; margin-bottom: 0.15rem; }
 .stamp-period-panel,
@@ -20,6 +47,7 @@
 }
 @media (max-width: 576px) {
   .stamp-period-grid { grid-template-columns: 1fr; }
+  .stamp-shcil-logins .btn { flex-basis: 100%; min-height: 42px; }
 }
 .stamp-period-card {
   border: 1px solid #d4dbe8;
@@ -362,6 +390,7 @@
 .stamp-payment-line .form-label { font-size: 11px; margin-bottom: 0.1rem; }
 @media (max-width: 768px) {
   .stamp-payment-line { grid-template-columns: 1fr; }
+  .stamp-shcil-logins .btn { min-height: 40px; }
 }
 .stamp-page-toolbar { flex-shrink: 0; background: #fff; border-radius: 6px; border: 1px solid #e9e4f5; }
 .stamp-page-toolbar .btn { min-width: 3.5rem; font-size: 12px; padding: 0.2rem 0.45rem; }

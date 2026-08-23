@@ -12,9 +12,28 @@
 .estamp-poi-modal-body { min-height: 240px; }
 .estamp-poi-modal-body img { max-width: 100%; max-height: 75vh; display: block; margin: 0 auto; }
 .estamp-poi-modal-body iframe { width: 100%; height: 75vh; border: 0; }
+.estamp-copy-wrap { display: inline-flex; align-items: center; gap: 0.28rem; max-width: 100%; }
+.estamp-copy-wrap span { word-break: break-word; }
+.estamp-copy-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #c5ced8;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+  line-height: 1;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.estamp-copy-btn:hover { background: #eef3f8; color: #0d47a1; }
+.estamp-copy-btn.is-copied { border-color: #198754; color: #198754; background: #e9f7ef; }
+.estamp-grid-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 @media (max-width: 768px) {
   .estamp-poi-thumb { width: 72px; height: 56px; }
   .estamp-poi-modal-body iframe { height: 60vh; }
+  .estamp-copy-btn { width: 28px; height: 28px; font-size: 0.8rem; }
 }
 </style>
 {% endblock %}
@@ -33,25 +52,26 @@
 {% endblock %}
 
 {% block content %}
-<div class="jtcs-card">
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-    <h3 class="h6 mb-0">Paid website e-Stamp orders</h3>
-    <span class="small text-muted ms-auto" id="estampCount"></span>
+<p class="small text-muted mb-3">Paid website e-Stamp orders only. Mark <strong>Yes</strong> after payment is verified — that row moves to the confirmed grid. <strong>Edit / Reject / Permanent delete</strong> stay on the No / pending grid. Copy icons sit beside first party, second party, amount, and mobile.</p>
+
+<div class="jtcs-card mb-3">
+  <div class="estamp-grid-title mb-2">
+    <h3 class="h6 mb-0">Payment not confirmed / No</h3>
+    <span class="small text-muted ms-auto" id="estampPendingCount"></span>
   </div>
-  <p class="small text-muted mb-2">Only paid requests from jtcsxpert.com appear here. Draft saves stay on the website until payment. Confirm payment on each row before edit / generate stamp.</p>
   <div class="table-responsive">
     <table class="table table-sm table-hover table-striped align-middle mb-0">
       <thead>
         <tr>
           <th>Reference</th>
+          <th>Article</th>
           <th>First party</th>
           <th>Second party</th>
+          <th>Amount</th>
           <th>Mobile</th>
-          <th>POI</th>
           <th>Consideration</th>
           <th>Description</th>
-          <th>Article</th>
-          <th>Amount</th>
+          <th>POI</th>
           <th>Pay</th>
           <th>UTR</th>
           <th>Payment confirm?</th>
@@ -59,7 +79,39 @@
           <th>Date</th>
         </tr>
       </thead>
-      <tbody id="estampBody">
+      <tbody id="estampPendingBody">
+        <tr><td colspan="14" class="text-muted">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="jtcs-card">
+  <div class="estamp-grid-title mb-2">
+    <h3 class="h6 mb-0">Payment confirmed · Yes</h3>
+    <span class="small text-muted ms-auto" id="estampYesCount"></span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover table-striped align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Article</th>
+          <th>First party</th>
+          <th>Second party</th>
+          <th>Amount</th>
+          <th>Mobile</th>
+          <th>Consideration</th>
+          <th>Description</th>
+          <th>POI</th>
+          <th>Pay</th>
+          <th>UTR</th>
+          <th>Payment confirm?</th>
+          <th>Status</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody id="estampYesBody">
         <tr><td colspan="14" class="text-muted">Loading…</td></tr>
       </tbody>
     </table>
@@ -144,8 +196,10 @@
 {% block extra_js %}
 <script>
 (function () {
-  var body = document.getElementById("estampBody");
-  var count = document.getElementById("estampCount");
+  var pendingBody = document.getElementById("estampPendingBody");
+  var yesBody = document.getElementById("estampYesBody");
+  var pendingCount = document.getElementById("estampPendingCount");
+  var yesCount = document.getElementById("estampYesCount");
   var rowsByRef = {};
   var csrf = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
   var editModalEl = document.getElementById("estampEditModal");
@@ -165,6 +219,36 @@
   function post(url, payload) {
     return fetch(url, { method: "POST", headers: headers(), body: JSON.stringify(payload || {}) })
       .then(function (res) { return res.json().then(function (data) { return { res: res, data: data }; }); });
+  }
+
+  function isYes(row) {
+    return String((row && row.payment_confirmed) || "").toLowerCase() === "yes";
+  }
+
+  function partyLine(row, which) {
+    if (which === "first") return (row.first_party_display || row.full_name || "").trim();
+    return (row.second_party_display || row.second_party_name || "").trim();
+  }
+
+  function amountValue(row) {
+    var n = row.payable_amount != null && row.payable_amount !== "" ? row.payable_amount : row.amount;
+    if (n == null || n === "") return "";
+    var num = Number(n);
+    if (!isFinite(num)) return String(n);
+    return String(num);
+  }
+
+  function copyCell(text, label) {
+    var value = String(text == null ? "" : text).trim();
+    if (!value || value === "—") return "—";
+    return (
+      '<span class="estamp-copy-wrap">' +
+        "<span>" + esc(value) + "</span>" +
+        '<button type="button" class="estamp-copy-btn" data-act="copy" data-copy="' + encodeURIComponent(value) + '" title="Copy ' + esc(label) + '">' +
+          '<i class="bi bi-clipboard" aria-hidden="true"></i>' +
+        "</button>" +
+      "</span>"
+    );
   }
 
   function poiCell(row) {
@@ -202,53 +286,64 @@
     if (poiModal) poiModal.show();
   }
 
-  function actionButtons(row) {
+  function actionButtons(row, confirmedYes) {
     var confirmed = (row.payment_confirmed || "").toLowerCase();
-    var yesHidden = confirmed === "yes" ? "" : " hidden";
-    var noHidden = confirmed === "no" ? "" : " hidden";
+    var actions = "";
+    if (!confirmedYes) {
+      actions =
+        '<div class="estamp-actions">' +
+          '<button type="button" class="btn btn-sm btn-outline-primary" data-act="edit">Edit</button>' +
+          '<button type="button" class="btn btn-sm btn-outline-warning" data-act="reject">Reject</button>' +
+          '<button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">Permanent Delete</button>' +
+        "</div>";
+    }
     return (
       '<div class="estamp-confirm">' +
-        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="Yes"' + (confirmed === "yes" ? " checked" : "") + '> Yes</label>' +
-        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="No"' + (confirmed === "no" ? " checked" : "") + '> No</label>' +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="Yes"' + (confirmed === "yes" ? " checked" : "") + "> Yes</label>" +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="No"' + (confirmed === "no" ? " checked" : "") + "> No</label>" +
       "</div>" +
-      '<div class="estamp-actions estamp-yes-actions"' + yesHidden + ">" +
-        '<button type="button" class="btn btn-sm btn-outline-primary" data-act="edit">Edit</button>' +
-        '<button type="button" class="btn btn-sm btn-outline-warning" data-act="reject">Reject</button>' +
-        '<button type="button" class="btn btn-sm btn-outline-danger" data-act="delete">Permanent Delete</button>' +
-        '<button type="button" class="btn btn-sm btn-success" data-act="generate">Generate Stamp</button>' +
-      "</div>" +
-      '<div class="estamp-actions estamp-no-actions"' + noHidden + ">" +
-        '<button type="button" class="btn btn-sm btn-outline-warning" data-act="reject-nopay">Reject</button>' +
-      "</div>"
+      actions
     );
+  }
+
+  function rowHtml(row, confirmedYes) {
+    var amount = amountValue(row);
+    return "<tr data-ref=\"" + esc(row.reference_no) + "\">" +
+      "<td><strong>" + esc(row.reference_no || "") + "</strong></td>" +
+      "<td>" + esc(row.article_label || row.article_code || "—") + "</td>" +
+      "<td>" + copyCell(partyLine(row, "first"), "first party") + "</td>" +
+      "<td>" + copyCell(partyLine(row, "second"), "second party") + "</td>" +
+      "<td>" + (amount ? ('<span class="estamp-copy-wrap"><span>₹' + esc(amount) + "</span>" +
+        '<button type="button" class="estamp-copy-btn" data-act="copy" data-copy="' + encodeURIComponent(amount) + '" title="Copy amount"><i class="bi bi-clipboard" aria-hidden="true"></i></button></span>') : "—") + "</td>" +
+      "<td>" + copyCell(row.mobile || "", "mobile") + "</td>" +
+      "<td>" + (row.consideration_price !== "" && row.consideration_price != null ? esc(row.consideration_price) : "—") + "</td>" +
+      "<td>" + esc(row.description || "—") + "</td>" +
+      "<td>" + poiCell(row) + "</td>" +
+      "<td>" + esc(row.pay_method || "") + "</td>" +
+      "<td>" + esc(row.utr_number || "") + "</td>" +
+      "<td>" + actionButtons(row, confirmedYes) + "</td>" +
+      "<td>" + esc(row.review_status || "") + "</td>" +
+      "<td>" + esc(row.created_date || "") + "</td>" +
+      "</tr>";
+  }
+
+  function emptyRow(message) {
+    return '<tr><td colspan="14" class="text-muted">' + esc(message) + "</td></tr>";
   }
 
   function render(rows) {
     rowsByRef = {};
     (rows || []).forEach(function (row) { rowsByRef[row.reference_no] = row; });
-    if (count) count.textContent = rows.length + " paid order" + (rows.length === 1 ? "" : "s");
-    if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="14" class="text-muted">No paid e-Stamp orders yet.</td></tr>';
-      return;
-    }
-    body.innerHTML = rows.map(function (row) {
-      return "<tr data-ref=\"" + esc(row.reference_no) + "\">" +
-        "<td><strong>" + esc(row.reference_no || "") + "</strong></td>" +
-        "<td>" + esc(row.full_name || "") + "</td>" +
-        "<td>" + esc(row.second_party_name || "") + "</td>" +
-        "<td>" + esc(row.mobile || "") + "</td>" +
-        "<td>" + poiCell(row) + "</td>" +
-        "<td>" + (row.consideration_price !== "" && row.consideration_price != null ? esc(row.consideration_price) : "—") + "</td>" +
-        "<td>" + esc(row.description || "—") + "</td>" +
-        "<td>" + esc(row.article_label || row.article_code || "") + "</td>" +
-        "<td>" + esc(row.payable_amount || row.amount || "") + "</td>" +
-        "<td>" + esc(row.pay_method || "") + "</td>" +
-        "<td>" + esc(row.utr_number || "") + "</td>" +
-        "<td>" + actionButtons(row) + "</td>" +
-        "<td>" + esc(row.review_status || "") + "</td>" +
-        "<td>" + esc(row.created_date || "") + "</td>" +
-        "</tr>";
-    }).join("");
+    var pending = (rows || []).filter(function (row) { return !isYes(row); });
+    var confirmed = (rows || []).filter(isYes);
+    if (pendingCount) pendingCount.textContent = pending.length + " order" + (pending.length === 1 ? "" : "s");
+    if (yesCount) yesCount.textContent = confirmed.length + " order" + (confirmed.length === 1 ? "" : "s");
+    pendingBody.innerHTML = pending.length
+      ? pending.map(function (row) { return rowHtml(row, false); }).join("")
+      : emptyRow("No pending e-Stamp orders.");
+    yesBody.innerHTML = confirmed.length
+      ? confirmed.map(function (row) { return rowHtml(row, true); }).join("")
+      : emptyRow("No payment-confirmed e-Stamp orders yet.");
   }
 
   async function load() {
@@ -257,7 +352,8 @@
       var data = await res.json();
       render(data.rows || []);
     } catch (err) {
-      body.innerHTML = '<tr><td colspan="14" class="text-danger">Unable to load orders.</td></tr>';
+      pendingBody.innerHTML = emptyRow("Unable to load orders.");
+      yesBody.innerHTML = emptyRow("Unable to load orders.");
     }
   }
 
@@ -267,6 +363,10 @@
   }
 
   function openEdit(row) {
+    if (isYes(row)) {
+      alert("Edit is allowed only when Payment confirm is No.");
+      return;
+    }
     document.getElementById("estampEditRef").value = row.reference_no || "";
     document.getElementById("estampEditFirst").value = row.full_name || "";
     document.getElementById("estampEditFirstFather").value = row.father_or_husband_name || "";
@@ -280,9 +380,38 @@
     if (editModal) editModal.show();
   }
 
-  body.addEventListener("change", async function (event) {
+  async function copyText(btn) {
+    var raw = btn.getAttribute("data-copy") || "";
+    var text = "";
+    try { text = decodeURIComponent(raw); } catch (err) { text = raw; }
+    if (!text) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else {
+        var box = document.createElement("textarea");
+        box.value = text;
+        box.setAttribute("readonly", "");
+        box.style.position = "fixed";
+        box.style.left = "-9999px";
+        document.body.appendChild(box);
+        box.select();
+        document.execCommand("copy");
+        document.body.removeChild(box);
+      }
+      btn.classList.add("is-copied");
+      btn.setAttribute("title", "Copied");
+      setTimeout(function () {
+        btn.classList.remove("is-copied");
+        btn.setAttribute("title", "Copy");
+      }, 1200);
+    } catch (err) {
+      alert("Could not copy. Select the text and copy manually.");
+    }
+  }
+
+  document.addEventListener("change", async function (event) {
     var radio = event.target.closest('input[type="radio"][name^="pc-"]');
-    if (!radio) return;
+    if (!radio || (!pendingBody.contains(radio) && !yesBody.contains(radio))) return;
     var tr = radio.closest("tr");
     var ref = tr && tr.getAttribute("data-ref");
     if (!ref) return;
@@ -301,14 +430,19 @@
     }
   });
 
-  body.addEventListener("click", async function (event) {
+  document.addEventListener("click", async function (event) {
     var btn = event.target.closest("[data-act]");
-    if (!btn) return;
+    if (!btn || (!pendingBody.contains(btn) && !yesBody.contains(btn))) return;
+    var act = btn.getAttribute("data-act");
+    if (act === "copy") {
+      event.preventDefault();
+      await copyText(btn);
+      return;
+    }
     var tr = btn.closest("tr");
     var ref = tr && tr.getAttribute("data-ref");
     var row = rowsByRef[ref];
     if (!ref || !row) return;
-    var act = btn.getAttribute("data-act");
     try {
       if (act === "edit") {
         openEdit(row);
@@ -318,28 +452,27 @@
         openPoi(row, btn);
         return;
       }
-      if (act === "reject" || act === "reject-nopay") {
+      if (act === "reject") {
+        if (isYes(row)) {
+          alert("Reject is allowed only when Payment confirm is No.");
+          return;
+        }
         if (!window.confirm("Reject this stamp request?")) return;
-        var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/reject", {
-          reason: act === "reject-nopay" ? "no_payment" : "rejected",
-        });
+        var result = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/reject", { reason: "rejected" });
         if (!result.res.ok || result.data.ok === false) throw new Error(result.data.error || "Unable to reject.");
         openWhatsapp(result.data);
         await load();
         return;
       }
       if (act === "delete") {
+        if (isYes(row)) {
+          alert("Permanent delete is allowed only when Payment confirm is No.");
+          return;
+        }
         if (!window.confirm("Permanently delete this e-Stamp order? This cannot be undone.")) return;
         var del = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/delete", {});
         if (!del.res.ok || del.data.ok === false) throw new Error(del.data.error || "Unable to delete.");
         await load();
-        return;
-      }
-      if (act === "generate") {
-        var gen = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/generate-stamp", {});
-        if (!gen.res.ok || gen.data.ok === false) throw new Error(gen.data.error || "Unable to generate stamp.");
-        if (gen.data.stamp_url) window.location.href = gen.data.stamp_url;
-        else await load();
       }
     } catch (err) {
       alert(err.message || "Action failed.");

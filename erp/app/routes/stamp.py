@@ -76,6 +76,21 @@ def stamp_activity():
     )
 
 
+@bp.route("/stamp-activity/open-login", methods=["POST"])
+@login_required
+def stamp_open_login():
+    data = request.get_json(silent=True) or {}
+    role = (data.get("role") or request.form.get("role") or "deo").strip().lower()
+    try:
+        from app.services.shcil_open_login_service import ShcilOpenLoginService
+
+        return jsonify(ShcilOpenLoginService().open_login(role))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"ok": False, "error": f"Unable to open SHCIL login: {exc}"}), 500
+
+
 @bp.route("/stamp-activity/extract", methods=["POST"])
 @login_required
 def stamp_extract():

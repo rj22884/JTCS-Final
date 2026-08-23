@@ -150,10 +150,11 @@ def _stamp_relation(value: str) -> str:
 def stamp_party_line(name: str, relation: str, parent: str) -> str:
     person = _stamp_alnum(name)
     parent_name = _stamp_alnum(parent)
-    if not parent_name:
-        return person
-    tag = "WO" if relation == "husband" else "SO"
-    return f"{person} {tag} {parent_name}".strip()
+    rel = _stamp_relation(relation)
+    if rel and parent_name:
+        tag = "WO" if rel == "husband" else "SO"
+        return f"{person} {tag} {parent_name}".strip()
+    return person
 
 
 def _require_stamp_name(value: str, label: str) -> str:
@@ -377,6 +378,8 @@ class WebsiteEStampService:
         if row is None:
             raise ValueError("e-Stamp order not found.")
         no_pay = (reason or "").strip().lower() in {"no_payment", "no", "unpaid"}
+        if not no_pay:
+            self._assert_not_confirmed(row, "Reject")
         row.PaymentConfirmed = "No" if no_pay else (row.PaymentConfirmed or "Yes")
         row.ReviewStatus = "Rejected — no payment" if no_pay else "Rejected"
         row.ModifiedDate = datetime.utcnow()
@@ -389,10 +392,15 @@ class WebsiteEStampService:
         data["message"] = "Order rejected. WhatsApp reply prepared for the applicant."
         return data
 
+    def _assert_not_confirmed(self, row: WebsiteEStampOrder, action: str) -> None:
+        if (row.PaymentConfirmed or "").strip().title() == "Yes":
+            raise ValueError(f"{action} is allowed only when Payment confirm is No.")
+
     def admin_delete(self, reference_no: str) -> None:
         row = self.get_by_reference(reference_no)
         if row is None:
             return
+        self._assert_not_confirmed(row, "Permanent delete")
         db.session.delete(row)
         db.session.commit()
 
@@ -400,6 +408,7 @@ class WebsiteEStampService:
         row = self.get_by_reference(reference_no)
         if row is None:
             raise ValueError("e-Stamp order not found.")
+        self._assert_not_confirmed(row, "Edit")
         first = _require_stamp_name(data.get("full_name") or data.get("name") or row.FullName, "First party name")
         second = _require_stamp_name(data.get("second_party_name") or row.SecondPartyName, "Second party name")
         if len(first) < 2:
@@ -443,24 +452,6 @@ class WebsiteEStampService:
         row.ModifiedDate = datetime.utcnow()
         db.session.commit()
         return self._row(row)
-
-    def generate_stamp(self, reference_no: str) -> dict:
-        row = self.get_by_reference(reference_no)
-        if row is None:
-            raise ValueError("e-Stamp order not found.")
-        if (row.PaymentConfirmed or "") != "Yes":
-            raise ValueError("Confirm payment as Yes before generating the stamp.")
-        row.ReviewStatus = "Generate stamp"
-        row.ModifiedDate = datetime.utcnow()
-        db.session.commit()
-        from flask import url_for
-
-        stamp_url = url_for("estamp_orders.generate_page", reference_no=row.ReferenceNo)
-        data = self._row(row)
-        data["ok"] = True
-        data["stamp_url"] = stamp_url
-        data["message"] = "Opening SHCIL login. Enter captcha, then OTP."
-        return data
 
     def get_order_dict(self, reference_no: str) -> dict:
         row = self.get_by_reference(reference_no)
@@ -558,9 +549,19 @@ class WebsiteEStampService:
             "full_name": row.FullName,
             "father_or_husband_name": row.FatherOrHusbandName or "",
             "first_party_relation": row.FirstPartyRelation or "",
+            "first_party_display": stamp_party_line(
+                row.FullName or "",
+                row.FirstPartyRelation or "",
+                row.FatherOrHusbandName or "",
+            ),
             "second_party_name": row.SecondPartyName or "",
             "second_party_father_or_husband_name": row.SecondPartyFatherOrHusbandName or "",
             "second_party_relation": row.SecondPartyRelation or "",
+            "second_party_display": stamp_party_line(
+                row.SecondPartyName or "",
+                row.SecondPartyRelation or "",
+                row.SecondPartyFatherOrHusbandName or "",
+            ),
             "mobile": row.Mobile,
             "consideration_price": float(row.ConsiderationPrice) if row.ConsiderationPrice is not None else "",
             "description": row.Description or "",

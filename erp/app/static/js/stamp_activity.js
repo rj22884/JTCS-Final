@@ -2563,4 +2563,46 @@
     applyPeriodPreset(els.filterPeriod.value || "month");
   }
   loadMainGrid();
+
+  function setShcilLoginStatus(message, kind) {
+    var box = document.getElementById("stampShcilLoginStatus");
+    if (!box) return;
+    box.textContent = message || "";
+    box.classList.toggle("d-none", !message);
+    box.classList.remove("is-info", "is-ok", "is-error");
+    if (message) box.classList.add(kind === "error" ? "is-error" : kind === "ok" ? "is-ok" : "is-info");
+  }
+
+  async function openShcilLogin(role, btn) {
+    var csrf = window.STAMP_CSRF || "";
+    var url = window.STAMP_OPEN_LOGIN_URL || "/shcil/stamp-activity/open-login";
+    if (btn) btn.disabled = true;
+    setShcilLoginStatus("Opening SHCIL " + String(role || "").toUpperCase() + " login and filling User ID / password...", "info");
+    try {
+      var res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf,
+          "X-CSRF-Token": csrf,
+        },
+        body: JSON.stringify({ role: role, csrf_token: csrf }),
+      });
+      var data = await res.json();
+      if (!res.ok || data.ok === false) throw new Error(data.error || "Unable to open SHCIL login.");
+      setShcilLoginStatus(data.message || "User ID and password filled. Close the SHCIL window yourself when finished.", "ok");
+    } catch (err) {
+      setShcilLoginStatus((err && err.message) || "Unable to open SHCIL login.", "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  document.getElementById("stampLoginDeoBtn")?.addEventListener("click", function () {
+    openShcilLogin("deo", this);
+  });
+  document.getElementById("stampLoginAdminBtn")?.addEventListener("click", function () {
+    openShcilLogin("admin", this);
+  });
 })();
