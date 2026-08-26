@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
-set "VPS_HOST=200.141.5.68"
+set "VPS_HOST=200.234.41.220"
 set "VPS_USER=root"
 set "VPS_PORT=22"
 set "VPS_PATH=/root/JTCS-final"

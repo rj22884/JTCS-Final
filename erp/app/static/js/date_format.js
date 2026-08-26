@@ -97,19 +97,64 @@
   }
 
   function formatClockParts(dateObj) {
-    return (
-      pad2(dateObj.getDate()) +
-      "/" +
-      pad2(dateObj.getMonth() + 1) +
-      "/" +
-      dateObj.getFullYear() +
-      " " +
-      pad2(dateObj.getHours()) +
-      ":" +
-      pad2(dateObj.getMinutes()) +
-      ":" +
-      pad2(dateObj.getSeconds())
-    );
+    try {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Kolkata",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        hourCycle: "h23",
+      }).formatToParts(dateObj);
+      const get = function (type) {
+        const found = parts.find(function (part) {
+          return part.type === type;
+        });
+        return found ? found.value : "";
+      };
+      let hour = get("hour");
+      if (hour === "24") hour = "00";
+      return (
+        get("day") +
+        "/" +
+        get("month") +
+        "/" +
+        get("year") +
+        " " +
+        pad2(hour) +
+        ":" +
+        pad2(get("minute")) +
+        ":" +
+        pad2(get("second"))
+      );
+    } catch (_err) {
+      return (
+        pad2(dateObj.getDate()) +
+        "/" +
+        pad2(dateObj.getMonth() + 1) +
+        "/" +
+        dateObj.getFullYear() +
+        " " +
+        pad2(dateObj.getHours()) +
+        ":" +
+        pad2(dateObj.getMinutes()) +
+        ":" +
+        pad2(dateObj.getSeconds())
+      );
+    }
+  }
+
+  function parseServerIso(iso) {
+    const raw = String(iso || "").trim();
+    if (!raw) return NaN;
+    if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw)) {
+      return Date.parse(raw);
+    }
+    // Naive stamps from older servers were UTC wall-clock; do not treat them as local.
+    return NaN;
   }
 
   function startLiveClocks(root) {
@@ -123,7 +168,7 @@
     const anchors = [];
     nodes.forEach(function (el) {
       const iso = (el.getAttribute("data-server-iso") || "").trim();
-      let serverMs = Date.parse(iso);
+      let serverMs = parseServerIso(iso);
       if (Number.isNaN(serverMs)) serverMs = Date.now();
       anchors.push({
         el: el,

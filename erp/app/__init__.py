@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from app.utils.timezone import now_app, today_app
 
 from flask import Flask, has_request_context, redirect, request, session, url_for
 from app.config import Config
@@ -457,7 +457,7 @@ def create_app(config_class: type = Config) -> Flask:
         company_display_name = company_name if company_name not in (None, "", "JTCS ERP", "JTCS") else app.config.get(
             "COMPANY_DISPLAY_NAME", "Joshi Tax Consultancy & Services"
         )
-        today = date.today()
+        today = today_app()
         if today.month >= 4:
             financial_year = f"FY {today.year}-{today.year + 1}"
         else:
@@ -544,7 +544,7 @@ def create_app(config_class: type = Config) -> Flask:
             seo_meta_keywords = ""
             seo_schema_payload = None
 
-        now = datetime.now()
+        now = now_app()
         return {
             "app_name": app.config["APP_NAME"],
             "app_version": display_version,

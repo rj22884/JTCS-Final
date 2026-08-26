@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from flask import Blueprint, current_app, jsonify, render_template, request, session
 
+from app.utils.timezone import today_app
+
 from app.decorators import login_required, require_delete_reauth
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
@@ -30,7 +32,7 @@ def _parse_date(raw: str | None) -> date | None:
 
 
 def _resolve_period(dashboard_service: DashboardService) -> tuple[date, date, str]:
-    today = date.today()
+    today = today_app()
     preset = (request.args.get("period") or "").strip().lower()
     if preset in {"prev_fy", "previous_fy", "pfy"}:
         preset = "prev_fy"
@@ -83,7 +85,7 @@ def _resolve_period(dashboard_service: DashboardService) -> tuple[date, date, st
 def index():
     menu_service = MenuService()
     dashboard_service = DashboardService()
-    today = date.today()
+    today = today_app()
     date_from, date_to, period_preset = _resolve_period(dashboard_service)
 
     metrics = dashboard_service.get_metrics(date_from, date_to)

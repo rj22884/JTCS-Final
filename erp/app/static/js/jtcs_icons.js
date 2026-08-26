@@ -33,7 +33,7 @@
     "bi-fullscreen-exit": 1,
   };
 
-  var SKIP_ROOTS = "#biPickerModal, .mcust-icon-grid, .mcust-icon-pick, .jtcs-illu-skip, thead, .dash-sort-icon, .dash-th-label";
+  var SKIP_ROOTS = "#biPickerModal, .mcust-icon-grid, .mcust-icon-pick, .jtcs-illu-skip, thead, .dash-sort-icon, .dash-th-label, .cred-password-toggle, #credTogglePassword";
 
   function wrap(inner) {
     return (
@@ -637,7 +637,13 @@
     var key = resolveKey(el);
     var svg = G[key] || G.document;
     var mark = key + (needsTile(el) ? "-tile" : "");
-    if (el.getAttribute("data-jtcs-svg") === mark && el.querySelector("svg")) return;
+    if (
+      el.getAttribute("data-jtcs-svg") === mark &&
+      el.querySelector("svg") &&
+      el.classList.contains("jtcs-illu")
+    ) {
+      return;
+    }
     el.classList.add("jtcs-illu");
     el.classList.toggle("jtcs-illu-tile", needsTile(el));
     var tone = TONE[key] || "blue";

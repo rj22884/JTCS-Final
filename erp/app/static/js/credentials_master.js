@@ -63,7 +63,7 @@
       '">' +
       escapeHtml(maskPassword(row.password)) +
       "</span>" +
-      '<button type="button" class="btn btn-sm btn-outline-secondary cred-password-toggle py-0 px-1" ' +
+      '<button type="button" class="btn btn-sm btn-outline-secondary cred-password-toggle py-0 px-1 jtcs-illu-skip" ' +
       'title="Show / hide password" aria-label="Show or hide password">' +
       '<i class="bi bi-eye"></i></button>' +
       "</span>"
@@ -237,12 +237,18 @@
       if (shown) {
         textEl.textContent = maskPassword(textEl.getAttribute("data-password") || "");
         textEl.setAttribute("data-masked", "1");
-        if (icon) icon.className = "bi bi-eye";
+        if (icon) {
+          icon.classList.remove("bi-eye-slash");
+          icon.classList.add("bi", "bi-eye");
+        }
         toggleBtn.title = "Show password";
       } else {
         textEl.textContent = textEl.getAttribute("data-password") || "";
         textEl.setAttribute("data-masked", "0");
-        if (icon) icon.className = "bi bi-eye-slash";
+        if (icon) {
+          icon.classList.remove("bi-eye");
+          icon.classList.add("bi", "bi-eye-slash");
+        }
         toggleBtn.title = "Hide password";
       }
       return;
@@ -267,7 +273,8 @@
     els.password.type = show ? "text" : "password";
     const icon = els.togglePassword.querySelector("i");
     if (icon) {
-      icon.className = show ? "bi bi-eye-slash" : "bi bi-eye";
+      icon.classList.remove("bi-eye", "bi-eye-slash");
+      icon.classList.add(show ? "bi-eye-slash" : "bi-eye");
     }
   });
 

@@ -25,6 +25,7 @@ from sqlalchemy import text
 from app.config import BASE_DIR
 from app.extensions import db
 from app.modules.system_health.repository import SystemHealthRepository
+from app.utils.timezone import now_app
 
 logger = logging.getLogger(__name__)
 
@@ -277,8 +278,8 @@ class SystemHealthService:
             "environment": env_label,
             "uptime_seconds": uptime_s,
             "uptime_human": self._human_duration(uptime_s),
-            "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "timezone": time.tzname[0] if time.tzname else "local",
+            "server_time": now_app().strftime("%Y-%m-%d %H:%M:%S"),
+            "timezone": "Asia/Kolkata",
             "last_restart": datetime.fromtimestamp(_PROCESS_STARTED).strftime("%Y-%m-%d %H:%M:%S"),
             "python_version": platform.python_version(),
             "flask_version": flask_ver or "—",

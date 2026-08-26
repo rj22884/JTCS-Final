@@ -22,7 +22,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/credentials_master.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/credentials_master.css') }}?v=20260826eye1">
 {% endblock %}
 
 {% block content %}
@@ -89,7 +89,7 @@
               <label class="form-label" for="credPassword">Password</label>
               <div class="input-group">
                 <input type="password" class="form-control" id="credPassword" name="Password" maxlength="200" autocomplete="new-password">
-                <button type="button" class="btn btn-outline-secondary" id="credTogglePassword" title="Show / hide">
+                <button type="button" class="btn btn-outline-secondary jtcs-illu-skip" id="credTogglePassword" title="Show / hide">
                   <i class="bi bi-eye"></i>
                 </button>
               </div>
@@ -133,5 +133,5 @@
   };
   window.CREDENTIALS_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/credentials_master.js') }}"></script>
+<script src="{{ url_for('static', filename='js/credentials_master.js') }}?v=20260826eye1"></script>
 {% endblock %}

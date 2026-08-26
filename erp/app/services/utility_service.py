@@ -26,7 +26,7 @@ class UtilityService:
 
     def _load_vps_env(self) -> dict[str, str]:
         defaults = {
-            "VPS_HOST": "200.141.5.68",
+            "VPS_HOST": "200.234.41.220",
             "VPS_USER": "root",
             "VPS_PORT": "22",
             "VPS_PATH": "/root/JTCS-final",
