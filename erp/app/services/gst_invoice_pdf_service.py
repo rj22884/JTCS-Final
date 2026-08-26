@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import io
 import urllib.parse
 from pathlib import Path
 
-from flask import current_app
+from flask import current_app, has_request_context, request, url_for
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
@@ -28,6 +30,24 @@ except ImportError:  # pragma: no cover
     qrcode = None  # type: ignore
 
 
+class _LinkedImage(Image):
+    """QR / image that opens a URI when tapped in a PDF viewer."""
+
+    def __init__(self, *args, link_url: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._link_url = link_url
+
+    def draw(self):
+        super().draw()
+        if self._link_url:
+            self.canv.linkURL(
+                self._link_url,
+                (0, 0, self.drawWidth, self.drawHeight),
+                relative=1,
+                thickness=0,
+            )
+
+
 class GstInvoicePdfService:
     def __init__(self, invoice_service: GstInvoiceService | None = None):
         self.invoice_service = invoice_service or GstInvoiceService()
@@ -39,10 +59,13 @@ class GstInvoicePdfService:
         except (TypeError, ValueError):
             return "0.00"
 
-    def _logo_path(self) -> Path | None:
+    def _static_img_path(self, filename: str) -> Path | None:
         static = Path(current_app.static_folder or "")
-        candidate = static / "img" / "jtcs_invoice_logo.png"
+        candidate = static / "img" / filename
         return candidate if candidate.is_file() else None
+
+    def _logo_path(self) -> Path | None:
+        return self._static_img_path("jtcs_invoice_logo.png")
 
     def build_pdf_from_payload(self, payload: dict) -> tuple[bytes, str]:
         """Build preview PDF from form payload without requiring a saved invoice."""
@@ -74,6 +97,7 @@ class GstInvoicePdfService:
             "sgst_amount": float(header.get("SgstAmount") or 0),
             "igst_rate": float(header.get("IgstRate") or 0),
             "igst_amount": float(header.get("IgstAmount") or 0),
+            "round_off": float(header.get("RoundOffAmount") or 0),
             "invoice_value": float(header.get("InvoiceValue") or 0),
             "amount_in_words": header.get("AmountInWords") or "",
             "notes": header.get("Notes") or "",
@@ -131,13 +155,13 @@ class GstInvoicePdfService:
             html += f"<br/>({self._pdf_escape(extra)})"
         return Paragraph(html, cell)
 
-    def _upi_qr_png_bytes(self, data: dict) -> bytes | None:
+    def upi_intent_url(self, data: dict) -> str | None:
         upi = (data.get("pay_upi_id") or "").strip()
-        if not upi or qrcode is None:
+        if not upi:
             return None
         amount = self._fmt(data.get("invoice_value")).replace(",", "")
-        pn = (data.get("pay_account_holder") or data.get("pay_bank_name") or "JTCS").strip()
-        tn = (data.get("invoice_no") or "Invoice").strip()
+        pn = (data.get("pay_account_holder") or data.get("pay_bank_name") or "JTCS").strip() or "JTCS"
+        tn = (data.get("invoice_no") or "Invoice").strip() or "Invoice"
         params = {
             "pa": upi,
             "pn": pn,
@@ -145,7 +169,42 @@ class GstInvoicePdfService:
             "cu": "INR",
             "tn": tn,
         }
-        payload = "upi://pay?" + urllib.parse.urlencode(params)
+        return "upi://pay?" + urllib.parse.urlencode(params)
+
+    def pay_token(self, data: dict) -> str:
+        secret = current_app.secret_key
+        if isinstance(secret, str):
+            secret = secret.encode("utf-8")
+        raw = (
+            f"{data.get('invoice_id')}|{data.get('invoice_no') or ''}|"
+            f"{self._fmt(data.get('invoice_value')).replace(',', '')}"
+        )
+        return hmac.new(secret, raw.encode("utf-8"), hashlib.sha256).hexdigest()[:20]
+
+    def verify_pay_token(self, data: dict, token: str) -> bool:
+        expected = self.pay_token(data)
+        given = (token or "").strip()
+        if len(given) != len(expected):
+            return False
+        return hmac.compare_digest(expected, given)
+
+    def public_pay_url(self, data: dict) -> str | None:
+        if not self.upi_intent_url(data) or not data.get("invoice_id"):
+            return None
+        path = url_for(
+            "invoice_pay_public.public_upi_pay",
+            invoice_id=int(data["invoice_id"]),
+            t=self.pay_token(data),
+        )
+        base = (current_app.config.get("APP_BASE_URL") or "").strip().rstrip("/")
+        if not base and has_request_context():
+            base = (request.url_root or "").rstrip("/")
+        return (base + path) if base else path
+
+    def _upi_qr_png_bytes(self, data: dict) -> bytes | None:
+        payload = self.upi_intent_url(data)
+        if not payload or qrcode is None:
+            return None
         qr = qrcode.QRCode(version=None, box_size=4, border=1)
         qr.add_data(payload)
         qr.make(fit=True)
@@ -164,12 +223,61 @@ class GstInvoicePdfService:
         png = self._upi_qr_png_bytes(data)
         if not png:
             return None
-        return Image(io.BytesIO(png), width=32 * mm, height=32 * mm)
+        return _LinkedImage(
+            io.BytesIO(png),
+            width=32 * mm,
+            height=32 * mm,
+            link_url=self.upi_intent_url(data),
+        )
 
     def build_pdf(self, invoice_id: int) -> tuple[bytes, str]:
         data = self.invoice_service.get_record(invoice_id)
         safe_no = data["invoice_no"].replace("/", "-")
         return self._render_pdf(data), f"Invoice-{safe_no}.pdf"
+
+    @staticmethod
+    def _pdf_to_png(pdf_bytes: bytes) -> bytes:
+        errors: list[str] = []
+        try:
+            import pypdfium2 as pdfium
+
+            pdf = pdfium.PdfDocument(pdf_bytes)
+            page = pdf[0]
+            bitmap = page.render(scale=2)
+            image = bitmap.to_pil()
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception as exc:
+            errors.append(f"pypdfium2: {exc}")
+        try:
+            import fitz
+
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page = doc[0]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            return pix.tobytes("png")
+        except Exception as exc:
+            errors.append(f"pymupdf: {exc}")
+        try:
+            from pdf2image import convert_from_bytes
+
+            pages = convert_from_bytes(pdf_bytes, dpi=150)
+            if not pages:
+                raise RuntimeError("no pages")
+            buf = io.BytesIO()
+            pages[0].save(buf, format="PNG")
+            return buf.getvalue()
+        except Exception as exc:
+            errors.append(f"pdf2image: {exc}")
+        raise RuntimeError(
+            "Unable to create PNG from invoice. " + " | ".join(errors)
+        )
+
+    def build_png(self, invoice_id: int) -> tuple[bytes, str]:
+        pdf_bytes, pdf_name = self.build_pdf(invoice_id)
+        png_bytes = self._pdf_to_png(pdf_bytes)
+        return png_bytes, pdf_name.replace(".pdf", ".png")
 
     def _render_pdf(self, data: dict) -> bytes:
         company = self.invoice_service.company_profile()
@@ -191,7 +299,7 @@ class GstInvoicePdfService:
             parent=styles["Normal"],
             fontName="Helvetica-Bold",
             fontSize=13,
-            textColor=colors.HexColor("#154375"),
+            textColor=colors.HexColor("#0B2545"),
             leading=16,
         )
         small = ParagraphStyle(
@@ -209,7 +317,7 @@ class GstInvoicePdfService:
             fontName="Helvetica-Bold",
             fontSize=14,
             alignment=TA_CENTER,
-            textColor=colors.HexColor("#154375"),
+            textColor=colors.HexColor("#0B2545"),
             spaceBefore=6,
             spaceAfter=8,
         )
@@ -321,8 +429,8 @@ class GstInvoicePdfService:
         cust_table.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4F6F7")),
-                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
+                    ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4EB")),
+                    ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#D7E0EA")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 3),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 3),
@@ -367,7 +475,7 @@ class GstInvoicePdfService:
         items.setStyle(
             TableStyle(
                 [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#154375")),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2545")),
                     ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                     ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
                     ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -390,44 +498,77 @@ class GstInvoicePdfService:
         )
         story.append(Spacer(1, 6))
 
-        totals_rows = [
-            ["List Price:", self._fmt(data["list_price"])],
-            ["Discount:", self._fmt(data["discount_amount"])],
-            ["Taxable Value:", self._fmt(data["taxable_value"])],
-        ]
+        header_cell = ParagraphStyle(
+            "TotHead",
+            parent=cell,
+            fontName="Helvetica-Bold",
+            fontSize=7.5,
+            leading=9,
+            alignment=TA_CENTER,
+            textColor=colors.white,
+        )
+        value_cell = ParagraphStyle(
+            "TotVal",
+            parent=cell,
+            fontSize=8,
+            leading=10,
+            alignment=TA_CENTER,
+        )
+        value_cell_b = ParagraphStyle("TotValB", parent=value_cell, fontName="Helvetica-Bold")
+        round_off = float(data.get("round_off") or 0)
+        show_round = abs(round_off) >= 0.005
+        round_txt = f"{'+' if round_off > 0 else '-'}{self._fmt(abs(round_off))}"
         if data.get("tax_type") == "CGST_SGST":
-            totals_rows.append(
-                [
-                    f"CGST @ {self._fmt(data['cgst_rate'])}%:",
-                    self._fmt(data["cgst_amount"]),
-                ]
-            )
-            totals_rows.append(
-                [
-                    f"SGST @ {self._fmt(data['sgst_rate'])}%:",
-                    self._fmt(data["sgst_amount"]),
-                ]
-            )
+            tot_headers = [
+                Paragraph("List Price", header_cell),
+                Paragraph("Discount", header_cell),
+                Paragraph("Taxable Value", header_cell),
+                Paragraph(f"CGST @ {self._fmt(data['cgst_rate'])}%", header_cell),
+                Paragraph(f"SGST @ {self._fmt(data['sgst_rate'])}%", header_cell),
+            ]
+            tot_values = [
+                Paragraph(self._fmt(data["list_price"]), value_cell),
+                Paragraph(self._fmt(data["discount_amount"]), value_cell),
+                Paragraph(self._fmt(data["taxable_value"]), value_cell),
+                Paragraph(self._fmt(data["cgst_amount"]), value_cell),
+                Paragraph(self._fmt(data["sgst_amount"]), value_cell),
+            ]
         else:
-            totals_rows.append(
-                [
-                    f"IGST @ {self._fmt(data['igst_rate'])}%:",
-                    self._fmt(data["igst_amount"]),
-                ]
-            )
-        totals_rows.append(["Invoice Value:", self._fmt(data["invoice_value"])])
-
-        totals = Table(totals_rows, colWidths=[40 * mm, 30 * mm], hAlign="RIGHT")
+            tot_headers = [
+                Paragraph("List Price", header_cell),
+                Paragraph("Discount", header_cell),
+                Paragraph("Taxable Value", header_cell),
+                Paragraph(f"IGST @ {self._fmt(data['igst_rate'])}%", header_cell),
+            ]
+            tot_values = [
+                Paragraph(self._fmt(data["list_price"]), value_cell),
+                Paragraph(self._fmt(data["discount_amount"]), value_cell),
+                Paragraph(self._fmt(data["taxable_value"]), value_cell),
+                Paragraph(self._fmt(data["igst_amount"]), value_cell),
+            ]
+        if show_round:
+            tot_headers.append(Paragraph("Round off", header_cell))
+            tot_values.append(Paragraph(round_txt, value_cell))
+        tot_headers.append(Paragraph("Invoice Value", header_cell))
+        tot_values.append(Paragraph(self._fmt(data["invoice_value"]), value_cell_b))
+        n_tot = len(tot_headers)
+        tot_widths = [content_w / n_tot] * n_tot
+        totals = Table([tot_headers, tot_values], colWidths=tot_widths)
+        totals.hAlign = "LEFT"
+        last_col = n_tot - 1
         totals.setStyle(
             TableStyle(
                 [
-                    ("FONTNAME", (0, 0), (-1, -2), "Helvetica"),
-                    ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-                    ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#D6EAF8")),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2545")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("BACKGROUND", (last_col, 1), (last_col, 1), colors.HexColor("#FFF4EB")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 4),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
                 ]
             )
         )
@@ -468,13 +609,13 @@ class GstInvoicePdfService:
                 ),
             ]
             qr_img = self._upi_qr_image(data)
-            right_col: list = []
+            qr_col: list = []
             if qr_img is not None:
-                right_col.append(qr_img)
-                right_col.append(Spacer(1, 2))
-                right_col.append(
+                qr_col.append(qr_img)
+                qr_col.append(Spacer(1, 2))
+                qr_col.append(
                     Paragraph(
-                        f"Scan to pay Rs. {self._fmt(data.get('invoice_value'))}",
+                        f"Tap / scan to pay Rs. {self._fmt(data.get('invoice_value'))}",
                         ParagraphStyle(
                             "QrCap",
                             parent=small,
@@ -484,7 +625,7 @@ class GstInvoicePdfService:
                     )
                 )
             else:
-                right_col.append(
+                qr_col.append(
                     Paragraph(
                         "UPI QR not available<br/>(set UPI ID on bank master).",
                         ParagraphStyle(
@@ -497,15 +638,15 @@ class GstInvoicePdfService:
                     )
                 )
             pay_table = Table(
-                [[bank_lines, right_col]],
+                [[bank_lines, qr_col]],
                 colWidths=[content_w * 0.70, content_w * 0.30],
             )
             pay_table.hAlign = "LEFT"
             pay_table.setStyle(
                 TableStyle(
                     [
-                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#EBF5FB")),
-                        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
+                        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#E8F3FC")),
+                        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#D7E0EA")),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
                         ("LEFTPADDING", (0, 0), (-1, -1), 3),
                         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
@@ -520,9 +661,42 @@ class GstInvoicePdfService:
         else:
             story.append(Spacer(1, 8))
 
-        story.append(Paragraph(f"for {company['name']}", small))
-        story.append(Spacer(1, 22))
-        story.append(Paragraph("<b>Authorised Signatory</b>", small))
+        story.append(Paragraph(f"for {company['name']}", ParagraphStyle("SignFor", parent=small, alignment=TA_RIGHT)))
+        stamp_path = self._static_img_path("jtcs_invoice_stamp.png")
+        sign_path = self._static_img_path("jtcs_invoice_sign.png")
+        stamp_flow = ""
+        if stamp_path:
+            stamp_flow = Image(str(stamp_path), width=28 * mm, height=28 * mm, mask="auto")
+        sign_bits: list = []
+        if sign_path:
+            sign_bits.append(Image(str(sign_path), width=38 * mm, height=16 * mm, mask="auto"))
+            sign_bits.append(Spacer(1, 2))
+        sign_bits.append(
+            Paragraph(
+                "<b>Authorised Signatory</b>",
+                ParagraphStyle("SignLab", parent=small, alignment=TA_RIGHT),
+            )
+        )
+        sign_table = Table(
+            [[stamp_flow, sign_bits]],
+            colWidths=[32 * mm, 48 * mm],
+        )
+        sign_table.hAlign = "RIGHT"
+        sign_table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        story.append(Spacer(1, 4))
+        story.append(sign_table)
         story.append(Spacer(1, 10))
         story.append(Paragraph("<b>Terms &amp; Conditions:</b>", cell_b))
         story.append(

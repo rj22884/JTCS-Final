@@ -98,6 +98,8 @@ class GstInvoiceRepository:
             ("VoucherType", "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_VoucherType DEFAULT (N'SALE')"),
             ("PaymentDate", "DATE NULL"),
             ("AmountPaid", "DECIMAL(18,2) NULL"),
+            ("TallyBillNo", "NVARCHAR(50) NULL"),
+            ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
         ):
             self.session.execute(
                 text(
@@ -123,6 +125,28 @@ class GstInvoiceRepository:
             )
             self.session.commit()
         self._schema_ready = True
+
+    def find_by_tally_bill_no(self, bill_no: str) -> GstInvoice | None:
+        self.ensure_schema()
+        key = (bill_no or "").strip()
+        if not key:
+            return None
+        invoice_id = self.session.execute(
+            text(
+                """
+                SELECT TOP 1 InvoiceID
+                FROM dbo.GstInvoice
+                WHERE TallyBillNo IS NOT NULL
+                  AND LTRIM(RTRIM(TallyBillNo)) <> N''
+                  AND UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_no
+                ORDER BY InvoiceID DESC
+                """
+            ),
+            {"bill_no": key.upper()},
+        ).scalar()
+        if not invoice_id:
+            return None
+        return self.get_by_id(int(invoice_id))
 
     def list_all(
         self,

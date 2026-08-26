@@ -15,7 +15,7 @@ from app.decorators import login_required, require_delete_reauth
 from app.services.bank_master_service import BankMasterService
 from app.services.gst_invoice_pdf_service import GstInvoicePdfService
 from app.services.gst_invoice_service import GstInvoiceService
-from app.services.followup_service import tax_period_options
+from app.services.followup_service import lookup_tally_bill, tax_period_options
 from app.services.item_master_service import ItemMasterService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
@@ -360,6 +360,9 @@ def api_list_invoices():
             date_to=date_to,
             voucher_type=voucher_type,
         )
+        pdf_svc = GstInvoicePdfService()
+        for row in rows:
+            row["pay_url"] = pdf_svc.public_pay_url(row) or ""
         return jsonify({"ok": True, "rows": rows, "count": len(rows)})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -449,6 +452,44 @@ def api_navigate_invoice():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@bp.route("/api/invoices/tally-bill", methods=["GET"], strict_slashes=False)
+@login_required
+def api_tally_bill_lookup():
+    """Fill invoice customer / date / amount from GST, TDS, DSC, or ITR Followup."""
+    bill_no = (request.args.get("bill_no") or request.args.get("q") or "").strip()
+    if not bill_no:
+        return jsonify({"ok": False, "found": False, "error": "Enter Tally Bill Number."}), 400
+    try:
+        rec = lookup_tally_bill(bill_no)
+        if not rec:
+            return jsonify(
+                {
+                    "ok": False,
+                    "found": False,
+                    "error": "Tally Bill Number followup (GST / TDS / DSC / ITR) mein nahi mila.",
+                }
+            ), 404
+        existing = GstInvoiceService().find_invoice_for_tally_bill(bill_no)
+        if existing:
+            return jsonify(
+                {
+                    "ok": False,
+                    "found": True,
+                    "duplicate": True,
+                    "error": (
+                        f"Tally Bill Number {bill_no} par invoice pehle se hai "
+                        f"({existing.get('invoice_no') or existing.get('invoice_id')}). "
+                        "Duplicate allow nahi hai."
+                    ),
+                    "existing_invoice": existing,
+                    "record": rec,
+                }
+            ), 409
+        return jsonify({"ok": True, "found": True, "record": rec})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/api/invoices/next-no", methods=["GET"], strict_slashes=False)
 @login_required
 def api_next_invoice_no():
@@ -493,13 +534,19 @@ def preview_html(invoice_id: int):
         invoice = svc.get_record(invoice_id)
         company = svc.company_profile()
         qr_data_uri = pdf_svc.upi_qr_data_uri(invoice)
+        upi_pay_url = pdf_svc.upi_intent_url(invoice)
         logo_url = url_for("static", filename="img/jtcs_invoice_logo.png")
+        stamp_url = url_for("static", filename="img/jtcs_invoice_stamp.png")
+        sign_url = url_for("static", filename="img/jtcs_invoice_sign.png")
         html = render_template(
             "accounting/_invoice_preview_html.html",
             invoice=invoice,
             company=company,
             qr_data_uri=qr_data_uri,
+            upi_pay_url=upi_pay_url,
             logo_url=logo_url,
+            stamp_url=stamp_url,
+            sign_url=sign_url,
         )
         return jsonify(
             {
@@ -532,6 +579,24 @@ def download_pdf(invoice_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 404
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/invoice/<int:invoice_id>/png", methods=["GET"], strict_slashes=False)
+@login_required
+def download_png(invoice_id: int):
+    try:
+        content, filename = GstInvoicePdfService().build_png(invoice_id)
+        return Response(
+            content,
+            mimetype="image/png",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 
 @bp.route("/api/invoices/preview-pdf", methods=["POST"], strict_slashes=False)

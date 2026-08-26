@@ -35,6 +35,7 @@
     place: document.getElementById("invPlace"),
     placeCode: document.getElementById("invPlaceCode"),
     date: document.getElementById("invDate"),
+    tallyBillNo: document.getElementById("invTallyBillNo"),
     no: document.getElementById("invNo"),
     id: document.getElementById("invId"),
     rcm: document.getElementById("invRcm"),
@@ -42,6 +43,10 @@
     payBank: document.getElementById("invPayBank"),
     payDate: document.getElementById("invPayDate"),
     amountPaid: document.getElementById("invAmountPaid"),
+    roundOffAmt: document.getElementById("invRoundOffAmt"),
+    roundOffSign: document.getElementById("invRoundOffSign"),
+    roundOffAdd: document.getElementById("invRoundOffAdd"),
+    roundOffSub: document.getElementById("invRoundOffSub"),
     kindGst: document.getElementById("invKindGst"),
     kindNonGst: document.getElementById("invKindNonGst"),
     taxHint: document.getElementById("invTaxHint"),
@@ -65,6 +70,7 @@
   let searchTimer = null;
   let gridTimer = null;
   let editingId = null;
+  let lastTallyLookup = "";
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -363,6 +369,114 @@
     if (cell) cell.textContent = taxable.toFixed(2);
   }
 
+  function computeLocalTotals() {
+    let listPrice = 0;
+    let disc = 0;
+    let taxable = 0;
+    let gstUsed = 0;
+    els.body?.querySelectorAll(".inv-line").forEach(function (tr) {
+      const qty = parseFloat(tr.querySelector(".inv-qty")?.value || "0") || 0;
+      const rate = parseFloat(tr.querySelector(".inv-rate")?.value || "0") || 0;
+      const d = parseFloat(tr.querySelector(".inv-disc")?.value || "0") || 0;
+      const gst = parseFloat(tr.querySelector(".inv-gst")?.value || "0") || 0;
+      listPrice += qty * rate;
+      disc += d;
+      taxable += Math.max(0, qty * rate - d);
+      if (gst > gstUsed) gstUsed = gst;
+    });
+    const placeCode = (els.placeCode?.value || "").trim();
+    const seller = String(api.companyStateCode || "05").trim();
+    const intra = !!placeCode && placeCode === seller;
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
+    let cgstRate = 0;
+    let sgstRate = 0;
+    let igstRate = 0;
+    if (intra) {
+      cgstRate = gstUsed / 2;
+      sgstRate = gstUsed / 2;
+      cgst = (taxable * cgstRate) / 100;
+      sgst = (taxable * sgstRate) / 100;
+    } else {
+      igstRate = gstUsed;
+      igst = (taxable * igstRate) / 100;
+    }
+    const baseValue = taxable + cgst + sgst + igst;
+    const roundOff = roundOffSigned();
+    return {
+      list_price: listPrice,
+      discount_amount: disc,
+      taxable_value: taxable,
+      cgst_rate: cgstRate,
+      cgst_amount: cgst,
+      sgst_rate: sgstRate,
+      sgst_amount: sgst,
+      igst_rate: igstRate,
+      igst_amount: igst,
+      round_off: roundOff,
+      invoice_value: Math.max(0, baseValue + roundOff),
+      amount_in_words: (els.words && els.words.textContent) || "",
+      tax_type: intra ? "CGST_SGST" : "IGST",
+    };
+  }
+
+  function roundOffMagnitude() {
+    return Math.abs(parseFloat(els.roundOffAmt?.value || "0") || 0);
+  }
+
+  function roundOffSigned() {
+    const mag = roundOffMagnitude();
+    const sign = (els.roundOffSign?.value || "").toLowerCase();
+    if (sign === "add") return mag;
+    if (sign === "sub") return -mag;
+    return 0;
+  }
+
+  function setRoundOffSign(sign) {
+    const next = sign === "add" || sign === "sub" ? sign : "";
+    if (els.roundOffSign) els.roundOffSign.value = next;
+    els.roundOffAdd?.classList.toggle("is-on", next === "add");
+    els.roundOffSub?.classList.toggle("is-on", next === "sub");
+  }
+
+  function applyRoundOff(sign) {
+    const mag = roundOffMagnitude();
+    if (!mag) {
+      showStatus("Round off value enter karein, phir + ya − dabayein.", "warning");
+      els.roundOffAmt?.focus();
+      return;
+    }
+    setRoundOffSign(sign);
+    schedulePreview();
+  }
+
+  function resetRoundOff() {
+    if (els.roundOffAmt) els.roundOffAmt.value = "";
+    setRoundOffSign("");
+  }
+
+  function setRoundOffFromRecord(record) {
+    const signed = Number(record.round_off != null ? record.round_off : 0) || 0;
+    const mag =
+      Number(
+        record.round_off_amount != null ? record.round_off_amount : Math.abs(signed)
+      ) || 0;
+    let sign = (record.round_off_sign || "").toLowerCase();
+    if (!sign) {
+      if (signed > 0) sign = "add";
+      else if (signed < 0) sign = "sub";
+    }
+    if (els.roundOffAmt) els.roundOffAmt.value = mag ? mag.toFixed(2) : "";
+    setRoundOffSign(sign);
+  }
+
+  function schedulePreview() {
+    applyTotals(computeLocalTotals());
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(runTotalsPreview, 350);
+  }
+
   function collectPayload() {
     const lines = [];
     els.body.querySelectorAll(".inv-line").forEach(function (tr) {
@@ -396,6 +510,9 @@
       place_of_supply_code: els.placeCode?.value || "",
       reverse_charge: els.rcm?.value || "0",
       notes: els.notes?.value || "",
+      tally_bill_no: els.tallyBillNo?.value || "",
+      round_off_amount: els.roundOffAmt?.value || "",
+      round_off_sign: els.roundOffSign?.value || "",
       payment_bank_account_id: els.payBank?.value || "",
       payment_date: els.payDate?.value || "",
       amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
@@ -433,12 +550,8 @@
     }
   }
 
-  function schedulePreview() {
-    clearTimeout(previewTimer);
-    previewTimer = setTimeout(runTotalsPreview, 350);
-  }
-
   async function runTotalsPreview() {
+    applyTotals(computeLocalTotals());
     const payload = collectPayload();
     if (!payload.lines.length || !payload.customer_name) return;
     try {
@@ -476,6 +589,9 @@
     if (els.placeCode) els.placeCode.value = record.place_of_supply_code || "";
     if (els.rcm) els.rcm.value = record.reverse_charge ? "1" : "0";
     if (els.notes) els.notes.value = record.notes || "";
+    if (els.tallyBillNo) els.tallyBillNo.value = record.tally_bill_no || "";
+    lastTallyLookup = (record.tally_bill_no || "").trim();
+    setRoundOffFromRecord(record);
     if (els.payBank) {
       const payId = record.payment_bank_account_id
         ? String(record.payment_bank_account_id)
@@ -560,6 +676,9 @@
     if (els.payBank) els.payBank.value = "";
     if (els.payDate) els.payDate.value = api.today || new Date().toISOString().slice(0, 10);
     if (els.amountPaid) els.amountPaid.value = "";
+    if (els.tallyBillNo) els.tallyBillNo.value = "";
+    lastTallyLookup = "";
+    resetRoundOff();
     if (els.date) {
       // Purchase: user enters supplier invoice date; Sale defaults to today.
       els.date.value =
@@ -697,7 +816,7 @@
     let phone = mobile;
     if (phone.length === 10) phone = "91" + phone;
     const company = api.companyName || "JTCS";
-    const msg =
+    let msg =
       "Dear " +
       (row.customer_name || "Customer") +
       ",\n\n" +
@@ -711,9 +830,13 @@
       fmtDate(row.invoice_date) +
       "\n" +
       "Amount: Rs. " +
-      money(row.invoice_value) +
-      "\n\n" +
-      "Thank you.";
+      money(row.invoice_value);
+    if (row.pay_url) {
+      msg +=
+        "\n\nPay now (Google Pay / PhonePe / Paytm):\n" +
+        row.pay_url;
+    }
+    msg += "\n\nThank you.";
     const url =
       "https://wa.me/" +
       (phone || "") +
@@ -774,6 +897,9 @@
         '<a class="btn btn-outline-secondary btn-sm me-1" href="' +
         apiUrl(api.pdf, row.invoice_id) +
         '" target="_blank" rel="noopener" title="PDF"><i class="bi bi-file-earmark-pdf"></i></a>' +
+        '<a class="btn btn-outline-secondary btn-sm me-1" href="' +
+        apiUrl(api.png, row.invoice_id) +
+        '" target="_blank" rel="noopener" title="PNG image"><i class="bi bi-image"></i></a>' +
         '<button type="button" class="btn btn-outline-success btn-sm inv-g-wa" data-id="' +
         row.invoice_id +
         '" title="WhatsApp"><i class="bi bi-whatsapp"></i></button>' +
@@ -785,6 +911,7 @@
         customer_name: row.customer_name,
         contact_mobile: row.contact_mobile,
         invoice_value: row.invoice_value,
+        pay_url: row.pay_url || "",
       });
       els.gridBody.appendChild(tr);
     });
@@ -812,6 +939,149 @@
   function hideSuggest() {
     els.customerSuggest?.classList.add("d-none");
     if (els.customerSuggest) els.customerSuggest.innerHTML = "";
+  }
+
+  function findItemForModule(moduleCode) {
+    const needle = String(moduleCode || "").toUpperCase();
+    if (!needle) return null;
+    return (
+      items.find(function (it) {
+        const hay = (
+          (it.item_code || "") +
+          " " +
+          (it.item_name || "") +
+          " " +
+          (it.label || "")
+        ).toUpperCase();
+        return hay.indexOf(needle) >= 0;
+      }) || null
+    );
+  }
+
+  function mapFollowupQuarter(raw) {
+    const value = String(raw || "").trim();
+    if (!value) return "";
+    if (serviceQuarters.indexOf(value) >= 0) return value;
+    const key = value.toUpperCase().slice(0, 2);
+    const map = {
+      Q1: "Q1-Apr-May-Jun",
+      Q2: "Q2-Jul-Aug-Sep",
+      Q3: "Q3-Oct-Nov-Dec",
+      Q4: "Q4-Jan-Feb-Mar",
+    };
+    return map[key] || "";
+  }
+
+  function applyTallyAmount(rec) {
+    const item = findItemForModule(rec.module_code);
+    const gst = item && item.gst_rate_percent != null ? item.gst_rate_percent : 18;
+    const split = splitGstInclusive(rec.bill_amount != null ? rec.bill_amount : 0, gst);
+    clearLines();
+    addLine({
+      item_id: item ? item.item_id : "",
+      tax_period: rec.tax_period || "",
+      quarter: mapFollowupQuarter(rec.quarter),
+      particulars: rec.particulars || "",
+      hsn_sac: item ? item.hsn_sac : "",
+      unit: item ? item.unit || "NOS" : "NOS",
+      qty: 1,
+      rate: split.rate,
+      gst_rate_percent: gst,
+    });
+    if (els.roundOffAmt) {
+      els.roundOffAmt.value = split.roundOff ? Number(split.roundOff).toFixed(2) : "";
+    }
+    setRoundOffSign(split.sign);
+  }
+
+  function q2(n) {
+    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+  }
+
+  function isIntraState() {
+    const placeCode = (els.placeCode?.value || "").trim();
+    const seller = String(api.companyStateCode || "05").trim();
+    return !!placeCode && placeCode === seller;
+  }
+
+  function splitGstInclusive(gross, gstRate) {
+    gross = q2(gross);
+    gstRate = q2(gstRate);
+    if (gross <= 0) return { rate: 0, roundOff: 0, sign: "" };
+    if (gstRate <= 0) return { rate: gross, roundOff: 0, sign: "" };
+    const taxable = q2((gross * 100) / (100 + gstRate));
+    let gstTotal;
+    if (isIntraState()) {
+      const half = q2(gstRate / 2);
+      gstTotal = q2(q2((taxable * half) / 100) + q2((taxable * half) / 100));
+    } else {
+      gstTotal = q2((taxable * gstRate) / 100);
+    }
+    const roundOff = q2(gross - q2(taxable + gstTotal));
+    let sign = "";
+    if (roundOff > 0) sign = "add";
+    else if (roundOff < 0) sign = "sub";
+    return { rate: taxable, roundOff: Math.abs(roundOff), sign: sign };
+  }
+
+  async function applyTallyBill(rec) {
+    if (!rec) return;
+    if (rec.invoice_date && els.date) {
+      els.date.value = String(rec.invoice_date).slice(0, 10);
+      await refreshInvoiceNo().catch(function () {});
+    }
+    if (rec.customer_id) {
+      try {
+        await pickCustomer(rec.customer_id);
+      } catch (_err) {
+        if (els.customerId) els.customerId.value = rec.customer_id || "";
+        if (els.customerName) els.customerName.value = rec.customer_name || "";
+        if (els.customerSearch) els.customerSearch.value = rec.customer_name || "";
+      }
+    } else if (rec.customer_name) {
+      if (els.customerName) els.customerName.value = rec.customer_name;
+      if (els.customerSearch) els.customerSearch.value = rec.customer_name;
+    }
+    applyTallyAmount(rec);
+    const amt =
+      rec.bill_amount != null
+        ? Number(rec.bill_amount).toLocaleString("en-IN", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })
+        : "0.00";
+    showStatus(
+      (rec.module_title || rec.module_code || "Followup") +
+        " se bill mila — " +
+        (rec.customer_name || "Customer") +
+        " · Amount ₹" +
+        amt +
+        ". Invoice isi naam par ready hai, Save Invoice dabayein.",
+      "success"
+    );
+    schedulePreview();
+  }
+
+  async function lookupTallyBill(force) {
+    if (voucherType === "PURCHASE" || !api.tallyBill || !els.tallyBillNo) return;
+    const billNo = (els.tallyBillNo.value || "").trim();
+    if (!billNo) return;
+    if (!force && billNo === lastTallyLookup) return;
+    lastTallyLookup = billNo;
+    showStatus("Tally Bill Number followup mein dhoondh rahe hain…", "info");
+    try {
+      const url = new URL(api.tallyBill, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.record) {
+        throw new Error(data.error || "Tally Bill Number nahi mila.");
+      }
+      await applyTallyBill(data.record);
+    } catch (err) {
+      lastTallyLookup = "";
+      showStatus(err.message || String(err), "danger");
+    }
   }
 
   async function pickCustomer(id) {
@@ -907,6 +1177,38 @@
   els.date?.addEventListener("change", function () {
     refreshInvoiceNo().catch(function () {});
     schedulePreview();
+  });
+
+  els.payBank?.addEventListener("change", function () {
+    schedulePreview();
+  });
+
+  els.roundOffAdd?.addEventListener("click", function () {
+    applyRoundOff("add");
+  });
+  els.roundOffSub?.addEventListener("click", function () {
+    applyRoundOff("sub");
+  });
+  els.roundOffAmt?.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      const sign = (els.roundOffSign?.value || "").toLowerCase() || "sub";
+      applyRoundOff(sign);
+    }
+  });
+
+  els.tallyBillNo?.addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      lookupTallyBill(true).catch(function (err) {
+        showStatus(err.message || String(err), "danger");
+      });
+    }
+  });
+  els.tallyBillNo?.addEventListener("blur", function () {
+    lookupTallyBill(false).catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
   });
 
   els.addLine?.addEventListener("click", function () {

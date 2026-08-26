@@ -8,8 +8,10 @@ from app.repositories.transaction_repository import MasterRepository
 from app.services.menu_service import MenuService
 from app.services.ocr_provider_service import OcrProviderService
 from app.services.stamp_ocr_service import StampOcrService
+from app.services.shcil_open_login_service import SHCIL_LOGIN_URL
 from app.services.stamp_service import StampService
 from app.utils.roles import has_admin_role
+from app.utils.runtime_env import is_vps_runtime
 
 bp = Blueprint("stamp", __name__, url_prefix="/shcil")
 
@@ -63,6 +65,8 @@ def stamp_activity():
         repost_mobile=repost_mobile,
         ocr_status=ocr_status,
         is_admin=has_admin_role(session.get("role")),
+        is_vps=is_vps_runtime(),
+        shcil_login_url=SHCIL_LOGIN_URL,
         load_stamp_id=load_stamp_id,
         website_prefill={
             "mobile": (request.args.get("mobile") or "").strip(),

@@ -91,16 +91,40 @@
   <div class="inv-html-words"><strong>Amount (In Words):</strong> {{ invoice.amount_in_words or dash }}</div>
 
   <table class="inv-html-totals">
-    <tr><td>List Price:</td><td class="text-end">{{ money(invoice.list_price) }}</td></tr>
-    <tr><td>Discount:</td><td class="text-end">{{ money(invoice.discount_amount) }}</td></tr>
-    <tr><td>Taxable Value:</td><td class="text-end">{{ money(invoice.taxable_value) }}</td></tr>
-    {% if invoice.tax_type == 'CGST_SGST' %}
-    <tr><td>CGST @ {{ money(invoice.cgst_rate) }}%:</td><td class="text-end">{{ money(invoice.cgst_amount) }}</td></tr>
-    <tr><td>SGST @ {{ money(invoice.sgst_rate) }}%:</td><td class="text-end">{{ money(invoice.sgst_amount) }}</td></tr>
-    {% else %}
-    <tr><td>IGST @ {{ money(invoice.igst_rate) }}%:</td><td class="text-end">{{ money(invoice.igst_amount) }}</td></tr>
-    {% endif %}
-    <tr class="inv-html-total-row"><td>Invoice Value:</td><td class="text-end">{{ money(invoice.invoice_value) }}</td></tr>
+    <thead>
+      <tr>
+        <th>List Price</th>
+        <th>Discount</th>
+        <th>Taxable Value</th>
+        {% if invoice.tax_type == 'CGST_SGST' %}
+        <th>CGST @ {{ money(invoice.cgst_rate) }}%</th>
+        <th>SGST @ {{ money(invoice.sgst_rate) }}%</th>
+        {% else %}
+        <th>IGST @ {{ money(invoice.igst_rate) }}%</th>
+        {% endif %}
+        {% if invoice.round_off and invoice.round_off != 0 %}
+        <th>Round off</th>
+        {% endif %}
+        <th>Invoice Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ money(invoice.list_price) }}</td>
+        <td>{{ money(invoice.discount_amount) }}</td>
+        <td>{{ money(invoice.taxable_value) }}</td>
+        {% if invoice.tax_type == 'CGST_SGST' %}
+        <td>{{ money(invoice.cgst_amount) }}</td>
+        <td>{{ money(invoice.sgst_amount) }}</td>
+        {% else %}
+        <td>{{ money(invoice.igst_amount) }}</td>
+        {% endif %}
+        {% if invoice.round_off and invoice.round_off != 0 %}
+        <td>{% if invoice.round_off > 0 %}+{% endif %}{{ money(invoice.round_off) }}</td>
+        {% endif %}
+        <td class="inv-html-total-cell">{{ money(invoice.invoice_value) }}</td>
+      </tr>
+    </tbody>
   </table>
 
   {% if invoice.pay_account_number or invoice.pay_bank_name or invoice.pay_upi_id %}
@@ -117,8 +141,15 @@
     </div>
     <div class="inv-html-pay-qr">
       {% if qr_data_uri %}
+      {% if upi_pay_url %}
+      <a class="inv-html-pay-qr-link" href="{{ upi_pay_url }}">
+        <img src="{{ qr_data_uri }}" alt="UPI QR">
+        <div class="small">Tap or scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
+      </a>
+      {% else %}
       <img src="{{ qr_data_uri }}" alt="UPI QR">
       <div class="small">Scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
+      {% endif %}
       {% else %}
       <div class="text-muted small">UPI QR not available<br>(set UPI ID on bank master).</div>
       {% endif %}
@@ -127,9 +158,18 @@
   {% endif %}
 
   <div class="inv-html-sign">
-    <div>for {{ company.name }}</div>
-    <div class="inv-html-sign-space"></div>
-    <div><strong>Authorised Signatory</strong></div>
+    <div class="inv-html-sign-for">for {{ company.name }}</div>
+    <div class="inv-html-sign-marks">
+      {% if stamp_url %}
+      <img class="inv-html-stamp" src="{{ stamp_url }}" alt="Office stamp">
+      {% endif %}
+      <div class="inv-html-sign-col">
+        {% if sign_url %}
+        <img class="inv-html-sign-img" src="{{ sign_url }}" alt="Authorised signatory">
+        {% endif %}
+        <div><strong>Authorised Signatory</strong></div>
+      </div>
+    </div>
   </div>
 
   <div class="inv-html-terms">

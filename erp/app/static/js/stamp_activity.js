@@ -2564,6 +2564,8 @@
   }
   loadMainGrid();
 
+  var shcilCreds = { userId: "", password: "" };
+
   function setShcilLoginStatus(message, kind) {
     var box = document.getElementById("stampShcilLoginStatus");
     if (!box) return;
@@ -2573,11 +2575,72 @@
     if (message) box.classList.add(kind === "error" ? "is-error" : kind === "ok" ? "is-ok" : "is-info");
   }
 
+  function hideShcilCreds() {
+    var box = document.getElementById("stampShcilCreds");
+    if (box) box.classList.add("d-none");
+  }
+
+  function showShcilCreds(userId, password, loginUrl) {
+    shcilCreds.userId = userId || "";
+    shcilCreds.password = password || "";
+    var box = document.getElementById("stampShcilCreds");
+    var userEl = document.getElementById("stampShcilUserIdText");
+    var passEl = document.getElementById("stampShcilPasswordText");
+    var link = document.getElementById("stampShcilOpenLink");
+    if (userEl) userEl.textContent = shcilCreds.userId;
+    if (passEl) passEl.textContent = shcilCreds.password;
+    if (link && loginUrl) link.href = loginUrl;
+    if (box) box.classList.remove("d-none");
+  }
+
+  function copyShcilValue(text) {
+    var value = String(text || "");
+    if (!value) return Promise.resolve();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(value);
+    }
+    return new Promise(function (resolve, reject) {
+      var input = document.createElement("textarea");
+      input.value = value;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.left = "-9999px";
+      document.body.appendChild(input);
+      input.select();
+      try {
+        document.execCommand("copy");
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+      document.body.removeChild(input);
+    });
+  }
+
+  function openShcilPopup(loginUrl, role) {
+    var dest = loginUrl || window.STAMP_SHCIL_LOGIN_URL || "";
+    if (!dest) return null;
+    return window.open(
+      dest,
+      "jtcsShcilLogin_" + String(role || "deo"),
+      "width=1200,height=840,scrollbars=yes,resizable=yes"
+    );
+  }
+
   async function openShcilLogin(role, btn) {
     var csrf = window.STAMP_CSRF || "";
     var url = window.STAMP_OPEN_LOGIN_URL || "/shcil/stamp-activity/open-login";
+    var loginUrl = window.STAMP_SHCIL_LOGIN_URL || "";
+    var clientHint = !!window.STAMP_SHCIL_CLIENT_LOGIN;
+    var popup = null;
     if (btn) btn.disabled = true;
-    setShcilLoginStatus("Opening SHCIL " + String(role || "").toUpperCase() + " login and filling User ID / password...", "info");
+    hideShcilCreds();
+    if (clientHint) {
+      popup = openShcilPopup(loginUrl, role);
+      setShcilLoginStatus("Opening SHCIL " + String(role || "").toUpperCase() + " login in this browser...", "info");
+    } else {
+      setShcilLoginStatus("Opening SHCIL " + String(role || "").toUpperCase() + " login and filling User ID / password...", "info");
+    }
     try {
       var res = await fetch(url, {
         method: "POST",
@@ -2591,13 +2654,39 @@
       });
       var data = await res.json();
       if (!res.ok || data.ok === false) throw new Error(data.error || "Unable to open SHCIL login.");
-      setShcilLoginStatus(data.message || "User ID and password filled. Close the SHCIL window yourself when finished.", "ok");
+      var dest = data.login_url || loginUrl;
+      if (data.mode === "client") {
+        if (!popup || popup.closed) popup = openShcilPopup(dest, role);
+        else {
+          try { popup.location.href = dest; } catch (e) {}
+        }
+        showShcilCreds(data.user_id, data.password, dest);
+        copyShcilValue(data.user_id).catch(function () {});
+        var extra = popup ? "" : " Popup blocked — use “Open SHCIL login page” below.";
+        setShcilLoginStatus((data.message || "SHCIL login opened.") + extra, popup ? "ok" : "error");
+      } else {
+        if (popup && !popup.closed) {
+          try { popup.close(); } catch (e) {}
+        }
+        hideShcilCreds();
+        setShcilLoginStatus(data.message || "User ID and password filled. Close the SHCIL window yourself when finished.", "ok");
+      }
     } catch (err) {
+      if (clientHint && loginUrl && (!popup || popup.closed)) {
+        popup = openShcilPopup(loginUrl, role);
+      }
       setShcilLoginStatus((err && err.message) || "Unable to open SHCIL login.", "error");
     } finally {
       if (btn) btn.disabled = false;
     }
   }
+
+  document.getElementById("stampShcilCopyUserBtn")?.addEventListener("click", function () {
+    copyShcilValue(shcilCreds.userId).catch(function () {});
+  });
+  document.getElementById("stampShcilCopyPassBtn")?.addEventListener("click", function () {
+    copyShcilValue(shcilCreds.password).catch(function () {});
+  });
 
   document.getElementById("stampLoginDeoBtn")?.addEventListener("click", function () {
     openShcilLogin("deo", this);

@@ -367,6 +367,36 @@ class ShcilOpenLoginService:
         pwd.fill("")
         pwd.fill(password)
 
+    @staticmethod
+    def _use_client_browser() -> bool:
+        """VPS / headless Linux cannot open a window on the operator's PC."""
+        try:
+            from app.utils.runtime_env import is_vps_runtime
+
+            if is_vps_runtime():
+                return True
+        except Exception:
+            pass
+        if os.name != "nt" and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return True
+        return False
+
+    def _client_payload(self, role: str, user_id: str, password: str) -> dict:
+        label = role.upper()
+        return {
+            "ok": True,
+            "mode": "client",
+            "role": role,
+            "user_id": user_id,
+            "password": password,
+            "login_url": SHCIL_LOGIN_URL,
+            "message": (
+                f"SHCIL {label} login page opened in this browser. "
+                "User ID and password are shown below — paste them on the SHCIL page, "
+                "type the captcha, then click LOGIN."
+            ),
+        }
+
     def open_login(self, role: str) -> dict:
         wanted = "admin" if str(role or "").strip().lower() == "admin" else "deo"
         cred = CredentialsMasterService().find_shcil_login(role=wanted)
@@ -378,10 +408,13 @@ class ShcilOpenLoginService:
         if not user_id or not password:
             raise ValueError("SHCIL User ID or password is missing in Credentials Master.")
 
+        if self._use_client_browser():
+            return self._client_payload(wanted, user_id, password)
+
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError as exc:
-            raise ValueError("Playwright is not installed. Run: pip install playwright") from exc
+        except ImportError:
+            return self._client_payload(wanted, user_id, password)
 
         started = threading.Event()
         error_box: list[BaseException] = []
@@ -409,10 +442,12 @@ class ShcilOpenLoginService:
                     result_box.append(
                         {
                             "ok": True,
+                            "mode": "desktop",
                             "role": wanted,
                             "user_id": user_id,
                             "browser": kind,
                             "already_logged_in": True,
+                            "login_url": SHCIL_LOGIN_URL,
                             "message": (
                                 f"SHCIL {wanted.upper()} is already open in {browser_label}. "
                                 "The app will not touch stamp pages. Close that window yourself when finished."
@@ -424,10 +459,12 @@ class ShcilOpenLoginService:
                     result_box.append(
                         {
                             "ok": True,
+                            "mode": "desktop",
                             "role": wanted,
                             "user_id": user_id,
                             "browser": kind,
                             "already_logged_in": False,
+                            "login_url": SHCIL_LOGIN_URL,
                             "message": (
                                 f"SHCIL {wanted.upper()} opened in {browser_label}. "
                                 "User ID and password are filled. Type the captcha and click LOGIN yourself. "
@@ -468,5 +505,5 @@ class ShcilOpenLoginService:
         if not started.wait(timeout=90):
             raise ValueError("SHCIL login window is taking too long to open. Try again.")
         if error_box:
-            raise ValueError(str(error_box[0]))
-        return result_box[0] if result_box else {"ok": True, "role": wanted, "user_id": user_id}
+            return self._client_payload(wanted, user_id, password)
+        return result_box[0] if result_box else self._client_payload(wanted, user_id, password)

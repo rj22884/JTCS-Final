@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260823logins1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260826vpslogin1">
 {% endblock %}
 
 {% block content %}
@@ -60,6 +60,19 @@
         <button type="button" class="btn btn-sm stamp-login-admin" id="stampLoginAdminBtn">Login Admin</button>
       </div>
       <div id="stampShcilLoginStatus" class="stamp-shcil-login-status d-none" role="status"></div>
+      <div id="stampShcilCreds" class="stamp-shcil-creds d-none">
+        <a id="stampShcilOpenLink" class="stamp-shcil-open-link" href="#" target="_blank" rel="noopener">Open SHCIL login page</a>
+        <div class="stamp-shcil-cred-line">
+          <span>User ID</span>
+          <strong id="stampShcilUserIdText"></strong>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyUserBtn">Copy</button>
+        </div>
+        <div class="stamp-shcil-cred-line">
+          <span>Password</span>
+          <strong id="stampShcilPasswordText"></strong>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyPassBtn">Copy</button>
+        </div>
+      </div>
       <div id="stampMobileGate" class="jtcs-card stamp-mobile-gate stamp-mobile-gate-top">
         <div class="stamp-section-head">Start Stamp Activity</div>
         <p class="small text-muted mb-2">Enter mobile number to begin. The form will clear each new entry.</p>
@@ -504,6 +517,8 @@
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
   window.STAMP_OPEN_LOGIN_URL = {{ url_for('stamp.stamp_open_login') | tojson }};
+  window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
+  window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260823logins1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260826vpslogin1"></script>
 {% endblock %}

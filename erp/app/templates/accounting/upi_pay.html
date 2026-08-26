@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pay {{ invoice.invoice_no }} · JTCS</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #e8eef6;
+      color: #123;
+    }
+    .wrap {
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 22px 18px;
+      box-shadow: 0 8px 28px rgba(11, 37, 69, 0.12);
+      text-align: center;
+    }
+    .brand { font-weight: 800; color: #154375; font-size: 18px; }
+    .muted { color: #5d6d7e; font-size: 13px; margin: 6px 0 14px; }
+    .amount { font-size: 28px; font-weight: 800; color: #0b2545; margin: 8px 0 4px; }
+    .inv { font-size: 13px; color: #334; margin-bottom: 16px; }
+    .pay-btn {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      background: #0f766e;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin: 8px 0;
+    }
+    .pay-btn.alt { background: #1d4ed8; }
+    .qr { width: 168px; height: 168px; margin: 12px auto; display: block; }
+    .upi { font-family: Consolas, monospace; font-size: 13px; word-break: break-all; }
+    .hint { font-size: 12px; color: #5d6d7e; margin-top: 12px; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="brand">{{ company.name }}</div>
+      <div class="muted">UPI payment</div>
+      <div class="amount">Rs. {{ '%.2f'|format(invoice.invoice_value|float) }}</div>
+      <div class="inv">Invoice {{ invoice.invoice_no }}</div>
+      <a class="pay-btn" id="payBtn" href="{{ upi_uri }}">Pay with UPI app</a>
+      {% if invoice.pay_upi_id %}
+      <div class="upi">{{ invoice.pay_upi_id }}</div>
+      {% endif %}
+      {% if qr_data_uri %}
+      <img class="qr" src="{{ qr_data_uri }}" alt="UPI QR">
+      {% endif %}
+      <p class="hint">
+        This page opens Google Pay, PhonePe, Paytm or any UPI app on this phone.
+        If nothing opens, tap <strong>Pay with UPI app</strong> or scan the QR.
+      </p>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var uri = {{ upi_uri | tojson }};
+      if (!uri) return;
+      setTimeout(function () {
+        window.location.href = uri;
+      }, 250);
+    })();
+  </script>
+</body>
+</html>

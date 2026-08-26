@@ -172,6 +172,40 @@ class FollowupRepository:
             self.session.flush()
             self._entry_master_columns = None
 
+    def find_by_tally_bill_no(self, bill_no: str) -> dict | None:
+        """Look up an active GST / TDS / DSC / ITR followup by Tally Bill Number."""
+        key = (bill_no or "").strip()
+        if not key:
+            return None
+        available = self._entry_master_columns_set()
+        amount_sql = "e.BillAmount" if "BillAmount" in available else "CAST(NULL AS DECIMAL(18, 2)) AS BillAmount"
+        quarter_sql = "e.Quarter" if "Quarter" in available else "CAST(NULL AS NVARCHAR(10)) AS Quarter"
+        sql = f"""
+            SELECT TOP 1
+                e.EntryID,
+                e.ModuleCode,
+                e.WorkDate,
+                e.TaxPeriod,
+                e.CustomerID,
+                e.ReturnType,
+                e.BillNo,
+                e.BillDate,
+                {amount_sql},
+                {quarter_sql},
+                c.CustomerName,
+                c.MobileNumber
+            FROM FollowupEntryMaster e
+            INNER JOIN CustomerMaster c ON c.CustomerID = e.CustomerID
+            WHERE e.IsActive = 1
+              AND e.ModuleCode IN (N'GST', N'TDS', N'DSC', N'ITR')
+              AND e.BillNo IS NOT NULL
+              AND UPPER(LTRIM(RTRIM(e.BillNo))) = :bill_no
+            ORDER BY CASE WHEN e.BillDate IS NULL THEN 1 ELSE 0 END,
+                     e.BillDate DESC, e.WorkDate DESC, e.EntryID DESC
+        """
+        row = self.session.execute(text(sql), {"bill_no": key.upper()}).mappings().first()
+        return dict(row) if row else None
+
     def find_active_itr_by_customer_period(self, customer_name: str, tax_period: str) -> FollowupEntryMaster | None:
         from app.models.transactions import CustomerMaster
 

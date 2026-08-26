@@ -83,6 +83,58 @@ def default_tax_period(today: date | None = None) -> str:
     return tax_period_for_year(current_fy_start_year(today))
 
 
+def _iso_date(value) -> str | None:
+    if not value:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]
+    text = str(value).strip()
+    return text[:10] if text else None
+
+
+def lookup_tally_bill(bill_no: str) -> dict | None:
+    """Resolve a Tally Bill Number from GST / TDS / DSC / ITR Followup."""
+    key = (bill_no or "").strip()
+    if not key:
+        return None
+    repo = FollowupRepository()
+    try:
+        repo.ensure_billing_columns()
+    except Exception:
+        repo.session.rollback()
+    row = repo.find_by_tally_bill_no(key)
+    if not row:
+        return None
+    module = (row.get("ModuleCode") or "").strip().upper()
+    meta = MODULE_META.get(module) or {}
+    title = (meta.get("title") or module or "Followup").strip()
+    tax_period = (row.get("TaxPeriod") or "").strip()
+    return_type = (row.get("ReturnType") or "").strip()
+    parts = [f"{title} Followup"]
+    if tax_period:
+        parts.append(tax_period)
+    particulars = " — ".join(parts)
+    if return_type:
+        particulars = f"{particulars} ({return_type})"
+    bill_date = row.get("BillDate") or row.get("WorkDate")
+    amount = row.get("BillAmount")
+    return {
+        "entry_id": row.get("EntryID"),
+        "module_code": module,
+        "module_title": title,
+        "customer_id": row.get("CustomerID"),
+        "customer_name": (row.get("CustomerName") or "").strip(),
+        "mobile_number": (row.get("MobileNumber") or "").strip(),
+        "bill_no": (row.get("BillNo") or "").strip(),
+        "invoice_date": _iso_date(bill_date),
+        "bill_amount": float(amount) if amount is not None else None,
+        "tax_period": tax_period,
+        "quarter": (row.get("Quarter") or "").strip(),
+        "return_type": return_type,
+        "particulars": particulars,
+    }
+
+
 class FollowupService:
     def __init__(
         self,
@@ -1099,6 +1151,17 @@ class FollowupService:
             self.followup_repo.ensure_billing_columns()
 
         bill_no = (payload.get("bill_no") or payload.get("BillNo") or existing_bill_no or "").strip() or None
+        if bill_no:
+            other = self.followup_repo.find_by_tally_bill_no(bill_no)
+            other_id = int(other.get("EntryID") or 0) if other else 0
+            if other and other_id and other_id != int(entry_id or 0):
+                other_mod = (other.get("ModuleCode") or "").strip().upper() or "Followup"
+                other_name = (other.get("CustomerName") or "").strip()
+                raise ValueError(
+                    f"Tally Bill Number {bill_no} already used in {other_mod} Followup"
+                    + (f" ({other_name})" if other_name else "")
+                    + ". Duplicate allow nahi hai."
+                )
         if "tally_bill_generated" in stage_codes or "payment_received" in stage_codes:
             bill_amount = self._parse_bill_amount(payload)
         else:

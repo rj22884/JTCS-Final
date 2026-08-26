@@ -124,6 +124,39 @@ class GstInvoiceService:
         except (InvalidOperation, ValueError):
             return Decimal(default)
 
+    def _parse_round_off(self, payload: dict) -> Decimal:
+        sign = str(
+            payload.get("round_off_sign") or payload.get("RoundOffSign") or ""
+        ).strip().lower()
+        mag = abs(
+            self._money(payload.get("round_off_amount") or payload.get("RoundOffAmount"))
+        )
+        if mag > Decimal("100"):
+            raise ValueError("Round off cannot be more than 100.00.")
+        if sign in {"add", "+", "plus"}:
+            return mag
+        if sign in {"sub", "subtract", "-", "minus"}:
+            return -mag
+        signed = payload.get("round_off")
+        if signed not in (None, ""):
+            value = self._money(signed)
+            if abs(value) > Decimal("100"):
+                raise ValueError("Round off cannot be more than 100.00.")
+            return value
+        return Decimal("0.00")
+
+    @staticmethod
+    def _round_off_sign(value) -> str:
+        try:
+            amount = float(value or 0)
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount > 0:
+            return "add"
+        if amount < 0:
+            return "sub"
+        return ""
+
     @staticmethod
     def _line_text(*values) -> str:
         for value in values:
@@ -368,6 +401,9 @@ class GstInvoiceService:
             "igst_rate": float(inv.IgstRate or 0),
             "igst_amount": float(inv.IgstAmount or 0),
             "invoice_value": float(inv.InvoiceValue or 0),
+            "round_off": float(getattr(inv, "RoundOffAmount", 0) or 0),
+            "round_off_amount": abs(float(getattr(inv, "RoundOffAmount", 0) or 0)),
+            "round_off_sign": self._round_off_sign(getattr(inv, "RoundOffAmount", 0)),
             "amount_in_words": inv.AmountInWords or "",
             "notes": inv.Notes or "",
             "payment_bank_account_id": getattr(inv, "PaymentBankAccountID", None),
@@ -388,6 +424,7 @@ class GstInvoiceService:
                 if getattr(inv, "AmountPaid", None) is not None
                 else None
             ),
+            "tally_bill_no": (getattr(inv, "TallyBillNo", None) or "").strip(),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
             "lines": self._serialize_lines(lines),
         }
@@ -477,10 +514,38 @@ class GstInvoiceService:
         }
 
     def preview_totals(self, payload: dict) -> dict:
-        return self._build_header_and_lines(payload, persist_no=False)[2]
+        return self._build_header_and_lines(
+            payload, persist_no=False, require_payment_bank=False
+        )[2]
+
+    def find_invoice_for_tally_bill(self, bill_no: str) -> dict | None:
+        inv = self.repo.find_by_tally_bill_no(bill_no)
+        if inv is None:
+            return None
+        return {
+            "invoice_id": inv.InvoiceID,
+            "invoice_no": inv.InvoiceNo or "",
+            "customer_name": inv.CustomerName or "",
+        }
+
+    def _assert_tally_bill_unique(
+        self, bill_no: str | None, *, exclude_invoice_id: int | None = None
+    ) -> None:
+        key = (bill_no or "").strip()
+        if not key:
+            return
+        existing = self.repo.find_by_tally_bill_no(key)
+        if existing is None:
+            return
+        if exclude_invoice_id and existing.InvoiceID == exclude_invoice_id:
+            return
+        raise ValueError(
+            f"Tally Bill Number {key} par invoice pehle se hai ({existing.InvoiceNo}). "
+            "Duplicate allow nahi hai."
+        )
 
     def _build_header_and_lines(
-        self, payload: dict, *, persist_no: bool
+        self, payload: dict, *, persist_no: bool, require_payment_bank: bool = True
     ) -> tuple[dict, list[dict], dict]:
         self.repo.ensure_schema()
         self.item_repo.ensure_schema()
@@ -609,6 +674,10 @@ class GstInvoiceService:
             igst_amt = _q(taxable_total * igst_rate / Decimal("100"))
 
         invoice_value = _q(taxable_total + cgst_amt + sgst_amt + igst_amt)
+        round_off = self._parse_round_off(payload)
+        invoice_value = _q(invoice_value + round_off)
+        if invoice_value < 0:
+            raise ValueError("Invoice Value cannot be negative after round off.")
         words = amount_in_words_inr(invoice_value)
 
         invoice_no = (payload.get("invoice_no") or "").strip()
@@ -625,23 +694,32 @@ class GstInvoiceService:
             pay_bank_id = int(pay_bank_id_raw) if pay_bank_id_raw not in (None, "") else None
         except (TypeError, ValueError):
             pay_bank_id = None
-        if not pay_bank_id:
+        bank_data = {
+            "bank_name": "",
+            "account_number": "",
+            "ifsc_code": "",
+            "branch_name": "",
+            "account_holder_name": "",
+            "account_type": "",
+            "upi_id": "",
+        }
+        if pay_bank_id:
+            bank_svc = BankMasterService()
+            bank_svc.repo.ensure_schema()
+            bank_row = bank_svc.repo.get_by_id(pay_bank_id)
+            if bank_row is None or not bank_row.ActiveStatus:
+                raise ValueError("Selected payment bank account was not found or is inactive.")
+            is_cash = bank_svc._is_cash_account(bank_row.BankName, bank_row.AccountNumber)
+            if voucher_type != self.VOUCHER_PURCHASE and is_cash:
+                raise ValueError("Cash cannot be used as payment bank for invoice QR.")
+            bank_data = bank_svc._serialize(bank_row)
+            if voucher_type != self.VOUCHER_PURCHASE and not (bank_data.get("upi_id") or "").strip():
+                raise ValueError(
+                    "Selected payment bank has no UPI ID. "
+                    "Set UPI ID in Bank Master (CA-Current / SB), then try again."
+                )
+        elif require_payment_bank:
             raise ValueError("Payment Bank Account is required.")
-
-        bank_svc = BankMasterService()
-        bank_svc.repo.ensure_schema()
-        bank_row = bank_svc.repo.get_by_id(pay_bank_id)
-        if bank_row is None or not bank_row.ActiveStatus:
-            raise ValueError("Selected payment bank account was not found or is inactive.")
-        is_cash = bank_svc._is_cash_account(bank_row.BankName, bank_row.AccountNumber)
-        if voucher_type != self.VOUCHER_PURCHASE and is_cash:
-            raise ValueError("Cash cannot be used as payment bank for invoice QR.")
-        bank_data = bank_svc._serialize(bank_row)
-        if voucher_type != self.VOUCHER_PURCHASE and not (bank_data.get("upi_id") or "").strip():
-            raise ValueError(
-                "Selected payment bank has no UPI ID. "
-                "Set UPI ID in Bank Master (CA-Current / SB), then try again."
-            )
 
         pay_date_raw = (payload.get("payment_date") or payload.get("PaymentDate") or "").strip()
         payment_date = None
@@ -715,6 +793,7 @@ class GstInvoiceService:
             "IgstRate": igst_rate,
             "IgstAmount": igst_amt,
             "InvoiceValue": invoice_value,
+            "RoundOffAmount": round_off,
             "AmountInWords": words,
             "Notes": ((payload.get("notes") or "").strip() or None),
             "PaymentBankAccountID": pay_bank_id,
@@ -727,6 +806,10 @@ class GstInvoiceService:
             "PayUpiId": bank_data["upi_id"] or None,
             "PaymentDate": payment_date,
             "AmountPaid": amount_paid,
+            "TallyBillNo": (
+                (payload.get("tally_bill_no") or payload.get("TallyBillNo") or "").strip()[:50]
+                or None
+            ),
             "CreatedBy": (payload.get("created_by") or None),
             "CreatedAt": datetime.utcnow(),
         }
@@ -745,6 +828,9 @@ class GstInvoiceService:
             "igst_rate": float(igst_rate),
             "igst_amount": float(igst_amt),
             "invoice_value": float(invoice_value),
+            "round_off": float(round_off),
+            "round_off_amount": abs(float(round_off)),
+            "round_off_sign": self._round_off_sign(round_off),
             "amount_in_words": words,
             "invoice_no": header["InvoiceNo"],
             "payment_bank_account_id": pay_bank_id,
@@ -764,6 +850,7 @@ class GstInvoiceService:
         if created_by:
             payload = {**payload, "created_by": created_by}
         header, lines, _ = self._build_header_and_lines(payload, persist_no=True)
+        self._assert_tally_bill_unique(header.get("TallyBillNo"))
 
         def _write() -> dict:
             inv = self.repo.create(header, lines)
@@ -778,6 +865,7 @@ class GstInvoiceService:
         # Keep existing invoice number on edit
         payload = {**payload, "invoice_no": inv.InvoiceNo}
         header, lines, _ = self._build_header_and_lines(payload, persist_no=False)
+        self._assert_tally_bill_unique(header.get("TallyBillNo"), exclude_invoice_id=invoice_id)
         header["UpdatedAt"] = datetime.utcnow()
         # Do not overwrite created audit fields
         header.pop("CreatedAt", None)
