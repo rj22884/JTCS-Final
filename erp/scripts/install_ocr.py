@@ -19,7 +19,7 @@ PACKAGES = [
     "easyocr",
     "torch",
     "torchvision",
-    "opencv-python-headless",
+    "opencv-python-headless>=4.8.0,<4.12.0",
     "Pillow",
     "numpy",
     "pytesseract",

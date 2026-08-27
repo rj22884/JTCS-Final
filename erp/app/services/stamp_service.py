@@ -394,30 +394,11 @@ class StampService:
             [(line.get("bank_account_id"), str(line.get("amount"))) for line in payment_lines],
         )
 
-        mobile_number = (form.get("MobileNumber") or "").strip()
         stamp_duty_paid_by = self._clean(form.get("StampDutyPaidBy")) or self._clean(
             form.get("FirstPartyName")
         )
-        selected_customer_id = None
-        raw_customer_id = form.get("CustomerID")
-        try:
-            if raw_customer_id not in (None, ""):
-                selected_customer_id = int(str(raw_customer_id).strip())
-                if selected_customer_id <= 0:
-                    selected_customer_id = None
-        except (TypeError, ValueError):
-            selected_customer_id = None
         customer_id = None
-        customer_name = None
-        if selected_customer_id:
-            customer = self.master_repo.get_customer(selected_customer_id)
-            if customer:
-                customer_id = customer.CustomerID
-                customer_name = customer.CustomerName
-        if customer_id is None and stamp_duty_paid_by and mobile_number:
-            customer = self.master_repo.find_or_create_customer(stamp_duty_paid_by, mobile_number)
-            customer_id = customer.CustomerID
-            customer_name = customer.CustomerName
+        customer_name = stamp_duty_paid_by or None
         txn_date = (
             self._as_date(form.get("TransactionDate"))
             or self._as_date(form.get("CertificateIssuedDate"))
@@ -649,7 +630,7 @@ class StampService:
             "TransactionDate": daily.TransactionDate.isoformat()
             if daily and daily.TransactionDate
             else "",
-            "CustomerID": daily.CustomerID if daily else "",
+            "CustomerID": "",
             "ReferenceNo": daily.ReferenceNo if daily else "",
             "Narration": daily.Description if daily else "Stamp Sale",
             "Remarks": stamp.Remarks or daily.Remarks if daily else "",

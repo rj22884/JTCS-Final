@@ -407,12 +407,13 @@ Stamp Duty Amount(Rs.)
         except Exception as exc:
             fail("Multiple payment modes", str(exc))
 
-        print("\n=== CustomerMaster save from Stamp Duty Paid By + mobile ===")
+        print("\n=== Stamp does not write CustomerMaster ===")
         try:
             master_repo = MasterRepository()
             customer_cert = f"TEST-CUST-{suffix}"
             customer_mobile = "9876543210"
             customer_name = f"Stamp Customer {suffix}"
+            before = {c.CustomerID for c in master_repo.list_customers_by_mobile(customer_mobile)}
             stamp_service.save_stamp_activity(
                 {
                     "EntryMode": "manual",
@@ -426,13 +427,14 @@ Stamp Duty Amount(Rs.)
                 },
                 created_by="stamp.test",
             )
-            matches = master_repo.list_customers_by_mobile(customer_mobile)
-            if any(c.CustomerName == customer_name for c in matches):
-                ok("Customer saved in CustomerMaster from Stamp Duty Paid By")
+            after = master_repo.list_customers_by_mobile(customer_mobile)
+            created = [c for c in after if c.CustomerName == customer_name and c.CustomerID not in before]
+            if created:
+                fail("CustomerMaster isolation", f"stamp saved {customer_name!r} into CustomerMaster")
             else:
-                fail("CustomerMaster save", f"expected {customer_name!r} for mobile {customer_mobile}")
+                ok("Stamp party name is not written to CustomerMaster")
         except Exception as exc:
-            fail("CustomerMaster save", str(exc))
+            fail("CustomerMaster isolation", str(exc))
 
         print("\n=== Report handlers ===")
         from app.services.report_service import ReportFilters, ReportService

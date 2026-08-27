@@ -47,7 +47,7 @@ if [[ ! -x "${VENV}/bin/pip" ]]; then
 fi
 
 "${VENV}/bin/pip" uninstall -y opencv-python opencv-contrib-python || true
-"${VENV}/bin/pip" install --disable-pip-version-check "opencv-python-headless>=4.8.0"
+"${VENV}/bin/pip" install --disable-pip-version-check "opencv-python-headless>=4.8.0,<4.12.0"
 
 echo "--- OpenCV import check ---"
 "${VENV}/bin/python" - <<'PY'

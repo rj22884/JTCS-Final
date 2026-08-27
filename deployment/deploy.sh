@@ -444,7 +444,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     || ${SUDO_OCR} apt-get install -y libgl1-mesa-glx libglib2.0-0 tesseract-ocr tesseract-ocr-eng >/dev/null 2>&1 \
     || log_warn "Could not apt-install libGL/tesseract (run deployment/fix_vps_ocr.sh)"
   pip uninstall -y opencv-python opencv-contrib-python >/dev/null 2>&1 || true
-  pip install -q "opencv-python-headless>=4.8.0" || log_warn "opencv-python-headless install failed"
+  pip install -q "opencv-python-headless>=4.8.0,<4.12.0" || log_warn "opencv-python-headless install failed"
 fi
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260827party1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260827ocr2">
 {% endblock %}
 
 {% block content %}
@@ -275,7 +275,6 @@
     <input type="hidden" name="StampID" id="StampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EditStampID" id="EditStampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EntryMode" id="EntryMode" value="manual">
-    <input type="hidden" name="CustomerID" id="CustomerID" value="">
 
     <div class="row g-2" id="stampFormLayout">
       <div class="col-auto d-none" id="stampImageColumn">
@@ -424,21 +423,6 @@
           </div>
         </div>
       </div>
-
-      <div class="col-auto" id="stampCustomerMatchColumn">
-        <div class="stamp-customer-match-panel" id="stampCustomerMatchPanel">
-          <div class="stamp-customer-match-head">
-            <div class="stamp-section-head mb-0">Customer Master</div>
-            <div class="small text-muted" id="stampCustomerMatchFieldLabel">Type a party name to match</div>
-          </div>
-          <input type="search" class="form-control form-control-sm mb-2" id="stampCustomerMatchFilter"
-                 placeholder="Filter customer master…" autocomplete="off">
-          <div class="stamp-customer-match-list" id="stampCustomerMatchList"></div>
-          <div class="stamp-customer-match-hint" id="stampCustomerMatchHint">
-            Like-name matches appear here. Select an existing customer, or keep the typed name to save as a new record.
-          </div>
-        </div>
-      </div>
     </div>
   </form>
 
@@ -495,30 +479,6 @@
   </div>
 </div>
 
-<div class="modal fade" id="stampCustomerMatchModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header py-2">
-        <h5 class="modal-title fs-6">Customer already exists</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <p class="small mb-2">
-          One or more party names already exist in Customer Master.
-          Select from the list, or continue with this record to save it as a new customer.
-        </p>
-        <div id="stampCustomerMatchModalBody"></div>
-      </div>
-      <div class="modal-footer py-2">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="stampCustomerMatchContinueBtn">
-          Continue with this record
-        </button>
-        <button type="button" class="btn btn-primary btn-sm" data-bs-dismiss="modal">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="modal fade" id="stampDuplicateModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -545,8 +505,6 @@
   window.STAMP_IS_ADMIN = {{ is_admin | tojson }};
   window.STAMP_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.STAMP_SEARCH_URL = {{ url_for('stamp.stamp_search') | tojson }};
-  window.STAMP_CUSTOMERS_BY_MOBILE_URL = {{ url_for('stamp.stamp_customers_by_mobile') | tojson }};
-  window.STAMP_CUSTOMERS_SEARCH_URL = {{ url_for('stamp.stamp_customers_search') | tojson }};
   window.STAMP_RECORD_URL = {{ url_for('stamp.stamp_record', stamp_id=0) | tojson }};
   window.STAMP_DELETE_URL = {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }};
   window.STAMP_GRID_URL = {{ url_for('stamp.stamp_grid_data') | tojson }};
@@ -561,5 +519,5 @@
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260827party1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260827ocr2"></script>
 {% endblock %}

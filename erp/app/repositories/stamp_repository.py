@@ -12,7 +12,6 @@ from app.exceptions.stamp_exceptions import ExistingStampRecord
 from app.models.bank_cash import OthersBankCashTransaction
 from app.models.stamp import StampMaster, StampOcrImage
 from app.models.transactions import (
-    CustomerMaster,
     JTCSDailyTransaction,
     JTCSDailyTransactionPayment,
     JtcsBankAccountMaster,
@@ -204,7 +203,10 @@ class StampRepository:
                     else "",
                     "payment_mode": payment_mode,
                     "bank_account_id": bank_account_id,
-                    "customer_name": daily.CustomerName if daily else "",
+                    "customer_name": (daily.CustomerName if daily else "")
+                    or stamp.StampDutyPaidBy
+                    or stamp.FirstPartyName
+                    or "",
                     "created_by": stamp.CreatedBy,
                 }
             )
@@ -233,19 +235,23 @@ class StampRepository:
                 stmt = stmt.where(JTCSDailyTransaction.TransactionDate >= filters.date_from)
             if filters.date_to:
                 stmt = stmt.where(JTCSDailyTransaction.TransactionDate <= filters.date_to)
-        if filters.mobile:
-            mobile = "".join(ch for ch in filters.mobile if ch.isdigit())[-10:]
-            if mobile:
-                stmt = stmt.where(CustomerMaster.MobileNumber.like(f"%{mobile}%"))
         if filters.customer:
-            stmt = stmt.where(CustomerMaster.CustomerName.like(f"%{filters.customer.strip()}%"))
+            needle = f"%{filters.customer.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    StampMaster.FirstPartyName.like(needle),
+                    StampMaster.SecondPartyName.like(needle),
+                    StampMaster.PurchasedBy.like(needle),
+                    StampMaster.StampDutyPaidBy.like(needle),
+                    JTCSDailyTransaction.CustomerName.like(needle),
+                )
+            )
         return stmt
 
     def _grid_base_stmt(self, filters: StampGridFilters):
         stmt = (
-            select(StampMaster, JTCSDailyTransaction, CustomerMaster)
+            select(StampMaster, JTCSDailyTransaction)
             .outerjoin(JTCSDailyTransaction, JTCSDailyTransaction.StampID == StampMaster.StampID)
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
         return self._apply_transaction_filters(stmt, filters)
@@ -279,7 +285,6 @@ class StampRepository:
             .select_from(JtcsBankTransaction)
             .join(JTCSDailyTransaction, self._bank_daily_join())
             .join(StampMaster, JTCSDailyTransaction.StampID == StampMaster.StampID)
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(JtcsBankTransaction.SourceTable == "JTCSDailyTransaction")
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
@@ -476,7 +481,6 @@ class StampRepository:
             )
             .select_from(JTCSDailyTransaction)
             .join(StampMaster, JTCSDailyTransaction.StampID == StampMaster.StampID)
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
         sale_stmt = self._apply_transaction_filters(sale_stmt, filters)
@@ -486,7 +490,6 @@ class StampRepository:
             select(func.coalesce(func.sum(StampMaster.StampDutyAmount), 0))
             .select_from(JTCSDailyTransaction)
             .join(StampMaster, JTCSDailyTransaction.StampID == StampMaster.StampID)
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
         duty_stmt = self._apply_transaction_filters(duty_stmt, filters)
@@ -500,7 +503,6 @@ class StampRepository:
                 JTCSDailyTransactionPayment.TransactionID == JTCSDailyTransaction.TransactionID,
             )
             .join(StampMaster, JTCSDailyTransaction.StampID == StampMaster.StampID)
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
         payment_base = self._apply_transaction_filters(payment_base, filters)
@@ -518,7 +520,6 @@ class StampRepository:
                 JtcsBankAccountMaster,
                 JtcsBankAccountMaster.JtcsBankAccountID == JTCSDailyTransactionPayment.BankAccountID,
             )
-            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
             .where(self._cash_account_match())
         )
@@ -568,7 +569,7 @@ class StampRepository:
             .limit(effective_limit)
         )
         rows: list[dict] = []
-        for stamp, daily, customer in self.session.execute(stmt).all():
+        for stamp, daily in self.session.execute(stmt).all():
             payment_mode = ""
             has_cash = False
             has_non_cash = False
@@ -633,8 +634,11 @@ class StampRepository:
                     "transaction_date": daily.TransactionDate.isoformat()
                     if daily and daily.TransactionDate
                     else "",
-                    "customer_name": daily.CustomerName if daily else "",
-                    "mobile_number": customer.MobileNumber if customer else "",
+                    "customer_name": (daily.CustomerName if daily else "")
+                    or stamp.StampDutyPaidBy
+                    or stamp.FirstPartyName
+                    or "",
+                    "mobile_number": "",
                     "first_party": stamp.FirstPartyName or "",
                     "payment_mode": payment_mode,
                     "stamp_duty_paid_by": stamp.StampDutyPaidBy or "",

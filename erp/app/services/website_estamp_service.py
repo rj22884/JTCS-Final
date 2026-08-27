@@ -15,7 +15,6 @@ from sqlalchemy import text
 from app.extensions import db, mail
 from app.models.auth import CompanyProfile
 from app.models.website_estamp import WebsiteEStampOrder
-from app.repositories.transaction_repository import MasterRepository
 from app.services.website_estamp_articles import article_by_code, article_display, public_articles
 
 logger = logging.getLogger(__name__)
@@ -280,15 +279,7 @@ class WebsiteEStampService:
             self._notify(existing)
             return self._public(existing, "Payment received. Reference Number: " + existing.ReferenceNo)
 
-        customer_id = None
-        try:
-            customer = MasterRepository().find_or_create_customer(first, mobile)
-            customer_id = customer.CustomerID
-        except Exception:
-            db.session.rollback()
-            logger.warning("e-Stamp customer link skipped", exc_info=True)
-
-        row = WebsiteEStampOrder(ReferenceNo=reference, CustomerID=customer_id)
+        row = WebsiteEStampOrder(ReferenceNo=reference, CustomerID=None)
         self._apply(row, data, first, second, mobile, article, amount)
         row.IsPaid = True
         row.PaymentStatus = "paid"

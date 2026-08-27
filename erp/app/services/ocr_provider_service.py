@@ -24,11 +24,15 @@ TESSERACT_CANDIDATE_PATHS = (
     "/snap/bin/tesseract",
 )
 
+# EasyOCR 1.7 is built for OpenCV 4.x. Unpinned >=4.8 pulls OpenCV 5, which can
+# import as a stub namespace without cvtColor.
+OPENCV_PIN = "opencv-python-headless>=4.8.0,<4.12.0"
+
 EASYOCR_STACK = (
     "easyocr",
     "torch",
     "torchvision",
-    "opencv-python-headless",
+    OPENCV_PIN,
     "Pillow",
     "numpy",
 )
@@ -55,7 +59,7 @@ INSTALL_GUIDE_WINDOWS = [
 INSTALL_GUIDE_LINUX = [
     "On the VPS run: sudo bash deployment/fix_vps_ocr.sh",
     "Or: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-eng",
-    "Then in the ERP venv: pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-python-headless",
+    "Then in the ERP venv: pip uninstall -y opencv-python opencv-contrib-python && pip install \"" + OPENCV_PIN + "\"",
     "Or click Install OCR Engine on Stamp Activity (Administrator).",
     "Restart the ERP service after installation completes.",
 ]
@@ -146,7 +150,7 @@ def force_opencv_headless() -> tuple[bool, str]:
             "pip",
             "install",
             "--disable-pip-version-check",
-            "opencv-python-headless>=4.8.0",
+            OPENCV_PIN,
         ],
         capture_output=True,
         text=True,
@@ -158,32 +162,88 @@ def force_opencv_headless() -> tuple[bool, str]:
     return install.returncode == 0, detail[-800:]
 
 
+def _hydrate_cv2(mod) -> None:
+    """Copy native OpenCV symbols onto the cv2 package if the loader left them off."""
+    if callable(getattr(mod, "cvtColor", None)):
+        return
+    native = getattr(mod, "cv2", None)
+    if native is None or native is mod:
+        try:
+            native = importlib.import_module("cv2.cv2")
+        except Exception:  # noqa: BLE001
+            native = None
+    if native is None:
+        return
+    for key in dir(native):
+        if key.startswith("_") or hasattr(mod, key):
+            continue
+        try:
+            setattr(mod, key, getattr(native, key))
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def rebind_easyocr_cv2() -> None:
+    """Point EasyOCR's cached `cv2` imports at a hydrated OpenCV module."""
+    try:
+        import cv2
+    except Exception:  # noqa: BLE001
+        return
+    _hydrate_cv2(cv2)
+    for name in (
+        "easyocr.utils",
+        "easyocr.imgproc",
+        "easyocr.detection",
+        "easyocr.recognition",
+        "easyocr.craft_utils",
+    ):
+        mod = sys.modules.get(name)
+        if mod is not None and getattr(mod, "cv2", None) is not None:
+            try:
+                mod.cv2 = cv2
+            except Exception:  # noqa: BLE001
+                continue
+
+
 def _try_import_cv2() -> Exception | None:
     try:
-        import cv2  # noqa: F401
+        import numpy as np
+        import cv2
 
+        _hydrate_cv2(cv2)
+        if not callable(getattr(cv2, "cvtColor", None)):
+            return AttributeError("module 'cv2' has no attribute 'cvtColor'")
+        sample = np.zeros((4, 4, 3), dtype=np.uint8)
+        cv2.cvtColor(sample, getattr(cv2, "COLOR_RGB2BGR", 4))
         return None
     except Exception as exc:  # noqa: BLE001
         return exc
 
 
+def _needs_opencv_repair(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    text = str(exc).lower()
+    return _libgl_missing(exc) or "cvtcolor" in text or "libgl" in text
+
+
 def prepare_opencv_for_ocr(*, allow_install: bool = False) -> None:
-    """Make OpenCV importable on headless Linux VPS (missing libGL.so.1)."""
+    """Make OpenCV importable and ensure cvtColor exists (EasyOCR requirement)."""
     global _OPENCV_HEADLESS_ATTEMPTED
     err = _try_import_cv2()
     if err is None:
+        rebind_easyocr_cv2()
         return
-    if not _libgl_missing(err):
-        return
-    logger.warning("OpenCV import needs libGL (%s)", err)
-    if not allow_install or _OPENCV_HEADLESS_ATTEMPTED:
+    logger.warning("OpenCV is not ready for OCR (%s)", err)
+    if not allow_install or _OPENCV_HEADLESS_ATTEMPTED or not _needs_opencv_repair(err):
         return
     _OPENCV_HEADLESS_ATTEMPTED = True
-    logger.warning("Switching to opencv-python-headless")
+    logger.warning("Switching to pinned opencv-python-headless")
     ok, detail = force_opencv_headless()
     if ok:
         err2 = _try_import_cv2()
         if err2 is None:
+            rebind_easyocr_cv2()
             logger.info("OpenCV headless import succeeded")
             return
         logger.warning("OpenCV still failing after headless swap: %s", err2)
@@ -268,6 +328,15 @@ def probe_easyocr() -> ProviderProbe:
     try:
         import easyocr  # noqa: F401
 
+        rebind_easyocr_cv2()
+        cv2_err = _try_import_cv2()
+        if cv2_err is not None:
+            return ProviderProbe(
+                name="EasyOCR",
+                available=False,
+                reason="OpenCV cvtColor unavailable",
+                detail=str(cv2_err),
+            )
         return ProviderProbe(name="EasyOCR", available=True, reason="Packages installed")
     except Exception as exc:
         hint = ""

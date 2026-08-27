@@ -5,7 +5,6 @@ from flask import Blueprint, flash, jsonify, redirect, render_template, request,
 from app.decorators import admin_required, login_required, require_delete_reauth
 from app.exceptions.stamp_exceptions import OcrUserError, StampDuplicateError
 from app.repositories.transaction_repository import MasterRepository
-from app.services.customer_service import CustomerService
 from app.services.menu_service import MenuService
 from app.services.ocr_provider_service import OcrProviderService
 from app.services.stamp_ocr_service import StampOcrService
@@ -177,33 +176,6 @@ def stamp_card_detail():
 def stamp_bank_accounts():
     master_repo = MasterRepository()
     return jsonify(master_repo.list_stamp_bank_payment_modes())
-
-
-@bp.route("/stamp-activity/customers-by-mobile", methods=["GET"])
-@login_required
-def stamp_customers_by_mobile():
-    mobile = (request.args.get("mobile") or "").strip()
-    if not mobile:
-        return jsonify({"ok": False, "error": "Mobile number is required.", "count": 0, "customers": []}), 400
-    customers = MasterRepository().list_customers_by_mobile(mobile)
-    return jsonify(
-        {
-            "ok": True,
-            "count": len(customers),
-            "customers": [
-                {"id": customer.CustomerID, "name": customer.CustomerName}
-                for customer in customers
-            ],
-        }
-    )
-
-
-@bp.route("/stamp-activity/customers-search", methods=["GET"])
-@login_required
-def stamp_customers_search():
-    query = (request.args.get("q") or request.args.get("name") or "").strip()
-    rows = CustomerService().search_party_name(query, limit=20)
-    return jsonify({"ok": True, "count": len(rows), "customers": rows})
 
 
 @bp.route("/stamp-activity/search")
