@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#243b7b">
+  <title>Starting · JTCS ERP</title>
+  <link rel="manifest" href="{{ url_for('runtime.manifest') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/jtcs-app-192.png') }}">
+  <link href="{{ url_for('static', filename='css/erp.css') }}?v=20260827plat1" rel="stylesheet">
+  <style>
+    .jtcs-boot-page {
+      min-height: 100dvh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(1200px 600px at 50% -10%, #3a5cb5 0%, #243b7b 42%, #10182e 100%);
+      color: #fff;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      padding: max(1rem, env(safe-area-inset-top)) 1.25rem max(1rem, env(safe-area-inset-bottom));
+    }
+    .jtcs-boot-card {
+      width: min(420px, 100%);
+      text-align: center;
+    }
+    .jtcs-boot-mark {
+      width: 64px; height: 64px; margin: 0 auto 1rem;
+      border-radius: 16px; background: #fff; color: #243b7b;
+      display: grid; place-items: center; font-weight: 800; font-size: 1.15rem;
+    }
+    .jtcs-boot-title { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 700; }
+    .jtcs-boot-sub { margin: 0; opacity: 0.85; font-size: 0.95rem; }
+    .jtcs-boot-meta { margin: 1.1rem 0 0; font-size: 0.9rem; line-height: 1.5; opacity: 0.92; }
+    .jtcs-boot-bar {
+      margin-top: 1.25rem; height: 4px; border-radius: 99px; background: rgba(255,255,255,.18); overflow: hidden;
+    }
+    .jtcs-boot-bar > span {
+      display: block; height: 100%; width: 36%;
+      background: #fff; border-radius: 99px;
+      animation: jtcs-boot-slide 1.1s ease-in-out infinite;
+    }
+    @keyframes jtcs-boot-slide {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(380%); }
+    }
+  </style>
+  {% include 'partials/platform_head.html' %}
+</head>
+<body class="jtcs-boot-page">
+  <div class="jtcs-boot-card">
+    <div class="jtcs-boot-mark">JTCS</div>
+    <h1 class="jtcs-boot-title">Starting JTCS ERP</h1>
+    <p class="jtcs-boot-sub" id="jtcsBootStatus">Detecting version and device…</p>
+    <p class="jtcs-boot-meta" id="jtcsBootMeta"></p>
+    <div class="jtcs-boot-bar" aria-hidden="true"><span></span></div>
+  </div>
+  <script>
+    window.JTCS_BOOT = {
+      next: {{ next_url | tojson }},
+      api: {{ runtime_api | tojson }},
+      fallbackVersion: {{ app_version | tojson }},
+      build: {{ build_number | tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='js/platform.js') }}?v=20260827plat2"></script>
+  <script>
+    (function () {
+      var statusEl = document.getElementById("jtcsBootStatus");
+      var metaEl = document.getElementById("jtcsBootMeta");
+      var started = Date.now();
+      function go() {
+        var wait = Math.max(0, 700 - (Date.now() - started));
+        setTimeout(function () {
+          window.location.replace(window.JTCS_BOOT.next || "/");
+        }, wait);
+      }
+      window.JTCSPlatform.boot({
+        api: window.JTCS_BOOT.api,
+        fallbackVersion: window.JTCS_BOOT.fallbackVersion,
+        build: window.JTCS_BOOT.build
+      }).then(function (info) {
+        if (statusEl) statusEl.textContent = "Version " + info.version + " ready";
+        if (metaEl) {
+          metaEl.textContent = info.label + " · " + info.form + " · " + info.os;
+        }
+        go();
+      }).catch(function () {
+        if (statusEl) statusEl.textContent = "Opening app…";
+        go();
+      });
+    })();
+  </script>
+</body>
+</html>

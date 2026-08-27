@@ -2,9 +2,10 @@
 <html lang="en" data-bs-theme="light">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <title>{% block title %}{{ page_title | default('Customer Portal') }}{% endblock %} · {{ company_name | default(app_name) }}</title>
+  {% include 'partials/platform_head.html' %}
   {% include 'partials/seo_head.html' %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -83,6 +84,7 @@
   </div>
   {% endblock %}
 
+  <script src="{{ url_for('static', filename='js/platform.js') }}?v=20260827plat2"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     window.CP_API = {

@@ -1,0 +1,32 @@
+<meta name="theme-color" content="#243b7b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JTCS">
+<link rel="manifest" href="{{ url_for('runtime.manifest') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/jtcs-app-192.png') }}">
+<script>
+(function () {
+  try {
+    var ua = navigator.userAgent || "";
+    var touch = (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window;
+    var os = "other";
+    if (/Windows/i.test(ua)) os = "windows";
+    else if (/Android/i.test(ua)) os = "android";
+    else if (/iPhone|iPod/i.test(ua)) os = "ios";
+    else if (/iPad/i.test(ua) || (/Mac/i.test(ua) && (navigator.maxTouchPoints || 0) > 1)) os = "ios";
+    else if (/Mac OS|Macintosh/i.test(ua)) os = "macos";
+    else if (/CrOS/i.test(ua)) os = "chromeos";
+    else if (/Linux/i.test(ua)) os = "linux";
+    var w = Math.min(window.innerWidth || 1200, (screen && screen.width) || 1200);
+    var form = "desktop";
+    if (w < 576) form = "phone";
+    else if (w < 992) form = "tablet";
+    if (os === "android" || os === "ios") form = w < 600 ? "phone" : "tablet";
+    var html = document.documentElement;
+    html.classList.add("jtcs-os-" + os, "jtcs-form-" + form);
+    html.setAttribute("data-jtcs-os", os);
+    html.setAttribute("data-jtcs-form", form);
+  } catch (e) {}
+})();
+</script>

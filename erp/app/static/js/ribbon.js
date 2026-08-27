@@ -63,6 +63,19 @@
     mobileToggle.addEventListener("click", function () {
       topMenu.classList.toggle("open");
     });
+    topMenu.addEventListener("click", function (event) {
+      const link = event.target.closest("a.jtcs-menu-link, a.jtcs-top-link");
+      if (!link || link.getAttribute("href") === "#") return;
+      if (window.innerWidth <= 991) {
+        topMenu.classList.remove("open");
+        closeAllTopMenus();
+      }
+    });
+    window.addEventListener("resize", function () {
+      if (window.innerWidth > 991) {
+        topMenu.classList.remove("open");
+      }
+    });
   }
 
   document.querySelectorAll("[data-ribbon-action]").forEach(function (button) {

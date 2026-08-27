@@ -54,6 +54,20 @@
     ledgerIncome: document.getElementById("LedgerKindIncome"),
     ledgerExpense: document.getElementById("LedgerKindExpense"),
     ledgerMisc: document.getElementById("LedgerKindMisc"),
+    customerId: document.getElementById("oieCustomerId"),
+    workDone: document.getElementById("oieWorkDone"),
+    tallyBill: document.getElementById("oieTallyBillGenerated"),
+    autoBillBtn: document.getElementById("oieAutoBillBtn"),
+    miscWorkflowWrap: document.getElementById("oieMiscWorkflowWrap"),
+    tallyBillWrap: document.getElementById("oieTallyBillWrap"),
+    tallyBillNo: document.getElementById("oieTallyBillNo"),
+    tallyBillDate: document.getElementById("oieTallyBillDate"),
+    tallyBillAmount: document.getElementById("oieTallyBillAmount"),
+    paymentSection: document.getElementById("oiePaymentSection"),
+    paymentFieldset: document.getElementById("oiePaymentFieldset"),
+    paymentLockedHint: document.getElementById("oiePaymentLockedHint"),
+    paymentSectionNum: document.getElementById("oiePaymentSectionNum"),
+    remarksSectionNum: document.getElementById("oieRemarksSectionNum"),
     paymentLines: document.getElementById("oiePaymentLines"),
     paymentSummary: document.getElementById("oiePaymentSummary"),
     addPaymentBtn: document.getElementById("oieAddPaymentBtn"),
@@ -111,6 +125,55 @@
     if (els.ledgerExpense && els.ledgerExpense.checked) return "Expense";
     if (els.ledgerMisc && els.ledgerMisc.checked) return "Misc.";
     return "Income";
+  }
+
+  function isMiscKind() {
+    return currentLedgerKind() === "Misc.";
+  }
+
+  function isWorkDoneChecked() {
+    return !!(els.workDone && els.workDone.checked);
+  }
+
+  function isTallyChecked() {
+    return !!(els.tallyBill && els.tallyBill.checked);
+  }
+
+  function isPaymentActive() {
+    return !isMiscKind() || isTallyChecked();
+  }
+
+  function syncMiscWorkflow() {
+    const misc = isMiscKind();
+    els.miscWorkflowWrap?.classList.toggle("d-none", !misc);
+    if (!misc) {
+      if (els.workDone) els.workDone.checked = false;
+      if (els.tallyBill) {
+        els.tallyBill.checked = false;
+        els.tallyBill.disabled = true;
+      }
+    } else if (els.tallyBill) {
+      const workDone = isWorkDoneChecked();
+      els.tallyBill.disabled = !workDone;
+      if (!workDone) els.tallyBill.checked = false;
+    }
+    const tally = isTallyChecked();
+    els.tallyBillWrap?.classList.toggle("d-none", !tally);
+    els.autoBillBtn?.classList.toggle("d-none", !tally);
+    if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
+      els.tallyBillDate.value = window.OIE_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
+    }
+    if (tally && els.tallyBillAmount && !(els.tallyBillAmount.value || "").trim()) {
+      const cat = getCategoryTotal();
+      if (cat > 0) els.tallyBillAmount.value = cat.toFixed(2);
+    }
+    const paymentOn = isPaymentActive();
+    if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
+    els.paymentSection?.classList.toggle("oie-payment-section-locked", !paymentOn);
+    els.paymentLockedHint?.classList.toggle("d-none", paymentOn);
+    if (els.paymentSectionNum) els.paymentSectionNum.textContent = misc ? "4" : "3";
+    if (els.remarksSectionNum) els.remarksSectionNum.textContent = misc ? "5" : "4";
+    if (paymentOn) ensurePaymentLines();
   }
 
   function isEditMode() {
@@ -173,6 +236,7 @@
     });
     updateCategorySummary();
     updatePaymentSummary();
+    syncMiscWorkflow();
   }
 
   function buildCategorySelect(selectedId) {
@@ -698,6 +762,9 @@
   }
 
   function validatePaymentLines() {
+    if (!isPaymentActive()) return null;
+    const paymentTotal = getPaymentTotal();
+    if (isMiscKind() && paymentTotal <= 0) return null;
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
     if (!lines.length) return "At least one payment mode is required.";
     for (let i = 0; i < lines.length; i++) {
@@ -711,7 +778,6 @@
         return "Each payment amount must be greater than zero.";
       }
     }
-    const paymentTotal = getPaymentTotal();
     if (paymentTotal <= 0) {
       return "Total payment amount must be greater than zero.";
     }
@@ -733,6 +799,7 @@
     form.querySelectorAll(".oie-payment-sync").forEach(function (el) {
       el.remove();
     });
+    if (!isPaymentActive()) return;
     const lines = els.paymentLines.querySelectorAll(".oie-payment-line");
     lines.forEach(function (line) {
       const bank = line.querySelector(".oie-payment-bank");
@@ -816,6 +883,9 @@
 
   function selectCustomer(customer) {
     if (!customer) return;
+    if (els.customerId) {
+      els.customerId.value = String(customer.customer_id || customer.CustomerID || "");
+    }
     if (els.customerName) {
       els.customerName.value = customer.customer_name || customer.CustomerName || "";
     }
@@ -1348,6 +1418,16 @@
           "</td>" +
           "<td>" +
           ledgerBadge(row.ledger_kind) +
+          (row.ledger_kind === "Misc."
+            ? (row.work_done
+                ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                : "") +
+              (row.tally_bill_generated
+                ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                : row.work_done
+                  ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                  : "")
+            : "") +
           "</td>" +
           "<td>" +
           escapeHtml(formatDisplayDate(row.work_date)) +
@@ -1444,6 +1524,26 @@
         } else if (els.ledgerIncome) {
           els.ledgerIncome.checked = true;
         }
+        const hasPayments = (record.payments || []).some(function (p) {
+          return parseFloat(p.amount || "0") > 0;
+        });
+        if (els.workDone) {
+          els.workDone.checked = !!record.work_done || (record.ledger_kind === "Misc." && hasPayments);
+        }
+        if (els.tallyBill) {
+          els.tallyBill.checked =
+            !!record.tally_bill_generated || (record.ledger_kind === "Misc." && hasPayments);
+        }
+        if (els.customerId) els.customerId.value = record.customer_id ? String(record.customer_id) : "";
+        if (els.tallyBillNo) {
+          els.tallyBillNo.value = record.tally_bill_no || (hasPayments ? record.bill_no || "" : "");
+        }
+        if (els.tallyBillDate) {
+          els.tallyBillDate.value = (record.tally_bill_date || record.work_date || "").slice(0, 10);
+        }
+        if (els.tallyBillAmount) {
+          els.tallyBillAmount.value = record.tally_bill_amount || (hasPayments ? record.amount || "" : "");
+        }
         syncLedgerLabels();
         const categoryRows =
           record.categories && record.categories.length
@@ -1455,7 +1555,13 @@
         if (els.remarks) els.remarks.value = record.remarks || "";
         clearCustomerSelectionHint();
         hideCustomerResults();
+        if (els.customerId) els.customerId.value = record.customer_id ? String(record.customer_id) : "";
+        if (els.customerSelected && record.customer_id) {
+          els.customerSelected.textContent = "Customer selected from master";
+          els.customerSelected.classList.remove("d-none");
+        }
         resetPaymentLines(record.payments && record.payments.length ? record.payments : [{}]);
+        syncMiscWorkflow();
         if (entryModal) entryModal.show();
       });
   }
@@ -1514,10 +1620,82 @@
     });
   }
 
+  function validateMiscWorkflow() {
+    if (!isMiscKind()) return null;
+    if (isTallyChecked() && !isWorkDoneChecked()) {
+      return "Work Done must be checked before Tally Bill Generated.";
+    }
+    if (!isTallyChecked()) return null;
+    if (!(els.tallyBillNo?.value || "").trim()) {
+      return "Tally bill number is required when Tally Bill Generated is checked.";
+    }
+    const billAmount = parseFloat(els.tallyBillAmount?.value || "0");
+    if (!billAmount || billAmount <= 0) {
+      return "Bill amount is required when Tally Bill Generated is checked.";
+    }
+    if (!(els.customerName?.value || "").trim()) {
+      return "Customer name is required when Tally Bill Generated is checked.";
+    }
+    return null;
+  }
+
+  function openAutomatedBill() {
+    const customerId = (els.customerId?.value || "").trim();
+    if (!customerId) {
+      alert("Please select a customer first.");
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("customer_id", customerId);
+    const customerName = (els.customerName?.value || "").trim();
+    if (customerName) params.set("customer_name", customerName);
+    const url = "/accounting/invoice?" + params.toString();
+    const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
+    const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));
+    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
+    const features = [
+      "width=" + width,
+      "height=" + height,
+      "left=" + left,
+      "top=" + top,
+      "menubar=yes",
+      "toolbar=yes",
+      "location=yes",
+      "status=yes",
+      "resizable=yes",
+      "scrollbars=yes",
+    ].join(",");
+    const win = window.open(url, "jtcsAccountingInvoiceWindow", features);
+    if (!win) {
+      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
+      return;
+    }
+    try {
+      win.focus();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  window.OIE_applyBillingResult = function (data) {
+    if (!data) return;
+    if (els.tallyBillNo && data.bill_no) els.tallyBillNo.value = data.bill_no;
+    if (els.tallyBillAmount && data.bill_amount != null) els.tallyBillAmount.value = data.bill_amount;
+    if (els.tallyBillDate && data.bill_date) els.tallyBillDate.value = data.bill_date;
+    if (els.tallyBill) els.tallyBill.checked = true;
+    syncMiscWorkflow();
+  };
+
   function saveEntry() {
     const categoryError = validateCategoryLines();
     if (categoryError) {
       alert(categoryError);
+      return Promise.resolve();
+    }
+    const workflowError = validateMiscWorkflow();
+    if (workflowError) {
+      alert(workflowError);
       return Promise.resolve();
     }
     const paymentError = validatePaymentLines();
@@ -1672,6 +1850,7 @@
 
   if (els.customerName) {
     els.customerName.addEventListener("input", function () {
+      if (els.customerId) els.customerId.value = "";
       clearCustomerSelectionHint();
       clearTimeout(customerSearchTimer);
       customerSearchTimer = setTimeout(function () {
@@ -1729,6 +1908,10 @@
       }
     });
   });
+
+  els.workDone?.addEventListener("change", syncMiscWorkflow);
+  els.tallyBill?.addEventListener("change", syncMiscWorkflow);
+  els.autoBillBtn?.addEventListener("click", openAutomatedBill);
 
   if (els.gridBody) {
     els.gridBody.addEventListener("click", function (event) {

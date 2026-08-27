@@ -64,6 +64,7 @@ from app.routes.website_snapshot_public import bp as website_snapshot_public_bp
 from app.routes.recruitment_applications import bp as recruitment_applications_bp
 from app.routes.hr import bp as hr_bp
 from app.routes.market_quotes import bp as market_quotes_bp
+from app.routes.runtime import bp as runtime_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -185,6 +186,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(integration_settings_bp)
     app.register_blueprint(system_health_bp)
     app.register_blueprint(pages_bp)
+    app.register_blueprint(runtime_bp)
 
     # Website intake uses API key auth (no session CSRF token).
     csrf.exempt(public_intake_bp)

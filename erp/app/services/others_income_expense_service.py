@@ -127,7 +127,33 @@ class OthersIncomeExpenseService:
             return OthersIncomeExpenseService.LEDGER_INCOME
         return OthersIncomeExpenseService.LEDGER_INCOME
 
-    def _parse_payment_lines(self, form: dict, entry_amount: Decimal) -> list[dict]:
+    @staticmethod
+    def _bool_from_form(form: dict, *keys: str) -> bool:
+        for key in keys:
+            raw = form.get(key)
+            if raw is None:
+                continue
+            if str(raw).strip().lower() in ("1", "true", "on", "yes"):
+                return True
+        return False
+
+    @staticmethod
+    def _int_from_form(form: dict, *keys: str) -> int | None:
+        for key in keys:
+            raw = form.get(key)
+            if raw in (None, ""):
+                continue
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+        return None
+
+    def _parse_payment_lines(
+        self, form: dict, entry_amount: Decimal, *, required: bool = True
+    ) -> list[dict]:
         bank_ids = self._get_form_list(form, "PaymentBankAccountID[]")
         amounts = self._get_form_list(form, "PaymentAmount[]")
         payment_dates = self._get_form_list(form, "PaymentDate[]")
@@ -150,12 +176,20 @@ class OthersIncomeExpenseService:
         lines: list[dict] = []
         total = Decimal("0")
         for bank_id_raw, amount_raw, payment_date_raw in zip(bank_ids, amounts, payment_dates):
-            bank_account_id = int(bank_id_raw or 0)
-            if bank_account_id <= 0:
-                raise ValueError("Each payment mode must be selected.")
-            amount = self._decimal(amount_raw)
-            if amount <= 0:
-                raise ValueError("Each payment amount must be greater than zero.")
+            try:
+                bank_account_id = int(bank_id_raw or 0)
+            except (TypeError, ValueError):
+                bank_account_id = 0
+            try:
+                amount = self._decimal(amount_raw)
+            except ValueError:
+                amount = Decimal("0")
+            if bank_account_id <= 0 or amount <= 0:
+                if required:
+                    if bank_account_id <= 0:
+                        raise ValueError("Each payment mode must be selected.")
+                    raise ValueError("Each payment amount must be greater than zero.")
+                continue
             payment_date = self._date(payment_date_raw) or fallback_date
             payment_mode_id = self.master_repo.resolve_payment_mode_for_bank_account(bank_account_id)
             total += amount
@@ -167,6 +201,9 @@ class OthersIncomeExpenseService:
                     "payment_date": payment_date,
                 }
             )
+
+        if not lines:
+            return []
 
         if total < entry_amount:
             kind = self._ledger_kind_from_form(form)
@@ -580,6 +617,20 @@ class OthersIncomeExpenseService:
             "categories": categories,
             "customer_name": row.CustomerName or "",
             "mobile_number": row.MobileNumber or "",
+            "customer_id": getattr(row, "CustomerID", None) or None,
+            "work_done": bool(getattr(row, "WorkDone", False)),
+            "tally_bill_generated": bool(getattr(row, "TallyBillGenerated", False)),
+            "tally_bill_no": (getattr(row, "TallyBillNo", None) or "") or "",
+            "tally_bill_date": (
+                row.TallyBillDate.isoformat()
+                if getattr(row, "TallyBillDate", None)
+                else ""
+            ),
+            "tally_bill_amount": (
+                str(row.TallyBillAmount)
+                if getattr(row, "TallyBillAmount", None) is not None
+                else ""
+            ),
             "remarks": row.Remarks or "",
             "created_date": row.CreatedDate.isoformat() if row.CreatedDate else "",
         }
@@ -713,17 +764,53 @@ class OthersIncomeExpenseService:
         if len(work_label) > 80:
             work_label = work_label[:77].rstrip(", ") + "..."
 
-        payment_lines = self._parse_payment_lines(form, category_total)
-        if not payment_lines:
+        work_done = self._bool_from_form(form, "WorkDone", "work_done")
+        tally_bill = self._bool_from_form(form, "TallyBillGenerated", "tally_bill_generated")
+        if ledger_kind != self.LEDGER_MISC:
+            work_done = False
+            tally_bill = False
+        if tally_bill and not work_done:
+            raise ValueError("Work Done must be checked before Tally Bill Generated.")
+
+        tally_bill_no = (form.get("TallyBillNo") or form.get("tally_bill_no") or "").strip() or None
+        tally_bill_date = self._date(form.get("TallyBillDate") or form.get("tally_bill_date"))
+        tally_bill_amount_raw = form.get("TallyBillAmount") or form.get("tally_bill_amount") or ""
+        tally_bill_amount = None
+        if str(tally_bill_amount_raw).strip():
+            tally_bill_amount = self._decimal(tally_bill_amount_raw)
+
+        if tally_bill:
+            if not tally_bill_no:
+                raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
+            if not tally_bill_amount or tally_bill_amount <= 0:
+                raise ValueError("Bill amount is required when Tally Bill Generated is checked.")
+            if not tally_bill_date:
+                tally_bill_date = work_date
+        else:
+            tally_bill_no = None
+            tally_bill_date = None
+            tally_bill_amount = None
+
+        if ledger_kind == self.LEDGER_MISC and not tally_bill:
+            payment_lines = []
+        else:
+            payment_lines = self._parse_payment_lines(
+                form, category_total, required=ledger_kind != self.LEDGER_MISC
+            )
+        if ledger_kind != self.LEDGER_MISC and not payment_lines:
             raise ValueError("At least one payment mode is required.")
 
         received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
-        if received_total <= 0:
-            raise ValueError("Payment amount must be greater than zero.")
+        if ledger_kind != self.LEDGER_MISC:
+            if received_total <= 0:
+                raise ValueError("Payment amount must be greater than zero.")
         amount = category_total
         customer_name = (form.get("CustomerName") or form.get("customer_name") or "").strip() or None
         mobile_number = (form.get("MobileNumber") or form.get("mobile_number") or "").strip() or None
+        customer_id = self._int_from_form(form, "CustomerID", "customer_id")
         remarks = (form.get("Remarks") or form.get("remarks") or "").strip() or None
+        if tally_bill and not customer_name:
+            raise ValueError("Customer name is required when Tally Bill Generated is checked.")
 
         existing_row = None
         if is_update:
@@ -748,6 +835,12 @@ class OthersIncomeExpenseService:
                 "Amount": amount,
                 "CustomerName": customer_name,
                 "MobileNumber": mobile_number,
+                "CustomerID": customer_id,
+                "WorkDone": work_done,
+                "TallyBillGenerated": tally_bill,
+                "TallyBillNo": tally_bill_no,
+                "TallyBillDate": tally_bill_date,
+                "TallyBillAmount": tally_bill_amount,
                 "Remarks": remarks,
             }
             existing_daily = None
@@ -778,28 +871,47 @@ class OthersIncomeExpenseService:
                 ],
             )
 
-            daily, bank_ids = self._repost_transactions(
-                bill_no=row.BillNo,
-                work_date=work_date,
-                work_name=work_label,
-                entry_amount=amount,
-                payment_lines=payment_lines,
-                customer_name=customer_name,
-                remarks=remarks,
-                created_by=created_by,
-                existing_daily=existing_daily,
-                ledger_kind=ledger_kind,
-            )
+            daily = None
+            bank_ids: list[int] = []
+            if payment_lines:
+                daily, bank_ids = self._repost_transactions(
+                    bill_no=row.BillNo,
+                    work_date=work_date,
+                    work_name=work_label,
+                    entry_amount=amount,
+                    payment_lines=payment_lines,
+                    customer_name=customer_name,
+                    remarks=remarks,
+                    created_by=created_by,
+                    existing_daily=existing_daily,
+                    ledger_kind=ledger_kind,
+                )
+            elif existing_daily is not None:
+                self._remove_daily_transaction(existing_daily)
+
+            if daily is not None:
+                message = (
+                    f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount}). "
+                    f"Payment received {received_total}. Daily Transaction #{daily.TransactionID}."
+                )
+            elif tally_bill:
+                message = (
+                    f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount}). "
+                    "Tally bill generated — payment pending."
+                )
+            elif work_done:
+                message = (
+                    f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount}). Work done."
+                )
+            else:
+                message = f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount})."
 
             return OthersIncomeExpenseSaveResult(
                 entry_id=row.EntryID,
                 bill_no=row.BillNo,
-                daily_transaction_id=daily.TransactionID,
+                daily_transaction_id=daily.TransactionID if daily is not None else None,
                 bank_transaction_ids=bank_ids,
-                message=(
-                    f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount}). "
-                    f"Payment received {received_total}. Daily Transaction #{daily.TransactionID}."
-                ),
+                message=message,
             )
 
         try:

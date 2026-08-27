@@ -335,3 +335,46 @@
 .oie-pager .pagination .page-item.disabled .page-link {
   cursor: default;
 }
+
+.oie-workflow-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.375rem;
+}
+
+.oie-stage-item {
+  margin-bottom: 0;
+}
+
+.oie-auto-bill-btn {
+  vertical-align: middle;
+  font-size: 12px;
+  padding: 0.15rem 0.5rem;
+}
+
+.oie-payment-section-locked {
+  opacity: 0.62;
+}
+
+.oie-payment-section-locked fieldset {
+  pointer-events: none;
+}
+
+#oiePaymentFieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.oie-wf-badge {
+  font-size: 10px;
+  font-weight: 650;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}

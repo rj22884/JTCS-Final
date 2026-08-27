@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260820oiepage1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260827misc1">
 {% endblock %}
 
 {% block content %}
@@ -140,6 +140,7 @@
         <form method="post" id="oieEntryForm" class="oie-entry-form" novalidate>
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="EntryID" id="EntryID" value="">
+          <input type="hidden" name="CustomerID" id="oieCustomerId" value="">
 
           <div class="row g-3 mb-2">
             <div class="col-md-4">
@@ -212,10 +213,55 @@
             </div>
           </div>
 
-          <div class="oie-entry-section mb-3">
+          <div class="oie-entry-section mb-3 d-none" id="oieMiscWorkflowWrap">
             <div class="oie-entry-section-title">
-              <span class="oie-entry-section-num">3</span> Payment Details
+              <span class="oie-entry-section-num">3</span> Workflow
             </div>
+            <div class="oie-workflow-checks" id="oieWorkflowChecks">
+              <div class="form-check form-check-inline oie-stage-item">
+                <input class="form-check-input" type="checkbox" name="WorkDone" value="1"
+                       id="oieWorkDone">
+                <label class="form-check-label" for="oieWorkDone">Work Done</label>
+              </div>
+              <div class="form-check form-check-inline oie-stage-item">
+                <input class="form-check-input" type="checkbox" name="TallyBillGenerated" value="1"
+                       id="oieTallyBillGenerated" disabled>
+                <label class="form-check-label" for="oieTallyBillGenerated">Tally Bill Generated</label>
+                <button type="button" class="btn btn-outline-primary btn-sm ms-1 oie-auto-bill-btn d-none"
+                        id="oieAutoBillBtn">
+                  Generate Automated Bill
+                </button>
+              </div>
+            </div>
+            <div class="oie-tally-bill-wrap d-none mt-2" id="oieTallyBillWrap">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label" for="oieTallyBillNo">Tally Bill Number</label>
+                  <input type="text" class="form-control" id="oieTallyBillNo" name="TallyBillNo"
+                         maxlength="50" placeholder="Bill / invoice number">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="oieTallyBillDate">Bill Date</label>
+                  <input type="date" class="form-control" id="oieTallyBillDate" name="TallyBillDate"
+                         value="{{ default_date }}">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="oieTallyBillAmount">Bill Amount (₹)</label>
+                  <input type="number" class="form-control" id="oieTallyBillAmount" name="TallyBillAmount"
+                         min="0" step="0.01" placeholder="0.00">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3" id="oiePaymentSection">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num" id="oiePaymentSectionNum">3</span> Payment Details
+            </div>
+            <p class="small text-muted mb-2 d-none" id="oiePaymentLockedHint">
+              Payment Details Tally Bill Generated ke baad active honge.
+            </p>
+            <fieldset id="oiePaymentFieldset">
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
               <label class="form-label oie-required mb-0">Payment Modes</label>
               <button type="button" class="btn btn-sm oie-entry-add-payment" id="oieAddPaymentBtn">
@@ -227,11 +273,12 @@
             {% if not payment_modes %}
             <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
             {% endif %}
+            </fieldset>
           </div>
 
           <div class="oie-entry-section mb-3">
             <div class="oie-entry-section-title">
-              <span class="oie-entry-section-num">4</span> Remarks
+              <span class="oie-entry-section-num" id="oieRemarksSectionNum">4</span> Remarks
             </div>
             <div class="row g-3">
               <div class="col-12">
@@ -348,5 +395,5 @@
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260823dmy1"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260827misc1"></script>
 {% endblock %}

@@ -107,7 +107,8 @@ def login():
     if not ok:
         return _render_login(service=service, email=email, dialog_error=message)
     service.establish_session(row)
-    response = redirect(_next_url())
+    next_url = _next_url()
+    response = redirect(url_for("runtime.boot", next=next_url))
     return service.attach_remember_cookie(
         response,
         user_id=user_id,
