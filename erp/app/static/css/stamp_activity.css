@@ -134,9 +134,10 @@
   border-radius: 4px;
 }
 #stampDataGrid {
-  table-layout: fixed;
-  width: 100%;
-  min-width: 100%;
+  table-layout: auto;
+  width: max-content;
+  min-width: 0;
+  max-width: none;
   font-size: 13.5px;
 }
 #stampDataGrid th,
@@ -144,15 +145,12 @@
   padding: 0.28rem 0.4rem;
   vertical-align: middle;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
+  width: 1%;
 }
-#stampDataGrid .stamp-col-grow {
-  width: auto;
-}
-#stampDataGrid .stamp-col-cert {
-  width: auto;
-}
+#stampDataGrid .stamp-col-grow,
+#stampDataGrid .stamp-col-cert,
 #stampDataGrid .stamp-col-num,
 #stampDataGrid .stamp-col-date,
 #stampDataGrid .stamp-col-mobile,

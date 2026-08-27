@@ -951,6 +951,7 @@
       els.dataGridBody.appendChild(tr);
     });
     updateGridSortHeaders();
+    autoFitGridColumns();
   }
 
   function editGridRecord(stampId) {
@@ -2734,7 +2735,7 @@
     });
   });
 
-  const COL_WIDTH_KEY = "stamp-grid-col-widths";
+  const COL_WIDTH_KEY = "stamp-grid-col-widths-v2";
   let columnResizeMoved = false;
 
   function readStoredColWidths() {
@@ -2770,13 +2771,51 @@
     });
   }
 
-  function initColumnResize() {
+  function clearColumnWidths() {
+    const table = document.getElementById("stampDataGrid");
+    if (!table) return;
+    table.querySelectorAll("thead th").forEach(function (th) {
+      th.style.width = "";
+      th.style.minWidth = "";
+      th.style.maxWidth = "";
+    });
+    table.style.tableLayout = "auto";
+    table.style.width = "max-content";
+    table.style.minWidth = "0";
+  }
+
+  function autoFitGridColumns() {
     const table = document.getElementById("stampDataGrid");
     const headerRow = table?.querySelector("thead tr");
     if (!table || !headerRow) return;
     const stored = readStoredColWidths();
+    clearColumnWidths();
+    const colCount = headerRow.children.length;
+    const natural = [];
+    for (let i = 0; i < colCount; i++) {
+      let max = 0;
+      table.querySelectorAll("thead tr").forEach(function (tr) {
+        const cell = tr.children[i];
+        if (cell) max = Math.max(max, cell.scrollWidth);
+      });
+      table.querySelectorAll("tbody tr").forEach(function (tr) {
+        const td = tr.children[i];
+        if (td) max = Math.max(max, td.scrollWidth);
+      });
+      natural[i] = Math.max(52, max + 8);
+    }
+    for (let i = 0; i < colCount; i++) {
+      applyColumnWidth(i, stored[String(i)] || natural[i]);
+    }
+    table.style.tableLayout = "fixed";
+    table.style.width = "max-content";
+  }
+
+  function initColumnResize() {
+    const table = document.getElementById("stampDataGrid");
+    const headerRow = table?.querySelector("thead tr");
+    if (!table || !headerRow) return;
     Array.from(headerRow.children).forEach(function (th, index) {
-      applyColumnWidth(index, stored[String(index)] || th.getBoundingClientRect().width);
       if (th.querySelector(".stamp-col-resizer")) return;
       const handle = document.createElement("span");
       handle.className = "stamp-col-resizer";
@@ -2808,6 +2847,7 @@
         document.addEventListener("mouseup", onUp);
       });
     });
+    autoFitGridColumns();
   }
 
   const stampGridHead = document.querySelector("#stampDataGrid thead");
