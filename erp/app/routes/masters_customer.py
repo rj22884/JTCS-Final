@@ -360,3 +360,9 @@ def dsc_document(customer_id: int, kind: str):
         return send_file(path, as_attachment=True, download_name=name)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/exit")
+@login_required
+def exit_module():
+    return redirect(url_for("dashboard.index"))

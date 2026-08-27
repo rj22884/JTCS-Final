@@ -177,12 +177,15 @@ def _pick_bank(bank_id: int | None) -> dict:
 
     banks = BankMasterService().list_payment_accounts()
     if not banks:
-        raise ValueError("Koi Payment Bank (UPI ID wala) Bank Master mein nahi mila.")
+        raise ValueError("Koi Payment Bank (QR/Bill Received) Bank Master mein nahi mila.")
     if bank_id:
         for bank in banks:
             if int(bank.get("account_id") or 0) == int(bank_id):
                 return bank
         raise ValueError(f"Payment bank id {bank_id} nahi mili.")
+    for bank in banks:
+        if (bank.get("upi_id") or "").strip():
+            return bank
     return banks[0]
 
 

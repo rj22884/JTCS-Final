@@ -63,6 +63,7 @@ from app.routes.website_analytics_public import bp as website_analytics_public_b
 from app.routes.website_snapshot_public import bp as website_snapshot_public_bp
 from app.routes.recruitment_applications import bp as recruitment_applications_bp
 from app.routes.hr import bp as hr_bp
+from app.routes.market_quotes import bp as market_quotes_bp
 from app.modules.crm.routes import (
     crm_api_bp,
     crm_bp,
@@ -175,6 +176,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(website_snapshot_public_bp)
     app.register_blueprint(recruitment_applications_bp)
     app.register_blueprint(hr_bp)
+    app.register_blueprint(market_quotes_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)

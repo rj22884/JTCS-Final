@@ -103,11 +103,11 @@
                 Default: Bank Accounts (Cash → Cash-in-Hand). From Chart of Group Master — single select only.
               </div>
             </div>
-            <div class="col-md-6 d-none" id="bankMasterUpiWrap">
+            <div class="col-md-6" id="bankMasterUpiWrap">
               <label class="form-label" for="bankMasterUpiId">UPI ID</label>
               <input type="text" class="form-control" id="bankMasterUpiId" name="UpiId" maxlength="100"
                      placeholder="e.g. name@upi / mobile@paytm">
-              <div class="form-text">Optional — used on invoice QR when set (CA-Current / SB).</div>
+              <div class="form-text">Optional — used on invoice QR when set.</div>
             </div>
             <div class="col-md-6">
               <label class="form-label" for="bankMasterAccountNumber">Account Number *</label>
@@ -207,5 +207,5 @@
   window.BANK_MASTER_DEFAULT_BANK_GROUP_ID = {{ default_bank_group_id | tojson }};
   window.BANK_MASTER_DEFAULT_CASH_GROUP_ID = {{ default_cash_group_id | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260819permdel"></script>
+<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260827upi1"></script>
 {% endblock %}

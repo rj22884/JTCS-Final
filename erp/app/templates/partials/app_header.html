@@ -15,6 +15,14 @@
     </div>
   </div>
 
+  <div class="jtcs-market-ticker" id="jtcsMarketTicker" data-quotes-url="{{ url_for('market_quotes.quotes') }}" hidden>
+    <button type="button" class="jtcs-market-live" id="jtcsMarketLive" title="Market feed status" disabled>
+      <span class="jtcs-market-live-dot" aria-hidden="true"></span>
+      LIVE
+    </button>
+    <div class="jtcs-market-items" id="jtcsMarketItems" role="list"></div>
+  </div>
+
   <div class="jtcs-header-meta">
     <div class="jtcs-global-search-wrap hide-sm">
       <div class="jtcs-global-search">
@@ -22,7 +30,7 @@
         <input type="search"
                class="form-control form-control-sm jtcs-global-search-input"
                id="jtcsGlobalSearch"
-               placeholder="Search customers, leads, invoices…"
+               placeholder="Search customers, ledgers, items, invoices…"
                autocomplete="off"
                aria-label="Global search"
                aria-expanded="false"

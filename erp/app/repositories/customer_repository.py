@@ -348,20 +348,32 @@ class CustomerRepository:
         digits = re.sub(r"\D", "", needle)
         like = f"%{needle}%"
         like_upper = f"%{needle.upper()}%"
+        clauses = [
+            "UPPER(LTRIM(RTRIM(CustomerName))) LIKE UPPER(:like)",
+            "UPPER(LTRIM(RTRIM(PANNumber))) LIKE :like_upper",
+            "UPPER(LTRIM(RTRIM(ISNULL(EmailID, N'')))) LIKE UPPER(:like)",
+        ]
+        params: dict = {
+            "lim": limit,
+            "like": like,
+            "like_prefix": f"{needle}%",
+            "like_upper": like_upper,
+        }
+        if mobile:
+            clauses.append("MobileNumber LIKE :mobile_like")
+            params["mobile_like"] = f"%{mobile}%"
+        if len(digits) >= 4:
+            clauses.append("REPLACE(AadhaarNumber, ' ', '') LIKE :digits_like")
+            params["digits_like"] = f"%{digits}%"
+        where_sql = " OR ".join(clauses)
         rows = self.session.execute(
             text(
-                """
+                f"""
                 SELECT TOP (:lim) CustomerID, CustomerName, MobileNumber, PANNumber,
                        AadhaarNumber, Pincode, AddressLine1, AddressLine2, State, Country, EmailID,
-                       FilingFrequency
+                       FilingFrequency, CustomerStatus
                 FROM CustomerMaster
-                WHERE CustomerStatus = N'Active'
-                  AND (
-                    UPPER(LTRIM(RTRIM(CustomerName))) LIKE UPPER(:like)
-                    OR MobileNumber LIKE :mobile_like
-                    OR UPPER(LTRIM(RTRIM(PANNumber))) LIKE :like_upper
-                    OR REPLACE(AadhaarNumber, ' ', '') LIKE :digits_like
-                  )
+                WHERE ({where_sql})
                 ORDER BY
                   CASE
                     WHEN UPPER(LTRIM(RTRIM(CustomerName))) LIKE UPPER(:like_prefix) THEN 0
@@ -370,14 +382,7 @@ class CustomerRepository:
                   CustomerName
                 """
             ),
-            {
-                "lim": limit,
-                "like": like,
-                "like_prefix": f"{needle}%",
-                "like_upper": like_upper,
-                "mobile_like": f"%{mobile}%",
-                "digits_like": f"%{digits}%",
-            },
+            params,
         ).mappings().all()
         return [
             {
@@ -393,6 +398,7 @@ class CustomerRepository:
                 "country": row["Country"] or "",
                 "email_id": row.get("EmailID") or "",
                 "filing_frequency": row.get("FilingFrequency") or "",
+                "customer_status": row.get("CustomerStatus") or "Active",
             }
             for row in rows
         ]
@@ -709,6 +715,37 @@ class CustomerRepository:
                 "WHERE CustomerID = :id"
             ),
             {"id": customer_id, "now": datetime.utcnow()},
+        )
+        self.session.flush()
+
+    def purge(self, customer_id: int) -> None:
+        """Hard-delete a customer row. Call only after usage checks. Not recoverable."""
+        cid = int(customer_id)
+        for table in ("CustomerIncomeExpenseWorkLink", "CustomerPortalLoginLog"):
+            safe = self._safe_table_name(table)
+            if not safe:
+                continue
+            self.session.execute(
+                text(
+                    f"IF OBJECT_ID(N'dbo.[{safe}]', N'U') IS NOT NULL "
+                    f"DELETE FROM dbo.[{safe}] WHERE CustomerID = :id"
+                ),
+                {"id": cid},
+            )
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.ChartOfAccountMaster', N'CustomerID') IS NOT NULL
+                    UPDATE dbo.ChartOfAccountMaster
+                    SET CustomerID = NULL
+                    WHERE CustomerID = :id
+                """
+            ),
+            {"id": cid},
+        )
+        self.session.execute(
+            text("DELETE FROM dbo.CustomerMaster WHERE CustomerID = :id"),
+            {"id": cid},
         )
         self.session.flush()
 

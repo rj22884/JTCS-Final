@@ -21,16 +21,8 @@ ACCOUNT_TYPES = BANK_ACCOUNT_TYPES
 
 
 def account_type_needs_upi(account_type: str | None) -> bool:
-    """UPI field for CA-Current* and SB account types only."""
-    code = (account_type or "").strip()
-    if not code:
-        return False
-    key = code.casefold()
-    if key == "sb" or key.startswith("sb ") or key.startswith("sb-"):
-        return True
-    if key.startswith("ca-current"):
-        return True
-    return False
+    """UPI ID is optional on every Bank Master account type."""
+    return True
 
 
 class BankMasterService:
@@ -169,9 +161,6 @@ class BankMasterService:
                 display_order = 2
 
         upi_id = self._clean(form.get("UpiId") or form.get("upi_id"), 100)
-        # UPI is optional; clear when account type does not use invoice QR.
-        if not account_type_needs_upi(account_type):
-            upi_id = None
 
         chart_group_id = self._int_or_default(
             form.get("ChartGroupID") or form.get("chart_group_id") or form.get("under_group_id"),
@@ -257,7 +246,11 @@ class BankMasterService:
         }
 
     def list_payment_accounts(self) -> list[dict]:
-        """Active bank accounts for invoice payment (exclude Cash; UPI ID required)."""
+        """Active bank accounts for sale invoice Payment Bank (QR/Bill Received only).
+
+        Cash is excluded (invoice QR). Accounts without QR/Bill Received stay off this list.
+        UPI ID is optional — invoice PDF shows a fallback when it is blank.
+        """
         self.repo.ensure_schema()
         rows = []
         for row in self.repo.list_all():
@@ -266,13 +259,19 @@ class BankMasterService:
             if self._is_cash_account(row.BankName, row.AccountNumber):
                 continue
             data = self._serialize(row)
-            if not (data.get("upi_id") or "").strip():
+            if not data.get("qr_bill_received"):
                 continue
             data["label"] = (
                 f"{data['bank_name']} · {data['account_number']}"
                 + (f" [{data['account_type']}]" if data["account_type"] else "")
             )
             rows.append(data)
+        rows.sort(
+            key=lambda r: (
+                int(r.get("display_order") or 100),
+                (r.get("label") or "").lower(),
+            )
+        )
         return rows
 
     def list_accounts_for_purchase_payment(self) -> list[dict]:

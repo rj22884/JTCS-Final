@@ -76,6 +76,7 @@ class GstInvoice(db.Model):
     PaymentDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     AmountPaid: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
+    DailyTransactionID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     CreatedBy: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
     CreatedAt: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     UpdatedAt: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

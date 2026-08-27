@@ -367,7 +367,8 @@
     if (els.editBtn) els.editBtn.disabled = !has;
     if (els.restoreBtn) els.restoreBtn.disabled = !has || !row || row.customer_status !== "Inactive";
     if (els.deleteBtn) {
-      els.deleteBtn.disabled = !has || (row && (row.customer_status === "Inactive" || row.has_links));
+      const blockedActive = row && row.customer_status !== "Inactive" && row.has_links;
+      els.deleteBtn.disabled = !has || !!blockedActive;
     }
     if (els.resetPortalBtn) {
       els.resetPortalBtn.disabled = !has || (row && row.customer_status === "Inactive");
@@ -427,9 +428,18 @@
       const linked = !!row.has_links;
       let extraBtn = "";
       if (inactive) {
-        extraBtn = '<button type="button" class="btn btn-outline-success btn-sm cm-row-restore" data-id="' + row.customer_id + '" title="Restore Active"><i class="bi bi-arrow-counterclockwise"></i></button>';
+        extraBtn =
+          '<button type="button" class="btn btn-outline-success btn-sm cm-row-restore" data-id="' +
+          row.customer_id +
+          '" title="Restore Active"><i class="bi bi-arrow-counterclockwise"></i></button> ' +
+          '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' +
+          row.customer_id +
+          '" title="Permanent delete"><i class="bi bi-trash"></i></button>';
       } else if (!linked) {
-        extraBtn = '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' + row.customer_id + '" title="Delete"><i class="bi bi-trash"></i></button>';
+        extraBtn =
+          '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' +
+          row.customer_id +
+          '" title="Mark Inactive"><i class="bi bi-trash"></i></button>';
       }
       const badge = inactive
         ? '<span class="badge bg-secondary">Inactive</span>'
@@ -1549,8 +1559,10 @@
     if (!customerId) return;
     const row = rows.find(function (r) { return r.customer_id === customerId; });
     const name = row ? row.customer_name : "this customer";
-    const message =
-      'Delete "' + name + '"?\n\nSoft delete — customer will be marked Inactive.';
+    const inactive = row && row.customer_status === "Inactive";
+    const message = inactive
+      ? 'Permanently delete "' + name + '"?\n\nThis cannot be recovered.'
+      : 'Mark "' + name + '" Inactive?\n\nCustomer can be restored later. Delete again after Inactive for a permanent delete (cannot be recovered).';
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm(message))) return;

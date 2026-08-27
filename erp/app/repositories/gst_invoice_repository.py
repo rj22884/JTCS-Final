@@ -99,6 +99,7 @@ class GstInvoiceRepository:
             ("PaymentDate", "DATE NULL"),
             ("AmountPaid", "DECIMAL(18,2) NULL"),
             ("TallyBillNo", "NVARCHAR(50) NULL"),
+            ("DailyTransactionID", "INT NULL"),
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
         ):
             self.session.execute(

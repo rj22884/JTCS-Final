@@ -5,11 +5,14 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from flask import current_app
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from app.extensions import db
+from app.models.gst_billing import GstInvoice
+from app.models.transactions import JTCSDailyTransaction
 from app.repositories.gst_invoice_repository import GstInvoiceRepository
 from app.repositories.item_master_repository import ItemMasterRepository
+from app.repositories.transaction_repository import DailyTransactionRepository
 from app.services.bank_master_service import BankMasterService
 from app.utils.db_session import persist
 
@@ -307,6 +310,8 @@ class GstInvoiceService:
     INVOICE_KIND_NON_GST = "NON_GST"
     VOUCHER_SALE = "SALE"
     VOUCHER_PURCHASE = "PURCHASE"
+    DAILY_WORK_TYPE = "Accounting"
+    DAILY_SUB_WORK_TYPE = "Sale / Service Invoice"
 
     @staticmethod
     def normalize_voucher_type(value) -> str:
@@ -713,10 +718,9 @@ class GstInvoiceService:
             if voucher_type != self.VOUCHER_PURCHASE and is_cash:
                 raise ValueError("Cash cannot be used as payment bank for invoice QR.")
             bank_data = bank_svc._serialize(bank_row)
-            if voucher_type != self.VOUCHER_PURCHASE and not (bank_data.get("upi_id") or "").strip():
+            if voucher_type != self.VOUCHER_PURCHASE and not bank_data.get("qr_bill_received"):
                 raise ValueError(
-                    "Selected payment bank has no UPI ID. "
-                    "Set UPI ID in Bank Master (CA-Current / SB), then try again."
+                    "Selected payment bank is not marked QR/Bill Received in Bank Master."
                 )
         elif require_payment_bank:
             raise ValueError("Payment Bank Account is required.")
@@ -846,6 +850,198 @@ class GstInvoiceService:
         }
         return header, lines_out, preview
 
+    def _norm_ref(self, value) -> str:
+        return str(value or "").strip().upper()
+
+    def _invoice_gst_amount(self, inv: GstInvoice) -> Decimal:
+        return _q(
+            Decimal(str(inv.CgstAmount or 0))
+            + Decimal(str(inv.SgstAmount or 0))
+            + Decimal(str(inv.IgstAmount or 0))
+        )
+
+    def _find_own_sale_daily(self, inv: GstInvoice) -> JTCSDailyTransaction | None:
+        daily_id = getattr(inv, "DailyTransactionID", None)
+        if daily_id:
+            daily = db.session.get(JTCSDailyTransaction, int(daily_id))
+            if daily is not None:
+                return daily
+        invoice_no = self._norm_ref(inv.InvoiceNo)
+        if not invoice_no:
+            return None
+        return db.session.scalars(
+            select(JTCSDailyTransaction)
+            .where(JTCSDailyTransaction.WorkType == self.DAILY_WORK_TYPE)
+            .where(JTCSDailyTransaction.SubWorkType == self.DAILY_SUB_WORK_TYPE)
+            .where(JTCSDailyTransaction.ReferenceNo == invoice_no)
+            .order_by(JTCSDailyTransaction.TransactionID.desc())
+        ).first()
+
+    def _followup_sale_daily(self, tally_bill_no: str | None, *, exclude_daily_id: int | None = None) -> JTCSDailyTransaction | None:
+        bill_no = self._norm_ref(tally_bill_no)
+        if not bill_no:
+            return None
+        stmt = (
+            select(JTCSDailyTransaction)
+            .where(JTCSDailyTransaction.Status == "Posted")
+            .where(JTCSDailyTransaction.SaleAmount != 0)
+            .where(JTCSDailyTransaction.ReferenceNo == bill_no)
+            .where(
+                (JTCSDailyTransaction.WorkType != self.DAILY_WORK_TYPE)
+                | (JTCSDailyTransaction.SubWorkType != self.DAILY_SUB_WORK_TYPE)
+            )
+            .order_by(JTCSDailyTransaction.TransactionID.desc())
+        )
+        if exclude_daily_id:
+            stmt = stmt.where(JTCSDailyTransaction.TransactionID != int(exclude_daily_id))
+        return db.session.scalars(stmt).first()
+
+    def _tally_bill_already_in_sales(self, tally_bill_no: str | None, *, exclude_daily_id: int | None = None) -> bool:
+        return self._followup_sale_daily(tally_bill_no, exclude_daily_id=exclude_daily_id) is not None
+
+    def _strip_followup_sale(self, daily: JTCSDailyTransaction) -> None:
+        """Keep the followup row, but stop counting it as Sale so the invoice date wins."""
+        sale = _q(Decimal(str(daily.SaleAmount or 0)))
+        if sale == 0:
+            return
+        total = _q(Decimal(str(daily.TotalAmount or 0)))
+        daily.SaleAmount = Decimal("0.00")
+        remaining = total - sale
+        daily.TotalAmount = remaining if remaining > 0 else Decimal("0.00")
+        daily.ModifiedDate = datetime.utcnow()
+        db.session.flush()
+
+    def _remove_sale_daily(self, inv: GstInvoice) -> None:
+        daily = self._find_own_sale_daily(inv)
+        if daily is None:
+            inv.DailyTransactionID = None
+            return
+        DailyTransactionRepository().delete(daily)
+        inv.DailyTransactionID = None
+        db.session.flush()
+
+    def _sync_sale_daily(self, inv: GstInvoice) -> bool:
+        """Post Sale invoice into JTCSDailyTransaction so dashboard sales cards pick it up.
+
+        Existing SaleAmount rows (followup / stamp / etc.) stay as-is. If this invoice
+        is already counted via Tally Bill Number, do not add a second row.
+        """
+        voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+        amount = _q(Decimal(str(inv.InvoiceValue or 0)))
+        own = self._find_own_sale_daily(inv)
+        if voucher != self.VOUCHER_SALE or amount == 0:
+            if own is not None:
+                self._remove_sale_daily(inv)
+                return True
+            return False
+        followup = self._followup_sale_daily(
+            getattr(inv, "TallyBillNo", None),
+            exclude_daily_id=own.TransactionID if own is not None else None,
+        )
+        if followup is not None and followup.TransactionDate == inv.InvoiceDate:
+            # Already in sales cards on this invoice date — do not double-count.
+            return False
+        if followup is not None:
+            # Same bill was posted on followup date; move Sale to invoice date.
+            self._strip_followup_sale(followup)
+
+        gst_amount = self._invoice_gst_amount(inv)
+        customer_name = (inv.CustomerName or "").strip() or None
+        description = f"{self.DAILY_SUB_WORK_TYPE} — {inv.InvoiceNo}"
+        if customer_name:
+            description = f"{description} — {customer_name}"
+        created_by = (inv.CreatedBy or "").strip() or "Sale Invoice"
+        if own is not None:
+            own.TransactionDate = inv.InvoiceDate
+            own.CustomerID = inv.CustomerID
+            own.CustomerName = customer_name
+            own.ReferenceNo = self._norm_ref(inv.InvoiceNo)
+            own.Description = description
+            own.IncomeAmount = Decimal("0")
+            own.ExpenseAmount = Decimal("0")
+            own.SaleAmount = amount
+            own.PurchaseAmount = Decimal("0")
+            own.GSTAmount = gst_amount
+            own.TotalAmount = amount
+            own.Status = "Posted"
+            own.ModifiedDate = datetime.utcnow()
+            own.Remarks = self._norm_ref(getattr(inv, "TallyBillNo", None)) or None
+            inv.DailyTransactionID = own.TransactionID
+            db.session.flush()
+            return True
+
+        daily = DailyTransactionRepository().create(
+            {
+                "TransactionDate": inv.InvoiceDate,
+                "WorkType": self.DAILY_WORK_TYPE,
+                "SubWorkType": self.DAILY_SUB_WORK_TYPE,
+                "CustomerID": inv.CustomerID,
+                "CustomerName": customer_name,
+                "ReferenceNo": self._norm_ref(inv.InvoiceNo),
+                "Description": description,
+                "IncomeAmount": Decimal("0"),
+                "ExpenseAmount": Decimal("0"),
+                "SaleAmount": amount,
+                "PurchaseAmount": Decimal("0"),
+                "GSTAmount": gst_amount,
+                "TDSAmount": Decimal("0"),
+                "TotalAmount": amount,
+                "PaymentSplitCount": 1,
+                "Status": "Posted",
+                "CreatedBy": created_by,
+                "CreatedDate": datetime.utcnow(),
+                "Remarks": self._norm_ref(getattr(inv, "TallyBillNo", None)) or None,
+            }
+        )
+        inv.DailyTransactionID = daily.TransactionID
+        db.session.flush()
+        return True
+
+    def ensure_sale_invoices_posted(self) -> int:
+        """Backfill Sale invoices that are not yet in daily sales totals."""
+        self.repo.ensure_schema()
+        today = date.today()
+        invoice_ids = db.session.execute(
+            text(
+                """
+                SELECT i.InvoiceID
+                FROM dbo.GstInvoice i
+                WHERE ISNULL(i.VoucherType, N'SALE') = N'SALE'
+                  AND ISNULL(i.InvoiceValue, 0) <> 0
+                  AND i.DailyTransactionID IS NULL
+                  AND (
+                        i.InvoiceDate = :today
+                        OR ISNULL(i.CreatedBy, N'') <> N'DayBook Import'
+                  )
+                  AND NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.JTCSDailyTransaction d
+                        WHERE d.Status = N'Posted'
+                          AND ISNULL(d.SaleAmount, 0) <> 0
+                          AND d.TransactionDate = i.InvoiceDate
+                          AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                              = UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                          AND NULLIF(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))), N'') IS NOT NULL
+                          AND NOT (
+                                d.WorkType = N'Accounting'
+                                AND d.SubWorkType = N'Sale / Service Invoice'
+                          )
+                  )
+                """
+            ),
+            {"today": today},
+        ).scalars().all()
+        posted = 0
+        for invoice_id in invoice_ids:
+            inv = self.repo.get_by_id(int(invoice_id))
+            if inv is None:
+                continue
+            if self._sync_sale_daily(inv):
+                posted += 1
+        if posted:
+            db.session.commit()
+        return posted
+
     def create_record(self, payload: dict, *, created_by: str | None = None) -> dict:
         if created_by:
             payload = {**payload, "created_by": created_by}
@@ -854,6 +1050,7 @@ class GstInvoiceService:
 
         def _write() -> dict:
             inv = self.repo.create(header, lines)
+            self._sync_sale_daily(inv)
             return self._serialize(inv)
 
         return persist(_write)
@@ -862,17 +1059,16 @@ class GstInvoiceService:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
-        # Keep existing invoice number on edit
         payload = {**payload, "invoice_no": inv.InvoiceNo}
         header, lines, _ = self._build_header_and_lines(payload, persist_no=False)
         self._assert_tally_bill_unique(header.get("TallyBillNo"), exclude_invoice_id=invoice_id)
         header["UpdatedAt"] = datetime.utcnow()
-        # Do not overwrite created audit fields
         header.pop("CreatedAt", None)
         header.pop("CreatedBy", None)
 
         def _write() -> dict:
             updated = self.repo.update(inv, header, lines)
+            self._sync_sale_daily(updated)
             return self._serialize(updated)
 
         return persist(_write)
@@ -931,6 +1127,7 @@ class GstInvoiceService:
             raise ValueError("Invoice not found.")
 
         def _write() -> str:
+            self._remove_sale_daily(inv)
             self.repo.delete(inv)
             return "Invoice deleted successfully."
 

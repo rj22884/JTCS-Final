@@ -6,6 +6,8 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from sqlalchemy.exc import IntegrityError
+
 from app.customer_master.constants import (
     GROUP_TABS,
     MASTER_MANDATORY_FIELDS,
@@ -45,6 +47,9 @@ class CustomerInUseError(ValueError):
 _IN_USE_MESSAGE = (
     "This customer is linked to existing records and cannot be deleted or inactivated. "
     "Only Edit is allowed."
+)
+_IN_USE_PERMANENT_MESSAGE = (
+    "This customer has linked records and cannot be permanently deleted."
 )
 
 
@@ -408,17 +413,28 @@ class CustomerMasterService:
 
     def delete_record(self, customer_id: int) -> str:
         usage = self.repository.get_usage(customer_id)
+        row = self.repository.get_detail(customer_id)
+        inactive = (row.get("CustomerStatus") or "").strip().lower() == "inactive"
         if not usage.get("can_delete"):
-            raise CustomerInUseError(usage, _IN_USE_MESSAGE)
+            raise CustomerInUseError(
+                usage,
+                _IN_USE_PERMANENT_MESSAGE if inactive else _IN_USE_MESSAGE,
+            )
 
         def _write() -> str:
-            row = self.repository.get_detail(customer_id)
-            if (row.get("CustomerStatus") or "").lower() == "inactive":
-                raise ValueError("Customer is already inactive.")
+            if inactive:
+                self.repository.purge(customer_id)
+                return "Customer permanently deleted. This cannot be recovered."
             self.repository.deactivate(customer_id)
-            return "Customer marked inactive successfully."
+            return (
+                "Customer marked inactive. Delete again to permanently remove "
+                "(cannot be recovered)."
+            )
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE) from exc
 
     def restore_record(self, customer_id: int) -> str:
         def _write() -> str:

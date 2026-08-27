@@ -203,12 +203,22 @@ class DashboardService:
                 params["date_to"] = date_to
         return Decimal(str(db.session.execute(text(sql), params).scalar() or 0))
 
+    def _ensure_gst_sales_posted(self) -> None:
+        """Add Sale invoices into daily SaleAmount without changing existing rows."""
+        try:
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().ensure_sale_invoices_posted()
+        except Exception:
+            db.session.rollback()
+
     def get_metrics(
         self,
         date_from: date | None = None,
         date_to: date | None = None,
     ) -> DashboardMetrics:
         self.ensure_schema()
+        self._ensure_gst_sales_posted()
         date_from, date_to = self._normalize_period(date_from, date_to)
 
         daily = db.session.execute(
@@ -612,6 +622,7 @@ class DashboardService:
 
     def get_today_activity_summary(self, system_date: date | None = None) -> TodayActivitySummary:
         system_date = system_date or date.today()
+        self._ensure_gst_sales_posted()
         row = db.session.execute(
             text(
                 """
@@ -910,6 +921,32 @@ class DashboardService:
                             "source_module": "printing_scanning",
                             "source_module_id": pid,
                             "source_url": url_for(endpoint, load_entry=pid),
+                            "can_open": True,
+                        }
+                    )
+                return base
+
+            if wt_u == "ACCOUNTING" and "sale" in sw_l and ref:
+                row = db.session.execute(
+                    text(
+                        """
+                        SELECT TOP 1 InvoiceID
+                        FROM dbo.GstInvoice
+                        WHERE InvoiceNo = :invoice_no
+                        ORDER BY InvoiceID DESC
+                        """
+                    ),
+                    {"invoice_no": ref},
+                ).first()
+                if row:
+                    iid = int(row[0])
+                    base.update(
+                        {
+                            "source_module": "gst_invoice",
+                            "source_module_id": iid,
+                            "source_url": url_for(
+                                "accounting_invoice.invoice_sale", edit=iid
+                            ),
                             "can_open": True,
                         }
                     )
@@ -1938,6 +1975,7 @@ class DashboardService:
     ) -> dict:
         """Aggregated posted daily-transaction series for dashboard charts."""
         date_from, date_to = self._normalize_period(date_from, date_to)
+        self._ensure_gst_sales_posted()
         span_days = (date_to - date_from).days + 1
         monthly = span_days > 45
 

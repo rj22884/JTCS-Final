@@ -34,22 +34,6 @@
     qrBillReceived: document.getElementById("bankMasterQrBillReceived"),
   };
 
-  function accountTypeNeedsUpi(accountType) {
-    const key = String(accountType || "").trim().toLowerCase();
-    if (!key) return false;
-    if (key === "sb" || key.indexOf("sb ") === 0 || key.indexOf("sb-") === 0) return true;
-    return key.indexOf("ca-current") === 0;
-  }
-
-  function toggleUpiField() {
-    const need = accountTypeNeedsUpi(els.accountType?.value);
-    if (els.upiWrap) els.upiWrap.classList.toggle("d-none", !need);
-    if (els.upiId) {
-      els.upiId.required = false;
-      if (!need) els.upiId.value = "";
-    }
-  }
-
   function isCashAccount(bankName, accountNumber) {
     return String(bankName || "").trim().toLowerCase() === "cash"
       || String(accountNumber || "").trim().toLowerCase() === "cash";
@@ -278,7 +262,6 @@
     if (els.underGroup) els.underGroup.value = String(defaultUnderGroupId(false) || "");
     applyDefaultDrCrFromUnderGroup();
     applyCashDisplayOrderLock(false);
-    toggleUpiField();
   }
 
   function fillForm(record) {
@@ -325,15 +308,12 @@
     if (els.underGroup && record.chart_group_id != null) {
       els.underGroup.value = String(record.chart_group_id);
     }
-    toggleUpiField();
-    if (els.upiId && record.upi_id) els.upiId.value = record.upi_id;
   }
 
   function openAddModal() {
     clearForm();
     if (els.modalTitle) els.modalTitle.textContent = "Add Bank Account";
     applyCashDisplayOrderLock(false);
-    toggleUpiField();
     modal?.show();
     els.bankName?.focus();
   }
@@ -430,12 +410,7 @@
     } else {
       body.set("QrBillReceived", "0");
     }
-    // Always send UPI explicitly (hidden/cleared when not CA-Current / SB).
-    if (accountTypeNeedsUpi(els.accountType?.value)) {
-      body.set("UpiId", (els.upiId?.value || "").trim());
-    } else {
-      body.set("UpiId", "");
-    }
+    body.set("UpiId", (els.upiId?.value || "").trim());
     const url = accountId
       ? apiUrl(window.BANK_MASTER_API.update, accountId)
       : window.BANK_MASTER_API.create;
@@ -484,7 +459,6 @@
   els.accountNumber?.addEventListener("input", function () {
     applyCashDisplayOrderLock();
   });
-  els.accountType?.addEventListener("change", toggleUpiField);
   els.underGroup?.addEventListener("change", applyDefaultDrCrFromUnderGroup);
 
   els.addBtn?.addEventListener("click", openAddModal);

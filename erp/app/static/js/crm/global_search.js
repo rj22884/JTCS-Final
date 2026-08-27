@@ -10,6 +10,15 @@
   let debounceTimer = null;
   let abortCtrl = null;
 
+  const GROUPS = [
+    { key: "customers", label: "Customers", icon: "bi-person", fallbackHref: "/masters/customer" },
+    { key: "ledgers", label: "Ledgers", icon: "bi-journal-text", fallbackHref: "/Reports_and_analysis/ledger_report" },
+    { key: "items", label: "Items", icon: "bi-box-seam", fallbackHref: "/masters/item" },
+    { key: "invoices", label: "Invoices", icon: "bi-receipt", fallbackHref: "/accounting/invoice/sale" },
+    { key: "leads", label: "Leads", icon: "bi-person-plus", fallbackHref: "/crm/leads" },
+    { key: "documents", label: "Documents", icon: "bi-folder", fallbackHref: "/crm/documents" },
+  ];
+
   function hideResults() {
     resultsEl.classList.remove("show");
     input.setAttribute("aria-expanded", "false");
@@ -20,39 +29,74 @@
     input.setAttribute("aria-expanded", "true");
   }
 
+  function pick(row, keys) {
+    for (let i = 0; i < keys.length; i++) {
+      const v = row[keys[i]];
+      if (v != null && String(v).trim()) return String(v).trim();
+    }
+    return "";
+  }
+
+  function rowTitle(row) {
+    return (
+      pick(row, [
+        "title",
+        "customer_name",
+        "CustomerName",
+        "FullName",
+        "item_name",
+        "ItemName",
+        "label",
+        "InvoiceNo",
+        "InvoiceNumber",
+        "name",
+      ]) || "Untitled"
+    );
+  }
+
+  function rowSubtitle(row) {
+    const direct = pick(row, ["subtitle"]);
+    if (direct) return direct;
+    if (row.GrandTotal != null) return "₹ " + row.GrandTotal;
+    if (row.InvoiceValue != null) return "₹ " + row.InvoiceValue;
+    return pick(row, [
+      "mobile_number",
+      "Mobile",
+      "email_id",
+      "Email",
+      "pan_number",
+      "item_code",
+      "FolderType",
+      "Status",
+    ]);
+  }
+
+  function rowHref(row, group) {
+    return pick(row, ["href"]) || group.fallbackHref || "#";
+  }
+
   function renderResults(data) {
     const parts = [];
-    const groups = [
-      { key: "customers", label: "Customers", icon: "bi-person", href: (r) => "/crm/customer-360/" + (r.CustomerID || r.customer_id) },
-      { key: "leads", label: "Leads", icon: "bi-person-plus", href: (r) => "/crm/leads/" + (r.LeadID || r.lead_id) },
-      { key: "invoices", label: "Invoices", icon: "bi-receipt", href: () => "/accounting/reports" },
-      { key: "documents", label: "Documents", icon: "bi-folder", href: () => "/crm/documents" },
-    ];
-
-    groups.forEach(function (g) {
-      const rows = data[g.key] || [];
+    GROUPS.forEach(function (g) {
+      const rows = (data && data[g.key]) || [];
       if (!rows.length) return;
-      parts.push('<div class="jtcs-global-search-group">' + CrmCommon.escapeHtml(g.label) + "</div>");
-      rows.slice(0, 6).forEach(function (row) {
-        const title =
-          row.CustomerName ||
-          row.FullName ||
-          row.InvoiceNumber ||
-          row.Title ||
-          row.DocumentTitle ||
-          row.name ||
-          "Item";
-        let sub = row.Mobile || row.Email || row.FolderType || row.Status || "";
-        if (!sub && row.GrandTotal != null) sub = "₹ " + row.GrandTotal;
+      parts.push(
+        '<div class="jtcs-global-search-group">' + CrmCommon.escapeHtml(g.label) + "</div>"
+      );
+      rows.slice(0, 8).forEach(function (row) {
+        const title = rowTitle(row);
+        const sub = rowSubtitle(row);
         parts.push(
           '<a class="jtcs-global-search-item" href="' +
-            CrmCommon.escapeHtml(g.href(row)) +
+            CrmCommon.escapeHtml(rowHref(row, g)) +
             '">' +
             '<i class="bi ' +
             g.icon +
             ' me-1"></i>' +
             CrmCommon.escapeHtml(title) +
-            (sub ? '<div class="small text-muted">' + CrmCommon.escapeHtml(String(sub)) + "</div>" : "") +
+            (sub
+              ? '<div class="small text-muted">' + CrmCommon.escapeHtml(sub) + "</div>"
+              : "") +
             "</a>"
         );
       });
