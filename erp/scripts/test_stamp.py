@@ -136,6 +136,43 @@ Stamp Duty Amount(Rs.)
                     ok(f"StampDutyAmount parse {raw!r} = {actual}")
                 else:
                     fail(f"StampDutyAmount parse {raw!r}", f"expected {expected!r}, got {actual!r}")
+
+            garbled = """
+            Government of Uttarakhand
+            Certiticate Number
+            IN UK80596276301039Y
+            Certificate Issued Date : 05-Jul-2026 11.55 AM
+            Purchased by : test
+            First Party : RAM SINGH
+            Second Party : SHYAM SINGH
+            Stamp Duty Paid By : RAM SINGH
+            Stamp Duty Amount(Rs.) : 1 (One only)
+            """
+            garbled_fields = ocr.parse_certificate_text(garbled)
+            if garbled_fields.get("CertificateNumber") == "IN-UK80596276301039Y":
+                ok("Garbled OCR still finds IN-UK certificate number")
+            else:
+                fail(
+                    "Garbled certificate number",
+                    f"got {garbled_fields.get('CertificateNumber')!r}",
+                )
+            unlabeled = "IN-UK80596276301039Y First Party test Stamp Duty Amount(Rs.) : 500 (Five hundred only)"
+            unlabeled_fields = ocr.parse_certificate_text(unlabeled)
+            if unlabeled_fields.get("CertificateNumber") == "IN-UK80596276301039Y":
+                ok("Unlabeled IN-UK certificate number fallback")
+            else:
+                fail(
+                    "Unlabeled certificate number",
+                    f"got {unlabeled_fields.get('CertificateNumber')!r}",
+                )
+            try:
+                partial = ocr.parse_certificate_text("First Party : RAM SINGH\nStamp Duty Amount(Rs.) : 1 (One only)")
+                if partial.get("FirstPartyName") == "RAM SINGH":
+                    ok("Missing certificate number still returns partial fields")
+                else:
+                    fail("Partial OCR fields", f"got {partial!r}")
+            except Exception as exc:
+                fail("Partial OCR should not raise", str(exc))
         except Exception as exc:
             fail("OCR parsing", str(exc))
 

@@ -397,8 +397,19 @@ class StampService:
         stamp_duty_paid_by = self._clean(form.get("StampDutyPaidBy")) or self._clean(
             form.get("FirstPartyName")
         )
-        customer_id = None
         customer_name = stamp_duty_paid_by or None
+        customer_id = None
+        mobile_digits = "".join(ch for ch in (form.get("MobileNumber") or "") if ch.isdigit())[-10:]
+        if len(mobile_digits) == 10:
+            matches = self.master_repo.list_customers_by_mobile(mobile_digits)
+            if matches:
+                customer_id = matches[0].CustomerID
+                if not customer_name:
+                    customer_name = matches[0].CustomerName
+        if customer_id is None and stamp_id:
+            existing_for_customer = self.stamp_repo.get_daily_for_stamp(stamp_id)
+            if existing_for_customer and existing_for_customer.CustomerID:
+                customer_id = existing_for_customer.CustomerID
         txn_date = (
             self._as_date(form.get("TransactionDate"))
             or self._as_date(form.get("CertificateIssuedDate"))

@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260827ocr2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260827rows1">
 {% endblock %}
 
 {% block content %}
@@ -18,14 +18,14 @@
             <select class="form-select form-select-sm" id="stampFilterPeriod">
               <option value="today">Today</option>
               <option value="week">This Week</option>
-              <option value="month" selected>This Month</option>
+              <option value="month">This Month</option>
               <option value="year">This Year</option>
-              <option value="custom">Custom Range</option>
+              <option value="custom" selected>Custom Range</option>
             </select>
           </div>
           <div class="col-6 col-md-4 col-lg-2">
             <label class="form-label" for="stampFilterDateFrom">Date From</label>
-            <input type="date" class="form-control form-control-sm" id="stampFilterDateFrom" value="{{ default_date_from }}">
+            <input type="date" class="form-control form-control-sm" id="stampFilterDateFrom" value="">
           </div>
           <div class="col-6 col-md-4 col-lg-2">
             <label class="form-label" for="stampFilterDateTo">Date To</label>
@@ -98,7 +98,19 @@
 
   <div class="jtcs-card stamp-data-grid-panel mb-2">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-      <div class="stamp-section-head mb-0">Stamp Activity Records</div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="stamp-section-head mb-0">Stamp Activity Records</div>
+        <label class="form-label mb-0 small text-muted" for="stampPageSize">Rows</label>
+        <select class="form-select form-select-sm stamp-page-size" id="stampPageSize" aria-label="Rows per page">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+          <option value="all">All records</option>
+        </select>
+      </div>
       <span class="small text-muted" id="stampDataGridCount"></span>
     </div>
     <div class="table-responsive stamp-data-grid-wrap">
@@ -151,6 +163,12 @@
       </table>
     </div>
     <div id="stampDataGridEmpty" class="small text-muted py-3 d-none">No stamp records match the current filters.</div>
+    <div class="stamp-pager d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
+      <span class="small text-muted" id="stampPageInfo"></span>
+      <nav aria-label="Stamp activity pages">
+        <ul class="pagination pagination-sm mb-0" id="stampPagerNav"></ul>
+      </nav>
+    </div>
   </div>
 
   <div class="modal fade" id="stampCardDetailModal" tabindex="-1" aria-labelledby="stampCardDetailTitle" aria-hidden="true">
@@ -519,5 +537,5 @@
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260827ocr2"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260827col1"></script>
 {% endblock %}

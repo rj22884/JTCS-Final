@@ -12,6 +12,7 @@ from app.exceptions.stamp_exceptions import ExistingStampRecord
 from app.models.bank_cash import OthersBankCashTransaction
 from app.models.stamp import StampMaster, StampOcrImage
 from app.models.transactions import (
+    CustomerMaster,
     JTCSDailyTransaction,
     JTCSDailyTransactionPayment,
     JtcsBankAccountMaster,
@@ -225,18 +226,21 @@ class StampRepository:
         apply_dates: bool = True,
     ):
         cert = self._normalize_certificate_query(filters.certificate)
-        # Certificate search must find the row anywhere in JTCS (period does not hide it).
+        customer = (filters.customer or "").strip()
+        mobile = "".join(ch for ch in (filters.mobile or "") if ch.isdigit())
+        # Certificate / customer / mobile search must find the row anywhere in JTCS
+        # (period must not hide an integrated stamp).
         if cert:
             stmt = stmt.where(
                 func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{cert}%")
             )
-        elif apply_dates:
+        elif apply_dates and not customer and not mobile:
             if filters.date_from:
                 stmt = stmt.where(JTCSDailyTransaction.TransactionDate >= filters.date_from)
             if filters.date_to:
                 stmt = stmt.where(JTCSDailyTransaction.TransactionDate <= filters.date_to)
-        if filters.customer:
-            needle = f"%{filters.customer.strip()}%"
+        if customer:
+            needle = f"%{customer}%"
             stmt = stmt.where(
                 or_(
                     StampMaster.FirstPartyName.like(needle),
@@ -252,9 +256,14 @@ class StampRepository:
         stmt = (
             select(StampMaster, JTCSDailyTransaction)
             .outerjoin(JTCSDailyTransaction, JTCSDailyTransaction.StampID == StampMaster.StampID)
+            .outerjoin(CustomerMaster, CustomerMaster.CustomerID == JTCSDailyTransaction.CustomerID)
             .where(StampMaster.IsActive == True)  # noqa: E712
         )
-        return self._apply_transaction_filters(stmt, filters)
+        stmt = self._apply_transaction_filters(stmt, filters)
+        mobile = "".join(ch for ch in (filters.mobile or "") if ch.isdigit())
+        if mobile:
+            stmt = stmt.where(CustomerMaster.MobileNumber.like(f"%{mobile}%"))
+        return stmt
 
     def _cash_account_match(self):
         return or_(
@@ -272,6 +281,30 @@ class StampRepository:
             or (account.AccountNumber or "").strip().lower() == "cash"
             or (account.MaskedAccountNumber or "").strip().lower() == "cash"
         )
+
+    def _payment_account_label(
+        self,
+        account: JtcsBankAccountMaster | None = None,
+        bank: JtcsBankTransaction | None = None,
+    ) -> str:
+        bank_name = (account.BankName if account is not None else "") or (
+            bank.BankName if bank is not None else ""
+        )
+        account_number = ""
+        if account is not None:
+            account_number = (account.AccountNumber or account.MaskedAccountNumber or "").strip()
+        if not account_number and bank is not None:
+            account_number = (bank.MaskedAccountNumber or "").strip()
+        if self._account_is_cash(account) or (bank_name or "").strip().lower() == "cash" or (
+            account_number or ""
+        ).strip().lower() == "cash":
+            return "Cash"
+        digits = "".join(ch for ch in account_number if ch.isdigit())
+        if len(digits) >= 4:
+            return digits[-4:]
+        if digits:
+            return digits
+        return account_number or (bank_name or "").strip()
 
     def _bank_daily_join(self):
         return or_(
@@ -554,73 +587,142 @@ class StampRepository:
         stmt = select(StampOcrImage.StampID).where(StampOcrImage.StampID.isnot(None)).distinct()
         return {int(stamp_id) for stamp_id in self.session.scalars(stmt).all() if stamp_id}
 
-    def grid_rows(self, filters: StampGridFilters, *, limit: int = 500) -> list[dict]:
-        ocr_stamp_ids = self._ocr_stamp_ids()
-        # Targeted searches must not be truncated by the default period page size.
-        cert = self._normalize_certificate_query(filters.certificate)
-        mobile = "".join(ch for ch in (filters.mobile or "") if ch.isdigit())[-10:]
-        customer = (filters.customer or "").strip()
-        effective_limit = limit
-        if cert or mobile or customer:
-            effective_limit = max(limit, 5000)
-        stmt = (
-            self._grid_base_stmt(filters)
-            .order_by(JTCSDailyTransaction.TransactionDate.desc(), StampMaster.CreatedDate.desc())
-            .limit(effective_limit)
-        )
-        rows: list[dict] = []
-        for stamp, daily in self.session.execute(stmt).all():
-            payment_mode = ""
-            has_cash = False
-            has_non_cash = False
-            if daily is not None:
-                payment_lines = self.session.scalars(
+    @staticmethod
+    def _id_chunks(values: list[int], size: int = 1000):
+        for i in range(0, len(values), size):
+            yield values[i : i + size]
+
+    def _payment_lookup(self, daily_ids: list[int]) -> dict[int, tuple[str, bool, bool]]:
+        """Map daily TransactionID → (payment_mode, has_cash, has_non_cash)."""
+        result: dict[int, tuple[str, bool, bool]] = {}
+        if not daily_ids:
+            return result
+
+        payment_lines: list[JTCSDailyTransactionPayment] = []
+        for chunk in self._id_chunks(daily_ids):
+            payment_lines.extend(
+                self.session.scalars(
                     select(JTCSDailyTransactionPayment)
-                    .where(JTCSDailyTransactionPayment.TransactionID == daily.TransactionID)
-                    .order_by(JTCSDailyTransactionPayment.PaymentSequence.asc())
+                    .where(JTCSDailyTransactionPayment.TransactionID.in_(chunk))
+                    .order_by(
+                        JTCSDailyTransactionPayment.TransactionID.asc(),
+                        JTCSDailyTransactionPayment.PaymentSequence.asc(),
+                    )
                 ).all()
-                labels: list[str] = []
-                for line in payment_lines:
-                    account = self.session.get(JtcsBankAccountMaster, line.BankAccountID)
-                    if account is not None:
-                        labels.append(
-                            (account.AccountNumber or account.MaskedAccountNumber or account.BankName or "").strip()
-                        )
-                        if self._account_is_cash(account):
-                            has_cash = True
-                        else:
-                            has_non_cash = True
-                if not labels:
-                    bank_rows = self.session.scalars(
+            )
+        account_ids = {line.BankAccountID for line in payment_lines}
+        accounts: dict[int, JtcsBankAccountMaster] = {}
+        for chunk in self._id_chunks(list(account_ids)):
+            for account in self.session.scalars(
+                select(JtcsBankAccountMaster).where(
+                    JtcsBankAccountMaster.JtcsBankAccountID.in_(chunk)
+                )
+            ).all():
+                accounts[account.JtcsBankAccountID] = account
+
+        lines_by_txn: dict[int, list[JTCSDailyTransactionPayment]] = {}
+        for line in payment_lines:
+            lines_by_txn.setdefault(line.TransactionID, []).append(line)
+
+        missing = [tid for tid in daily_ids if tid not in lines_by_txn]
+        banks_by_txn: dict[int, list[JtcsBankTransaction]] = {}
+        if missing:
+            bank_rows: list[JtcsBankTransaction] = []
+            for chunk in self._id_chunks(missing):
+                bank_rows.extend(
+                    self.session.scalars(
                         select(JtcsBankTransaction)
+                        .where(JtcsBankTransaction.SourceTable == "JTCSDailyTransaction")
                         .where(
-                            JtcsBankTransaction.SourceTable == "JTCSDailyTransaction",
                             or_(
-                                JtcsBankTransaction.SourceRecordID == daily.TransactionID,
-                                JtcsBankTransaction.SourceID == daily.TransactionID,
-                            ),
+                                JtcsBankTransaction.SourceRecordID.in_(chunk),
+                                JtcsBankTransaction.SourceID.in_(chunk),
+                            )
                         )
                         .order_by(JtcsBankTransaction.PaymentSequence.asc())
                     ).all()
-                    for bank in bank_rows:
-                        labels.append(
-                            (bank.MaskedAccountNumber or bank.BankName or str(bank.JtcsBankAccountID)).strip()
-                        )
-                        account = self.session.get(JtcsBankAccountMaster, bank.JtcsBankAccountID)
-                        if self._account_is_cash(account):
-                            has_cash = True
-                        elif (bank.BankName or "").strip().lower() == "cash" or (
-                            bank.MaskedAccountNumber or ""
-                        ).strip().lower() == "cash":
-                            has_cash = True
-                        else:
-                            has_non_cash = True
-                payment_mode = " + ".join(label for label in labels if label)
-                if not has_cash and not has_non_cash and payment_mode:
-                    if payment_mode.strip().lower() == "cash":
+                )
+            for bank in bank_rows:
+                key = bank.SourceRecordID or bank.SourceID
+                if key:
+                    banks_by_txn.setdefault(int(key), []).append(bank)
+            missing_account_ids = [
+                bank.JtcsBankAccountID
+                for bank in bank_rows
+                if bank.JtcsBankAccountID and bank.JtcsBankAccountID not in accounts
+            ]
+            for chunk in self._id_chunks(list(dict.fromkeys(missing_account_ids))):
+                for account in self.session.scalars(
+                    select(JtcsBankAccountMaster).where(
+                        JtcsBankAccountMaster.JtcsBankAccountID.in_(chunk)
+                    )
+                ).all():
+                    accounts[account.JtcsBankAccountID] = account
+
+        for txn_id in daily_ids:
+            labels: list[str] = []
+            has_cash = False
+            has_non_cash = False
+            for line in lines_by_txn.get(txn_id, []):
+                account = accounts.get(line.BankAccountID)
+                label = self._payment_account_label(account=account)
+                if label:
+                    labels.append(label)
+                if self._account_is_cash(account) or label == "Cash":
+                    has_cash = True
+                elif label:
+                    has_non_cash = True
+            if not labels:
+                for bank in banks_by_txn.get(txn_id, []):
+                    account = accounts.get(bank.JtcsBankAccountID)
+                    label = self._payment_account_label(account=account, bank=bank)
+                    if label:
+                        labels.append(label)
+                    if self._account_is_cash(account) or label == "Cash":
                         has_cash = True
-                    else:
+                    elif label:
                         has_non_cash = True
+            payment_mode = " + ".join(label for label in labels if label)
+            if not has_cash and not has_non_cash and payment_mode:
+                if payment_mode.strip().lower() == "cash":
+                    has_cash = True
+                else:
+                    has_non_cash = True
+            result[txn_id] = (payment_mode, has_cash, has_non_cash)
+        return result
+
+    def grid_rows(self, filters: StampGridFilters, *, limit: int | None = None) -> list[dict]:
+        ocr_stamp_ids = self._ocr_stamp_ids()
+        stmt = self._grid_base_stmt(filters).order_by(
+            JTCSDailyTransaction.TransactionDate.desc(), StampMaster.CreatedDate.desc()
+        )
+        if limit is not None and limit > 0:
+            stmt = stmt.limit(limit)
+        pairs = self.session.execute(stmt).all()
+        daily_ids = [daily.TransactionID for _, daily in pairs if daily is not None]
+        payments = self._payment_lookup(daily_ids)
+        customer_ids = [
+            daily.CustomerID for _, daily in pairs if daily is not None and daily.CustomerID
+        ]
+        mobiles: dict[int, str] = {}
+        for chunk in self._id_chunks(list(dict.fromkeys(customer_ids))):
+            for customer in self.session.scalars(
+                select(CustomerMaster).where(CustomerMaster.CustomerID.in_(chunk))
+            ).all():
+                mobiles[customer.CustomerID] = (customer.MobileNumber or "").strip()
+
+        rows: list[dict] = []
+        for stamp, daily in pairs:
+            payment_mode = ""
+            has_cash = False
+            has_non_cash = False
+            mobile_number = ""
+            if daily is not None:
+                payment_mode, has_cash, has_non_cash = payments.get(
+                    daily.TransactionID, ("", False, False)
+                )
+                if daily.CustomerID:
+                    mobile_number = mobiles.get(daily.CustomerID, "")
             rows.append(
                 {
                     "stamp_id": stamp.StampID,
@@ -638,7 +740,7 @@ class StampRepository:
                     or stamp.StampDutyPaidBy
                     or stamp.FirstPartyName
                     or "",
-                    "mobile_number": "",
+                    "mobile_number": mobile_number,
                     "first_party": stamp.FirstPartyName or "",
                     "payment_mode": payment_mode,
                     "stamp_duty_paid_by": stamp.StampDutyPaidBy or "",

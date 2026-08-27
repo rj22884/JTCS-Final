@@ -149,7 +149,6 @@ class TesseractBackend(OcrBackend):
 
 _ENGINE_CACHE: tuple[str, OcrBackend] | None = None
 _LAST_INIT_ERROR: str | None = None
-_SKIP_PROVIDERS: set[str] = set()
 
 _ENGINE_FACTORIES: list[tuple[str, Callable[[], OcrBackend]]] = [
     ("EasyOCR", EasyOcrBackend),
@@ -162,11 +161,10 @@ def get_last_init_error() -> str | None:
     return _LAST_INIT_ERROR
 
 
-def _skip_provider(name: str) -> None:
-    global _ENGINE_CACHE
-    _SKIP_PROVIDERS.add(name)
-    _ENGINE_CACHE = None
-    logger.warning("OCR provider skipped after extract failure: %s", name)
+def peek_ocr_engine() -> str | None:
+    if _ENGINE_CACHE is None:
+        return None
+    return _ENGINE_CACHE[0]
 
 
 def _is_recoverable_ocr_error(exc: BaseException) -> bool:
@@ -174,14 +172,15 @@ def _is_recoverable_ocr_error(exc: BaseException) -> bool:
     return "cvtcolor" in text or ("has no attribute" in text and "cv2" in text) or "libgl" in text
 
 
-def get_ocr_engine(force_refresh: bool = False) -> tuple[str, OcrBackend]:
+def get_ocr_engine(force_refresh: bool = False, exclude: set[str] | None = None) -> tuple[str, OcrBackend]:
     global _ENGINE_CACHE, _LAST_INIT_ERROR
-    if _ENGINE_CACHE is not None and not force_refresh:
+    skip = exclude or set()
+    if _ENGINE_CACHE is not None and not force_refresh and _ENGINE_CACHE[0] not in skip:
         return _ENGINE_CACHE
 
     errors: list[str] = []
     for name, factory in _ENGINE_FACTORIES:
-        if name in _SKIP_PROVIDERS:
+        if name in skip:
             continue
         try:
             backend = factory()
@@ -210,17 +209,15 @@ def _prepare_image(raw: bytes) -> Image.Image:
 
 def _extract_with_fallback(image: Image.Image) -> OcrResult:
     tried: list[str] = []
+    retried: set[str] = set()
     last_exc: Exception | None = None
     while True:
         try:
-            provider_name, engine = get_ocr_engine(force_refresh=bool(tried))
+            provider_name, engine = get_ocr_engine(force_refresh=bool(tried), exclude=set(tried))
         except OcrEngineNotAvailableError:
             if last_exc is not None:
                 raise last_exc
             raise
-        if provider_name in tried:
-            break
-        tried.append(provider_name)
         logger.info("OCR Provider: %s", provider_name)
         logger.info("OCR Started")
         try:
@@ -231,9 +228,16 @@ def _extract_with_fallback(image: Image.Image) -> OcrResult:
         except Exception as exc:
             last_exc = exc
             logger.error("OCR Failed Reason (%s): %s", provider_name, exc)
+            if _is_recoverable_ocr_error(exc) and provider_name not in retried:
+                retried.add(provider_name)
+                rebind_easyocr_cv2()
+                logger.warning("Retrying %s after OpenCV repair", provider_name)
+                continue
+            tried.append(provider_name)
+            global _ENGINE_CACHE
+            _ENGINE_CACHE = None
             if not _is_recoverable_ocr_error(exc):
                 raise
-            _skip_provider(provider_name)
     if last_exc is not None:
         raise last_exc
     raise OcrEngineNotAvailableError("OCR Engine Not Installed. Administrator Contact Required.")

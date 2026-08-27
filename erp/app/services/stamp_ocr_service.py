@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 
 # All known Uttarakhand e-Stamp labels in document order (used to slice values).
 DOCUMENT_LABELS: list[tuple[str, str]] = [
-    ("CertificateNumber", r"Certificate\s*No\.?"),
-    ("CertificateIssuedDate", r"Certificate\s*Issued\s*Date"),
+    ("CertificateNumber", r"Certif[il1]cate\s*(?:No\.?|Number|Num\.?)"),
+    ("CertificateIssuedDate", r"Certif[il1]cate\s*Issued\s*Date"),
     ("AccountReference", r"Account\s*Reference"),
     ("UniqueDocumentReference", r"Unique\s*(?:Doc\.?\s*)?Reference"),
     ("PurchasedBy", r"Purchased\s*by"),
-    ("DescriptionOfDocument", r"Description\s*(?:of\s*Document)?"),
+    ("DescriptionOfDocument", r"Description\s+of\s+Document"),
     ("PropertyDescription", r"Property\s*Description"),
     ("ConsiderationPrice", r"Consideration\s*Price"),
     ("FirstPartyName", r"First\s*Party"),
@@ -31,11 +31,21 @@ DOCUMENT_LABELS: list[tuple[str, str]] = [
     ("StampDutyAmount", r"Stamp\s*Duty\s*Am[o0]?u?n?t\s*(?:\(\s*Rs[\.:]?\s*\))?"),
 ]
 
+_CERT_NUMBER_RE = re.compile(
+    r"\bIN[\s\-]?UK[\s\-]?[A-Z0-9]{8,}\b",
+    re.IGNORECASE,
+)
+
 # Fields returned to the Stamp Activity form (label mapping only — no positional OCR).
 EXTRACT_FIELDS = {
     "CertificateNumber",
     "CertificateIssuedDate",
+    "AccountReference",
+    "UniqueDocumentReference",
     "PurchasedBy",
+    "DescriptionOfDocument",
+    "PropertyDescription",
+    "ConsiderationPrice",
     "FirstPartyName",
     "SecondPartyName",
     "StampDutyPaidBy",
@@ -141,10 +151,11 @@ class StampOcrService:
             if line_amount:
                 result["StampDutyAmount"] = line_amount
 
-        if not result.get("CertificateNumber"):
-            raise ValueError(
-                "Certificate Number could not be detected. Enter details manually or retry with a clearer image."
-            )
+        cert = self._extract_certificate_number(normalized, raw_values.get("CertificateNumber"))
+        if cert:
+            result["CertificateNumber"] = cert
+        elif not result.get("CertificateNumber"):
+            logger.warning("Certificate number not detected. Returning partial OCR fields: %s", sorted(result))
         return result
 
     @staticmethod
@@ -283,6 +294,9 @@ class StampOcrService:
             return None
 
         if field == "CertificateNumber":
+            extracted = self._normalize_certificate_number(value)
+            if extracted:
+                return extracted
             match = re.search(r"([A-Z]{2}-[A-Z0-9]+|[A-Z0-9][A-Z0-9\-\/]{4,})", value, re.IGNORECASE)
             return match.group(1).upper() if match else value.split()[0][:100]
 
@@ -292,6 +306,17 @@ class StampOcrService:
 
         if field == "StampDutyAmount":
             return self._parse_stamp_duty_amount(value)
+
+        if field == "ConsiderationPrice":
+            return self._parse_stamp_duty_amount(value) or self._parse_numeric_amount(value)
+
+        if field == "UniqueDocumentReference":
+            match = re.search(r"(SUBIN[\-A-Z0-9]+|[A-Z0-9][A-Z0-9\-]{8,})", value, re.IGNORECASE)
+            return match.group(1).upper() if match else value[:200]
+
+        if field == "PropertyDescription":
+            cleaned = value[:1000].strip()
+            return "" if re.match(r"^(na|n/?a|nil|none|-)$", cleaned, re.I) else cleaned
 
         return value[:300]
 
@@ -330,6 +355,16 @@ class StampOcrService:
         )
         if paren_words:
             word_amount = StampOcrService._word_amount(paren_words.group(1))
+            if word_amount is not None:
+                return word_amount
+
+        paren_bare = re.search(
+            r"\(\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)\s*\)",
+            original,
+            re.IGNORECASE,
+        )
+        if paren_bare:
+            word_amount = StampOcrService._word_amount(paren_bare.group(1))
             if word_amount is not None:
                 return word_amount
 
@@ -402,9 +437,32 @@ class StampOcrService:
             return None
         return StampOcrService._quantize_amount(match.group(1))
 
+    @classmethod
+    def _extract_certificate_number(cls, text: str, sliced: str | None = None) -> str | None:
+        for blob in (sliced or "", text or ""):
+            if not blob:
+                continue
+            found = cls._normalize_certificate_number(blob)
+            if found:
+                return found
+        return None
+
+    @staticmethod
+    def _normalize_certificate_number(value: str) -> str | None:
+        if not value:
+            return None
+        match = _CERT_NUMBER_RE.search(value)
+        if not match:
+            return None
+        compact = re.sub(r"[\s\-]+", "", match.group(0).upper())
+        if compact.startswith("INUK") and len(compact) >= 12:
+            return "IN-UK" + compact[4:]
+        return match.group(0).upper().replace(" ", "")
+
     @staticmethod
     def _parse_issued_date(value: str) -> date | None:
         value = value.strip()
+        value = re.sub(r"(\d)\.(\d{2}\s*[AP]M)", r"\1:\2", value, flags=re.IGNORECASE)
         date_part = re.match(
             r"(\d{1,2}[\-/][A-Za-z]{3,9}[\-/]\d{2,4}|\d{1,2}[\-/]\d{1,2}[\-/]\d{2,4}|\d{4}-\d{2}-\d{2})",
             value,

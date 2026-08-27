@@ -134,8 +134,8 @@
   border-radius: 4px;
 }
 #stampDataGrid {
-  table-layout: auto;
-  width: max-content;
+  table-layout: fixed;
+  width: 100%;
   min-width: 100%;
   font-size: 13.5px;
 }
@@ -144,21 +144,14 @@
   padding: 0.28rem 0.4rem;
   vertical-align: middle;
   white-space: nowrap;
-  width: 1%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #stampDataGrid .stamp-col-grow {
   width: auto;
-  max-width: 14rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 #stampDataGrid .stamp-col-cert {
   width: auto;
-  max-width: 16rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 #stampDataGrid .stamp-col-num,
 #stampDataGrid .stamp-col-date,
@@ -216,6 +209,42 @@
 .stamp-data-grid-wrap th.stamp-sortable:hover,
 .stamp-data-grid-wrap th.stamp-sorted {
   color: #243b7b;
+}
+.stamp-pager {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.65rem;
+  flex-shrink: 0;
+}
+.stamp-page-size {
+  width: auto;
+  min-width: 7.5rem;
+}
+.stamp-pager .pagination .page-link {
+  cursor: pointer;
+}
+.stamp-pager .pagination .page-item.disabled .page-link {
+  cursor: default;
+}
+.stamp-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  z-index: 6;
+}
+.stamp-col-resizer:hover,
+.stamp-col-resizer.is-active {
+  background: rgba(36, 59, 123, 0.28);
+}
+body.stamp-col-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+body.stamp-col-resizing iframe {
+  pointer-events: none;
 }
 .stamp-sort-icon {
   font-size: 0.72rem;

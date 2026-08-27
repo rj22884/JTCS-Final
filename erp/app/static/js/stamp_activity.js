@@ -74,6 +74,9 @@
     dataGridCount: document.getElementById("stampDataGridCount"),
     dataGridEmpty: document.getElementById("stampDataGridEmpty"),
     dataGridTitle: document.querySelector(".stamp-data-grid-panel .stamp-section-head"),
+    pageSize: document.getElementById("stampPageSize"),
+    pageInfo: document.getElementById("stampPageInfo"),
+    pagerNav: document.getElementById("stampPagerNav"),
     cardDetailModalEl: document.getElementById("stampCardDetailModal"),
     cardDetailTitle: document.getElementById("stampCardDetailTitle"),
     cardDetailSub: document.getElementById("stampCardDetailSub"),
@@ -91,6 +94,9 @@
   let activeCardFilter = null;
   let lastPeriodSummary = {};
   let cardDetailModal = null;
+  const PAGE_SIZES = [25, 50, 100, 200, 500, 1000];
+  const PAGE_SIZE_KEY = "stamp-page-size";
+  let pageState = { page: 1, pageSize: 50 };
   const CARD_META = {
     total_sale_amount: { label: "Total Stamp Sale Amount", className: "is-sale" },
     payment_received_amount: { label: "Payment Received Amount", className: "is-payment" },
@@ -127,6 +133,13 @@
   let searchResults = [];
   let ocrImportedLock = false;
   let txnDateManualOverride = false;
+
+  function defaultTransactionDateToday() {
+    if (!els.transactionDate) return;
+    const today = (window.STAMP_DEFAULT_DATE || "").trim();
+    if (today) els.transactionDate.value = today;
+    setTransactionDateManual(true);
+  }
 
   function defaultTransactionDateFromCert(force) {
     if (!els.certIssuedDate || !els.transactionDate) return;
@@ -171,7 +184,12 @@
   const fieldMap = {
     CertificateNumber: "CertificateNumber",
     CertificateIssuedDate: "CertificateIssuedDate",
+    AccountReference: "AccountReference",
+    UniqueDocumentReference: "UniqueDocumentReference",
     PurchasedBy: "PurchasedBy",
+    DescriptionOfDocument: "DescriptionOfDocument",
+    PropertyDescription: "PropertyDescription",
+    ConsiderationPrice: "ConsiderationPrice",
     FirstPartyName: "FirstPartyName",
     SecondPartyName: "SecondPartyName",
     StampDutyPaidBy: "StampDutyPaidBy",
@@ -502,18 +520,27 @@
     return top || col;
   }
 
+  function effectiveCustomerFilter() {
+    const top = (els.filterCustomer?.value || "").trim();
+    const col = (gridFilters.customer_name || "").trim();
+    if (top && col) return top.length >= col.length ? top : col;
+    return top || col;
+  }
+
   function buildGridQueryParams() {
     const params = new URLSearchParams();
     const cert = effectiveCertificateFilter();
-    // Certificate search is server-side (full JTCS). Dates still sent for summary context
-    // but backend ignores period when certificate is present.
-    if (!cert) {
+    const customer = effectiveCustomerFilter();
+    const mobile = (els.filterMobile?.value || "").trim();
+    // Certificate / customer / mobile search is server-side (full JTCS). Period is ignored
+    // so an integrated stamp is not hidden because its cert date is in another year.
+    if (!cert && !customer && !mobile) {
       if (els.filterDateFrom?.value) params.set("date_from", els.filterDateFrom.value);
       if (els.filterDateTo?.value) params.set("date_to", els.filterDateTo.value);
     }
     if (cert) params.set("certificate", cert);
     if (els.filterMobile?.value.trim()) params.set("mobile", els.filterMobile.value.trim());
-    if (els.filterCustomer?.value.trim()) params.set("customer", els.filterCustomer.value.trim());
+    if (customer) params.set("customer", customer);
     return params;
   }
 
@@ -560,9 +587,15 @@
       const from = summary.period_from || els.filterDateFrom?.value || "";
       const to = summary.period_to || els.filterDateTo?.value || "";
       const count = summary.stamp_count != null ? summary.stamp_count : 0;
-      els.periodLabel.textContent =
-        formatDisplayDate(from) + " to " + formatDisplayDate(to) +
-        " · " + count + " stamp(s)";
+      if (from && to) {
+        els.periodLabel.textContent =
+          formatDisplayDate(from) + " to " + formatDisplayDate(to) + " · " + count + " stamp(s)";
+      } else if (to) {
+        els.periodLabel.textContent =
+          "Up to " + formatDisplayDate(to) + " · " + count + " stamp(s)";
+      } else {
+        els.periodLabel.textContent = count + " stamp(s)";
+      }
     }
     updateGridTitleForCard();
   }
@@ -588,7 +621,7 @@
       });
     }
     if (!options.skipRender) {
-      renderMainDataGrid(mainGridRows);
+      renderMainDataGrid(mainGridRows, { resetPage: true });
     }
   }
 
@@ -607,7 +640,7 @@
         card.setAttribute("aria-pressed", active ? "true" : "false");
       });
     }
-    renderMainDataGrid(mainGridRows);
+    renderMainDataGrid(mainGridRows, { resetPage: true });
     await openCardDetailPopup(cardKey);
   }
 
@@ -720,7 +753,107 @@
     }
   }
 
-  function renderMainDataGrid(rows) {
+  function readStoredPageSize() {
+    try {
+      const raw = localStorage.getItem(PAGE_SIZE_KEY) || "";
+      if (raw === "all") return "all";
+      const num = Number(raw);
+      if (PAGE_SIZES.indexOf(num) !== -1) return num;
+    } catch (err) {
+      /* ignore */
+    }
+    return 50;
+  }
+
+  function persistPageSize(size) {
+    try {
+      localStorage.setItem(PAGE_SIZE_KEY, String(size));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function currentPageSize() {
+    const raw = els.pageSize?.value || String(pageState.pageSize);
+    if (raw === "all") return "all";
+    const num = Number(raw);
+    return PAGE_SIZES.indexOf(num) !== -1 ? num : 50;
+  }
+
+  function pageWindow(current, total) {
+    if (total <= 7) {
+      const pages = [];
+      for (let i = 1; i <= total; i++) pages.push(i);
+      return pages;
+    }
+    const pages = [1];
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    if (start > 2) pages.push("ellipsis");
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (end < total - 1) pages.push("ellipsis");
+    pages.push(total);
+    return pages;
+  }
+
+  function pagerItem(label, page, options) {
+    const opts = options || {};
+    const disabled = !!opts.disabled;
+    const active = !!opts.active;
+    const ellipsis = !!opts.ellipsis;
+    if (ellipsis) {
+      return '<li class="page-item disabled"><span class="page-link">…</span></li>';
+    }
+    const cls = "page-item" + (disabled ? " disabled" : "") + (active ? " active" : "");
+    if (disabled && !active) {
+      return '<li class="' + cls + '"><span class="page-link">' + label + "</span></li>";
+    }
+    return (
+      '<li class="' +
+      cls +
+      '"><button type="button" class="page-link stamp-page-btn" data-page="' +
+      page +
+      '"' +
+      (active ? ' aria-current="page"' : "") +
+      ">" +
+      label +
+      "</button></li>"
+    );
+  }
+
+  function renderPager(total, pageSize, page, totalPages, isAll) {
+    pageState.page = page;
+    pageState.pageSize = isAll ? "all" : pageSize;
+    if (els.pageInfo) {
+      if (!total) {
+        els.pageInfo.textContent = "Showing 0 of 0";
+      } else if (isAll) {
+        els.pageInfo.textContent = "Showing all " + total;
+      } else {
+        const from = (page - 1) * pageSize + 1;
+        const to = Math.min(page * pageSize, total);
+        els.pageInfo.textContent = "Showing " + from + "–" + to + " of " + total;
+      }
+    }
+    if (!els.pagerNav) return;
+    if (!total) {
+      els.pagerNav.innerHTML = "";
+      return;
+    }
+    const items = [pagerItem("Previous", page - 1, { disabled: page <= 1 })];
+    pageWindow(page, totalPages).forEach(function (item) {
+      if (item === "ellipsis") {
+        items.push(pagerItem("", 0, { ellipsis: true }));
+        return;
+      }
+      items.push(pagerItem(String(item), item, { active: item === page }));
+    });
+    items.push(pagerItem("Next", page + 1, { disabled: page >= totalPages }));
+    els.pagerNav.innerHTML = items.join("");
+  }
+
+  function renderMainDataGrid(rows, options) {
+    options = options || {};
     mainGridRows = rows || [];
     if (!els.dataGridBody) return;
     const visible = prepareGridRows(mainGridRows);
@@ -743,17 +876,36 @@
           ? "0 of " + mainGridRows.length + " records"
           : "0 records";
       }
+      renderPager(0, 25, 1, 1, false);
       updateGridSortHeaders();
       return;
     }
     els.dataGridEmpty?.classList.add("d-none");
-    if (els.dataGridCount) {
-      els.dataGridCount.textContent =
-        visible.length === mainGridRows.length
-          ? visible.length + " record" + (visible.length === 1 ? "" : "s")
-          : visible.length + " of " + mainGridRows.length + " records";
+    const sizeChoice = currentPageSize();
+    const isAll = sizeChoice === "all";
+    const pageSize = isAll ? visible.length : sizeChoice;
+    const total = visible.length;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize) || 1);
+    let page = options.resetPage ? 1 : pageState.page;
+    if (options.focusStampId) {
+      const idx = visible.findIndex(function (row) {
+        return Number(row.stamp_id) === Number(options.focusStampId);
+      });
+      if (idx >= 0) page = Math.floor(idx / pageSize) + 1;
     }
-    visible.forEach(function (row) {
+    if (page > totalPages) page = totalPages;
+    if (page < 1) page = 1;
+    const start = (page - 1) * pageSize;
+    const pageRows = visible.slice(start, start + pageSize);
+    renderPager(total, pageSize, page, totalPages, isAll);
+    if (els.dataGridCount) {
+      const loadedNote =
+        visible.length === mainGridRows.length
+          ? total + " record" + (total === 1 ? "" : "s")
+          : total + " of " + mainGridRows.length + " records";
+      els.dataGridCount.textContent = loadedNote;
+    }
+    pageRows.forEach(function (row) {
       const tr = document.createElement("tr");
       tr.dataset.stampId = String(row.stamp_id);
       if (row.is_ocr_entry) {
@@ -858,7 +1010,8 @@
     els.certNumber?.focus();
   }
 
-  async function loadMainGrid() {
+  async function loadMainGrid(options) {
+    options = options || { resetPage: true };
     if (!window.STAMP_GRID_URL) return;
     if (els.periodLabel) els.periodLabel.textContent = "Loading...";
     try {
@@ -871,17 +1024,68 @@
         throw new Error(data.error || "Unable to load stamp grid.");
       }
       renderPeriodSummary(data.period_summary || {});
-      renderMainDataGrid(data.rows || []);
+      renderMainDataGrid(data.rows || [], options);
     } catch (err) {
       if (els.periodLabel) els.periodLabel.textContent = err.message || "Load failed";
       renderPeriodSummary({});
-      renderMainDataGrid([]);
+      renderMainDataGrid([], options);
     }
   }
 
+  async function revealStampInGrid(options) {
+    options = options || {};
+    clearColumnFilters();
+    clearCardFilter({ skipRender: true });
+    const cert = (options.certificate || "").trim();
+    if (cert && els.filterCert) els.filterCert.value = cert;
+    const stampId = options.stampId ? parseInt(options.stampId, 10) : 0;
+    await loadMainGrid(stampId ? { focusStampId: stampId } : { resetPage: true });
+    if (!stampId || !els.dataGridBody) return;
+    const row = els.dataGridBody.querySelector('tr[data-stamp-id="' + stampId + '"]');
+    if (!row) return;
+    Array.from(els.dataGridBody.querySelectorAll("tr")).forEach(function (r) {
+      r.classList.remove("table-active");
+    });
+    row.classList.add("table-active");
+    row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (!saveMode) {
+      setSelectedStamp(stampId);
+      enterSelectMode();
+    }
+  }
+
+  async function revealSavedStampInGrid(stampId) {
+    stampId = parseInt(stampId, 10);
+    if (!stampId) {
+      await loadMainGrid();
+      return;
+    }
+    let cert = (els.certNumber?.value || "").trim();
+    if (!cert && window.STAMP_RECORD_URL) {
+      try {
+        const res = await fetch(stampApiUrl(window.STAMP_RECORD_URL, stampId), {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+        const data = await res.json();
+        if (data.ok && data.record) {
+          cert = (data.record.CertificateNumber || "").trim();
+        }
+      } catch (e) {
+        cert = "";
+      }
+    }
+    await revealStampInGrid({ stampId: stampId, certificate: cert });
+  }
+
+  function applyDefaultGridDates() {
+    if (els.filterPeriod) els.filterPeriod.value = "custom";
+    if (els.filterDateFrom) els.filterDateFrom.value = "";
+  }
+
   function resetGridFilters() {
-    if (els.filterPeriod) els.filterPeriod.value = "month";
-    applyPeriodPreset("month");
+    applyDefaultGridDates();
+    const today = (window.STAMP_DEFAULT_DATE_TO || window.STAMP_DEFAULT_DATE || "").trim();
+    if (els.filterDateTo && today) els.filterDateTo.value = today;
     if (els.filterCert) els.filterCert.value = "";
     if (els.filterMobile) els.filterMobile.value = "";
     if (els.filterCustomer) els.filterCustomer.value = "";
@@ -1675,6 +1879,7 @@
     refreshMobileCustomers(mobile);
     openEntryModal();
     enterSaveMode();
+    defaultTransactionDateToday();
     els.certNumber?.focus();
     return true;
   }
@@ -1931,8 +2136,7 @@
       document.getElementById("ReferenceNo").value = els.certNumber.value;
     }
     if (!options.preserveTransactionDate) {
-      defaultTransactionDateFromCert(true);
-      setTransactionDateManual(false);
+      defaultTransactionDateToday();
     }
   }
 
@@ -1958,6 +2162,10 @@
         if (!resolveEditingStampId() && els.editStampIdInput) els.editStampIdInput.value = "";
         if (!resolveEditingStampId()) clearSelectedStamp();
         if (showModal) showDuplicateModal(data);
+        revealStampInGrid({
+          stampId: data.stamp_id,
+          certificate: data.certificate_number || number,
+        });
         return data;
       }
       if (!editingStampId) blockedDuplicateCert = null;
@@ -1988,33 +2196,64 @@
     logOcr("Image Loaded", { name: selectedFile.name, size: selectedFile.size, type: selectedFile.type });
     logOcr("OCR Started", { provider: status.active_provider, file: selectedFile.name });
 
-    const body = new FormData();
-    body.append("certificate_file", selectedFile);
-    body.append("csrf_token", window.STAMP_CSRF || "");
+    function buildExtractBody() {
+      const payload = new FormData();
+      payload.append("certificate_file", selectedFile);
+      payload.append("csrf_token", window.STAMP_CSRF || "");
+      return payload;
+    }
+
+    function isNetworkError(err) {
+      const msg = (err && err.message) || String(err || "");
+      return /failed to fetch|networkerror|load failed|abort|the operation was aborted/i.test(msg);
+    }
+
+    async function postExtract() {
+      const controller = new AbortController();
+      const timer = setTimeout(function () { controller.abort(); }, 180000);
+      try {
+        return await fetch(window.STAMP_EXTRACT_URL, {
+          method: "POST",
+          body: buildExtractBody(),
+          credentials: "same-origin",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+    }
 
     try {
-      const response = await fetch(window.STAMP_EXTRACT_URL, {
-        method: "POST",
-        body: body,
-        headers: { "X-Requested-With": "XMLHttpRequest" },
-      });
+      let response;
+      try {
+        response = await postExtract();
+      } catch (firstErr) {
+        if (!isNetworkError(firstErr)) throw firstErr;
+        logOcr("OCR retry after disconnect", firstErr.message || String(firstErr));
+        await new Promise(function (resolve) { setTimeout(resolve, 1500); });
+        response = await postExtract();
+      }
       const data = await response.json();
+      if (data.provider && els.ocrProviderBadge) {
+        els.ocrProviderBadge.textContent = data.provider;
+      }
+      if (data.fields) populateFields(data.fields);
+      if (data.ocr_image_id) els.ocrImageId.value = data.ocr_image_id;
+      stayOnImageMode();
+
       if (!response.ok || !data.ok) {
         const reason = data.reason || data.error || "Unknown OCR error.";
         logOcr("OCR Failed Reason", reason);
         if (data.engine_missing) updateEngineBanner(data.status);
-        throw new Error(reason);
+        fallbackToManual(data.fields || collectCurrentFields(), reason);
+        return;
       }
 
       logOcr("OCR Provider", data.provider);
       logOcr("OCR Text", data.ocr_text);
       logOcr("OCR Completed", { confidence: data.confidence, fields: data.fields });
       console.log("===== OCR TEXT =====\n" + (data.ocr_text || "") + "\n====================");
-
-      populateFields(data.fields || {});
-      if (data.ocr_image_id) els.ocrImageId.value = data.ocr_image_id;
-      if (els.ocrProviderBadge) els.ocrProviderBadge.textContent = data.provider || status.active_provider;
-      stayOnImageMode();
 
       if (!isFullOcrSuccess(data.fields || {})) {
         const missing = missingOcrFields(data.fields || {});
@@ -2038,7 +2277,13 @@
       syncExistingCertificateState(false);
     } catch (err) {
       logOcr("OCR Failed Reason", err.message || String(err));
-      fallbackToManual(collectCurrentFields(), "OCR failed: " + (err.message || String(err)));
+      const network = /failed to fetch|networkerror|load failed|abort/i.test(err.message || String(err));
+      fallbackToManual(
+        collectCurrentFields(),
+        network
+          ? "Server disconnected during OCR. Keep this page open and click Retry OCR. Do not start another python run.py."
+          : ("OCR failed: " + (err.message || String(err)))
+      );
     } finally {
       ocrRunning = false;
       els.overlay.classList.add("d-none");
@@ -2137,6 +2382,19 @@
       const basePath = window.location.pathname.split("?")[0];
       els.duplicateViewBtn.href = basePath + "?load_stamp=" + encodeURIComponent(String(data.stamp_id));
       els.duplicateViewBtn.classList.remove("d-none");
+      els.duplicateViewBtn.onclick = function (e) {
+        e.preventDefault();
+        duplicateModal?.hide();
+        revealStampInGrid({
+          stampId: data.stamp_id,
+          certificate: data.certificate_number || "",
+        });
+        if (mobileConfirmed) {
+          loadStampRecord(data.stamp_id).then(function () {
+            openEntryModal();
+          });
+        }
+      };
     }
     duplicateModal?.show();
   }
@@ -2256,12 +2514,6 @@
 
   els.certNumber?.addEventListener("blur", function () {
     syncExistingCertificateState(true);
-  });
-  els.certIssuedDate?.addEventListener("input", function () {
-    defaultTransactionDateFromCert(false);
-  });
-  els.certIssuedDate?.addEventListener("change", function () {
-    defaultTransactionDateFromCert(false);
   });
   els.transactionDate?.addEventListener("change", function () {
     const certDate = (els.certIssuedDate?.value || "").trim();
@@ -2446,6 +2698,27 @@
     e.preventDefault();
     resetGridFilters();
   });
+  if (els.pageSize) {
+    const storedSize = readStoredPageSize();
+    els.pageSize.value = String(storedSize);
+    pageState.pageSize = storedSize;
+    els.pageSize.addEventListener("change", function () {
+      const size = currentPageSize();
+      pageState.pageSize = size;
+      persistPageSize(size);
+      renderMainDataGrid(mainGridRows, { resetPage: true });
+    });
+  }
+  if (els.pagerNav) {
+    els.pagerNav.addEventListener("click", function (event) {
+      const btn = event.target.closest(".stamp-page-btn");
+      if (!btn || !els.pagerNav.contains(btn)) return;
+      const page = Number(btn.getAttribute("data-page") || "");
+      if (!Number.isFinite(page) || page < 1) return;
+      pageState.page = page;
+      renderMainDataGrid(mainGridRows);
+    });
+  }
   els.filterPeriod?.addEventListener("change", function () {
     applyPeriodPreset(els.filterPeriod.value || "month");
     loadMainGrid();
@@ -2461,9 +2734,90 @@
     });
   });
 
+  const COL_WIDTH_KEY = "stamp-grid-col-widths";
+  let columnResizeMoved = false;
+
+  function readStoredColWidths() {
+    try {
+      const raw = localStorage.getItem(COL_WIDTH_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (err) {
+      /* ignore */
+    }
+    return {};
+  }
+
+  function persistColWidths(widths) {
+    try {
+      localStorage.setItem(COL_WIDTH_KEY, JSON.stringify(widths));
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
+  function applyColumnWidth(index, widthPx) {
+    const table = document.getElementById("stampDataGrid");
+    if (!table) return;
+    const width = Math.max(52, Math.round(widthPx));
+    table.querySelectorAll("thead tr").forEach(function (tr) {
+      const th = tr.children[index];
+      if (th) {
+        th.style.width = width + "px";
+        th.style.minWidth = width + "px";
+        th.style.maxWidth = width + "px";
+      }
+    });
+  }
+
+  function initColumnResize() {
+    const table = document.getElementById("stampDataGrid");
+    const headerRow = table?.querySelector("thead tr");
+    if (!table || !headerRow) return;
+    const stored = readStoredColWidths();
+    Array.from(headerRow.children).forEach(function (th, index) {
+      applyColumnWidth(index, stored[String(index)] || th.getBoundingClientRect().width);
+      if (th.querySelector(".stamp-col-resizer")) return;
+      const handle = document.createElement("span");
+      handle.className = "stamp-col-resizer";
+      handle.title = "Drag to resize column";
+      th.appendChild(handle);
+      handle.addEventListener("mousedown", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        columnResizeMoved = false;
+        const startX = event.pageX;
+        const startWidth = th.getBoundingClientRect().width;
+        handle.classList.add("is-active");
+        document.body.classList.add("stamp-col-resizing");
+        function onMove(moveEvent) {
+          const next = startWidth + (moveEvent.pageX - startX);
+          if (Math.abs(moveEvent.pageX - startX) > 3) columnResizeMoved = true;
+          applyColumnWidth(index, next);
+        }
+        function onUp() {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          handle.classList.remove("is-active");
+          document.body.classList.remove("stamp-col-resizing");
+          const widths = readStoredColWidths();
+          widths[String(index)] = Math.round(th.getBoundingClientRect().width);
+          persistColWidths(widths);
+        }
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    });
+  }
+
   const stampGridHead = document.querySelector("#stampDataGrid thead");
   stampGridHead?.addEventListener("click", function (event) {
     if (event.target.closest(".stamp-col-filter")) return;
+    if (event.target.closest(".stamp-col-resizer")) return;
+    if (columnResizeMoved) {
+      columnResizeMoved = false;
+      return;
+    }
     const th = event.target.closest("th.stamp-sortable");
     if (!th) return;
     onGridSortHeader(th.dataset.sortKey);
@@ -2488,11 +2842,20 @@
       scheduleCertificateServerReload();
       return;
     }
-    renderMainDataGrid(mainGridRows);
+    if (input.dataset.filterKey === "customer_name") {
+      scheduleCertificateServerReload();
+      return;
+    }
+    renderMainDataGrid(mainGridRows, { resetPage: true });
   });
   stampGridHead?.addEventListener("keydown", function (event) {
     const input = event.target.closest(".stamp-col-filter");
-    if (!input || input.dataset.filterKey !== "certificate_number") return;
+    if (
+      !input ||
+      (input.dataset.filterKey !== "certificate_number" && input.dataset.filterKey !== "customer_name")
+    ) {
+      return;
+    }
     if (event.key !== "Enter") return;
     event.preventDefault();
     if (certFilterReloadTimer) {
@@ -2500,24 +2863,30 @@
       certFilterReloadTimer = null;
     }
     readGridFiltersFromDom();
-    if (els.filterCert) els.filterCert.value = gridFilters.certificate_number || "";
+    if (input.dataset.filterKey === "certificate_number" && els.filterCert) {
+      els.filterCert.value = gridFilters.certificate_number || "";
+    }
     loadMainGrid();
   });
 
   updateEngineBanner(window.STAMP_OCR_STATUS);
   refreshOcrStatus();
   resetPaymentLines();
-  if (initMobileFromRepost()) {
-    if (window.STAMP_AUTO_LOAD_STAMP_ID) {
-      const autoStampId = parseInt(window.STAMP_AUTO_LOAD_STAMP_ID, 10);
-      if (!Number.isNaN(autoStampId) && autoStampId > 0) {
-        setEditStampIds(autoStampId);
-        setSelectedStamp(autoStampId);
-      }
+  const autoStampId = parseInt(window.STAMP_AUTO_LOAD_STAMP_ID, 10) || 0;
+  const openedFromRepost = initMobileFromRepost();
+  if (openedFromRepost) {
+    if (autoStampId) {
+      setEditStampIds(autoStampId);
+      setSelectedStamp(autoStampId);
     }
     openEntryModal();
-    if (window.STAMP_AUTO_LOAD_STAMP_ID) {
-      loadStampRecord(window.STAMP_AUTO_LOAD_STAMP_ID);
+    if (autoStampId) {
+      loadStampRecord(autoStampId).then(function () {
+        revealStampInGrid({
+          stampId: autoStampId,
+          certificate: (els.certNumber?.value || "").trim(),
+        });
+      });
     } else {
       enterSaveMode();
       applyWebsitePrefill();
@@ -2527,9 +2896,16 @@
     updateToolbarButtons();
   }
   if (els.filterPeriod) {
-    applyPeriodPreset(els.filterPeriod.value || "month");
+    applyDefaultGridDates();
   }
-  loadMainGrid();
+  initColumnResize();
+  if (autoStampId && openedFromRepost) {
+    /* Grid is loaded by revealStampInGrid after the record fetch. */
+  } else if (autoStampId) {
+    revealSavedStampInGrid(autoStampId);
+  } else {
+    loadMainGrid();
+  }
 
   var shcilCreds = { userId: "", password: "" };
 

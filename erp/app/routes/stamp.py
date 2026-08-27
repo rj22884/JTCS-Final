@@ -36,7 +36,7 @@ def stamp_activity():
                 created_by=session.get("user_name", "System"),
             )
             flash(result.message, "success")
-            return redirect(url_for("stamp.stamp_activity"))
+            return redirect(url_for("stamp.stamp_activity", load_stamp=result.stamp_id))
         except StampDuplicateError as exc:
             duplicate_existing = exc.existing
             flash(str(exc), "danger")
@@ -57,7 +57,7 @@ def stamp_activity():
         page_title="Stamp Activity",
         breadcrumb=menu_service.get_breadcrumb("/shcil/stamp-activity", session.get("role")),
         default_date=date.today().isoformat(),
-        default_date_from=date.today().replace(day=1).isoformat(),
+        default_date_from="",
         default_date_to=date.today().isoformat(),
         payment_modes=master_repo.list_stamp_bank_payment_modes(),
         duplicate_existing=duplicate_existing,
@@ -128,9 +128,9 @@ def stamp_extract():
             }
         ), 400
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc), "reason": str(exc)}), 400
+        return jsonify({"ok": False, "error": str(exc), "reason": str(exc), "fields": {}}), 400
     except Exception as exc:
-        return jsonify({"ok": False, "error": str(exc), "reason": str(exc)}), 500
+        return jsonify({"ok": False, "error": str(exc), "reason": str(exc), "fields": {}}), 500
 
 
 @bp.route("/stamp-activity/ocr-status", methods=["GET"])

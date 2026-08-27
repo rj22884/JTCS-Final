@@ -434,6 +434,15 @@ class OcrProviderService:
     def get_status(cls) -> OcrStartupStatus:
         if _STATUS is None:
             return cls.initialize()
+        try:
+            from app.services.ocr_engine import peek_ocr_engine
+
+            cached = peek_ocr_engine()
+            if cached and _STATUS.active_provider != cached:
+                _STATUS.active_provider = cached
+                _STATUS.ready = True
+        except Exception:  # noqa: BLE001
+            pass
         return _STATUS
 
     @classmethod
