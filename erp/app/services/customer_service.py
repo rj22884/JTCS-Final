@@ -11,6 +11,9 @@ class CustomerService:
     def search(self, query: str, *, limit: int = 20) -> list[dict]:
         return self.repository.search(query, limit=limit)
 
+    def search_party_name(self, query: str, *, limit: int = 15) -> list[dict]:
+        return self.repository.search_party_name(query, limit=limit)
+
     def get_detail(self, customer_id: int) -> dict:
         return self.repository.get_detail(customer_id)
 

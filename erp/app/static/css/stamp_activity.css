@@ -449,7 +449,7 @@
   border-right: 1px solid #d4dbe8;
 }
 .stamp-toolbar-group:last-child { border-right: 0; padding-right: 0; }
-#stampFormLayout.stamp-layout-manual #stampFormContent { flex: 0 0 100%; max-width: 100%; }
+#stampFormLayout.stamp-layout-manual #stampFormContent { flex: 1 1 auto; max-width: none; min-width: 0; }
 #stampMainWorkspace.stamp-mode-manual #stampOcrEngineAlert { display: none !important; }
 #stampSearchPanel { flex-shrink: 0; max-height: 160px; overflow: hidden; }
 #stampPartialOcrAlert { padding: 0.25rem 0.5rem !important; margin-bottom: 0.25rem !important; font-size: 11px; }
@@ -560,4 +560,102 @@
   max-width: 100%;
   max-height: 100%;
   transform-origin: center center;
+}
+#stampCustomerMatchColumn {
+  flex: 0 0 280px;
+  width: 280px;
+  max-width: 300px;
+  min-width: 220px;
+  min-height: 0;
+}
+.stamp-customer-match-panel {
+  height: 100%;
+  min-height: 220px;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e9e4f5;
+  border-radius: 6px;
+  padding: 0.45rem 0.5rem;
+}
+.stamp-customer-match-head {
+  margin-bottom: 0.4rem;
+}
+.stamp-customer-match-head .stamp-section-head {
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: 0.15rem;
+}
+.stamp-customer-match-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  border: 1px solid #ece8f5;
+  border-radius: 4px;
+  background: #faf9fd;
+}
+.stamp-customer-match-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid #eeeaf6;
+  background: transparent;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+}
+.stamp-customer-match-item:last-child { border-bottom: 0; }
+.stamp-customer-match-item:hover,
+.stamp-customer-match-item.is-active {
+  background: #ede9fe;
+}
+.stamp-customer-match-item-name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e1b4b;
+  line-height: 1.25;
+}
+.stamp-customer-match-item-meta {
+  display: block;
+  font-size: 10px;
+  color: #6b7280;
+}
+.stamp-customer-match-empty {
+  padding: 0.7rem 0.5rem;
+  font-size: 11px;
+  color: #6b7280;
+}
+.stamp-customer-match-hint {
+  font-size: 10px;
+  color: #5c667a;
+  margin-top: 0.35rem;
+  line-height: 1.35;
+}
+.stamp-field.is-master-selected {
+  border-color: #16a34a !important;
+  background: #f0fdf4 !important;
+}
+.stamp-customer-match-group {
+  margin-bottom: 0.75rem;
+}
+.stamp-customer-match-group h6 {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+}
+#stampCustomerMatchModal { z-index: 2010; }
+#stampCustomerMatchModal + .modal-backdrop { z-index: 2000; }
+@media (max-width: 991.98px) {
+  #stampCustomerMatchColumn {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .stamp-customer-match-panel {
+    min-height: 180px;
+    max-height: 240px;
+  }
 }

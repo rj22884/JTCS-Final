@@ -398,19 +398,26 @@ class StampService:
         stamp_duty_paid_by = self._clean(form.get("StampDutyPaidBy")) or self._clean(
             form.get("FirstPartyName")
         )
-        customer_id = form.get("CustomerID")
+        selected_customer_id = None
+        raw_customer_id = form.get("CustomerID")
+        try:
+            if raw_customer_id not in (None, ""):
+                selected_customer_id = int(str(raw_customer_id).strip())
+                if selected_customer_id <= 0:
+                    selected_customer_id = None
+        except (TypeError, ValueError):
+            selected_customer_id = None
+        customer_id = None
         customer_name = None
-        if stamp_duty_paid_by and mobile_number:
+        if selected_customer_id:
+            customer = self.master_repo.get_customer(selected_customer_id)
+            if customer:
+                customer_id = customer.CustomerID
+                customer_name = customer.CustomerName
+        if customer_id is None and stamp_duty_paid_by and mobile_number:
             customer = self.master_repo.find_or_create_customer(stamp_duty_paid_by, mobile_number)
             customer_id = customer.CustomerID
             customer_name = customer.CustomerName
-        elif customer_id:
-            customer_id = int(customer_id)
-            customer = self.master_repo.get_customer(customer_id)
-            if customer:
-                customer_name = customer.CustomerName
-        else:
-            customer_id = None
         txn_date = (
             self._as_date(form.get("TransactionDate"))
             or self._as_date(form.get("CertificateIssuedDate"))

@@ -1020,6 +1020,13 @@
     return String(g.group_nature || "").trim();
   }
 
+  function isUniversalCustomerGroup(code, label) {
+    const name = String(label || "").trim().toLowerCase();
+    if (name.indexOf("none above") >= 0) return true;
+    const key = String(code || "").trim().toUpperCase().replace(/[\s_-]/g, "");
+    return key === "NONE" || key === "NONEABOVE" || key === "NA";
+  }
+
   function allowedCustomerGroupCodes(chartId, includeCode) {
     if (!chartId) return [];
     const selectedNature = chartNatureForId(chartId);
@@ -1030,6 +1037,10 @@
       const code = g.code;
       const key = String(code).toUpperCase();
       if (include && key === include) {
+        if (allowed.indexOf(code) < 0) allowed.push(code);
+        return;
+      }
+      if (isUniversalCustomerGroup(code, g.label)) {
         if (allowed.indexOf(code) < 0) allowed.push(code);
         return;
       }

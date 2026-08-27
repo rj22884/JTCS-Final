@@ -82,6 +82,15 @@
     cardDetailHead: document.getElementById("stampCardDetailHead"),
     cardDetailBody: document.getElementById("stampCardDetailBody"),
     cardDetailEmpty: document.getElementById("stampCardDetailEmpty"),
+    customerId: document.getElementById("CustomerID"),
+    customerMatchColumn: document.getElementById("stampCustomerMatchColumn"),
+    customerMatchLabel: document.getElementById("stampCustomerMatchFieldLabel"),
+    customerMatchFilter: document.getElementById("stampCustomerMatchFilter"),
+    customerMatchList: document.getElementById("stampCustomerMatchList"),
+    customerMatchHint: document.getElementById("stampCustomerMatchHint"),
+    customerMatchModalEl: document.getElementById("stampCustomerMatchModal"),
+    customerMatchModalBody: document.getElementById("stampCustomerMatchModalBody"),
+    customerMatchContinueBtn: document.getElementById("stampCustomerMatchContinueBtn"),
   };
 
   let mainGridRows = [];
@@ -127,6 +136,21 @@
   let searchResults = [];
   let ocrImportedLock = false;
   let txnDateManualOverride = false;
+  let customerMatchModal = null;
+  let activePartyFieldId = "StampDutyPaidBy";
+  let partyMatchTimer = null;
+  let partyMatchSeq = 0;
+  let partyPromptSnapshot = null;
+  let syncingPartyFilter = false;
+
+  const PARTY_NAME_FIELDS = [
+    { id: "PurchasedBy", label: "Purchased By" },
+    { id: "FirstPartyName", label: "First Party" },
+    { id: "SecondPartyName", label: "Second Party" },
+    { id: "StampDutyPaidBy", label: "Stamp Duty Paid By" },
+  ];
+  const PARTY_NAME_IDS = PARTY_NAME_FIELDS.map(function (field) { return field.id; });
+  const MAIN_CUSTOMER_FIELD_IDS = ["StampDutyPaidBy", "FirstPartyName"];
 
   function defaultTransactionDateFromCert(force) {
     if (!els.certIssuedDate || !els.transactionDate) return;
@@ -167,6 +191,7 @@
   if (els.duplicateModalEl && window.bootstrap) duplicateModal = new bootstrap.Modal(els.duplicateModalEl);
   if (els.entryModalEl && window.bootstrap) entryModal = new bootstrap.Modal(els.entryModalEl);
   if (els.cardDetailModalEl && window.bootstrap) cardDetailModal = new bootstrap.Modal(els.cardDetailModalEl);
+  if (els.customerMatchModalEl && window.bootstrap) customerMatchModal = new bootstrap.Modal(els.customerMatchModalEl);
 
   const fieldMap = {
     CertificateNumber: "CertificateNumber",
@@ -224,6 +249,250 @@
       return MANUAL_REQUIRED_FIELDS;
     }
     return REQUIRED_FIELDS;
+  }
+
+  function partyFieldMeta(fieldId) {
+    return PARTY_NAME_FIELDS.find(function (field) { return field.id === fieldId; }) || null;
+  }
+
+  function partyInput(fieldId) {
+    return document.getElementById(fieldId);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function selectedCustomerId(fieldId) {
+    const input = partyInput(fieldId);
+    return (input && input.dataset.customerId) || "";
+  }
+
+  function markPartySelection(fieldId, customer) {
+    const input = partyInput(fieldId);
+    if (!input) return;
+    if (customer && customer.customer_id) {
+      input.dataset.customerId = String(customer.customer_id);
+      input.dataset.customerName = customer.customer_name || "";
+      input.classList.add("is-master-selected");
+    } else {
+      delete input.dataset.customerId;
+      delete input.dataset.customerName;
+      input.classList.remove("is-master-selected");
+    }
+  }
+
+  function clearAllPartySelections() {
+    PARTY_NAME_IDS.forEach(function (fieldId) {
+      markPartySelection(fieldId, null);
+    });
+    if (els.customerId) els.customerId.value = "";
+  }
+
+  function syncMainCustomerId() {
+    if (!els.customerId) return;
+    const paidId = selectedCustomerId("StampDutyPaidBy");
+    const firstId = selectedCustomerId("FirstPartyName");
+    els.customerId.value = paidId || firstId || "";
+  }
+
+  function applyCustomerToField(fieldId, customer, options) {
+    options = options || {};
+    const input = partyInput(fieldId);
+    if (!input || !customer) return;
+    const name = customer.customer_name || customer.name || "";
+    if (name) input.value = name;
+    markPartySelection(fieldId, {
+      customer_id: customer.customer_id || customer.id,
+      customer_name: name,
+    });
+    if (MAIN_CUSTOMER_FIELD_IDS.indexOf(fieldId) >= 0) syncMainCustomerId();
+    if (!options.keepList) {
+      renderPartyMatchList(fieldId, [customer], name);
+    }
+  }
+
+  function onPartyNameTyped(fieldId) {
+    const input = partyInput(fieldId);
+    if (!input) return;
+    const typed = (input.value || "").trim();
+    const selectedName = (input.dataset.customerName || "").trim();
+    if (!typed || !selectedName || typed.toLowerCase() !== selectedName.toLowerCase()) {
+      markPartySelection(fieldId, null);
+      if (MAIN_CUSTOMER_FIELD_IDS.indexOf(fieldId) >= 0) syncMainCustomerId();
+    }
+  }
+
+  function renderPartyMatchList(fieldId, customers, query) {
+    if (!els.customerMatchList) return;
+    const meta = partyFieldMeta(fieldId);
+    activePartyFieldId = fieldId || activePartyFieldId;
+    if (els.customerMatchLabel) {
+      els.customerMatchLabel.textContent = meta
+        ? "Matching: " + meta.label
+        : "Type a party name to match";
+    }
+    if (!syncingPartyFilter && els.customerMatchFilter && document.activeElement !== els.customerMatchFilter) {
+      els.customerMatchFilter.value = query || "";
+    }
+    const selectedId = selectedCustomerId(activePartyFieldId);
+    if (!customers || !customers.length) {
+      const q = (query || "").trim();
+      els.customerMatchList.innerHTML = q.length < 2
+        ? '<div class="stamp-customer-match-empty">Type at least 2 characters to search Customer Master.</div>'
+        : '<div class="stamp-customer-match-empty">No like-name match. This name will be saved as a new customer record.</div>';
+      if (els.customerMatchHint) {
+        els.customerMatchHint.textContent = q.length < 2
+          ? "Like-name matches appear here. Select an existing customer, or keep the typed name to save as a new record."
+          : "No match in Customer Master. Keep this name to save as a new record.";
+      }
+      return;
+    }
+    els.customerMatchList.innerHTML = customers.map(function (row) {
+      const id = String(row.customer_id || row.id || "");
+      const name = row.customer_name || row.name || "";
+      const mobile = row.mobile_number || "";
+      const status = row.customer_status || "";
+      const active = selectedId && selectedId === id ? " is-active" : "";
+      const metaBits = [mobile, status].filter(Boolean).join(" · ");
+      return '<button type="button" class="stamp-customer-match-item' + active + '" data-customer-id="' + escapeHtml(id) + '">' +
+        '<span class="stamp-customer-match-item-name">' + escapeHtml(name) + '</span>' +
+        (metaBits ? '<span class="stamp-customer-match-item-meta">' + escapeHtml(metaBits) + "</span>" : "") +
+        "</button>";
+    }).join("");
+    els.customerMatchList.querySelectorAll(".stamp-customer-match-item").forEach(function (btn, idx) {
+      btn.addEventListener("click", function () {
+        applyCustomerToField(activePartyFieldId, customers[idx]);
+      });
+    });
+    if (els.customerMatchHint) {
+      els.customerMatchHint.textContent = "Select a customer from the list, or keep the typed name to save as a new record.";
+    }
+  }
+
+  async function fetchPartyCustomers(query) {
+    const q = (query || "").trim();
+    if (q.length < 2 || !window.STAMP_CUSTOMERS_SEARCH_URL) return [];
+    const url = window.STAMP_CUSTOMERS_SEARCH_URL + "?q=" + encodeURIComponent(q);
+    const res = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest", Accept: "application/json" } });
+    const data = await res.json();
+    if (!res.ok || !data.ok) return [];
+    return data.customers || [];
+  }
+
+  async function searchPartyField(fieldId, query, seq) {
+    const customers = await fetchPartyCustomers(query);
+    if (seq != null && seq !== partyMatchSeq) return customers;
+    renderPartyMatchList(fieldId, customers, query);
+    return customers;
+  }
+
+  function schedulePartySearch(fieldId, query) {
+    activePartyFieldId = fieldId || activePartyFieldId;
+    const q = (query == null ? (partyInput(activePartyFieldId)?.value || "") : query);
+    if (partyMatchTimer) clearTimeout(partyMatchTimer);
+    partyMatchTimer = setTimeout(function () {
+      const seq = ++partyMatchSeq;
+      searchPartyField(activePartyFieldId, q, seq);
+    }, 220);
+  }
+
+  async function collectPartyMatchGroups() {
+    const groups = [];
+    for (let i = 0; i < PARTY_NAME_FIELDS.length; i += 1) {
+      const field = PARTY_NAME_FIELDS[i];
+      const input = partyInput(field.id);
+      const name = (input && input.value || "").trim();
+      if (name.length < 2) continue;
+      const customers = await fetchPartyCustomers(name);
+      groups.push({ fieldId: field.id, label: field.label, query: name, customers: customers });
+    }
+    return groups;
+  }
+
+  function snapshotPartyNames() {
+    const snap = {};
+    PARTY_NAME_IDS.forEach(function (fieldId) {
+      const input = partyInput(fieldId);
+      snap[fieldId] = input ? input.value : "";
+    });
+    return snap;
+  }
+
+  function restorePartyNames(snap) {
+    if (!snap) return;
+    PARTY_NAME_IDS.forEach(function (fieldId) {
+      const input = partyInput(fieldId);
+      if (input && Object.prototype.hasOwnProperty.call(snap, fieldId)) {
+        input.value = snap[fieldId];
+      }
+      markPartySelection(fieldId, null);
+    });
+    syncMainCustomerId();
+  }
+
+  function renderCustomerExistsModal(groups) {
+    if (!els.customerMatchModalBody) return;
+    const matched = groups.filter(function (group) { return group.customers && group.customers.length; });
+    if (!matched.length) {
+      els.customerMatchModalBody.innerHTML = '<p class="small text-muted mb-0">No Customer Master match.</p>';
+      return;
+    }
+    els.customerMatchModalBody.innerHTML = matched.map(function (group) {
+      const rows = group.customers.map(function (row, idx) {
+        const name = row.customer_name || "";
+        const mobile = row.mobile_number || "";
+        const status = row.customer_status || "";
+        const metaBits = [mobile, status].filter(Boolean).join(" · ");
+        return '<button type="button" class="stamp-customer-match-item" data-field-id="' + escapeHtml(group.fieldId) + '" data-index="' + idx + '">' +
+          '<span class="stamp-customer-match-item-name">' + escapeHtml(name) + '</span>' +
+          (metaBits ? '<span class="stamp-customer-match-item-meta">' + escapeHtml(metaBits) + "</span>" : "") +
+          "</button>";
+      }).join("");
+      return '<div class="stamp-customer-match-group">' +
+        "<h6>" + escapeHtml(group.label) + ' <span class="stamp-customer-match-query">“' + escapeHtml(group.query) + "”</span></h6>" +
+        '<div class="stamp-customer-match-list" style="min-height:0;max-height:180px">' + rows + "</div>" +
+        "</div>";
+    }).join("");
+    els.customerMatchModalBody.querySelectorAll(".stamp-customer-match-item").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        const fieldId = btn.getAttribute("data-field-id");
+        const idx = parseInt(btn.getAttribute("data-index") || "0", 10);
+        const group = matched.find(function (item) { return item.fieldId === fieldId; });
+        if (!group || !group.customers[idx]) return;
+        applyCustomerToField(fieldId, group.customers[idx]);
+        btn.classList.add("is-active");
+        els.customerMatchModalBody.querySelectorAll('.stamp-customer-match-item[data-field-id="' + fieldId + '"]').forEach(function (other) {
+          if (other !== btn) other.classList.remove("is-active");
+        });
+      });
+    });
+  }
+
+  async function promptExistingCustomers() {
+    const groups = await collectPartyMatchGroups();
+    const hasMatch = groups.some(function (group) { return group.customers && group.customers.length; });
+    const firstWithName = groups.find(function (group) { return group.query; }) || groups[0];
+    if (firstWithName) {
+      renderPartyMatchList(firstWithName.fieldId, firstWithName.customers || [], firstWithName.query || "");
+    }
+    if (!hasMatch) return;
+    partyPromptSnapshot = snapshotPartyNames();
+    renderCustomerExistsModal(groups);
+    if (customerMatchModal) customerMatchModal.show();
+  }
+
+  function continueWithTypedPartyRecord() {
+    restorePartyNames(partyPromptSnapshot);
+    partyPromptSnapshot = null;
+    const fieldId = activePartyFieldId || "FirstPartyName";
+    const input = partyInput(fieldId);
+    searchPartyField(fieldId, input ? input.value : "");
+    customerMatchModal?.hide();
   }
 
   function setManualFieldLock(active) {
@@ -1108,6 +1377,20 @@
     }
     if (els.stampIdInput) els.stampIdInput.value = record.stamp_id ? String(record.stamp_id) : "";
     if (els.editStampIdInput) els.editStampIdInput.value = record.stamp_id ? String(record.stamp_id) : "";
+    if (els.customerId) els.customerId.value = record.CustomerID ? String(record.CustomerID) : "";
+    clearAllPartySelections();
+    if (record.CustomerID) {
+      const paidBy = document.getElementById("StampDutyPaidBy");
+      const first = document.getElementById("FirstPartyName");
+      const target = (paidBy && (paidBy.value || "").trim()) ? paidBy : first;
+      if (target) {
+        markPartySelection(target.id, {
+          customer_id: record.CustomerID,
+          customer_name: target.value || "",
+        });
+        syncMainCustomerId();
+      }
+    }
     editingStampId = record.stamp_id ? parseInt(record.stamp_id, 10) : null;
     blockedDuplicateCert = null;
     setOcrFieldLock(false);
@@ -1130,6 +1413,13 @@
     }
     enterSaveMode();
     ensureTransactionDateEditable();
+    const paidBy = document.getElementById("StampDutyPaidBy");
+    const firstParty = document.getElementById("FirstPartyName");
+    const fieldId = (paidBy && (paidBy.value || "").trim()) ? "StampDutyPaidBy"
+      : (firstParty && (firstParty.value || "").trim()) ? "FirstPartyName"
+      : "StampDutyPaidBy";
+    const input = partyInput(fieldId);
+    schedulePartySearch(fieldId, input ? input.value : "");
   }
 
   async function deleteSelectedRecord() {
@@ -1587,6 +1877,9 @@
       el.remove();
     });
     document.getElementById("Narration").value = "Stamp Sale";
+    if (els.customerId) els.customerId.value = "";
+    clearAllPartySelections();
+    renderPartyMatchList(activePartyFieldId, [], "");
     if (els.partialOcrAlert) {
       els.partialOcrAlert.classList.add("d-none");
       els.partialOcrAlert.textContent = "";
@@ -1676,6 +1969,7 @@
     if (duty && pre.amount) duty.value = pre.amount;
     if (sale && (pre.sale_amount || pre.amount)) sale.value = pre.sale_amount || pre.amount;
     if (desc && pre.description) desc.value = pre.description;
+    if (pre.first_party || pre.second_party) promptExistingCustomers();
   }
 
   function initMobileFromRepost() {
@@ -1758,6 +2052,7 @@
 
   function fallbackToManual(fields, reason) {
     populateFields(fields || {});
+    promptExistingCustomers();
     setOcrFieldLock(false);
     switchingMode = true;
     if (els.modeManual) els.modeManual.checked = true;
@@ -1964,6 +2259,23 @@
       defaultTransactionDateFromCert(true);
       setTransactionDateManual(false);
     }
+    if (options.checkCustomers) {
+      PARTY_NAME_IDS.forEach(function (fieldId) {
+        markPartySelection(fieldId, null);
+      });
+      syncMainCustomerId();
+      if (options.promptCustomers) {
+        promptExistingCustomers();
+      } else {
+        const firstParty = document.getElementById("FirstPartyName");
+        const paidBy = document.getElementById("StampDutyPaidBy");
+        const fieldId = (paidBy && paidBy.value.trim()) ? "StampDutyPaidBy"
+          : (firstParty && firstParty.value.trim()) ? "FirstPartyName"
+          : activePartyFieldId;
+        const input = partyInput(fieldId);
+        schedulePartySearch(fieldId, input ? input.value : "");
+      }
+    }
   }
 
   async function syncExistingCertificateState(showModal) {
@@ -2070,6 +2382,7 @@
       ensureSaleAmountDefault();
       showPartialOcrAlert("Certificate data imported from image. You can edit Transaction Date, Amount, Payment & Remarks only.");
       syncExistingCertificateState(false);
+      promptExistingCustomers();
     } catch (err) {
       logOcr("OCR Failed Reason", err.message || String(err));
       fallbackToManual(collectCurrentFields(), "OCR failed: " + (err.message || String(err)));
@@ -2217,6 +2530,37 @@
       e.preventDefault();
       confirmMobile();
     }
+  });
+
+  PARTY_NAME_FIELDS.forEach(function (field) {
+    const input = document.getElementById(field.id);
+    if (!input) return;
+    input.addEventListener("focus", function () {
+      activePartyFieldId = field.id;
+      schedulePartySearch(field.id, input.value);
+    });
+    input.addEventListener("input", function () {
+      activePartyFieldId = field.id;
+      onPartyNameTyped(field.id);
+      schedulePartySearch(field.id, input.value);
+    });
+  });
+  els.customerMatchFilter?.addEventListener("input", function () {
+    syncingPartyFilter = true;
+    schedulePartySearch(activePartyFieldId, els.customerMatchFilter.value);
+    setTimeout(function () { syncingPartyFilter = false; }, 260);
+  });
+  els.customerMatchFilter?.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      const firstMatch = els.customerMatchList?.querySelector(".stamp-customer-match-item");
+      if (firstMatch) firstMatch.click();
+    }
+  });
+  els.customerMatchContinueBtn?.addEventListener("click", function (e) {
+    e.preventDefault();
+    continueWithTypedPartyRecord();
   });
   els.mobileInput?.addEventListener("input", function () {
     setMobileError("");
@@ -2416,6 +2760,7 @@
     syncTransactionDateForSubmit();
     syncPaymentLinesToForm();
     ensureStampIdForSubmit();
+    syncMainCustomerId();
     const validationError = validateMandatoryFields();
     if (validationError) {
       e.preventDefault();
@@ -2429,6 +2774,16 @@
 
     if (e.key === "Enter") {
       e.preventDefault();
+      if (e.target && e.target.id === "stampCustomerMatchFilter") {
+        const firstMatch = els.customerMatchList?.querySelector(".stamp-customer-match-item");
+        if (firstMatch) firstMatch.click();
+        return;
+      }
+      if (e.target && PARTY_NAME_IDS.indexOf(e.target.id) >= 0) {
+        const pick = els.customerMatchList?.querySelector(".stamp-customer-match-item.is-active")
+          || els.customerMatchList?.querySelector(".stamp-customer-match-item");
+        if (pick) pick.click();
+      }
       if (!focusNextMandatoryField(e.target)) {
         const fields = getMandatoryFields();
         if (fields.length) fields[0].focus();

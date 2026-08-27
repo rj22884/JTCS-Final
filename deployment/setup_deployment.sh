@@ -31,7 +31,13 @@ fi
 ${SUDO} apt-get update
 ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y \
   git curl rsync python3 python3-venv python3-pip \
-  nginx supervisor 2>/dev/null || true
+  nginx supervisor \
+  libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+  tesseract-ocr tesseract-ocr-eng poppler-utils 2>/dev/null \
+  || ${SUDO} DEBIAN_FRONTEND=noninteractive apt-get install -y \
+       git curl rsync python3 python3-venv python3-pip nginx \
+       libgl1-mesa-glx libglib2.0-0 tesseract-ocr tesseract-ocr-eng poppler-utils 2>/dev/null \
+  || true
 
 # Prefer systemd unit for gunicorn (supervisor optional).
 ${SUDO} apt-get install -y gunicorn 2>/dev/null || true

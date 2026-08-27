@@ -15,10 +15,11 @@ from typing import Callable
 
 from PIL import Image
 
-from app.services.ocr_provider_service import configure_tesseract
+from app.services.ocr_provider_service import configure_tesseract, prepare_opencv_for_ocr
 
 logger = logging.getLogger(__name__)
 
+prepare_opencv_for_ocr()
 configure_tesseract()
 
 
@@ -41,6 +42,7 @@ class OcrBackend(ABC):
 
 class EasyOcrBackend(OcrBackend):
     def __init__(self):
+        prepare_opencv_for_ocr()
         import easyocr
 
         last_error: Exception | None = None
@@ -77,6 +79,7 @@ class EasyOcrBackend(OcrBackend):
 
 class PaddleOcrBackend(OcrBackend):
     def __init__(self):
+        prepare_opencv_for_ocr()
         from paddleocr import PaddleOCR
 
         try:
@@ -112,8 +115,8 @@ class TesseractBackend(OcrBackend):
         tess_path = configure_tesseract()
         if not tess_path:
             raise OcrEngineNotAvailableError(
-                "tesseract.exe not found. Install Tesseract or add to PATH "
-                "(C:\\Program Files\\Tesseract-OCR\\tesseract.exe)."
+                "Tesseract binary not found. On Linux: sudo apt-get install -y tesseract-ocr. "
+                r"On Windows: install Tesseract or add C:\Program Files\Tesseract-OCR\tesseract.exe to PATH."
             )
         pytesseract.get_tesseract_version()
 

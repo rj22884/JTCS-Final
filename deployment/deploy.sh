@@ -436,6 +436,17 @@ else
 fi
 pip install -q "gunicorn>=22.0.0" || abort_deploy "gunicorn install failed"
 
+# EasyOCR pulls opencv-python (needs libGL). Keep headless OpenCV on Linux VPS.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  log_info "Ensuring Linux OCR system libraries + opencv-python-headless"
+  if [[ "${EUID}" -eq 0 ]]; then SUDO_OCR=""; else SUDO_OCR="sudo"; fi
+  ${SUDO_OCR} apt-get install -y libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 tesseract-ocr tesseract-ocr-eng >/dev/null 2>&1 \
+    || ${SUDO_OCR} apt-get install -y libgl1-mesa-glx libglib2.0-0 tesseract-ocr tesseract-ocr-eng >/dev/null 2>&1 \
+    || log_warn "Could not apt-install libGL/tesseract (run deployment/fix_vps_ocr.sh)"
+  pip uninstall -y opencv-python opencv-contrib-python >/dev/null 2>&1 || true
+  pip install -q "opencv-python-headless>=4.8.0" || log_warn "opencv-python-headless install failed"
+fi
+
 # ---------------------------------------------------------------------------
 # Schema-only migrations
 # ---------------------------------------------------------------------------

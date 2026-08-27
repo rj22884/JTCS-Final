@@ -403,6 +403,63 @@ class CustomerRepository:
             for row in rows
         ]
 
+    _PARTY_JUNK = re.compile(r"^(na|n/?a|n\.a\.?|nil|none|null|-{1,3}|\.{1,3})$", re.I)
+    _PARTY_SPLIT = re.compile(
+        r"\b(?:s\s*/?\s*o|w\s*/?\s*o|d\s*/?\s*o|s/o|w/o|d/o|so|wo|do|and|&)\b",
+        re.I,
+    )
+
+    def party_search_needles(self, name: str) -> list[str]:
+        raw = re.sub(r"\s+", " ", (name or "").strip())
+        if len(raw) < 2 or self._PARTY_JUNK.match(raw):
+            return []
+        needles: list[str] = []
+        seen: set[str] = set()
+
+        def _add(value: str) -> None:
+            cleaned = re.sub(r"\s+", " ", (value or "").strip(" ,./-"))
+            key = cleaned.lower()
+            if len(cleaned) < 2 or key in seen or self._PARTY_JUNK.match(cleaned):
+                return
+            seen.add(key)
+            needles.append(cleaned)
+
+        _add(raw)
+        head = self._PARTY_SPLIT.split(raw)[0] if raw else ""
+        _add(head)
+        words = [w for w in re.split(r"\s+", head or raw) if len(w) >= 2]
+        if len(words) >= 2:
+            _add(" ".join(words[:2]))
+        return needles[:3]
+
+    def search_party_name(self, name: str, *, limit: int = 15) -> list[dict]:
+        needles = self.party_search_needles(name)
+        if not needles:
+            return []
+        merged: dict[int, dict] = {}
+        for needle in needles:
+            for row in self.search(needle, limit=limit):
+                customer_id = row.get("customer_id")
+                if customer_id is None:
+                    continue
+                merged[int(customer_id)] = row
+
+        raw_upper = needles[0].upper()
+        short_upper = needles[-1].upper()
+
+        def _rank(row: dict) -> tuple[int, str]:
+            customer_name = (row.get("customer_name") or "").strip().upper()
+            if customer_name == raw_upper or customer_name == short_upper:
+                return (0, customer_name)
+            if customer_name.startswith(short_upper) or customer_name.startswith(raw_upper):
+                return (1, customer_name)
+            if short_upper in customer_name or raw_upper in customer_name:
+                return (2, customer_name)
+            return (3, customer_name)
+
+        ranked = sorted(merged.values(), key=_rank)
+        return ranked[:limit]
+
     def list_master(
         self,
         *,

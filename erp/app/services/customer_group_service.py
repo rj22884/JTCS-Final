@@ -9,6 +9,15 @@ from app.utils.db_session import persist
 AVAILABLE_TAB_CODES = list(TAB_LABELS.keys())
 
 
+def is_universal_customer_group(code: str | None, name: str | None = None) -> bool:
+    """Catch-all groups such as 'None above' apply to every Chart of Account Group."""
+    label = (name or "").strip().casefold()
+    if "none above" in label:
+        return True
+    key = (code or "").strip().upper().replace(" ", "").replace("_", "").replace("-", "")
+    return key in {"NONE", "NONEABOVE", "NA"}
+
+
 class CustomerGroupService:
     def __init__(self, repository: CustomerGroupRepository | None = None):
         self.repository = repository or CustomerGroupRepository()
@@ -94,23 +103,31 @@ class CustomerGroupService:
         usage: dict[str, list[int]] | dict[str, set[int]],
         nature_by_chart_id: dict[int, str],
         include_code: str | None = None,
+        labels: dict[str, str] | None = None,
     ) -> list[str]:
         """Customer Groups allowed for a Chart of Account Group.
 
         Unused groups stay available (new combinations). Groups already used
         with other natures are hidden unless include_code keeps a legacy value.
+        Catch-all groups such as 'None above' stay available for every nature.
         """
         if not chart_group_id:
             return []
         selected_nature = (chart_nature or "").strip()
         include = (include_code or "").strip().upper()
+        names = labels or {}
         allowed: list[str] = []
         for raw in active_codes:
             code = (raw or "").strip()
             if not code:
                 continue
             key = code.upper()
+            label = names.get(key) or names.get(code) or ""
             if include and key == include:
+                if code not in allowed:
+                    allowed.append(code)
+                continue
+            if is_universal_customer_group(code, label):
                 if code not in allowed:
                     allowed.append(code)
                 continue
@@ -137,6 +154,10 @@ class CustomerGroupService:
         include_code: str | None = None,
     ) -> list[str]:
         active = [g["code"] for g in self.list_active_groups()]
+        labels = {
+            (g["code"] or "").strip().upper(): g.get("label") or ""
+            for g in self.list_active_groups()
+        }
         if not chart_group_id:
             return []
         natures: dict[int, str] = {}
@@ -159,6 +180,7 @@ class CustomerGroupService:
             usage=self.chart_group_usage_map(),
             nature_by_chart_id=natures,
             include_code=include_code,
+            labels=labels,
         )
 
     def is_group_valid_for_chart(

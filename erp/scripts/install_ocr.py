@@ -50,9 +50,14 @@ def main() -> int:
         print("\nOCR installation successful. Restart the ERP server.")
         return 0
 
-    print("\nOCR still not ready. Install Tesseract from:")
-    print("  https://github.com/UB-Mannheim/tesseract/wiki")
-    print("  Default path: C:\\Program Files\\Tesseract-OCR\\tesseract.exe")
+    print("\nOCR still not ready.")
+    if sys.platform.startswith("linux"):
+        print("  sudo bash deployment/fix_vps_ocr.sh")
+        print("  sudo apt-get install -y libgl1 libglib2.0-0 tesseract-ocr tesseract-ocr-eng")
+        print("  pip uninstall -y opencv-python opencv-contrib-python && pip install opencv-python-headless")
+    else:
+        print("  Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki")
+        print("  Default path: C:\\Program Files\\Tesseract-OCR\\tesseract.exe")
     return 1
 
 
