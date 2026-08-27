@@ -6,6 +6,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.repositories.others_repository import WorkMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 
 
@@ -320,6 +324,27 @@ class WorkMasterService:
         row = self.repository.get_by_id(work_id)
         if row is None:
             raise ValueError("Work type not found.")
+        work_name = (row.WorkName or "").strip()
+        assert_master_unused(
+            table="WorkMaster",
+            pk_column="WorkID",
+            pk_value=work_id,
+            display_name=work_name or "Work",
+            extra_checks=[
+                {
+                    "table": "JTCSDailyTransaction",
+                    "where": "LTRIM(RTRIM(WorkType)) = :name",
+                    "params": {"name": work_name},
+                    "label": "Daily Transaction",
+                },
+                {
+                    "table": "WorkTypeMaster",
+                    "where": "LTRIM(RTRIM(WorkTypeName)) = :name",
+                    "params": {"name": work_name},
+                    "label": "Sub Work Master",
+                },
+            ],
+        )
         if not row.ActiveStatus:
             return "Work type is already inactive."
 
@@ -327,4 +352,8 @@ class WorkMasterService:
             self.repository.deactivate(row)
             return "Work type deactivated successfully."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, work_name or "Work")
+            raise

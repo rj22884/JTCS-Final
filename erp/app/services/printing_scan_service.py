@@ -379,11 +379,10 @@ class PrintingScanService:
         return {"work_id": row.WorkID, "message": "Work type added."}
 
     def delete_work_master(self, work_id: int) -> dict:
-        row = self.work_repo.get_by_id(work_id)
-        if row is None:
-            raise ValueError("Work type not found.")
-        self.work_repo.deactivate(row)
-        return {"work_id": row.WorkID, "message": "Work type deactivated."}
+        from app.services.work_master_service import WorkMasterService
+
+        message = WorkMasterService(self.work_repo).delete_record(work_id)
+        return {"work_id": work_id, "message": message}
 
     def list_entries(self, *, ledger_kind: str | None = None) -> list[dict]:
         rows = self.printing_repo.list_recent(ledger_kind=ledger_kind or self.LEDGER_INCOME)

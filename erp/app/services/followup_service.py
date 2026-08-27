@@ -11,6 +11,7 @@ from app.repositories.customer_repository import CustomerRepository
 from app.repositories.followup_repository import FollowupRepository
 from app.services.followup_payment_service import FollowupPaymentService
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import assert_master_unused
 
 
 IDSIGN_STATUS_URL = "https://dsc.idsignca.com/ekycadmin/signup/webstatus"
@@ -1395,6 +1396,12 @@ class FollowupService:
                 raise ValueError("Workflow stage not found.")
             if not row.ActiveStatus:
                 raise ValueError("Workflow stage is already inactive.")
+            assert_master_unused(
+                table="FollowupWorkflowStage",
+                pk_column="StageID",
+                pk_value=stage_id,
+                display_name=row.StageName or "Workflow stage",
+            )
             self.followup_repo.deactivate_stage(row)
             return "Workflow stage marked inactive successfully."
 

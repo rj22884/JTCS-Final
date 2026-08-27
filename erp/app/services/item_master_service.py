@@ -7,6 +7,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.repositories.item_master_repository import ItemMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 
 def _q2(value: Decimal) -> Decimal:
@@ -247,9 +251,28 @@ class ItemMasterService:
         row = self.repo.get_by_id(item_id)
         if row is None:
             raise ValueError("Item not found.")
+        label = (row.ItemName or row.ItemCode or "Item").strip()
+        assert_master_unused(
+            table="ItemMaster",
+            pk_column="ItemID",
+            pk_value=item_id,
+            display_name=label,
+            extra_checks=[
+                {
+                    "table": "GstInvoiceLine",
+                    "where": "ItemID = :id",
+                    "params": {"id": item_id},
+                    "label": "GST Invoice",
+                },
+            ],
+        )
 
         def _write() -> str:
             self.repo.delete(row)
             return "Item deleted successfully."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, label)
+            raise

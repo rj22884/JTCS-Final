@@ -8,6 +8,10 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.repositories.chart_group_repository import ChartGroupRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 VALID_UNDER = {"Assets", "Liabilities"}
 
@@ -273,25 +277,36 @@ class ChartGroupService:
         row = self.repo.get_by_id(group_id)
         if row is None:
             raise ValueError("Group not found.")
-        linked = self.repo.count_accounts(group_id)
-        if linked > 0:
-            raise ValueError(
-                f"Cannot delete group '{row.GroupName}' — {linked} account(s) still reference it."
-            )
-        children = db.session.execute(
-            text(
-                "SELECT COUNT(1) FROM dbo.ChartOfGroupMaster WHERE ParentGroupID = :gid"
-            ),
-            {"gid": group_id},
-        ).scalar()
-        if int(children or 0) > 0:
-            raise ValueError(
-                f"Cannot delete group '{row.GroupName}' — child groups still exist under it."
-            )
+        label = row.GroupName or "Chart group"
+        assert_master_unused(
+            table="ChartOfGroupMaster",
+            pk_column="GroupID",
+            pk_value=group_id,
+            display_name=label,
+            column_aliases=["ChartGroupID", "ParentGroupID"],
+            extra_checks=[
+                {
+                    "table": "ChartOfAccountMaster",
+                    "where": "GroupID = :id",
+                    "params": {"id": group_id},
+                    "label": "Chart of Account Master",
+                },
+                {
+                    "table": "ChartOfAccountGroupLink",
+                    "where": "GroupID = :id",
+                    "params": {"id": group_id},
+                    "label": "Chart of Account Master",
+                },
+            ],
+        )
 
         def _write() -> str:
             name = row.GroupName
             self.repo.delete(row)
             return f"Group '{name}' deleted."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, label)
+            raise

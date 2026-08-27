@@ -5,6 +5,7 @@ from datetime import datetime
 from app.customer_master.constants import GROUP_TABS, TAB_LABELS
 from app.repositories.customer_group_repository import CustomerGroupRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import assert_master_unused
 
 AVAILABLE_TAB_CODES = list(TAB_LABELS.keys())
 
@@ -292,6 +293,21 @@ class CustomerGroupService:
                 raise ValueError("Group not found.")
             if not row.ActiveStatus:
                 raise ValueError("Group is already inactive.")
+            assert_master_unused(
+                table="CustomerGroupMaster",
+                pk_column="GroupID",
+                pk_value=group_id,
+                display_name=row.GroupName or row.GroupCode or "Customer group",
+                column_aliases=[],
+                extra_checks=[
+                    {
+                        "table": "CustomerMaster",
+                        "where": "UPPER(LTRIM(RTRIM(CustomerGroup))) = :code",
+                        "params": {"code": (row.GroupCode or "").strip().upper()},
+                        "label": "Customer Master",
+                    },
+                ],
+            )
             self.repository.deactivate(row)
             return "Group marked inactive successfully."
 

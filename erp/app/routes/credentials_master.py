@@ -6,6 +6,7 @@ from app.extensions import db
 from app.services.credentials_master_service import CredentialsMasterService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 from app.whats_new import publish_whats_new
 
 bp = Blueprint("credentials_master", __name__, url_prefix="/masters/credentials")
@@ -154,8 +155,10 @@ def delete_record(credential_id: int):
     try:
         message = CredentialsMasterService().delete_record(credential_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 

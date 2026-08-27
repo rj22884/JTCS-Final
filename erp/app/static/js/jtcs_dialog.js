@@ -155,6 +155,13 @@
   function inferType(message) {
     var text = String(message || "").toLowerCase();
     if (
+      /stop:|cannot be deleted|cannot delete|in use and cannot|still reference|linked to other|linked to existing/.test(
+        text
+      )
+    ) {
+      return "error";
+    }
+    if (
       /duplicate|already exists|conflict|failed|unable|denied|forbidden|not allowed|error|exception/.test(
         text
       )

@@ -5,6 +5,7 @@ import re
 
 from app.repositories.credentials_master_repository import CredentialsMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import assert_master_unused
 
 
 class CredentialsMasterService:
@@ -144,6 +145,12 @@ class CredentialsMasterService:
             row = self.repo.get_by_id(credential_id)
             if row is None:
                 raise ValueError("Credential not found.")
+            assert_master_unused(
+                table="CredentialsMaster",
+                pk_column="CredentialID",
+                pk_value=credential_id,
+                display_name=row.Activity or "Credential",
+            )
             if row.ActiveStatus:
                 self.repo.update(row, {"ActiveStatus": False})
                 return "Credential marked inactive."

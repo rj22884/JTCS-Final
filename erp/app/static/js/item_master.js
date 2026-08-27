@@ -355,6 +355,7 @@
     }
     if (delBtn) {
       deleteItem(delBtn.getAttribute("data-id")).catch(function (err) {
+        if (window.JTCSDialog?.alert) JTCSDialog.alert(err.message || String(err), "error");
         showStatus(err.message || String(err), "danger");
       });
     }

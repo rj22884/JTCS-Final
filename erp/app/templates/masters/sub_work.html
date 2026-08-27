@@ -40,9 +40,10 @@
   </div>
 
   <p class="small text-muted mb-3">
-    Sub Work Master is grouped from <strong>Work Master</strong> (<code>WorkMaster.LedgerKind</code>):
-    <strong>Income</strong> → <strong>Expense</strong> → <strong>Misc.</strong>
-    First choose Ledger Kind, then Work, then enter Sub Work.
+    <strong>NSDL</strong> jaise names <strong>Masters → Work/Category Master</strong> se aate hain.
+    <strong>New-Pan</strong> / <strong>Pan Correction</strong> yahan <strong>Sub Work Type</strong> hain —
+    menu: <strong>Masters → Sub Work Master</strong>.
+    Misc. entries par Chart of Account Group nahi dikhta.
   </p>
   <div id="swStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
@@ -53,7 +54,7 @@
           <th>ID</th>
           <th>Ledger Kind</th>
           <th>Work Name</th>
-          <th>Chart of Account Group</th>
+          <th class="sw-col-chart">Chart of Account Group</th>
           <th>Sub Work Type</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
@@ -98,11 +99,11 @@
             <div class="form-text">Works come from Masters → Work/Category Master for the selected Ledger Kind.</div>
           </div>
 
-          <div class="mb-3">
+          <div class="mb-3" id="swUnderGroupWrap">
             <label class="form-label" for="swUnderGroup">Chart of Account Group</label>
             <input type="text" class="form-control" id="swUnderGroup" readonly
                    placeholder="Set on Work/Category Master">
-            <div class="form-text">Inherited from the selected Work (Chart of Account Group).</div>
+            <div class="form-text">Inherited from the selected Work (Chart of Account Group). Not used for Misc.</div>
           </div>
 
           <div class="mb-0">
@@ -137,5 +138,5 @@
   window.SUB_WORK_GROUPS = {{ work_groups | tojson }};
   window.SUB_WORK_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260804undergroup"></script>
+<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260827miscchart1"></script>
 {% endblock %}

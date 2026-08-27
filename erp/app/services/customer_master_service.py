@@ -19,6 +19,7 @@ from app.customer_master.gst_state_codes import gst_code_for_state
 from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import MasterInUseError
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +39,17 @@ class DuplicateMobileWarning(ValueError):
         self.duplicates = duplicates
 
 
-class CustomerInUseError(ValueError):
+class CustomerInUseError(MasterInUseError):
     def __init__(self, usage: dict, message: str):
-        super().__init__(message)
-        self.usage = usage
+        super().__init__(message, links=list(usage.get("links") or []), usage=usage)
 
 
 _IN_USE_MESSAGE = (
-    "This customer is linked to existing records and cannot be deleted or inactivated. "
+    "Stop: this customer is linked to existing records and cannot be deleted or inactivated. "
     "Only Edit is allowed."
 )
 _IN_USE_PERMANENT_MESSAGE = (
-    "This customer has linked records and cannot be permanently deleted."
+    "Stop: this customer has linked records and cannot be permanently deleted."
 )
 
 

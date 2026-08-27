@@ -6,6 +6,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.repositories.account_type_repository import AccountTypeRepository, SEED_TYPES
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import (
+    MasterInUseError,
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 # Backward-compatible tuple of seed codes (tests / legacy imports).
 ACCOUNT_TYPE_CODES = tuple(code for code, *_ in SEED_TYPES)
@@ -145,14 +150,35 @@ class AccountTypeMasterService:
         row = self.repo.get_by_id(account_type_id)
         if row is None:
             raise ValueError("Account type not found.")
+        label = row.AccountTypeCode or row.AccountTypeName or "Account type"
+        assert_master_unused(
+            table="AccountTypeMaster",
+            pk_column="AccountTypeID",
+            pk_value=account_type_id,
+            display_name=label,
+            extra_checks=[
+                {
+                    "table": "JtcsBankAccountMaster",
+                    "where": "LTRIM(RTRIM(AccountType)) = :code",
+                    "params": {"code": (row.AccountTypeCode or "").strip()},
+                    "label": "Bank Master",
+                },
+            ],
+        )
         if self.repo.usage_count(row.AccountTypeCode) > 0:
-            raise ValueError("This Account Type is already in use and cannot be deleted.")
+            raise MasterInUseError(
+                f"Stop: '{label}' is already in use and cannot be deleted."
+            )
 
         def _write() -> str:
             self.repo.delete(row)
             return "Account type deleted successfully."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, label)
+            raise
 
     def is_valid_code(self, code: str, *, allow_inactive: bool = False) -> bool:
         row = self.repo.find_by_code((code or "").strip())

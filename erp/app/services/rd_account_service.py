@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from app.repositories.bank_cash_repository import RdAccountRepository
 from app.repositories.bank_master_repository import BankMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import MasterInUseError, assert_master_unused
 
 
 class RdAccountService:
@@ -171,17 +172,19 @@ class RdAccountService:
             row = self.repo.get_by_id(rd_account_id)
             if row is None:
                 raise ValueError("RD account not found.")
-            usage = self.repo.usage_count(row.BankAccountID)
-            if usage > 0:
-                self.repo.update(row, {"ActiveStatus": False})
-                if row.BankAccountID:
-                    bank = self.bank_repo.get_by_id(row.BankAccountID)
-                    if bank is not None:
-                        self.bank_repo.update(bank, {"ActiveStatus": False})
-                return (
-                    "RD account is used in transactions and was marked inactive "
-                    "instead of deleted."
-                )
+            label = (row.RdName or row.RdNumber or "RD account").strip()
+            assert_master_unused(
+                table="RdAccountMaster",
+                pk_column="RdAccountID",
+                pk_value=rd_account_id,
+                display_name=label,
+            )
+            if row.BankAccountID:
+                usage = self.repo.usage_count(row.BankAccountID)
+                if usage > 0:
+                    raise MasterInUseError(
+                        f"Stop: '{label}' is linked to bank transactions and cannot be deleted."
+                    )
             bank_id = row.BankAccountID
             self.repo.delete(row)
             if bank_id:

@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from app.decorators import login_required, require_delete_reauth
 from app.services.menu_service import MenuService
 from app.services.sub_work_master_service import SubWorkMasterService
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("masters_sub_work", __name__, url_prefix="/masters/sub-work")
 
@@ -151,6 +152,8 @@ def delete_record(work_type_id: int):
     try:
         message = SubWorkMasterService().delete_record(work_type_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

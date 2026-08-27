@@ -6,6 +6,7 @@ from app.services.hsn_sac_search_service import search_hsn_sac
 from app.services.item_master_service import ItemMasterService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("masters_item", __name__, url_prefix="/masters/item")
 
@@ -162,6 +163,8 @@ def delete_record(item_id: int):
     try:
         message = ItemMasterService().delete_record(item_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

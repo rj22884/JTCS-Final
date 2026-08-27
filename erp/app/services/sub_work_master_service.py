@@ -10,6 +10,10 @@ from app.models.others import WorkMaster
 from app.models.transactions import WorkTypeMaster
 from app.repositories.others_repository import OthersIncomeExpenseRepository, WorkMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 
 class SubWorkMasterService:
@@ -373,10 +377,34 @@ class SubWorkMasterService:
         row = db.session.get(WorkTypeMaster, work_type_id)
         if row is None or not row.ActiveStatus:
             raise ValueError("Sub work not found.")
+        parent_name = (row.WorkTypeName or "").strip()
+        sub_name = (row.SubWorkType or "").strip()
+        label = f"{parent_name} / {sub_name}".strip(" /") or "Sub work"
+        assert_master_unused(
+            table="WorkTypeMaster",
+            pk_column="WorkTypeID",
+            pk_value=work_type_id,
+            display_name=label,
+            extra_checks=[
+                {
+                    "table": "JTCSDailyTransaction",
+                    "where": (
+                        "LTRIM(RTRIM(SubWorkType)) = :sub "
+                        "AND LTRIM(RTRIM(WorkType)) = :parent"
+                    ),
+                    "params": {"sub": sub_name, "parent": parent_name},
+                    "label": "Daily Transaction",
+                },
+            ],
+        )
 
         def _write() -> str:
             row.ActiveStatus = False
             db.session.flush()
             return "Sub work deleted successfully."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, label)
+            raise

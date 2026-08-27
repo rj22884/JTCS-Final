@@ -8,6 +8,10 @@ from app.repositories.chart_account_repository import ChartAccountRepository
 from app.repositories.chart_group_repository import ChartGroupRepository
 from app.utils.db_session import persist
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 MAX_GROUPS = 5
 
@@ -547,16 +551,35 @@ class ChartAccountService:
         row = self.repo.get_by_id(account_id)
         if row is None:
             raise ValueError("Account not found.")
+        name = row.AccountName or "Account"
+        linked = bool(row.CustomerID or row.WorkID)
+        assert_master_unused(
+            table="ChartOfAccountMaster",
+            pk_column="AccountID",
+            pk_value=account_id,
+            display_name=name,
+            skip_tables={"ChartOfAccountGroupLink"},
+            extra_checks=[
+                {
+                    "table": "OthersBankCashTransaction",
+                    "where": "CreditLedgerKey = :key OR DebitLedgerKey = :key",
+                    "params": {"key": f"coa-{int(account_id)}"},
+                    "label": "Bank / Cash Transaction",
+                },
+            ],
+        )
 
         def _write() -> str:
-            name = row.AccountName
-            linked = bool(row.CustomerID or row.WorkID)
             self.repo.delete(row)
             if linked:
                 return f"Group assignment cleared for '{name}'."
             return f"Account '{name}' deleted."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, name)
+            raise
 
     def clear_customer_group(self, customer_id: int) -> str:
         row = self.repo.get_by_customer_id(customer_id)

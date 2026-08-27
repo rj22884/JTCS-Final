@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 
 def map_db_exception(exc: Exception) -> str:
     if isinstance(exc, IntegrityError):
+        raw = str(getattr(exc, "orig", None) or exc).lower()
+        if (
+            "reference constraint" in raw
+            or "conflicted with the reference" in raw
+            or "foreign key" in raw
+        ):
+            return (
+                "Stop: this record is linked to other data and cannot be deleted. "
+                "Remove or change the linked records first."
+            )
         return "A record with these details already exists."
     if isinstance(exc, OperationalError):
         return "Database is temporarily unavailable. Please try again."

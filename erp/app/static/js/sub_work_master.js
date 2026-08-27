@@ -20,6 +20,7 @@
     id: document.getElementById("swId"),
     workId: document.getElementById("swWorkId"),
     underGroup: document.getElementById("swUnderGroup"),
+    underGroupWrap: document.getElementById("swUnderGroupWrap"),
     subWorkType: document.getElementById("swSubWorkType"),
   };
 
@@ -56,11 +57,22 @@
     return (checked && checked.value) || "Misc.";
   }
 
+  function isMiscKind(kind) {
+    return (kind || "") === "Misc.";
+  }
+
+  function syncChartGroupVisibility() {
+    const misc = isMiscKind(selectedLedgerKind());
+    els.underGroupWrap?.classList.toggle("d-none", misc);
+    if (misc && els.underGroup) els.underGroup.value = "";
+  }
+
   function setLedgerKind(kind) {
     const value = kind || "Misc.";
     document.querySelectorAll('input[name="swLedgerKind"]').forEach(function (radio) {
       radio.checked = radio.value === value;
     });
+    syncChartGroupVisibility();
   }
 
   function ledgerBadge(kind) {
@@ -72,6 +84,10 @@
 
   function syncUnderGroupFromWork() {
     if (!els.underGroup || !els.workId) return;
+    if (isMiscKind(selectedLedgerKind())) {
+      els.underGroup.value = "";
+      return;
+    }
     const opt = els.workId.selectedOptions && els.workId.selectedOptions[0];
     const label = (opt && opt.dataset.underGroup) || "";
     els.underGroup.value = label || "";
@@ -135,6 +151,10 @@
   function renderRows(rows) {
     if (!els.body) return;
     els.body.innerHTML = "";
+    const hideChart = (els.filterKind?.value || "").trim() === "Misc.";
+    document.querySelectorAll(".sw-col-chart").forEach(function (el) {
+      el.classList.toggle("d-none", hideChart);
+    });
     if (!rows.length) {
       els.empty?.classList.remove("d-none");
       if (els.count) els.count.textContent = "0 records";
@@ -156,8 +176,8 @@
         "<td>" +
         escapeHtml(row.work_name || row.work_type_name) +
         "</td>" +
-        "<td>" +
-        escapeHtml(row.under_group || "—") +
+        '<td class="sw-col-chart">' +
+        escapeHtml(isMiscKind(row.ledger_kind) ? "—" : row.under_group || "—") +
         "</td>" +
         "<td>" +
         escapeHtml(row.sub_work_type) +
@@ -176,6 +196,10 @@
         '"><i class="bi bi-trash"></i> Delete</button>' +
         "</td>";
       els.body.appendChild(tr);
+    });
+    const hideChart = (els.filterKind?.value || "").trim() === "Misc.";
+    document.querySelectorAll(".sw-col-chart").forEach(function (el) {
+      el.classList.toggle("d-none", hideChart);
     });
   }
 
@@ -209,6 +233,7 @@
     setLedgerKind("Misc.");
     if (els.modalTitle) els.modalTitle.textContent = "Add Sub Work";
     loadWorksFromApi("Misc.", null, null).then(function () {
+      syncChartGroupVisibility();
       modal?.show();
       els.workId?.focus();
     });
@@ -232,6 +257,7 @@
         if (els.modalTitle) els.modalTitle.textContent = "Edit Sub Work";
         return loadWorksFromApi(kind, record.work_id, record.work_name || record.work_type_name).then(
           function () {
+            syncChartGroupVisibility();
             modal?.show();
           }
         );
@@ -324,6 +350,7 @@
 
   document.querySelectorAll('input[name="swLedgerKind"]').forEach(function (radio) {
     radio.addEventListener("change", function () {
+      syncChartGroupVisibility();
       loadWorksFromApi(selectedLedgerKind(), null, null);
     });
   });

@@ -385,6 +385,14 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("Import/Export menu ensure skipped: %s", exc)
 
         try:
+            from app.routes.masters_sub_work import _ensure_menu as ensure_sub_work_menu
+
+            ensure_sub_work_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Sub Work Master menu ensure skipped: %s", exc)
+
+        try:
             from app.routes.masters_work import _ensure_menu as ensure_work_category_menu
 
             ensure_work_category_menu()

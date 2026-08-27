@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from app.decorators import login_required, require_delete_reauth
 from app.services.followup_service import MODULE_META, FollowupService
 from app.services.menu_service import MenuService
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 MASTER_MODULES = {
     "itr": "ITR",
@@ -101,8 +102,10 @@ def delete_record(slug: str, stage_id: int):
         module_code, _ = _resolve_module(slug)
         message = FollowupService(module_code).delete_master_stage(stage_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @bp.route("/exit")

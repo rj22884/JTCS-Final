@@ -4,6 +4,7 @@ from app.decorators import login_required, require_delete_reauth
 from app.services.chart_group_service import ChartGroupService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("masters_chart_group", __name__, url_prefix="/masters/chart-group")
 
@@ -143,6 +144,8 @@ def delete_record(group_id: int):
     try:
         message = ChartGroupService().delete_record(group_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

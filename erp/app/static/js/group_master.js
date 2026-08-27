@@ -254,6 +254,7 @@
         loadGrid();
       })
       .catch(function (err) {
+        if (window.JTCSDialog?.alert) JTCSDialog.alert(err.message, "error");
         showStatus(err.message, "danger");
       });
   }

@@ -6,6 +6,7 @@ from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
 from app.services.menu_service import MenuService
 from app.services.printing_scan_service import PrintingScanService
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 income_bp = Blueprint("printing_scanning", __name__, url_prefix="/others/income")
 expense_bp = Blueprint("printing_scan_expense", __name__, url_prefix="/others/expense")
@@ -138,6 +139,8 @@ def _register_routes(bp: Blueprint, *, blueprint: str, ledger_kind: str, base_pa
         try:
             result = service.delete_work_master(work_id)
             return jsonify({"ok": True, **result})
+        except MasterInUseError as exc:
+            return json_in_use_response(exc)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         except Exception as exc:
@@ -258,6 +261,8 @@ def _register_expense_routes(bp: Blueprint, *, blueprint: str, ledger_kind: str,
         try:
             result = service.delete_work_master(work_id)
             return jsonify({"ok": True, **result})
+        except MasterInUseError as exc:
+            return json_in_use_response(exc)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         except Exception as exc:

@@ -1595,6 +1595,12 @@
       .then(function (data) {
         if (data.in_use) {
           if (row) row.has_links = true;
+          if (window.JTCSDialog?.alert) {
+            JTCSDialog.alert(
+              data.error || "Stop: this customer is in use and cannot be deleted.",
+              "error"
+            );
+          }
           showStatus(data.error || "Customer is in use and cannot be deleted.", "warning");
           setSelected(customerId);
           loadRecord(customerId);

@@ -4,6 +4,7 @@ from app.decorators import login_required, require_delete_reauth
 from app.extensions import db
 from app.services.customer_group_service import CustomerGroupService
 from app.services.menu_service import MenuService
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("masters_group", __name__, url_prefix="/masters/group")
 MENU_PATH = "/masters/group"
@@ -83,8 +84,10 @@ def delete_record(group_id: int):
     try:
         message = CustomerGroupService().delete_record(group_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 @bp.route("/exit", strict_slashes=False)

@@ -4,6 +4,7 @@ from app.decorators import login_required, require_delete_reauth
 from app.services.menu_service import MenuService
 from app.services.purpose_master_service import PurposeMasterService
 from app.utils.db_session import map_db_exception
+from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("purpose_master", __name__, url_prefix="/masters/purpose")
 
@@ -78,8 +79,10 @@ def delete_record(purpose_id: int):
     try:
         message = PurposeMasterService().delete_record(purpose_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 404
+        return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 

@@ -9,6 +9,10 @@ from app.repositories.bank_master_repository import BankMasterRepository
 from app.services.account_type_master_service import AccountTypeMasterService
 from app.utils.db_session import persist
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
+from app.utils.master_delete_guard import (
+    assert_master_unused,
+    raise_if_integrity_in_use,
+)
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -341,21 +345,33 @@ class BankMasterService:
             row = self.repo.get_by_id(account_id)
             if row is None:
                 raise ValueError("Bank account not found.")
-            usage = self.repo.usage_count(account_id)
-            if usage > 0:
-                raise ValueError(
-                    "This bank account is used in transactions and cannot be "
-                    "permanently deleted from the database. Set Status to Inactive "
-                    "to hide it from the dashboard."
-                )
+            label = (row.BankName or "").strip() or "Bank account"
+            assert_master_unused(
+                table="JtcsBankAccountMaster",
+                pk_column="JtcsBankAccountID",
+                pk_value=account_id,
+                display_name=label,
+                column_aliases=[
+                    "JtcsBankAccountID",
+                    "BankAccountID",
+                    "CreditBankAccountID",
+                    "DebitBankAccountID",
+                    "PaymentBankAccountID",
+                ],
+                extra_checks=[
+                    {
+                        "table": "OthersBankCashTransaction",
+                        "where": "CreditLedgerKey = :key OR DebitLedgerKey = :key",
+                        "params": {"key": f"bank-{int(account_id)}"},
+                        "label": "Bank / Cash Transaction",
+                    },
+                ],
+            )
             try:
                 self.repo.delete(row)
             except IntegrityError as exc:
-                raise ValueError(
-                    "This bank account is used in related records and cannot be "
-                    "permanently deleted from the database. Set Status to Inactive "
-                    "to hide it from the dashboard."
-                ) from exc
+                raise_if_integrity_in_use(exc, label)
+                raise
             return "Bank account permanently deleted from the database."
 
         return persist(_write)

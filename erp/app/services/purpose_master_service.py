@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
+
 from app.repositories.purpose_master_repository import PurposeMasterRepository
 from app.utils.db_session import persist
+from app.utils.master_delete_guard import assert_master_unused, raise_if_integrity_in_use
 
 
 class PurposeMasterService:
@@ -87,10 +90,30 @@ class PurposeMasterService:
             row = self.repo.get_by_id(purpose_id)
             if row is None:
                 raise ValueError("Purpose not found.")
+            label = row.PurposeName or "Purpose"
+            assert_master_unused(
+                table="PurposeMaster",
+                pk_column="PurposeID",
+                pk_value=purpose_id,
+                display_name=label,
+                extra_checks=[
+                    {
+                        "table": "OthersBankCashTransaction",
+                        "where": "LTRIM(RTRIM(Purpose)) = :name",
+                        "params": {"name": (row.PurposeName or "").strip()},
+                        "label": "Bank / Cash Transaction",
+                    },
+                ],
+            )
             if row.ActiveStatus:
                 self.repo.update(row, {"ActiveStatus": False})
                 return "Purpose marked inactive."
             self.repo.delete(row)
             return "Purpose deleted successfully."
 
-        return persist(_write)
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            row = self.repo.get_by_id(purpose_id)
+            raise_if_integrity_in_use(exc, (row.PurposeName if row else None) or "Purpose")
+            raise

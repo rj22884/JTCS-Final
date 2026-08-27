@@ -220,6 +220,7 @@
         loadGrid();
       })
       .catch(function (err) {
+        if (window.JTCSDialog?.alert) JTCSDialog.alert(err.message || "Unable to delete.", "error");
         showStatus(err.message || "Unable to delete.", "danger");
       });
   }
