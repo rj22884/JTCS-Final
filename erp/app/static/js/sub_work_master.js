@@ -24,9 +24,108 @@
     subWorkType: document.getElementById("swSubWorkType"),
   };
 
-  const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
   let searchTimer = null;
-  const workGroups = window.SUB_WORK_GROUPS || {};
+  let cachedRows = [];
+  let saving = false;
+  const workGroups = { Income: [], Expense: [], "Misc.": [] };
+
+  function normalizeKind(kind) {
+    const raw = String(kind == null ? "" : kind).trim();
+    if (!raw) return "";
+    const lower = raw.toLowerCase().replace(/\s+/g, "").replace(/\.+$/, "");
+    if (lower === "misc") return "Misc.";
+    if (lower === "income") return "Income";
+    if (lower === "expense") return "Expense";
+    return raw;
+  }
+
+  function ingestGroups(raw) {
+    Object.keys(raw || {}).forEach(function (key) {
+      const rows = raw[key] || [];
+      rows.forEach(function (row) {
+        const k = normalizeKind(row.ledger_kind || key);
+        if (!workGroups[k]) workGroups[k] = [];
+        workGroups[k].push(row);
+      });
+    });
+  }
+  ingestGroups(window.SUB_WORK_GROUPS);
+
+  function worksForKind(kind) {
+    const want = normalizeKind(kind);
+    const direct = workGroups[want] || [];
+    if (direct.length) return direct;
+    const aliases = [want, "Misc.", "Misc", "misc", "MISC."];
+    for (let i = 0; i < aliases.length; i += 1) {
+      const rows = workGroups[aliases[i]];
+      if (rows && rows.length && normalizeKind(aliases[i]) === want) return rows;
+    }
+    return [];
+  }
+
+  function getModal() {
+    if (!els.modalEl) return null;
+    if (!window.bootstrap || !bootstrap.Modal) return null;
+    return bootstrap.Modal.getOrCreateInstance(els.modalEl);
+  }
+
+  function showModal() {
+    const inst = getModal();
+    if (inst) {
+      inst.show();
+      return;
+    }
+    if (!els.modalEl) return;
+    els.modalEl.classList.add("show");
+    els.modalEl.style.display = "block";
+    els.modalEl.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+  }
+
+  function hideModal() {
+    const inst = getModal();
+    if (inst) {
+      inst.hide();
+      return;
+    }
+    if (!els.modalEl) return;
+    els.modalEl.classList.remove("show");
+    els.modalEl.style.display = "none";
+    els.modalEl.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+  }
+
+  function parseJsonResponse(res) {
+    const contentType = res.headers.get("content-type") || "";
+    return res.text().then(function (text) {
+      let data = {};
+      if (contentType.indexOf("application/json") >= 0 && text) {
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          throw new Error("Server returned invalid JSON.");
+        }
+      } else if (text && text.trim().charAt(0) === "{") {
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          data = {};
+        }
+      }
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || data.message || "Request failed (HTTP " + res.status + ").");
+      }
+      return data;
+    });
+  }
+
+  function csrfToken() {
+    return (
+      window.SUB_WORK_CSRF ||
+      els.form?.querySelector('[name="csrf_token"]')?.value ||
+      ""
+    );
+  }
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -54,11 +153,11 @@
 
   function selectedLedgerKind() {
     const checked = document.querySelector('input[name="swLedgerKind"]:checked');
-    return (checked && checked.value) || "Misc.";
+    return normalizeKind((checked && checked.value) || "Misc.");
   }
 
   function isMiscKind(kind) {
-    return (kind || "") === "Misc.";
+    return normalizeKind(kind) === "Misc.";
   }
 
   function syncChartGroupVisibility() {
@@ -68,9 +167,9 @@
   }
 
   function setLedgerKind(kind) {
-    const value = kind || "Misc.";
+    const value = normalizeKind(kind);
     document.querySelectorAll('input[name="swLedgerKind"]').forEach(function (radio) {
-      radio.checked = radio.value === value;
+      radio.checked = normalizeKind(radio.value) === value;
     });
     syncChartGroupVisibility();
   }
@@ -94,8 +193,15 @@
   }
 
   function fillWorkOptions(kind, selectedWorkId, selectedWorkName) {
+    if (typeof window.swFillWorkOptions === "function") {
+      const filled = window.swFillWorkOptions(kind, selectedWorkId, selectedWorkName);
+      if (filled) {
+        syncUnderGroupFromWork();
+        return;
+      }
+    }
     if (!els.workId) return;
-    const rows = workGroups[kind] || [];
+    const rows = worksForKind(kind);
     els.workId.innerHTML = '<option value="">-- Select Work --</option>';
     rows.forEach(function (row) {
       const opt = document.createElement("option");
@@ -103,6 +209,7 @@
       opt.textContent = row.work_name;
       opt.dataset.workName = row.work_name || "";
       opt.dataset.underGroup = row.under_group || "";
+      opt.dataset.kind = normalizeKind(row.ledger_kind || kind);
       if (row.chart_group_id != null) {
         opt.dataset.chartGroupId = String(row.chart_group_id);
       }
@@ -125,11 +232,16 @@
   }
 
   function loadWorksFromApi(kind, selectedWorkId, selectedWorkName) {
-    if (!api.works) {
-      fillWorkOptions(kind, selectedWorkId, selectedWorkName);
+    const want = normalizeKind(kind);
+    fillWorkOptions(want, selectedWorkId, selectedWorkName);
+    if (!api || !api.works) {
       return Promise.resolve();
     }
-    const url = api.works + "?ledger_kind=" + encodeURIComponent(kind || "");
+    // Do not put "Misc." at the end of the URL — some stacks drop a trailing ".".
+    const params = new URLSearchParams();
+    params.set("ledger_kind", want === "Misc." ? "misc" : want);
+    const join = String(api.works).indexOf("?") >= 0 ? "&" : "?";
+    const url = api.works + join + params.toString();
     return fetch(url, {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
@@ -140,32 +252,36 @@
         });
       })
       .then(function (rows) {
-        workGroups[kind] = rows;
-        fillWorkOptions(kind, selectedWorkId, selectedWorkName);
+        if (rows && rows.length) {
+          workGroups[want] = rows;
+        }
+        fillWorkOptions(want, selectedWorkId, selectedWorkName);
       })
       .catch(function () {
-        fillWorkOptions(kind, selectedWorkId, selectedWorkName);
+        fillWorkOptions(want, selectedWorkId, selectedWorkName);
       });
   }
 
   function renderRows(rows) {
     if (!els.body) return;
+    cachedRows = rows || [];
     els.body.innerHTML = "";
-    const hideChart = (els.filterKind?.value || "").trim() === "Misc.";
+    const hideChart = isMiscKind(els.filterKind?.value);
     document.querySelectorAll(".sw-col-chart").forEach(function (el) {
       el.classList.toggle("d-none", hideChart);
     });
-    if (!rows.length) {
+    if (!cachedRows.length) {
       els.empty?.classList.remove("d-none");
       if (els.count) els.count.textContent = "0 records";
       return;
     }
     els.empty?.classList.add("d-none");
     if (els.count) {
-      els.count.textContent = rows.length + " record" + (rows.length === 1 ? "" : "s");
+      els.count.textContent = cachedRows.length + " record" + (cachedRows.length === 1 ? "" : "s");
     }
-    rows.forEach(function (row) {
+    cachedRows.forEach(function (row) {
       const tr = document.createElement("tr");
+      tr.dataset.id = String(row.work_type_id);
       tr.innerHTML =
         "<td>" +
         escapeHtml(row.work_type_id) +
@@ -197,27 +313,30 @@
         "</td>";
       els.body.appendChild(tr);
     });
-    const hideChart = (els.filterKind?.value || "").trim() === "Misc.";
-    document.querySelectorAll(".sw-col-chart").forEach(function (el) {
-      el.classList.toggle("d-none", hideChart);
+  }
+
+  function isDuplicateSubWork(workName, subWorkType, excludeId) {
+    const name = String(workName || "").trim().toLowerCase();
+    const sub = String(subWorkType || "").trim().toLowerCase();
+    if (!name || !sub) return false;
+    return cachedRows.some(function (row) {
+      if (excludeId && String(row.work_type_id) === String(excludeId)) return false;
+      const rowName = String(row.work_name || row.work_type_name || "").trim().toLowerCase();
+      const rowSub = String(row.sub_work_type || "").trim().toLowerCase();
+      return rowName === name && rowSub === sub;
     });
   }
 
   function loadRows() {
     const params = new URLSearchParams();
     const q = (els.search?.value || "").trim();
-    const kind = (els.filterKind?.value || "").trim();
+    const kind = normalizeKind(els.filterKind?.value || "");
     if (q) params.set("search", q);
-    if (kind) params.set("ledger_kind", kind);
+    if (kind) params.set("ledger_kind", kind === "Misc." ? "misc" : kind);
     return fetch(api.list + "?" + params.toString(), {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load.");
-          return data;
-        });
-      })
+      .then(parseJsonResponse)
       .then(function (data) {
         renderRows(data.rows || []);
       })
@@ -232,22 +351,26 @@
     if (els.underGroup) els.underGroup.value = "";
     setLedgerKind("Misc.");
     if (els.modalTitle) els.modalTitle.textContent = "Add Sub Work";
-    loadWorksFromApi("Misc.", null, null).then(function () {
-      syncChartGroupVisibility();
-      modal?.show();
-      els.workId?.focus();
-    });
+    fillWorkOptions("Misc.", null, null);
+    syncChartGroupVisibility();
+    showModal();
+    return loadWorksFromApi("Misc.", null, null)
+      .then(function () {
+        syncChartGroupVisibility();
+        els.workId?.focus();
+      })
+      .catch(function (err) {
+        showStatus(err.message || "Unable to load works.", "danger");
+      });
   }
 
   function openEdit(id) {
     fetch(apiUrl(api.record, id), {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load.");
-          return data.record;
-        });
+      .then(parseJsonResponse)
+      .then(function (data) {
+        return data.record;
       })
       .then(function (record) {
         if (els.id) els.id.value = String(record.work_type_id || "");
@@ -258,7 +381,7 @@
         return loadWorksFromApi(kind, record.work_id, record.work_name || record.work_type_name).then(
           function () {
             syncChartGroupVisibility();
-            modal?.show();
+            showModal();
           }
         );
       })
@@ -268,7 +391,8 @@
   }
 
   function save(event) {
-    event.preventDefault();
+    if (event) event.preventDefault();
+    if (saving) return;
     const id = (els.id?.value || "").trim();
     const kind = selectedLedgerKind();
     const workOption = els.workId?.selectedOptions?.[0];
@@ -288,30 +412,36 @@
       els.subWorkType?.focus();
       return;
     }
+    if (isDuplicateSubWork(payload.work_name, payload.sub_work_type, id)) {
+      alert(
+        "'" + payload.sub_work_type + "' already exists under '" + payload.work_name + "'."
+      );
+      els.subWorkType?.focus();
+      return;
+    }
     const url = id ? apiUrl(api.update, id) : api.create;
+    saving = true;
     fetch(url, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-CSRFToken": window.SUB_WORK_CSRF || "",
+        "X-CSRFToken": csrfToken(),
         "X-Requested-With": "XMLHttpRequest",
       },
       body: JSON.stringify(payload),
     })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok || !data.ok) throw new Error(data.error || "Save failed.");
-          return data;
-        });
-      })
+      .then(parseJsonResponse)
       .then(function (data) {
-        modal?.hide();
+        hideModal();
         showStatus(data.message || "Saved.", "success");
         return loadRows();
       })
       .catch(function (err) {
         alert(err.message || "Save failed.");
+      })
+      .then(function () {
+        saving = false;
       });
   }
 
@@ -323,22 +453,21 @@
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this sub work?" });
       if (!creds) return;
     }
-    fetch(apiUrl(api.delete, id), {
-      method: "POST",
-      headers: Object.assign(
-        { Accept: "application/json", "X-CSRFToken": window.SUB_WORK_CSRF || "", "X-Requested-With": "XMLHttpRequest" },
-        creds ? { "Content-Type": "application/json" } : {}
-      ),
-      ...(creds
-        ? { body: JSON.stringify({ user_id: creds.user_id, password: creds.password }) }
-        : {}),
-    })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok || !data.ok) throw new Error(data.error || "Delete failed.");
-          return data;
-        });
-      })
+    const headers = {
+      Accept: "application/json",
+      "X-CSRFToken": csrfToken(),
+      "X-Requested-With": "XMLHttpRequest",
+    };
+    const options = { method: "POST", headers: headers };
+    if (creds) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify({
+        user_id: creds.user_id,
+        password: creds.password,
+      });
+    }
+    fetch(apiUrl(api.delete, id), options)
+      .then(parseJsonResponse)
       .then(function (data) {
         showStatus(data.message || "Deleted.", "info");
         return loadRows();
@@ -357,8 +486,12 @@
 
   els.workId?.addEventListener("change", syncUnderGroupFromWork);
 
-  els.addBtn?.addEventListener("click", openAdd);
-  els.addNewBtn?.addEventListener("click", openAdd);
+  document.addEventListener("click", function (event) {
+    const addBtn = event.target.closest("#swAddBtn, #swAddNewBtn");
+    if (addBtn) {
+      openAdd();
+    }
+  });
   els.refreshBtn?.addEventListener("click", loadRows);
   els.form?.addEventListener("submit", save);
   els.filterKind?.addEventListener("change", loadRows);
@@ -376,5 +509,10 @@
     if (delBtn) remove(delBtn.getAttribute("data-id"));
   });
 
-  renderRows(window.SUB_WORK_INITIAL_ROWS || []);
+  try {
+    renderRows(window.SUB_WORK_INITIAL_ROWS || []);
+  } catch (err) {
+    showStatus((err && err.message) || "Unable to render list.", "danger");
+  }
+  loadRows();
 })();

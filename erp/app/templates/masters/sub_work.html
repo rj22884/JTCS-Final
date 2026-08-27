@@ -2,7 +2,8 @@
 
 {% block ribbon_toolbar %}
 <div class="jtcs-ribbon-group">
-  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="swAddBtn" title="Add New">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="swAddBtn"
+          title="Add New" data-bs-toggle="modal" data-bs-target="#swModal">
     <i class="bi bi-plus-lg"></i>
     <span>Add New</span>
   </button>
@@ -30,7 +31,8 @@
       <input type="search" class="form-control form-control-sm" id="swSearch"
              placeholder="Work name or sub work...">
     </div>
-    <button type="button" class="btn btn-primary btn-sm" id="swAddNewBtn">
+    <button type="button" class="btn btn-primary btn-sm" id="swAddNewBtn"
+            data-bs-toggle="modal" data-bs-target="#swModal">
       <i class="bi bi-plus-lg"></i> Add New
     </button>
     <button type="button" class="btn btn-outline-secondary btn-sm" id="swRefreshBtn">
@@ -73,7 +75,7 @@
         <h5 class="modal-title" id="swModalTitle">Add Sub Work</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <form id="swForm" novalidate>
+      <form id="swForm" method="post" action="#" novalidate onsubmit="event.preventDefault();">
         <div class="modal-body">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" id="swId" value="">
@@ -93,6 +95,19 @@
 
           <div class="mb-3">
             <label class="form-label" for="swWorkId">Work Name *</label>
+            <template id="swWorkSource">
+              <select>
+                {% for kind, rows in work_groups.items() %}
+                  {% for row in rows %}
+                  <option value="{{ row.work_id }}"
+                          data-kind="{{ kind }}"
+                          data-work-name="{{ row.work_name }}"
+                          data-under-group="{{ row.under_group or '' }}"
+                          {% if row.chart_group_id %}data-chart-group-id="{{ row.chart_group_id }}"{% endif %}>{{ row.work_name }}</option>
+                  {% endfor %}
+                {% endfor %}
+              </select>
+            </template>
             <select class="form-select" id="swWorkId" required>
               <option value="">-- Select Work --</option>
             </select>
@@ -137,6 +152,83 @@
   window.SUB_WORK_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.SUB_WORK_GROUPS = {{ work_groups | tojson }};
   window.SUB_WORK_CSRF = {{ csrf_token() | tojson }};
+  (function () {
+    function kindOf(value) {
+      var raw = String(value == null ? "" : value).trim();
+      if (!raw) return "";
+      var lower = raw.toLowerCase().replace(/\s+/g, "").replace(/\.+$/, "");
+      if (lower === "misc") return "Misc.";
+      if (lower === "income") return "Income";
+      if (lower === "expense") return "Expense";
+      return raw;
+    }
+    function selectedKind() {
+      var el = document.querySelector('input[name="swLedgerKind"]:checked');
+      return kindOf((el && el.value) || "Misc.") || "Misc.";
+    }
+    window.swFillWorkOptions = function (kind, selectedId, selectedName) {
+      var src = document.getElementById("swWorkSource");
+      var dest = document.getElementById("swWorkId");
+      if (!dest) return 0;
+      var want = kindOf(kind || selectedKind()) || "Misc.";
+      dest.innerHTML = '<option value="">-- Select Work --</option>';
+      var count = 0;
+      if (src) {
+        var sourceOptions = src.content
+          ? src.content.querySelectorAll("option")
+          : src.options || src.querySelectorAll("option");
+        Array.prototype.forEach.call(sourceOptions, function (opt) {
+          if (kindOf(opt.getAttribute("data-kind")) !== want) return;
+          dest.appendChild(opt.cloneNode(true));
+          count += 1;
+        });
+      }
+      if (!count && window.SUB_WORK_GROUPS) {
+        var rows = window.SUB_WORK_GROUPS[want] || [];
+        if (!rows.length && want === "Misc.") {
+          rows = window.SUB_WORK_GROUPS["Misc."] || window.SUB_WORK_GROUPS.Misc || [];
+        }
+        rows.forEach(function (row) {
+          var option = document.createElement("option");
+          option.value = String(row.work_id);
+          option.textContent = row.work_name || "";
+          option.setAttribute("data-kind", want);
+          option.setAttribute("data-work-name", row.work_name || "");
+          option.setAttribute("data-under-group", row.under_group || "");
+          dest.appendChild(option);
+          count += 1;
+        });
+      }
+      if (selectedId && Array.prototype.some.call(dest.options, function (o) {
+        return o.value === String(selectedId);
+      })) {
+        dest.value = String(selectedId);
+      } else if (selectedName) {
+        Array.prototype.some.call(dest.options, function (o) {
+          if ((o.getAttribute("data-work-name") || o.textContent) === selectedName) {
+            dest.value = o.value;
+            return true;
+          }
+          return false;
+        });
+      }
+      var wrap = document.getElementById("swUnderGroupWrap");
+      if (wrap) wrap.classList.toggle("d-none", want === "Misc.");
+      return count;
+    };
+    document.addEventListener("change", function (event) {
+      if (event.target && event.target.name === "swLedgerKind") {
+        window.swFillWorkOptions(event.target.value);
+      }
+    });
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        window.swFillWorkOptions("Misc.");
+      });
+    } else {
+      window.swFillWorkOptions("Misc.");
+    }
+  })();
 </script>
-<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260827miscchart1"></script>
+<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260827save2"></script>
 {% endblock %}

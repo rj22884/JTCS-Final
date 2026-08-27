@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -27,6 +27,7 @@ class SubWorkMasterService:
     def _ensure(self) -> None:
         self._entry_repo.ensure_schema()
         self._seed_misc_defaults()
+        self._ensure_unique_name_sub()
 
     def _group_name_map(self) -> dict[int, str]:
         if self._group_name_cache is not None:
@@ -69,20 +70,61 @@ class SubWorkMasterService:
             )
         db.session.commit()
 
+    def _ensure_unique_name_sub(self) -> None:
+        try:
+            db.session.execute(
+                text(
+                    """
+                    IF COL_LENGTH(N'dbo.WorkTypeMaster', N'SubWorkType') IS NOT NULL
+                       AND NOT EXISTS (
+                            SELECT 1 FROM sys.indexes
+                            WHERE name = N'UX_WorkTypeMaster_Name_Sub'
+                              AND object_id = OBJECT_ID(N'dbo.WorkTypeMaster')
+                       )
+                       AND NOT EXISTS (
+                            SELECT WorkTypeName, SubWorkType
+                            FROM dbo.WorkTypeMaster
+                            GROUP BY WorkTypeName, SubWorkType
+                            HAVING COUNT(*) > 1
+                       )
+                        CREATE UNIQUE INDEX UX_WorkTypeMaster_Name_Sub
+                            ON dbo.WorkTypeMaster (WorkTypeName, SubWorkType);
+                    """
+                )
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     def _normalize_ledger_kind(self, raw: str | None) -> str | None:
         kind = (raw or "").strip()
         if not kind:
             return None
         if kind in self.LEDGER_KINDS:
             return kind
-        lower = kind.lower().rstrip(".")
-        if lower == "income":
+        compact = "".join(kind.split()).lower().rstrip(".")
+        if compact == "income":
             return "Income"
-        if lower == "expense":
+        if compact == "expense":
             return "Expense"
-        if lower == "misc":
+        if compact == "misc":
             return "Misc."
         return None
+
+    def _kind_of(self, raw: str | None) -> str | None:
+        """Canonical Income / Expense / Misc. from DB or query values (Misc vs Misc., padding)."""
+        return self._normalize_ledger_kind(raw)
+
+    def _works_for_kind(self, kind: str) -> list:
+        """Match WorkMaster.LedgerKind loosely so Misc / Misc. / padded values all appear."""
+        want = self._kind_of(kind)
+        if not want:
+            return []
+        return [
+            row
+            for row in self._work_repo.list_active()
+            if self._kind_of(row.LedgerKind) == want
+        ]
 
     def _work_lookup(self) -> dict[str, WorkMaster]:
         """Map WorkName → WorkMaster (prefer Misc. when duplicate names)."""
@@ -97,7 +139,9 @@ class SubWorkMasterService:
             if existing is None:
                 by_name[name] = row
                 continue
-            if priority.get(row.LedgerKind or "", 9) < priority.get(existing.LedgerKind or "", 9):
+            if priority.get(self._kind_of(row.LedgerKind) or "", 9) < priority.get(
+                self._kind_of(existing.LedgerKind) or "", 9
+            ):
                 by_name[name] = row
         return by_name
 
@@ -124,7 +168,7 @@ class SubWorkMasterService:
             "work_type_name": row.WorkTypeName or "",
             "work_name": row.WorkTypeName or "",
             "sub_work_type": row.SubWorkType or "",
-            "ledger_kind": parent.LedgerKind if parent else "",
+            "ledger_kind": self._kind_of(parent.LedgerKind) if parent else "",
             "chart_group_id": chart_group_id,
             "under_group": under_group,
             "active_status": bool(row.ActiveStatus),
@@ -133,45 +177,33 @@ class SubWorkMasterService:
     def list_ledger_kinds(self) -> list[str]:
         return list(self.LEDGER_KINDS)
 
+    def _serialize_work(self, row) -> dict:
+        chart_group_id, under_group = self._under_group_for_work(row)
+        return {
+            "work_id": row.WorkID,
+            "work_name": row.WorkName,
+            "ledger_kind": self._kind_of(row.LedgerKind) or (row.LedgerKind or ""),
+            "chart_group_id": chart_group_id,
+            "under_group": under_group,
+        }
+
     def list_works_for_ledger(self, ledger_kind: str | None) -> list[dict]:
         """Active WorkMaster rows for a LedgerKind (for cascading dropdown)."""
         self._ensure()
-        kind = self._normalize_ledger_kind(ledger_kind)
+        kind = self._kind_of(ledger_kind)
         if not kind:
             return []
-        rows = self._work_repo.list_active(ledger_kind=kind)
-        out = []
-        for row in rows:
-            chart_group_id, under_group = self._under_group_for_work(row)
-            out.append(
-                {
-                    "work_id": row.WorkID,
-                    "work_name": row.WorkName,
-                    "ledger_kind": row.LedgerKind,
-                    "chart_group_id": chart_group_id,
-                    "under_group": under_group,
-                }
-            )
-        return out
+        return [self._serialize_work(row) for row in self._works_for_kind(kind)]
 
     def list_work_groups(self) -> dict[str, list[dict]]:
         """WorkMaster grouped by LedgerKind for the form/filter."""
         self._ensure()
         groups = {kind: [] for kind in self.LEDGER_KINDS}
         for row in self._work_repo.list_active():
-            kind = row.LedgerKind if row.LedgerKind in self.LEDGER_KINDS else None
+            kind = self._kind_of(row.LedgerKind)
             if not kind:
                 continue
-            chart_group_id, under_group = self._under_group_for_work(row)
-            groups[kind].append(
-                {
-                    "work_id": row.WorkID,
-                    "work_name": row.WorkName,
-                    "ledger_kind": row.LedgerKind,
-                    "chart_group_id": chart_group_id,
-                    "under_group": under_group,
-                }
-            )
+            groups[kind].append(self._serialize_work(row))
         return groups
 
     def list_records(
@@ -193,7 +225,7 @@ class SubWorkMasterService:
         needle = (search or "").strip().lower()
         for row in rows:
             item = self._row_dict(row, lookup)
-            if kind and item["ledger_kind"] != kind:
+            if kind and self._kind_of(item["ledger_kind"]) != kind:
                 # Keep orphans only when no ledger filter
                 continue
             if kind is None and not item["ledger_kind"]:
@@ -271,7 +303,10 @@ class SubWorkMasterService:
                 raise ValueError("Select Ledger Kind (Income / Expense / Misc.).")
             parent = matches[0]
             if ledger_kind:
-                parent = next((w for w in matches if w.LedgerKind == ledger_kind), None)
+                parent = next(
+                    (w for w in matches if self._kind_of(w.LedgerKind) == ledger_kind),
+                    None,
+                )
                 if parent is None:
                     raise ValueError(
                         f"Work '{work_name}' not found under Ledger Kind '{ledger_kind}'."
@@ -279,11 +314,31 @@ class SubWorkMasterService:
         else:
             raise ValueError("Select Ledger Kind and Work from Work Master.")
 
-        if ledger_kind and parent.LedgerKind != ledger_kind:
+        parent_kind = self._kind_of(parent.LedgerKind)
+        if ledger_kind and parent_kind != ledger_kind:
             raise ValueError(
-                f"Work '{parent.WorkName}' belongs to '{parent.LedgerKind}', not '{ledger_kind}'."
+                f"Work '{parent.WorkName}' belongs to '{parent_kind}', not '{ledger_kind}'."
             )
         return parent
+
+    def _find_by_name_sub(
+        self,
+        work_type_name: str,
+        sub_work_type: str,
+        *,
+        exclude_id: int | None = None,
+    ) -> WorkTypeMaster | None:
+        name = (work_type_name or "").strip()
+        sub = (sub_work_type or "").strip()
+        if not name or not sub:
+            return None
+        stmt = select(WorkTypeMaster).where(
+            func.lower(WorkTypeMaster.WorkTypeName) == name.lower(),
+            func.lower(WorkTypeMaster.SubWorkType) == sub.lower(),
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(WorkTypeMaster.WorkTypeID != exclude_id)
+        return db.session.scalars(stmt).first()
 
     def create_record(self, payload: dict) -> dict:
         self._ensure()
@@ -293,12 +348,7 @@ class SubWorkMasterService:
             raise ValueError("Sub Work Type is required (e.g. New-Pan).")
 
         work_type_name = (parent.WorkName or "").strip()
-        existing = db.session.scalars(
-            select(WorkTypeMaster).where(
-                WorkTypeMaster.WorkTypeName == work_type_name,
-                WorkTypeMaster.SubWorkType == sub_work_type,
-            )
-        ).first()
+        existing = self._find_by_name_sub(work_type_name, sub_work_type)
         if existing and existing.ActiveStatus:
             raise ValueError(
                 f"'{sub_work_type}' already exists under '{work_type_name}' ({parent.LedgerKind})."
@@ -347,13 +397,7 @@ class SubWorkMasterService:
             raise ValueError("Sub Work Type is required.")
 
         work_type_name = (parent.WorkName or "").strip()
-        other = db.session.scalars(
-            select(WorkTypeMaster).where(
-                WorkTypeMaster.WorkTypeName == work_type_name,
-                WorkTypeMaster.SubWorkType == sub_work_type,
-                WorkTypeMaster.WorkTypeID != work_type_id,
-            )
-        ).first()
+        other = self._find_by_name_sub(work_type_name, sub_work_type, exclude_id=work_type_id)
         if other and other.ActiveStatus:
             raise ValueError(
                 f"'{sub_work_type}' already exists under '{work_type_name}' ({parent.LedgerKind})."

@@ -25,9 +25,33 @@ BILL_NO_PREFIX = {"Income": "S", "Expense": "E", "Misc.": "M"}
 
 
 class WorkMasterRepository:
+    LEDGER_INCOME = "Income"
+    LEDGER_EXPENSE = "Expense"
+    LEDGER_MISC = "Misc."
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
         self._schema_ready = False
+
+    @staticmethod
+    def _normalize_ledger_kind(raw: str | None) -> str | None:
+        kind = (raw or "").strip()
+        if not kind:
+            return None
+        if kind in (
+            WorkMasterRepository.LEDGER_INCOME,
+            WorkMasterRepository.LEDGER_EXPENSE,
+            WorkMasterRepository.LEDGER_MISC,
+        ):
+            return kind
+        compact = "".join(kind.split()).lower().rstrip(".")
+        if compact == "income":
+            return WorkMasterRepository.LEDGER_INCOME
+        if compact == "expense":
+            return WorkMasterRepository.LEDGER_EXPENSE
+        if compact == "misc":
+            return WorkMasterRepository.LEDGER_MISC
+        return None
 
     def ensure_schema(self) -> None:
         """Add ChartGroupID + opening balance columns on WorkMaster — masters only."""
@@ -88,14 +112,19 @@ class WorkMasterRepository:
             stmt = stmt.where(WorkMaster.ActiveStatus == True)  # noqa: E712
         elif active_only is False:
             stmt = stmt.where(WorkMaster.ActiveStatus == False)  # noqa: E712
-        if ledger_kind:
-            stmt = stmt.where(WorkMaster.LedgerKind == ledger_kind)
         stmt = stmt.order_by(
             WorkMaster.ActiveStatus.desc(),
             WorkMaster.LedgerKind,
             WorkMaster.WorkName,
         )
-        return list(self.session.scalars(stmt).all())
+        rows = list(self.session.scalars(stmt).all())
+        if ledger_kind:
+            want = self._normalize_ledger_kind(ledger_kind)
+            if want:
+                rows = [
+                    row for row in rows if self._normalize_ledger_kind(row.LedgerKind) == want
+                ]
+        return rows
 
     def get_by_id(self, work_id: int) -> WorkMaster | None:
         self.ensure_schema()
@@ -103,11 +132,13 @@ class WorkMasterRepository:
 
     def find_by_name_kind(self, work_name: str, ledger_kind: str) -> WorkMaster | None:
         self.ensure_schema()
-        stmt = select(WorkMaster).where(
-            WorkMaster.WorkName == work_name.strip(),
-            WorkMaster.LedgerKind == ledger_kind.strip(),
-        )
-        return self.session.scalars(stmt).first()
+        name = work_name.strip()
+        want = self._normalize_ledger_kind(ledger_kind)
+        stmt = select(WorkMaster).where(WorkMaster.WorkName == name)
+        for row in self.session.scalars(stmt).all():
+            if self._normalize_ledger_kind(row.LedgerKind) == want:
+                return row
+        return None
 
     def release_inactive_name_kind(
         self,
