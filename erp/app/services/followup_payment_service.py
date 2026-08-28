@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import or_, select
@@ -17,6 +17,7 @@ from app.repositories.transaction_repository import (
     DailyTransactionRepository,
     MasterRepository,
 )
+from app.services.payment_accounting_service import PaymentAccountingService
 
 
 class FollowupPaymentService:
@@ -32,25 +33,23 @@ class FollowupPaymentService:
         self.module_code = (module_code or "").strip().upper()
         self.work_type = self.module_code
         self.sub_work_type = f"{self.module_code} Followup"
+        self.receipt_sub_work_type = f"{self.module_code} Followup Receipt"
         self.daily_repo = daily_repo or DailyTransactionRepository()
         self.bank_repo = bank_repo or BankTransactionRepository()
         self.payment_repo = payment_repo or DailyTransactionPaymentRepository()
         self.master_repo = master_repo or MasterRepository()
+        self.accounting = PaymentAccountingService(
+            self.module_code,
+            daily_repo=self.daily_repo,
+            bank_repo=self.bank_repo,
+            payment_repo=self.payment_repo,
+            master_repo=self.master_repo,
+        )
 
     @staticmethod
     def is_udhaar_text(value: str | None) -> bool:
         """True for credit / उधार payment modes (not real cash/bank received)."""
-        raw = (value or "").strip()
-        if not raw:
-            return False
-        if "उधार" in raw:
-            return True
-        lower = raw.lower()
-        if "udhaar" in lower or "udhar" in lower:
-            return True
-        if lower in {"credit", "on credit", "credit sale", "receivable"}:
-            return True
-        return False
+        return PaymentAccountingService.is_udhaar_text(value)
 
     @classmethod
     def is_udhaar_account(cls, account) -> bool:
@@ -161,42 +160,18 @@ class FollowupPaymentService:
                 line_data["payment_date"] = payment_date
             lines.append(line_data)
 
-        if total < entry_amount:
-            raise ValueError(
-                f"Payment received ({total}) must be greater than or equal to bill amount ({entry_amount})."
-            )
         return lines
 
     def find_daily_for_bill(self, bill_no: str) -> JTCSDailyTransaction | None:
-        normalized = (bill_no or "").strip().upper()
-        if not normalized:
-            return None
-        stmt = (
-            select(JTCSDailyTransaction)
-            .where(
-                JTCSDailyTransaction.ReferenceNo == normalized,
-                JTCSDailyTransaction.WorkType == self.work_type,
-                JTCSDailyTransaction.SubWorkType == self.sub_work_type,
-            )
-            .order_by(JTCSDailyTransaction.TransactionID.desc())
-        )
-        return db.session.scalars(stmt).first()
+        """Prefer the receipt daily so edit forms load payment lines, not the invoice debit."""
+        receipt = self.accounting.find_receipt_daily(bill_no)
+        if receipt is not None:
+            return receipt
+        return self.accounting.find_sale_daily(bill_no)
 
     def bills_with_posted_payment(self, bill_nos: set[str]) -> set[str]:
-        """Return normalized bill numbers that already have a posted daily payment."""
-        normalized = {(b or "").strip().upper() for b in bill_nos if (b or "").strip()}
-        if not normalized:
-            return set()
-        stmt = (
-            select(JTCSDailyTransaction.ReferenceNo)
-            .where(
-                JTCSDailyTransaction.ReferenceNo.in_(normalized),
-                JTCSDailyTransaction.WorkType == self.work_type,
-                JTCSDailyTransaction.SubWorkType == self.sub_work_type,
-            )
-            .distinct()
-        )
-        return {(row or "").strip().upper() for row in db.session.scalars(stmt).all() if row}
+        """Return normalized bill numbers that already have a posted cash/bank receipt."""
+        return self.accounting.bills_with_posted_payment(bill_nos)
 
     def payment_dates_by_bills(self, bill_nos: set[str]) -> dict[str, list[str]]:
         """Unique payment dates (ISO) per bill no, oldest→newest.
@@ -207,7 +182,7 @@ class FollowupPaymentService:
         if not normalized:
             return {}
 
-        # Latest daily per bill (same rule as find_daily_for_bill).
+        # All followup sale + receipt dailies per bill (not only the latest row).
         daily_rows = db.session.execute(
             select(
                 JTCSDailyTransaction.ReferenceNo,
@@ -217,7 +192,10 @@ class FollowupPaymentService:
             .where(
                 JTCSDailyTransaction.ReferenceNo.in_(normalized),
                 JTCSDailyTransaction.WorkType == self.work_type,
-                JTCSDailyTransaction.SubWorkType == self.sub_work_type,
+                or_(
+                    JTCSDailyTransaction.SubWorkType == self.sub_work_type,
+                    JTCSDailyTransaction.SubWorkType == self.receipt_sub_work_type,
+                ),
             )
             .order_by(
                 JTCSDailyTransaction.ReferenceNo.asc(),
@@ -226,17 +204,19 @@ class FollowupPaymentService:
         ).all()
 
         bill_daily: dict[str, tuple[int, date | None]] = {}
+        txn_to_bill: dict[int, str] = {}
+        txn_ids: list[int] = []
         for ref, txn_id, txn_date in daily_rows:
             key = (ref or "").strip().upper()
-            if not key or key in bill_daily:
+            if not key:
                 continue
-            bill_daily[key] = (int(txn_id), txn_date)
+            txn_to_bill[int(txn_id)] = key
+            txn_ids.append(int(txn_id))
+            if key not in bill_daily:
+                bill_daily[key] = (int(txn_id), txn_date)
 
         if not bill_daily:
             return {}
-
-        txn_ids = [txn_id for txn_id, _ in bill_daily.values()]
-        txn_to_bill = {txn_id: bill for bill, (txn_id, _) in bill_daily.items()}
 
         # Dates from payment lines → linked bank rows.
         pay_rows = db.session.execute(
@@ -446,9 +426,35 @@ class FollowupPaymentService:
         self.daily_repo.delete(daily)
 
     def remove_linked_transactions(self, bill_no: str) -> None:
-        daily = self.find_daily_for_bill(bill_no)
-        if daily is not None:
-            self.remove_daily_transaction(daily)
+        """Backward-compatible name: remove Payment Received receipts only, keep the invoice debit."""
+        self.remove_receipts(bill_no)
+
+    def remove_receipts(self, bill_no: str) -> None:
+        self.accounting.remove_receipts(bill_no)
+
+    def remove_followup_accounting(self, bill_no: str) -> None:
+        self.accounting.remove_followup_accounting(bill_no)
+
+    def post_sale(
+        self,
+        *,
+        bill_no: str,
+        work_date: date,
+        amount: Decimal,
+        customer_name: str | None,
+        customer_id: int | None,
+        remarks: str | None,
+        created_by: str,
+    ) -> JTCSDailyTransaction | None:
+        return self.accounting.post_sale(
+            bill_no=bill_no,
+            work_date=work_date,
+            amount=amount,
+            customer_name=customer_name,
+            customer_id=customer_id,
+            remarks=remarks,
+            created_by=created_by,
+        )
 
     def post_payment(
         self,
@@ -463,95 +469,16 @@ class FollowupPaymentService:
         created_by: str,
         existing_daily: JTCSDailyTransaction | None = None,
     ) -> JTCSDailyTransaction:
-        description = f"{self.sub_work_type} — {bill_no}"
-        if existing_daily is not None:
-            bank_rows = self._collect_bank_rows(existing_daily)
-            self.payment_repo.delete_by_transaction(existing_daily.TransactionID)
-            existing_daily.BankTransactionID = None
-            db.session.flush()
-            for bank_row in bank_rows:
-                self.bank_repo.delete(bank_row)
-
-            existing_daily.TransactionDate = work_date
-            existing_daily.CustomerID = customer_id
-            existing_daily.CustomerName = customer_name
-            existing_daily.ReferenceNo = (bill_no or "").strip().upper()
-            existing_daily.Description = description
-            existing_daily.IncomeAmount = Decimal("0")
-            existing_daily.ExpenseAmount = Decimal("0")
-            existing_daily.SaleAmount = entry_amount
-            existing_daily.TotalAmount = entry_amount
-            existing_daily.PaymentModeID = payment_lines[0]["payment_mode_id"]
-            existing_daily.PaymentSplitCount = len(payment_lines)
-            existing_daily.Remarks = remarks
-            existing_daily.ModifiedDate = datetime.utcnow()
-            db.session.flush()
-            daily = existing_daily
-        else:
-            daily = self.daily_repo.create(
-                {
-                    "TransactionDate": work_date,
-                    "WorkType": self.work_type,
-                    "SubWorkType": self.sub_work_type,
-                    "CustomerID": customer_id,
-                    "CustomerName": customer_name,
-                    "ReferenceNo": (bill_no or "").strip().upper(),
-                    "Description": description,
-                    "IncomeAmount": Decimal("0"),
-                    "ExpenseAmount": Decimal("0"),
-                    "SaleAmount": entry_amount,
-                    "PurchaseAmount": Decimal("0"),
-                    "GSTAmount": Decimal("0"),
-                    "TDSAmount": Decimal("0"),
-                    "TotalAmount": entry_amount,
-                    "PaymentModeID": payment_lines[0]["payment_mode_id"],
-                    "PaymentSplitCount": len(payment_lines),
-                    "Status": "Posted",
-                    "CreatedBy": created_by,
-                    "CreatedDate": datetime.utcnow(),
-                    "Remarks": remarks,
-                }
-            )
-
-        bank_ids: list[int] = []
-        for index, payment_line in enumerate(payment_lines, start=1):
-            bank_account = self.master_repo.resolve_bank_account_by_id(payment_line["bank_account_id"])
-            line_date = payment_line.get("payment_date") or work_date
-            bank = self.bank_repo.create(
-                {
-                    "JtcsBankAccountID": bank_account.account_id or 0,
-                    "BankName": bank_account.bank_name,
-                    "MaskedAccountNumber": bank_account.masked_account_number,
-                    "TransactionDate": line_date,
-                    "Description": self.sub_work_type,
-                    "Debit": payment_line["amount"],
-                    "Credit": None,
-                    "ClosingBalance": Decimal("0"),
-                    "ImportedBy": created_by,
-                    "ImportedDate": datetime.utcnow(),
-                    "Remarks": bill_no,
-                    "IsLocked": False,
-                    "SourceTable": self.bank_repo.SOURCE_TABLE,
-                    "SourceRecordID": daily.TransactionID,
-                    "SourceType": self.work_type,
-                    "SourceID": daily.TransactionID,
-                    "LedgerKind": "RECEIPT",
-                    "PaymentModeID": payment_line["payment_mode_id"],
-                    "PaymentSequence": index,
-                }
-            )
-            bank_ids.append(bank.JtcsBankTransactionID)
-            self.payment_repo.create(
-                {
-                    "TransactionID": daily.TransactionID,
-                    "PaymentSequence": index,
-                    "PaymentModeID": payment_line["payment_mode_id"],
-                    "BankAccountID": payment_line["bank_account_id"],
-                    "Amount": payment_line["amount"],
-                    "BankTransactionID": bank.JtcsBankTransactionID,
-                }
-            )
-
-        if bank_ids:
-            self.daily_repo.update_bank_link(daily, bank_ids[0])
-        return daily
+        """Record Payment Received as Customer Credit only (Bank/UPI/Cash Dr)."""
+        return self.accounting.post_receipt(
+            bill_no=bill_no,
+            work_date=work_date,
+            payment_lines=payment_lines,
+            customer_name=customer_name,
+            customer_id=customer_id,
+            remarks=remarks,
+            created_by=created_by,
+            invoice_amount=entry_amount,
+            allow_overpayment=True,
+            existing_daily=existing_daily,
+        )

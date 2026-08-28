@@ -205,17 +205,6 @@ class OthersIncomeExpenseService:
         if not lines:
             return []
 
-        if total < entry_amount:
-            kind = self._ledger_kind_from_form(form)
-            if kind == self.LEDGER_EXPENSE:
-                label = "Expense amount"
-            elif kind == self.LEDGER_MISC:
-                label = "Misc. amount"
-            else:
-                label = "Income amount"
-            raise ValueError(
-                f"Payment received ({total}) must be greater than or equal to {label} ({entry_amount})."
-            )
         return lines
 
     def _collect_bank_rows_for_daily(

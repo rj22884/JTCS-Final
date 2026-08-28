@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.extensions import db
+from app.services.payment_accounting_service import sql_customer_receipt_expr
 from app.repositories.shcil_wallet_opening_repository import ShcilWalletOpeningRepository
 
 
@@ -309,23 +310,27 @@ class ReportService:
         rows = db.session.execute(
             text(
                 f"""
-                SELECT d.CustomerID,
-                       d.CustomerName,
-                       ISNULL(SUM(d.IncomeAmount + d.SaleAmount), 0) AS billed,
-                       ISNULL(SUM(ISNULL(b.Debit, 0)), 0) AS collected,
-                       ISNULL(SUM(d.IncomeAmount + d.SaleAmount), 0)
-                           - ISNULL(SUM(ISNULL(b.Debit, 0)), 0) AS outstanding
-                FROM JTCSDailyTransaction d
-                LEFT JOIN JtcsBankTransaction b
-                    ON b.JtcsBankTransactionID = d.BankTransactionID
-                WHERE d.TransactionDate BETWEEN :start_date AND :end_date
-                  AND d.Status = N'Posted'
-                  AND d.CustomerID IS NOT NULL
-                  {customer_filter}
-                GROUP BY d.CustomerID, d.CustomerName
-                HAVING ISNULL(SUM(d.IncomeAmount + d.SaleAmount), 0)
-                     - ISNULL(SUM(ISNULL(b.Debit, 0)), 0) <> 0
-                ORDER BY d.CustomerName
+                SELECT x.CustomerID,
+                       x.CustomerName,
+                       ISNULL(SUM(x.billed), 0) AS billed,
+                       ISNULL(SUM(x.collected), 0) AS collected,
+                       ISNULL(SUM(x.billed), 0) - ISNULL(SUM(x.collected), 0) AS outstanding
+                FROM (
+                    SELECT d.CustomerID,
+                           d.CustomerName,
+                           ISNULL(d.IncomeAmount, 0) + ISNULL(d.SaleAmount, 0) AS billed,
+                           {sql_customer_receipt_expr("d", "b")} AS collected
+                    FROM JTCSDailyTransaction d
+                    LEFT JOIN JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.TransactionDate BETWEEN :start_date AND :end_date
+                      AND d.Status = N'Posted'
+                      AND d.CustomerID IS NOT NULL
+                      {customer_filter}
+                ) x
+                GROUP BY x.CustomerID, x.CustomerName
+                HAVING ISNULL(SUM(x.billed), 0) - ISNULL(SUM(x.collected), 0) <> 0
+                ORDER BY x.CustomerName
                 """
             ),
             params,

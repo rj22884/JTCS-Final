@@ -890,6 +890,7 @@ class GstInvoiceService:
                 (JTCSDailyTransaction.WorkType != self.DAILY_WORK_TYPE)
                 | (JTCSDailyTransaction.SubWorkType != self.DAILY_SUB_WORK_TYPE)
             )
+            .where(~JTCSDailyTransaction.SubWorkType.like("%Followup Receipt"))
             .order_by(JTCSDailyTransaction.TransactionID.desc())
         )
         if exclude_daily_id:
@@ -940,6 +941,7 @@ class GstInvoiceService:
         )
         if followup is not None and followup.TransactionDate == inv.InvoiceDate:
             # Already in sales cards on this invoice date — do not double-count.
+            self._reconcile_payment_duplicates(inv)
             return False
         if followup is not None:
             # Same bill was posted on followup date; move Sale to invoice date.
@@ -968,6 +970,7 @@ class GstInvoiceService:
             own.Remarks = self._norm_ref(getattr(inv, "TallyBillNo", None)) or None
             inv.DailyTransactionID = own.TransactionID
             db.session.flush()
+            self._reconcile_payment_duplicates(inv)
             return True
 
         daily = DailyTransactionRepository().create(
@@ -995,7 +998,29 @@ class GstInvoiceService:
         )
         inv.DailyTransactionID = daily.TransactionID
         db.session.flush()
+        self._reconcile_payment_duplicates(inv)
         return True
+
+    def _reconcile_payment_duplicates(self, inv: GstInvoice) -> None:
+        tally = self._norm_ref(getattr(inv, "TallyBillNo", None))
+        if not tally:
+            return
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        module = None
+        try:
+            from app.models.followup import FollowupEntryMaster
+
+            entry = db.session.scalars(
+                select(FollowupEntryMaster)
+                .where(FollowupEntryMaster.BillNo == tally)
+                .order_by(FollowupEntryMaster.EntryID.desc())
+            ).first()
+            if entry is not None:
+                module = (entry.ModuleCode or "").strip().upper() or None
+        except Exception:
+            module = None
+        PaymentAccountingService(module).reconcile_reference(tally)
 
     def ensure_sale_invoices_posted(self) -> int:
         """Backfill Sale invoices that are not yet in daily sales totals."""

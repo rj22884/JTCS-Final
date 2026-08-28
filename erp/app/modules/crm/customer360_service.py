@@ -154,10 +154,25 @@ class Customer360Service:
         except Exception:
             db.session.rollback()
 
-        if opening_dr_cr.lower() in ("cr", "credit"):
-            balance = invoice_total - opening_amount
+        closing = None
+        try:
+            from app.services.ledger_export_service import LedgerExportService
+
+            data = LedgerExportService()._customer_ledger_data(
+                int(customer_id), date_from=None, date_to=None
+            )
+            closing = Decimal(str(data.get("closing") or 0))
+        except Exception:
+            db.session.rollback()
+            closing = None
+
+        if closing is None:
+            if opening_dr_cr.lower() in ("cr", "credit"):
+                balance = invoice_total - opening_amount
+            else:
+                balance = opening_amount + invoice_total
         else:
-            balance = opening_amount + invoice_total
+            balance = closing
 
         return {
             "opening_balance": str(opening_amount),

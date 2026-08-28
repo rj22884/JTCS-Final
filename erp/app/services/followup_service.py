@@ -672,24 +672,31 @@ class FollowupService:
             )
         payment_service = FollowupPaymentService(self.module_code)
         if data.get("bill_no"):
-            daily = payment_service.find_daily_for_bill(data["bill_no"])
+            receipt_daily = payment_service.accounting.find_receipt_daily(data["bill_no"])
+            sale_daily = payment_service.accounting.find_sale_daily(data["bill_no"])
+            daily = receipt_daily or sale_daily
             if daily is not None:
-                data["payments"] = payment_service.load_payment_lines(daily)
+                data["payments"] = (
+                    payment_service.load_payment_lines(receipt_daily) if receipt_daily is not None else []
+                )
                 data["daily_transaction_id"] = daily.TransactionID
-                received = self.received_amount_for_letter({**data, "payments": data["payments"]})
+                if data["payments"]:
+                    received = self.received_amount_for_letter({**data, "payments": data["payments"]})
+                else:
+                    received = 0.0
                 data["received_amount"] = received
                 if self.module_code == "ITR":
                     bill_val = float(data.get("bill_amount") or 0)
-                    if bill_val <= 0 and received > 0:
+                    if bill_val <= 0 and sale_daily is not None and sale_daily.SaleAmount:
+                        data["bill_amount"] = float(sale_daily.SaleAmount)
+                    elif bill_val <= 0 and received > 0:
                         data["bill_amount"] = received
                     elif bill_val <= 0 and daily.SaleAmount:
                         data["bill_amount"] = float(daily.SaleAmount)
-                    # Ensure Payment Received stage is present in the edit form when
-                    # payment was posted but the stage row was previously dropped.
                     completed_codes = {
                         (s.get("StageCode") or "").lower() for s in (data.get("completed_stages") or [])
                     }
-                    if "payment_received" not in completed_codes:
+                    if received > 0 and "payment_received" not in completed_codes:
                         payment_stage = self.followup_repo.get_stage_by_code("ITR", "payment_received")
                         if payment_stage is not None:
                             completed = list(data.get("completed_stages") or [])
@@ -1261,10 +1268,29 @@ class FollowupService:
 
             final_bill_no = data.get("BillNo")
             payment_service = FollowupPaymentService(self.module_code)
+            old_bill = (existing_bill_no or "").strip()
+            new_bill = (final_bill_no or "").strip()
+            if old_bill and old_bill.upper() != new_bill.upper():
+                payment_service.remove_followup_accounting(old_bill)
+
+            amount_value = data.get("BillAmount")
+            if "tally_bill_generated" in stage_codes and new_bill:
+                if amount_value is not None and float(amount_value) > 0:
+                    payment_service.post_sale(
+                        bill_no=new_bill,
+                        work_date=bill_date or work_date,
+                        amount=Decimal(str(amount_value)),
+                        customer_name=customer.get("CustomerName"),
+                        customer_id=customer_id,
+                        remarks=remarks,
+                        created_by=created_by or "System",
+                    )
+            elif new_bill and "payment_received" not in stage_codes:
+                payment_service.accounting.remove_followup_sale(new_bill)
+
             if "payment_received" in stage_codes:
-                if not final_bill_no:
+                if not new_bill:
                     raise ValueError("Tally bill number is required before marking Payment Received.")
-                amount_value = data.get("BillAmount")
                 if amount_value is None or float(amount_value) <= 0:
                     raise ValueError("Bill amount is required for Payment Received.")
                 payment_lines = payment_service.parse_payment_lines(payload, Decimal(str(amount_value)))
@@ -1274,10 +1300,10 @@ class FollowupService:
                     for line in payment_lines:
                         if not line.get("payment_date"):
                             raise ValueError("Each payment line must have a date.")
-                existing_daily = payment_service.find_daily_for_bill(final_bill_no)
+                existing_daily = payment_service.find_daily_for_bill(new_bill)
                 daily_work_date = work_date if self.module_code == "ITR" else (bill_date or work_date)
                 payment_service.post_payment(
-                    bill_no=final_bill_no,
+                    bill_no=new_bill,
                     work_date=daily_work_date,
                     entry_amount=Decimal(str(amount_value)),
                     payment_lines=payment_lines,
@@ -1287,8 +1313,10 @@ class FollowupService:
                     created_by=created_by or "System",
                     existing_daily=existing_daily,
                 )
-            elif final_bill_no:
-                payment_service.remove_linked_transactions(final_bill_no)
+            elif new_bill:
+                payment_service.remove_receipts(new_bill)
+            elif old_bill:
+                payment_service.remove_followup_accounting(old_bill)
 
             return self.get_entry(saved_id)
 
@@ -1300,7 +1328,7 @@ class FollowupService:
             if row is None or not row.IsActive or row.ModuleCode != self.module_code:
                 raise ValueError("Followup entry not found.")
             if row.BillNo:
-                FollowupPaymentService(self.module_code).remove_linked_transactions(row.BillNo)
+                FollowupPaymentService(self.module_code).remove_followup_accounting(row.BillNo)
             self.followup_repo.deactivate_entry(row)
             return "Followup entry deleted successfully."
 

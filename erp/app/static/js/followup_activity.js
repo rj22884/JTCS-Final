@@ -485,8 +485,9 @@
     }
     const billAmount = parseFloat(els.billAmount?.value || "0");
     const total = getPaymentTotal();
-    if (billAmount > 0 && total + 0.001 < billAmount) {
-      return "Payment received must be greater than or equal to bill amount.";
+    if (billAmount > 0 && total - billAmount > 0.001) {
+      // Overpayment is recorded as customer advance — allowed.
+      return null;
     }
     return null;
   }

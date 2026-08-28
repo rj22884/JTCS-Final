@@ -10,6 +10,10 @@ from typing import Any
 from sqlalchemy import text
 
 from app.extensions import db
+from app.services.payment_accounting_service import (
+    sql_customer_receipt_expr,
+    sql_unpaid_followup_exclusion,
+)
 from app.utils.opening_balance import (
     BANK_MOVEMENT_SINCE_OPENING_SQL,
     apply_account_running,
@@ -732,14 +736,19 @@ class FinancialReportEngine:
             text(
                 f"""
                 SELECT
-                    ISNULL(SUM(ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)), 0) AS billed,
-                    ISNULL(SUM(ISNULL(b.Debit, 0)), 0) AS received
-                FROM dbo.JTCSDailyTransaction d
-                LEFT JOIN dbo.JtcsBankTransaction b
-                    ON b.JtcsBankTransactionID = d.BankTransactionID
-                WHERE d.CustomerID = :customer_id
-                  AND d.Status = N'Posted'
-                  {prior_date_sql}
+                    ISNULL(SUM(x.billed), 0) AS billed,
+                    ISNULL(SUM(x.received), 0) AS received
+                FROM (
+                    SELECT
+                        ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS billed,
+                        {sql_customer_receipt_expr("d", "b")} AS received
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.CustomerID = :customer_id
+                      AND d.Status = N'Posted'
+                      {prior_date_sql}
+                ) x
                 """
             ),
             prior_params,
@@ -769,15 +778,7 @@ class FinancialReportEngine:
                           AND LTRIM(RTRIM(f.BillNo)) <> N''
                           AND ISNULL(f.BillAmount, 0) > 0
                           {fu_sql}
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM dbo.JTCSDailyTransaction d
-                              WHERE d.CustomerID = f.CustomerID
-                                AND d.Status = N'Posted'
-                                AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
-                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
-                                AND d.WorkType = f.ModuleCode
-                          )
+                          {sql_unpaid_followup_exclusion()}
                         """
                     ),
                     fu_params,
@@ -838,16 +839,11 @@ class FinancialReportEngine:
         }
         cust_rows = db.session.execute(
             text(
-                """
+                f"""
                 SELECT
                     d.CustomerID,
                     ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS Billed,
-                    ISNULL(b.Debit, 0) AS BankDebit,
-                    (
-                        SELECT ISNULL(SUM(p.Amount), 0)
-                        FROM dbo.JTCSDailyTransactionPayment p
-                        WHERE p.TransactionID = d.TransactionID
-                    ) AS PaymentTotal
+                    {sql_customer_receipt_expr("d", "b")} AS ReceiptAmount
                 FROM dbo.JTCSDailyTransaction d
                 LEFT JOIN dbo.JtcsBankTransaction b
                     ON b.JtcsBankTransactionID = d.BankTransactionID
@@ -866,9 +862,7 @@ class FinancialReportEngine:
                 continue
             key = f"coa-{aid}"
             billed = self.money(r["Billed"])
-            receipt = self.money(r["PaymentTotal"])
-            if receipt == ZERO:
-                receipt = self.money(r["BankDebit"])
+            receipt = self.money(r["ReceiptAmount"])
             moves[key]["debit"] += billed
             moves[key]["credit"] += receipt
 
@@ -876,7 +870,7 @@ class FinancialReportEngine:
         try:
             fu_rows = db.session.execute(
                 text(
-                    """
+                    f"""
                     SELECT f.CustomerID, ISNULL(f.BillAmount, 0) AS BillAmount
                     FROM dbo.FollowupEntryMaster f
                     WHERE f.CustomerID IS NOT NULL
@@ -886,15 +880,7 @@ class FinancialReportEngine:
                       AND ISNULL(f.BillAmount, 0) > 0
                       AND ISNULL(f.BillDate, f.WorkDate) >= :d1
                       AND ISNULL(f.BillDate, f.WorkDate) <= :d2
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM dbo.JTCSDailyTransaction d
-                          WHERE d.CustomerID = f.CustomerID
-                            AND d.Status = N'Posted'
-                            AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
-                                = UPPER(LTRIM(RTRIM(f.BillNo)))
-                            AND d.WorkType = f.ModuleCode
-                      )
+                      {sql_unpaid_followup_exclusion()}
                     """
                 ),
                 {"d1": date_from, "d2": date_to},

@@ -33,6 +33,10 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
+from app.services.payment_accounting_service import (
+    sql_customer_receipt_expr,
+    sql_unpaid_followup_exclusion,
+)
 
 # Brand palette (professional, colourful — not purple/glow AI defaults)
 COLOR_NAVY = "1B4F72"
@@ -1347,6 +1351,7 @@ class LedgerExportService:
                     "IncomeAmount": Decimal("0.00"),
                     "BankDebit": amount if is_credit_side else Decimal("0.00"),
                     "PaymentTotal": Decimal("0.00"),
+                    "ReceiptAmount": amount if is_credit_side else Decimal("0.00"),
                     "ObcEntryID": int(r["EntryID"] or 0),
                 }
             )
@@ -1462,14 +1467,19 @@ class LedgerExportService:
             text(
                 f"""
                 SELECT
-                    ISNULL(SUM(ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)), 0) AS billed,
-                    ISNULL(SUM(ISNULL(b.Debit, 0)), 0) AS received
-                FROM dbo.JTCSDailyTransaction d
-                LEFT JOIN dbo.JtcsBankTransaction b
-                    ON b.JtcsBankTransactionID = d.BankTransactionID
-                WHERE d.CustomerID = :customer_id
-                  AND d.Status = N'Posted'
-                  {prior_date_sql}
+                    ISNULL(SUM(x.billed), 0) AS billed,
+                    ISNULL(SUM(x.received), 0) AS received
+                FROM (
+                    SELECT
+                        ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS billed,
+                        {sql_customer_receipt_expr("d", "b")} AS received
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.CustomerID = :customer_id
+                      AND d.Status = N'Posted'
+                      {prior_date_sql}
+                ) x
                 """
             ),
             prior_params,
@@ -1505,15 +1515,7 @@ class LedgerExportService:
                           AND LTRIM(RTRIM(f.BillNo)) <> N''
                           AND ISNULL(f.BillAmount, 0) > 0
                           {fu_prior_sql}
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM dbo.JTCSDailyTransaction d
-                              WHERE d.CustomerID = f.CustomerID
-                                AND d.Status = N'Posted'
-                                AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
-                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
-                                AND d.WorkType = f.ModuleCode
-                          )
+                          {sql_unpaid_followup_exclusion()}
                         """
                     ),
                     fu_prior_params,
@@ -1522,7 +1524,7 @@ class LedgerExportService:
             followup_rows = list(
                 db.session.execute(
                     text(
-                        """
+                        f"""
                         SELECT
                             CAST(NULL AS INT) AS TransactionID,
                             ISNULL(f.BillDate, f.WorkDate) AS TransactionDate,
@@ -1538,7 +1540,8 @@ class LedgerExportService:
                             ISNULL(f.BillAmount, 0) AS SaleAmount,
                             CAST(0 AS DECIMAL(18, 2)) AS IncomeAmount,
                             CAST(0 AS DECIMAL(18, 2)) AS BankDebit,
-                            CAST(0 AS DECIMAL(18, 2)) AS PaymentTotal
+                            CAST(0 AS DECIMAL(18, 2)) AS PaymentTotal,
+                            CAST(0 AS DECIMAL(18, 2)) AS ReceiptAmount
                         FROM dbo.FollowupEntryMaster f
                         WHERE f.CustomerID = :customer_id
                           AND ISNULL(f.IsActive, 1) = 1
@@ -1547,15 +1550,7 @@ class LedgerExportService:
                           AND ISNULL(f.BillAmount, 0) > 0
                           AND ISNULL(f.BillDate, f.WorkDate) >= :date_from
                           AND ISNULL(f.BillDate, f.WorkDate) <= :date_to
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM dbo.JTCSDailyTransaction d
-                              WHERE d.CustomerID = f.CustomerID
-                                AND d.Status = N'Posted'
-                                AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
-                                    = UPPER(LTRIM(RTRIM(f.BillNo)))
-                                AND d.WorkType = f.ModuleCode
-                          )
+                          {sql_unpaid_followup_exclusion()}
                         """
                     ),
                     {
@@ -1599,7 +1594,7 @@ class LedgerExportService:
         rows = list(
             db.session.execute(
                 text(
-                    """
+                    f"""
                     SELECT
                         d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
                         d.StampID, d.ReferenceNo, d.Description, d.Remarks,
@@ -1610,7 +1605,8 @@ class LedgerExportService:
                             SELECT ISNULL(SUM(p.Amount), 0)
                             FROM dbo.JTCSDailyTransactionPayment p
                             WHERE p.TransactionID = d.TransactionID
-                        ) AS PaymentTotal
+                        ) AS PaymentTotal,
+                        {sql_customer_receipt_expr("d", "b")} AS ReceiptAmount
                     FROM dbo.JTCSDailyTransaction d
                     LEFT JOIN dbo.JtcsBankTransaction b
                         ON b.JtcsBankTransactionID = d.BankTransactionID
@@ -1675,11 +1671,13 @@ class LedgerExportService:
             }
         )
         for row in rows:
-            billed = self._money(row["SaleAmount"]) + self._money(row["IncomeAmount"])
-            receipt = self._money(row["PaymentTotal"])
-            if receipt == 0:
-                receipt = self._money(row["BankDebit"])
-            running = self._money(running + billed - receipt)
+            billed = self._money(row["SaleAmount"]) + self._money(row.get("IncomeAmount"))
+            if "ReceiptAmount" in row and row["ReceiptAmount"] is not None:
+                receipt = self._money(row["ReceiptAmount"])
+            else:
+                receipt = self._money(row.get("PaymentTotal"))
+                if receipt == 0:
+                    receipt = self._money(row.get("BankDebit"))
             work = (row["WorkType"] or "").strip()
             sub = (row["SubWorkType"] or "").strip()
             if sub:
@@ -1688,23 +1686,48 @@ class LedgerExportService:
             ref = (row["ReferenceNo"] or "").strip()
             if not ref and row.get("TransactionID"):
                 ref = f"TXN-{row['TransactionID']}"
-            lines.append(
-                {
-                    "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
-                    "bill": ref,
-                    "work": work,
-                    "description": (row["Description"] or row["Remarks"] or "").strip(),
-                    "debit": billed,
-                    "credit": receipt,
-                    "balance": running,
-                    "kind": "txn",
-                    "transaction_id": row.get("TransactionID"),
-                    "work_type": row.get("WorkType"),
-                    "sub_work_type": row.get("SubWorkType"),
-                    "stamp_id": row.get("StampID"),
-                    "obc_entry_id": row.get("ObcEntryID"),
-                }
-            )
+            raw_desc = (row["Description"] or row.get("Remarks") or "").strip()
+            sub_l = sub.lower()
+            desc_l = raw_desc.lower()
+            is_receipt_row = "followup receipt" in sub_l or desc_l.startswith("payment received") or desc_l.startswith("advance payment")
+            is_advance = desc_l.startswith("advance payment") or (is_receipt_row and billed == 0)
+            date_str = txn_date.strftime("%d/%m/%Y") if txn_date else ""
+            base = {
+                "date": date_str,
+                "bill": ref,
+                "work": work,
+                "kind": "txn",
+                "transaction_id": row.get("TransactionID"),
+                "work_type": row.get("WorkType"),
+                "sub_work_type": row.get("SubWorkType"),
+                "stamp_id": row.get("StampID"),
+                "obc_entry_id": row.get("ObcEntryID"),
+            }
+            # Never put Debit and Credit of the same payment on one customer-ledger line.
+            if billed > 0 and receipt > 0:
+                running = self._money(running + billed)
+                invoice_desc = raw_desc
+                if is_receipt_row or "payment received" in desc_l:
+                    invoice_desc = f"Invoice / Sale / Service — {ref}".strip(" —")
+                lines.append({**base, "description": invoice_desc or "Invoice / Sale / Service", "debit": billed, "credit": Decimal("0.00"), "balance": running})
+                running = self._money(running - receipt)
+                pay_desc = "Advance Payment" if is_advance else "Payment Received"
+                if ref:
+                    pay_desc = f"{pay_desc} — {ref}"
+                lines.append({**base, "description": pay_desc, "debit": Decimal("0.00"), "credit": receipt, "balance": running})
+                continue
+            if billed > 0:
+                running = self._money(running + billed)
+                desc = raw_desc or "Invoice / Sale / Service"
+                lines.append({**base, "description": desc, "debit": billed, "credit": Decimal("0.00"), "balance": running})
+                continue
+            if receipt > 0:
+                running = self._money(running - receipt)
+                if is_advance:
+                    desc = raw_desc or (f"Advance Payment — {ref}" if ref else "Advance Payment")
+                else:
+                    desc = raw_desc or (f"Payment Received — {ref}" if ref else "Payment Received")
+                lines.append({**base, "description": desc, "debit": Decimal("0.00"), "credit": receipt, "balance": running})
 
         return {
             "kind": "customer",

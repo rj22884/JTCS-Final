@@ -781,16 +781,6 @@
     if (paymentTotal <= 0) {
       return "Total payment amount must be greater than zero.";
     }
-    const categoryTotal = getCategoryTotal();
-    if (categoryTotal > 0 && paymentTotal + 0.0001 < categoryTotal) {
-      return (
-        "Payment total (" +
-        paymentTotal.toFixed(2) +
-        ") must be greater than or equal to category total (" +
-        categoryTotal.toFixed(2) +
-        ")."
-      );
-    }
     return null;
   }
 
