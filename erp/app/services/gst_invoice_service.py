@@ -860,12 +860,21 @@ class GstInvoiceService:
             + Decimal(str(inv.IgstAmount or 0))
         )
 
+    def _is_own_sale_daily(self, daily: JTCSDailyTransaction | None) -> bool:
+        if daily is None:
+            return False
+        return (
+            (daily.WorkType or "") == self.DAILY_WORK_TYPE
+            and (daily.SubWorkType or "") == self.DAILY_SUB_WORK_TYPE
+        )
+
     def _find_own_sale_daily(self, inv: GstInvoice) -> JTCSDailyTransaction | None:
         daily_id = getattr(inv, "DailyTransactionID", None)
         if daily_id:
             daily = db.session.get(JTCSDailyTransaction, int(daily_id))
-            if daily is not None:
+            if self._is_own_sale_daily(daily):
                 return daily
+            inv.DailyTransactionID = None
         invoice_no = self._norm_ref(inv.InvoiceNo)
         if not invoice_no:
             return None
@@ -901,16 +910,16 @@ class GstInvoiceService:
         return self._followup_sale_daily(tally_bill_no, exclude_daily_id=exclude_daily_id) is not None
 
     def _strip_followup_sale(self, daily: JTCSDailyTransaction) -> None:
-        """Keep the followup row, but stop counting it as Sale so the invoice date wins."""
-        sale = _q(Decimal(str(daily.SaleAmount or 0)))
-        if sale == 0:
+        """Remove the follow-up receivable. Keep the row only if it is a real receipt."""
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        module = (daily.WorkType or "").strip().upper()
+        acct = PaymentAccountingService(module or None)
+        if acct._is_combined_daily(daily) or acct._is_receipt_daily(daily):
+            acct._zero_sale_keep_receipt(daily)
+            db.session.flush()
             return
-        total = _q(Decimal(str(daily.TotalAmount or 0)))
-        daily.SaleAmount = Decimal("0.00")
-        remaining = total - sale
-        daily.TotalAmount = remaining if remaining > 0 else Decimal("0.00")
-        daily.ModifiedDate = datetime.utcnow()
-        db.session.flush()
+        acct._delete_daily(daily)
 
     def _remove_sale_daily(self, inv: GstInvoice) -> None:
         daily = self._find_own_sale_daily(inv)
@@ -922,10 +931,10 @@ class GstInvoiceService:
         db.session.flush()
 
     def _sync_sale_daily(self, inv: GstInvoice) -> bool:
-        """Post Sale invoice into JTCSDailyTransaction so dashboard sales cards pick it up.
+        """Post the Sale invoice as the customer receivable.
 
-        Existing SaleAmount rows (followup / stamp / etc.) stay as-is. If this invoice
-        is already counted via Tally Bill Number, do not add a second row.
+        Follow-up workflow dailies are not a second receivable. If one still
+        carries SaleAmount for this Tally Bill Number, strip or remove it.
         """
         voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
         amount = _q(Decimal(str(inv.InvoiceValue or 0)))
@@ -935,16 +944,14 @@ class GstInvoiceService:
                 self._remove_sale_daily(inv)
                 return True
             return False
-        followup = self._followup_sale_daily(
-            getattr(inv, "TallyBillNo", None),
-            exclude_daily_id=own.TransactionID if own is not None else None,
-        )
-        if followup is not None and followup.TransactionDate == inv.InvoiceDate:
-            # Already in sales cards on this invoice date — do not double-count.
-            self._reconcile_payment_duplicates(inv)
-            return False
-        if followup is not None:
-            # Same bill was posted on followup date; move Sale to invoice date.
+        exclude_id = own.TransactionID if own is not None else None
+        while True:
+            followup = self._followup_sale_daily(
+                getattr(inv, "TallyBillNo", None),
+                exclude_daily_id=exclude_id,
+            )
+            if followup is None:
+                break
             self._strip_followup_sale(followup)
 
         gst_amount = self._invoice_gst_amount(inv)
@@ -955,6 +962,8 @@ class GstInvoiceService:
         created_by = (inv.CreatedBy or "").strip() or "Sale Invoice"
         if own is not None:
             own.TransactionDate = inv.InvoiceDate
+            own.WorkType = self.DAILY_WORK_TYPE
+            own.SubWorkType = self.DAILY_SUB_WORK_TYPE
             own.CustomerID = inv.CustomerID
             own.CustomerName = customer_name
             own.ReferenceNo = self._norm_ref(inv.InvoiceNo)
@@ -1042,15 +1051,10 @@ class GstInvoiceService:
                         SELECT 1
                         FROM dbo.JTCSDailyTransaction d
                         WHERE d.Status = N'Posted'
-                          AND ISNULL(d.SaleAmount, 0) <> 0
-                          AND d.TransactionDate = i.InvoiceDate
+                          AND d.WorkType = N'Accounting'
+                          AND d.SubWorkType = N'Sale / Service Invoice'
                           AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
-                              = UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
-                          AND NULLIF(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))), N'') IS NOT NULL
-                          AND NOT (
-                                d.WorkType = N'Accounting'
-                                AND d.SubWorkType = N'Sale / Service Invoice'
-                          )
+                              = UPPER(LTRIM(RTRIM(ISNULL(i.InvoiceNo, N''))))
                   )
                 """
             ),

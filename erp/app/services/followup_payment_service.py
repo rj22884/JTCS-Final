@@ -446,6 +446,7 @@ class FollowupPaymentService:
         remarks: str | None,
         created_by: str,
     ) -> JTCSDailyTransaction | None:
+        """Follow-up is not a receivable. Delegates to accounting (no SaleAmount debit)."""
         return self.accounting.post_sale(
             bill_no=bill_no,
             work_date=work_date,

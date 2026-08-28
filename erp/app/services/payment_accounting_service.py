@@ -299,20 +299,26 @@ class PaymentAccountingService:
             return True
         return False
 
-    def find_gst_sale_daily(self, tally_bill_no: str) -> JTCSDailyTransaction | None:
+    def find_gst_invoice(self, tally_bill_no: str):
         ref = self.norm_ref(tally_bill_no)
         if not ref:
             return None
         try:
             from app.models.gst_billing import GstInvoice
 
-            inv = db.session.scalars(
+            return db.session.scalars(
                 select(GstInvoice)
-                .where(func.upper(GstInvoice.TallyBillNo) == ref)
+                .where(func.upper(func.ltrim(func.rtrim(func.coalesce(GstInvoice.TallyBillNo, "")))) == ref)
                 .order_by(GstInvoice.InvoiceID.desc())
             ).first()
         except Exception:
-            inv = None
+            return None
+
+    def find_gst_sale_daily(self, tally_bill_no: str) -> JTCSDailyTransaction | None:
+        ref = self.norm_ref(tally_bill_no)
+        if not ref:
+            return None
+        inv = self.find_gst_invoice(ref)
         if inv is not None:
             daily_id = getattr(inv, "DailyTransactionID", None)
             if daily_id:
@@ -392,6 +398,11 @@ class PaymentAccountingService:
             amount = self.money(sale.SaleAmount) + self.money(sale.IncomeAmount)
             if amount > 0:
                 return amount
+        inv = self.find_gst_invoice(bill_no)
+        if inv is not None:
+            amount = self.money(getattr(inv, "InvoiceValue", 0))
+            if amount > 0:
+                return amount
         if fallback is not None:
             return self.money(fallback)
         return Decimal("0.00")
@@ -447,9 +458,15 @@ class PaymentAccountingService:
         self._clear_payments(daily)
         self.daily_repo.delete(daily)
 
+    def gst_invoice_exists(self, bill_no: str) -> bool:
+        inv = self.find_gst_invoice(bill_no)
+        return inv is not None and self.money(getattr(inv, "InvoiceValue", 0)) > 0
+
     def other_sale_exists(self, bill_no: str, *, exclude_daily_id: int | None = None) -> bool:
         gst = self.find_gst_sale_daily(bill_no)
         if gst is not None and (exclude_daily_id is None or gst.TransactionID != int(exclude_daily_id)):
+            return True
+        if self.gst_invoice_exists(bill_no):
             return True
         for daily in self._module_dailies(bill_no):
             if exclude_daily_id and daily.TransactionID == int(exclude_daily_id):
@@ -458,37 +475,76 @@ class PaymentAccountingService:
                 return True
         return False
 
+    def ensure_gst_invoice_posted(self, bill_no: str) -> bool:
+        """Post the GST Sale / Service Invoice daily if a bill already has an invoice.
+
+        Does not invent a follow-up debit. Safe to call from payment/follow-up flows.
+        """
+        inv = self.find_gst_invoice(bill_no)
+        if inv is None or self.money(getattr(inv, "InvoiceValue", 0)) <= 0:
+            return False
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        return bool(GstInvoiceService()._sync_sale_daily(inv))
+
+    def _zero_sale_keep_receipt(self, daily: JTCSDailyTransaction) -> None:
+        daily.SaleAmount = Decimal("0.00")
+        daily.IncomeAmount = Decimal("0.00")
+        received = self._received_on_daily(daily)
+        daily.TotalAmount = received
+        daily.SubWorkType = self.receipt_sub_work_type or daily.SubWorkType
+        daily.ModifiedDate = datetime.utcnow()
+
     def reconcile_reference(self, bill_no: str) -> dict:
         """Heal duplicate Customer Debits for one bill without deleting receipts.
 
-        If a payment daily still carries SaleAmount AND a real invoice/sale
-        already exists for that bill, clear SaleAmount on the payment daily.
-        Combined rows with no other sale are left for ledger display splitting
-        (or split on the next payment save).
+        When a GST invoice exists for the Tally Bill Number, any follow-up
+        SaleAmount is a duplicate receivable and is removed (sale-only rows)
+        or zeroed (receipt/combined rows). Receipts stay as Customer Credit.
+        Historical follow-up sales with no invoice are left untouched.
         """
         ref = self.norm_ref(bill_no)
         if not ref:
-            return {"cleared_sale_on_receipts": 0, "removed_extra_receipts": 0}
+            return {
+                "cleared_sale_on_receipts": 0,
+                "removed_followup_sales": 0,
+                "removed_extra_receipts": 0,
+            }
+        invoice_exists = self.gst_invoice_exists(ref) or self.find_gst_sale_daily(ref) is not None
         cleared = 0
+        removed = 0
         for daily in list(self._module_dailies(ref)):
+            if self._is_gst_sale_daily(daily):
+                continue
+            if invoice_exists:
+                if self._is_combined_daily(daily) or (
+                    self._is_receipt_daily(daily) and self.money(daily.SaleAmount) + self.money(daily.IncomeAmount) > 0
+                ):
+                    self._zero_sale_keep_receipt(daily)
+                    cleared += 1
+                    continue
+                if self._is_followup_sale_daily(daily):
+                    self._delete_daily(daily)
+                    removed += 1
+                    continue
+                continue
             if not self._is_combined_daily(daily) and not (
                 self._is_receipt_daily(daily) and self.money(daily.SaleAmount) > 0
             ):
                 continue
             if not self.other_sale_exists(ref, exclude_daily_id=daily.TransactionID):
                 continue
-            daily.SaleAmount = Decimal("0.00")
-            daily.IncomeAmount = Decimal("0.00")
-            received = self._received_on_daily(daily)
-            daily.TotalAmount = received
-            daily.SubWorkType = self.receipt_sub_work_type or daily.SubWorkType
-            daily.ModifiedDate = datetime.utcnow()
+            self._zero_sale_keep_receipt(daily)
             cleared += 1
         db.session.flush()
-        return {"cleared_sale_on_receipts": cleared, "removed_extra_receipts": 0}
+        return {
+            "cleared_sale_on_receipts": cleared,
+            "removed_followup_sales": removed,
+            "removed_extra_receipts": 0,
+        }
 
     def reconcile_all_followup_duplicates(self) -> dict:
-        """Safe, additive recon for existing duplicate invoice+payment SaleAmount rows."""
+        """Heal leftover follow-up SaleAmount rows when a GST invoice already exists."""
         stmt = (
             select(JTCSDailyTransaction)
             .where(
@@ -499,18 +555,80 @@ class PaymentAccountingService:
             .order_by(JTCSDailyTransaction.TransactionID.asc())
         )
         seen: set[str] = set()
-        totals = {"cleared_sale_on_receipts": 0, "bills": 0}
+        totals = {
+            "cleared_sale_on_receipts": 0,
+            "removed_followup_sales": 0,
+            "invoices_posted": 0,
+            "bills": 0,
+        }
         for daily in db.session.scalars(stmt).all():
-            svc = PaymentAccountingService(daily.WorkType)
-            if not svc._has_payment_lines(daily) and svc._received_on_daily(daily) <= 0:
-                continue
             ref = self.norm_ref(daily.ReferenceNo)
             if not ref or ref in seen:
                 continue
+            svc = PaymentAccountingService(daily.WorkType)
+            invoice_exists = svc.gst_invoice_exists(ref) or svc.find_gst_sale_daily(ref) is not None
+            has_receipt = svc._has_payment_lines(daily) or svc._received_on_daily(daily) > 0
+            if not invoice_exists and not has_receipt:
+                continue
             seen.add(ref)
+            if invoice_exists and svc.ensure_gst_invoice_posted(ref):
+                totals["invoices_posted"] += 1
             result = svc.reconcile_reference(ref)
             totals["cleared_sale_on_receipts"] += int(result.get("cleared_sale_on_receipts") or 0)
+            totals["removed_followup_sales"] += int(result.get("removed_followup_sales") or 0)
             totals["bills"] += 1
+        try:
+            from app.models.followup import FollowupEntryMaster
+            from app.models.gst_billing import GstInvoice
+
+            unposted = db.session.scalars(
+                select(GstInvoice)
+                .where(
+                    GstInvoice.DailyTransactionID.is_(None),
+                    GstInvoice.InvoiceValue != 0,
+                )
+                .order_by(GstInvoice.InvoiceID.asc())
+            ).all()
+            for inv in unposted:
+                voucher = (getattr(inv, "VoucherType", None) or "SALE").strip().upper()
+                if voucher != "SALE":
+                    continue
+                ref = self.norm_ref(getattr(inv, "TallyBillNo", None))
+                if not ref or ref in seen:
+                    continue
+                module = None
+                entry = db.session.scalars(
+                    select(FollowupEntryMaster)
+                    .where(
+                        func.upper(func.ltrim(func.rtrim(func.coalesce(FollowupEntryMaster.BillNo, ""))))
+                        == ref
+                    )
+                    .order_by(FollowupEntryMaster.EntryID.desc())
+                ).first()
+                if entry is not None:
+                    module = (entry.ModuleCode or "").strip().upper() or None
+                if module is None:
+                    linked = db.session.scalars(
+                        select(JTCSDailyTransaction)
+                        .where(
+                            JTCSDailyTransaction.ReferenceNo == ref,
+                            JTCSDailyTransaction.Status == "Posted",
+                            JTCSDailyTransaction.WorkType.in_(FOLLOWUP_MODULES),
+                        )
+                        .order_by(JTCSDailyTransaction.TransactionID.desc())
+                    ).first()
+                    if linked is not None:
+                        module = (linked.WorkType or "").strip().upper() or None
+                svc = PaymentAccountingService(module)
+                seen.add(ref)
+                if svc.ensure_gst_invoice_posted(ref):
+                    totals["invoices_posted"] += 1
+                result = svc.reconcile_reference(ref)
+                totals["cleared_sale_on_receipts"] += int(result.get("cleared_sale_on_receipts") or 0)
+                totals["removed_followup_sales"] += int(result.get("removed_followup_sales") or 0)
+                totals["bills"] += 1
+        except Exception:
+            pass
         return totals
 
     def post_sale(
@@ -525,71 +643,17 @@ class PaymentAccountingService:
         created_by: str,
         description: str | None = None,
     ) -> JTCSDailyTransaction | None:
-        """Customer Debit only. Skips if a GST invoice sale already exists for this bill."""
-        amount = self.money(amount)
+        """Follow-up is workflow-only. Never posts a Customer Debit.
+
+        If a GST invoice already exists for this Tally Bill Number, post/keep
+        that invoice daily and strip leftover follow-up SaleAmount rows.
+        """
         ref = self.norm_ref(bill_no)
-        if not ref or amount <= 0:
+        if not ref:
             return None
-        if self.find_gst_sale_daily(ref) is not None:
-            self.reconcile_reference(ref)
-            return self.find_gst_sale_daily(ref)
-
-        existing = None
-        for daily in self._module_dailies(ref):
-            if self._is_followup_sale_daily(daily) and not self._is_combined_daily(daily):
-                existing = daily
-                break
-        if existing is None:
-            for daily in self._module_dailies(ref):
-                if self._is_followup_sale_daily(daily) and not self._has_payment_lines(daily):
-                    existing = daily
-                    break
-
-        desc = description or f"{self.sale_sub_work_type} — {ref}"
-        if existing is not None:
-            existing.TransactionDate = work_date
-            existing.CustomerID = customer_id
-            existing.CustomerName = customer_name
-            existing.ReferenceNo = ref
-            existing.Description = desc
-            existing.IncomeAmount = Decimal("0")
-            existing.ExpenseAmount = Decimal("0")
-            existing.SaleAmount = amount
-            existing.PurchaseAmount = Decimal("0")
-            existing.GSTAmount = existing.GSTAmount or Decimal("0")
-            existing.TotalAmount = amount
-            existing.SubWorkType = self.sale_sub_work_type
-            existing.Remarks = remarks
-            existing.ModifiedDate = datetime.utcnow()
-            db.session.flush()
-            self.reconcile_reference(ref)
-            return existing
-
-        daily = self.daily_repo.create(
-            {
-                "TransactionDate": work_date,
-                "WorkType": self.work_type,
-                "SubWorkType": self.sale_sub_work_type,
-                "CustomerID": customer_id,
-                "CustomerName": customer_name,
-                "ReferenceNo": ref,
-                "Description": desc,
-                "IncomeAmount": Decimal("0"),
-                "ExpenseAmount": Decimal("0"),
-                "SaleAmount": amount,
-                "PurchaseAmount": Decimal("0"),
-                "GSTAmount": Decimal("0"),
-                "TDSAmount": Decimal("0"),
-                "TotalAmount": amount,
-                "PaymentSplitCount": 1,
-                "Status": "Posted",
-                "CreatedBy": created_by,
-                "CreatedDate": datetime.utcnow(),
-                "Remarks": remarks,
-            }
-        )
+        self.ensure_gst_invoice_posted(ref)
         self.reconcile_reference(ref)
-        return daily
+        return self.find_gst_sale_daily(ref)
 
     def _split_combined_keep_sale(self, combined: JTCSDailyTransaction) -> None:
         """Turn a legacy sale+receipt daily into a sale-only daily."""
@@ -688,7 +752,8 @@ class PaymentAccountingService:
             if not self.is_udhaar_account(account):
                 received += amount
 
-        billed = self.invoice_amount(ref, fallback=invoice_amount)
+        self.ensure_gst_invoice_posted(ref)
+        billed = self.invoice_amount(ref)
         canonical = existing_daily
         if canonical is not None and self._is_followup_sale_daily(canonical) and not self._is_combined_daily(canonical):
             canonical = None

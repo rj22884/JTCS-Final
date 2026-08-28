@@ -1,9 +1,15 @@
 """
-Safe reconciliation for duplicate Customer Debit on Payment Received.
+Heal duplicate Customer Debits created by Follow-up workflow rows.
 
-Does NOT delete transactions. For followup payment dailies that still carry
-SaleAmount after a real invoice/sale already exists for the same bill, it
-clears the duplicate SaleAmount and keeps the bank receipt (Customer Credit).
+When a GST Sale / Service Invoice already exists for a Tally Bill Number,
+any "ITR Followup" / "GST Followup" / etc. SaleAmount is a duplicate
+receivable. This script:
+
+- Posts the invoice daily if it is missing
+- Removes sale-only follow-up debit rows
+- Zeros SaleAmount on follow-up receipt rows (keeps the Customer Credit)
+- Does not delete legitimate receipts or GST invoice dailies
+- Leaves historical follow-up sales alone when no invoice exists
 
 Usage (from erp folder):
     .venv\\Scripts\\python.exe scripts\\reconcile_payment_received_duplicates.py
@@ -25,7 +31,7 @@ load_dotenv(ROOT / ".env")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Reconcile duplicate Payment Received sale debits.")
+    parser = argparse.ArgumentParser(description="Reconcile duplicate Follow-up sale debits.")
     parser.add_argument(
         "--commit",
         action="store_true",
@@ -42,7 +48,9 @@ def main() -> int:
         totals = PaymentAccountingService().reconcile_all_followup_duplicates()
         print(
             f"Bills scanned: {totals.get('bills', 0)} | "
-            f"Duplicate SaleAmount cleared on receipts: {totals.get('cleared_sale_on_receipts', 0)}"
+            f"Invoice dailies posted: {totals.get('invoices_posted', 0)} | "
+            f"Follow-up sale rows removed: {totals.get('removed_followup_sales', 0)} | "
+            f"SaleAmount cleared on receipts: {totals.get('cleared_sale_on_receipts', 0)}"
         )
         if args.commit:
             db.session.commit()

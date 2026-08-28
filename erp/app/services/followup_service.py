@@ -1274,18 +1274,10 @@ class FollowupService:
                 payment_service.remove_followup_accounting(old_bill)
 
             amount_value = data.get("BillAmount")
-            if "tally_bill_generated" in stage_codes and new_bill:
-                if amount_value is not None and float(amount_value) > 0:
-                    payment_service.post_sale(
-                        bill_no=new_bill,
-                        work_date=bill_date or work_date,
-                        amount=Decimal(str(amount_value)),
-                        customer_name=customer.get("CustomerName"),
-                        customer_id=customer_id,
-                        remarks=remarks,
-                        created_by=created_by or "System",
-                    )
-            elif new_bill and "payment_received" not in stage_codes:
+            if new_bill:
+                payment_service.accounting.ensure_gst_invoice_posted(new_bill)
+                payment_service.accounting.reconcile_reference(new_bill)
+            if new_bill and "tally_bill_generated" not in stage_codes and "payment_received" not in stage_codes:
                 payment_service.accounting.remove_followup_sale(new_bill)
 
             if "payment_received" in stage_codes:
