@@ -62,6 +62,7 @@ from app.routes.website_analytics import bp as website_analytics_bp
 from app.routes.website_analytics_public import bp as website_analytics_public_bp
 from app.routes.website_snapshot_public import bp as website_snapshot_public_bp
 from app.routes.recruitment_applications import bp as recruitment_applications_bp
+from app.routes.property_listings import bp as property_listings_bp
 from app.routes.hr import bp as hr_bp
 from app.routes.market_quotes import bp as market_quotes_bp
 from app.routes.runtime import bp as runtime_bp
@@ -176,6 +177,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(website_analytics_public_bp)
     app.register_blueprint(website_snapshot_public_bp)
     app.register_blueprint(recruitment_applications_bp)
+    app.register_blueprint(property_listings_bp)
     app.register_blueprint(hr_bp)
     app.register_blueprint(market_quotes_bp)
     app.register_blueprint(crm_bp)
@@ -351,6 +353,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Sales Executive Applications menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.property_listings import ensure_property_menu
+
+            ensure_property_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Property Management menu ensure skipped: %s", exc)
 
         try:
             from app.services.hr_schema import ensure_hr_schema

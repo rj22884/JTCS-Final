@@ -135,6 +135,20 @@ class Config:
         os.getenv("RECRUITMENT_SSO_SECRET") or "jtcs-xpert-recruitment-sso-v1"
     ).strip().strip('"').strip("'")
 
+    # Website Property marketplace (SQLite from JTCS Web Page property module)
+    _prop_db_env = (os.getenv("PROPERTY_DB_PATH") or "").strip().strip('"').strip("'")
+    _prop_db_local = Path(r"D:\JTCS Web Page\property\var\property.db")
+    _prop_db_vps = Path("/var/www/jtcsxpert.com/property/var/property.db")
+    PROPERTY_DB_PATH = Path(_prop_db_env) if _prop_db_env else (
+        _prop_db_local if _prop_db_local.is_file() else _prop_db_vps
+    )
+    PROPERTY_PUBLIC_URL = (
+        os.getenv("PROPERTY_PUBLIC_URL") or os.getenv("RECRUITMENT_PUBLIC_URL") or ""
+    ).strip().strip('"').strip("'")
+    PROPERTY_SSO_SECRET = (
+        os.getenv("PROPERTY_SSO_SECRET") or os.getenv("RECRUITMENT_SSO_SECRET") or "jtcs-xpert-recruitment-sso-v1"
+    ).strip().strip('"').strip("'")
+
     # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
     WEBSITE_INTAKE_API_KEY = (os.getenv("WEBSITE_INTAKE_API_KEY") or "").strip().strip('"').strip("'")
     NOTIFICATION_POLL_SECONDS = int(os.getenv("NOTIFICATION_POLL_SECONDS", "15"))

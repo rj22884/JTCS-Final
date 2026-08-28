@@ -1,0 +1,148 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('dashboard.index') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h5 mb-1">Property Management</h1>
+    <p class="small text-muted mb-0">Haldwani property registrations from jtcsxpert.com/property — same website Property database (not a separate copy).</p>
+  </div>
+  <a class="btn btn-sm btn-outline-primary" href="{{ admin_url }}">
+    Open full Property Admin
+  </a>
+</div>
+
+<div class="d-flex flex-wrap gap-2 mb-3">
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Registrations</div><strong>{{ counts.listings or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Pending Verification</div><strong>{{ counts.pending or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Verified</div><strong>{{ counts.verified or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Rejected</div><strong>{{ counts.rejected or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Owners</div><strong>{{ counts.owners or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Buyers/Tenants</div><strong>{{ counts.buyers or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Leads</div><strong>{{ counts.leads or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Site Visits</div><strong>{{ counts.site_visits or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Requirements</div><strong>{{ counts.requirements or 0 }}</strong></div>
+  <div class="jtcs-card py-2 px-3 mb-0"><div class="small text-muted">Deals</div><strong>{{ counts.deals or 0 }}</strong></div>
+</div>
+
+<ul class="nav nav-pills flex-wrap gap-1 mb-3">
+  {% for key, label in sections %}
+  <li class="nav-item">
+    <a class="nav-link py-1 px-2 {% if section == key %}active{% endif %}" href="{{ url_for('property_listings.index', section=key) }}">{{ label }}</a>
+  </li>
+  {% endfor %}
+</ul>
+
+{% if section == 'listings' %}
+<form class="jtcs-card mb-3" method="get">
+  <input type="hidden" name="section" value="listings">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label class="form-label" for="propSearch">Search</label>
+      <input class="form-control form-control-sm" id="propSearch" name="q" value="{{ search }}" placeholder="Listing no, title, locality, owner">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label" for="propStatus">Status</label>
+      <select class="form-select form-select-sm" id="propStatus" name="status">
+        <option value="">All</option>
+        {% for s in ['Pending Verification','Documents Required','Under Review','Verified','Rejected','Published','Rented','Sold','Expired'] %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('property_listings.index') }}">Reset</a>
+    </div>
+  </div>
+</form>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-warning">{{ error }}</div>
+{% endif %}
+
+<div class="jtcs-card">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead>
+        {% if section == 'listings' %}
+        <tr><th>Listing</th><th>Title</th><th>Type</th><th>Locality</th><th>Owner</th><th>Status</th><th></th></tr>
+        {% elif section == 'owners' %}
+        <tr><th>Name</th><th>Mobile</th><th>Email</th><th>Listings</th></tr>
+        {% elif section == 'buyers' %}
+        <tr><th>Name</th><th>Mobile</th><th>Email</th></tr>
+        {% elif section in ['leads','visits'] %}
+        <tr><th>Name</th><th>Mobile</th><th>Listing</th><th>Type</th><th>Status</th></tr>
+        {% elif section == 'requirements' %}
+        <tr><th>Number</th><th>Type</th><th>Locality</th><th>Seeker</th><th>Status</th></tr>
+        {% elif section == 'deals' %}
+        <tr><th>Deal</th><th>Listing</th><th>Status</th><th>Brokerage</th><th>Payment</th></tr>
+        {% elif section == 'agreements' %}
+        <tr><th>Type</th><th>Deal</th><th>Listing</th><th>Status</th></tr>
+        {% endif %}
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% if section == 'listings' %}
+          <td>{{ row.listing_number }}</td>
+          <td>{{ row.title }}</td>
+          <td>{{ row.listing_type }} / {{ row.property_type }}</td>
+          <td>{{ row.locality }}</td>
+          <td>{{ row.owner_name }}</td>
+          <td>{{ row.status }}{% if row.is_verified %} · Verified{% endif %}</td>
+          <td><a class="btn btn-sm btn-outline-primary" href="{{ url_for('property_listings.detail', public_id=row.public_id) }}">View</a></td>
+          {% elif section == 'owners' %}
+          <td>{{ row.full_name }}</td>
+          <td>{{ row.mobile }}</td>
+          <td>{{ row.email }}</td>
+          <td>{{ row.listings }}</td>
+          {% elif section == 'buyers' %}
+          <td>{{ row.full_name }}</td>
+          <td>{{ row.mobile }}</td>
+          <td>{{ row.email }}</td>
+          {% elif section in ['leads','visits'] %}
+          <td>{{ row.name }}</td>
+          <td>{{ row.mobile }}</td>
+          <td>{{ row.listing_number }}</td>
+          <td>{{ row.lead_type }}</td>
+          <td>{{ row.status }}</td>
+          {% elif section == 'requirements' %}
+          <td>{{ row.requirement_number }}</td>
+          <td>{{ row.requirement_type }} / {{ row.property_type }}</td>
+          <td>{{ row.locality }}</td>
+          <td>{{ row.full_name }}</td>
+          <td>{{ row.status }}</td>
+          {% elif section == 'deals' %}
+          <td>{{ row.deal_number }}</td>
+          <td>{{ row.listing_number }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.total_amount }}</td>
+          <td>{{ row.payment_status }}</td>
+          {% elif section == 'agreements' %}
+          <td>{{ row.agreement_type }}</td>
+          <td>{{ row.deal_number }}</td>
+          <td>{{ row.listing_number }}</td>
+          <td>{{ row.status }}</td>
+          {% endif %}
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="8" class="text-muted py-4">No Property records in this view yet. New registrations from /property appear here automatically.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="small text-muted mt-3 mb-0">Aadhaar, Khata/Khatauni and other ownership files stay encrypted. Open full Property Admin (SSO) to view or verify documents — they are never shown on public property pages.</p>
+{% endblock %}

@@ -1,0 +1,73 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ url_for('property_listings.index') }}" class="jtcs-ribbon-btn" title="Back">
+    <i class="bi bi-arrow-left"></i>
+    <span>Back</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h1 class="h5 mb-1">{{ listing.listing_number }}</h1>
+    <p class="small text-muted mb-0">{{ listing.title }} · {{ listing.status }}{% if listing.is_verified %} · Verified{% endif %}</p>
+  </div>
+  <a class="btn btn-sm btn-outline-primary" href="{{ admin_url }}">Open in Property Admin (documents)</a>
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Property Details</h2>
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Type</strong><div>{{ listing.listing_type }} / {{ listing.property_type }}</div></div>
+    <div class="col-md-4"><strong>Locality</strong><div>{{ listing.locality }}</div></div>
+    <div class="col-md-4"><strong>Price</strong><div>{{ listing.price or '—' }}</div></div>
+    <div class="col-md-4"><strong>BHK</strong><div>{{ listing.bhk or '—' }}</div></div>
+    <div class="col-md-4"><strong>Furnishing</strong><div>{{ listing.furnishing or '—' }}</div></div>
+    <div class="col-12"><strong>Address</strong><div>{{ listing.address }}, {{ listing.city }}</div></div>
+    <div class="col-12"><strong>Description</strong><div>{{ listing.description or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Owner / Landlord</h2>
+  <div class="row g-2 small">
+    <div class="col-md-4"><strong>Name</strong><div>{{ listing.owner_name }}</div></div>
+    <div class="col-md-4"><strong>Mobile</strong><div>{{ listing.owner_mobile }}</div></div>
+    <div class="col-md-4"><strong>Email</strong><div>{{ listing.owner_email or '—' }}</div></div>
+    <div class="col-md-4"><strong>Ownership</strong><div>{{ listing.ownership_status or '—' }}</div></div>
+  </div>
+</div>
+
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Ownership Verification</h2>
+  <p class="small mb-2">{{ listing.photos|length }} photo(s). Sensitive documents are listed by type only — open Property Admin to view files.</p>
+  <ul class="small mb-0">
+    {% for doc in listing.documents %}
+    <li>{{ doc.doc_type }}{% if doc.aadhaar_last4 %} · Aadhaar last 4 {{ doc.aadhaar_last4 }}{% endif %} · {{ doc.original_name }}</li>
+    {% else %}
+    <li class="text-muted">No ownership documents uploaded yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+
+{% if listing.leads %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Leads / Site Visits</h2>
+  {% for lead in listing.leads %}
+  <p class="small mb-1">{{ lead.name }} · {{ lead.mobile }} · {{ lead.lead_type }} · {{ lead.status }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if listing.deals %}
+<div class="jtcs-card mb-3">
+  <h2 class="h6">Deals / Brokerage</h2>
+  {% for deal in listing.deals %}
+  <p class="small mb-1">{{ deal.deal_number }} · {{ deal.status }} · {{ deal.total_amount }} · {{ deal.payment_status }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
