@@ -119,6 +119,43 @@ class PaddleOcrBackend(OcrBackend):
         return OcrResult(provider="PaddleOCR", text=text, confidence=round(confidence, 2))
 
 
+def _prepare_tesseract_image(image: Image.Image) -> Image.Image:
+    """Upscale and contrast-boost small scans (WhatsApp / phone photos) for Tesseract."""
+    from PIL import ImageEnhance, ImageFilter, ImageOps
+
+    rgb = image.convert("RGB")
+    width, height = rgb.size
+    min_width = 1800
+    if width < min_width:
+        scale = min_width / float(width)
+        rgb = rgb.resize((int(width * scale), int(height * scale)), Image.Resampling.LANCZOS)
+    gray = ImageOps.grayscale(rgb)
+    gray = ImageOps.autocontrast(gray)
+    gray = ImageEnhance.Contrast(gray).enhance(1.55)
+    gray = gray.filter(ImageFilter.SHARPEN)
+    return gray
+
+
+def _tesseract_text_score(text: str) -> int:
+    import re
+
+    blob = (text or "").lower()
+    hints = (
+        r"in[\s\-]?uk",
+        r"subin",
+        r"certif",
+        r"issued",
+        r"purchas",
+        r"first\s*part",
+        r"second\s*part",
+        r"stamp\s*dut",
+        r"account\s*ref",
+        r"unique",
+    )
+    hits = sum(1 for pattern in hints if re.search(pattern, blob))
+    return hits * 200 + min(len(blob.strip()), 2500)
+
+
 class TesseractBackend(OcrBackend):
     def __init__(self):
         import pytesseract
@@ -135,16 +172,27 @@ class TesseractBackend(OcrBackend):
         import pytesseract
 
         configure_tesseract()
-        rgb = image.convert("RGB")
-        text = pytesseract.image_to_string(rgb, lang="eng")
-        data = pytesseract.image_to_data(rgb, output_type=pytesseract.Output.DICT)
+        prepared = _prepare_tesseract_image(image)
+        configs = ("--oem 3 --psm 4", "--oem 3 --psm 6", "--oem 3 --psm 11")
+        best_text = ""
+        best_score = -1
+        best_config = configs[0]
+        for config in configs:
+            text = pytesseract.image_to_string(prepared, lang="eng", config=config) or ""
+            score = _tesseract_text_score(text)
+            logger.info("Tesseract candidate %s score=%s chars=%s", config, score, len(text))
+            if score > best_score:
+                best_score = score
+                best_text = text
+                best_config = config
+        data = pytesseract.image_to_data(prepared, output_type=pytesseract.Output.DICT, config=best_config)
         scores = [
             float(conf)
             for conf in data.get("conf", [])
             if conf not in (-1, "-1") and str(conf).replace(".", "", 1).isdigit() and float(conf) >= 0
         ]
         confidence = (sum(scores) / len(scores)) if scores else 72.0
-        return OcrResult(provider="Tesseract", text=text, confidence=round(confidence, 2))
+        return OcrResult(provider="Tesseract", text=best_text, confidence=round(confidence, 2))
 
 
 _ENGINE_CACHE: tuple[str, OcrBackend] | None = None
@@ -204,6 +252,12 @@ def _prepare_image(raw: bytes) -> Image.Image:
     image = Image.open(BytesIO(raw))
     if image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
+    width, height = image.size
+    min_width = 1400
+    if width < min_width:
+        scale = min_width / float(width)
+        image = image.resize((int(width * scale), int(height * scale)), Image.Resampling.LANCZOS)
+        logger.info("OCR: upscaled image from %sx%s to %sx%s", width, height, image.size[0], image.size[1])
     return image
 
 
@@ -236,11 +290,8 @@ def _extract_with_fallback(image: Image.Image) -> OcrResult:
             tried.append(provider_name)
             global _ENGINE_CACHE
             _ENGINE_CACHE = None
-            if not _is_recoverable_ocr_error(exc):
-                raise
-    if last_exc is not None:
-        raise last_exc
-    raise OcrEngineNotAvailableError("OCR Engine Not Installed. Administrator Contact Required.")
+            logger.warning("Falling back from %s to the next OCR provider", provider_name)
+            continue
 
 
 def ocr_image_bytes(raw: bytes) -> OcrResult:

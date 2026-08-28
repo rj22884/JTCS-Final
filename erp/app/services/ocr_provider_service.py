@@ -401,17 +401,14 @@ class OcrProviderService:
         prepare_opencv_for_ocr()
         providers = [probe_easyocr(), probe_paddleocr(), probe_tesseract()]
         tess_path = configure_tesseract()
+        # Do not instantiate EasyOCR Reader here — model download / RAM on a VPS
+        # worker would fail startup and permanently lock Tesseract as the engine.
         active: str | None = None
-
-        try:
-            from app.services.ocr_engine import get_ocr_engine
-
-            name, _ = get_ocr_engine(force_refresh=True)
-            active = name
-            logger.info("OCR startup probe: active provider = %s", active)
-        except Exception as exc:
-            logger.warning("OCR startup probe: provider init failed — %s", exc)
-            active = None
+        for probe in providers:
+            if probe.available:
+                active = probe.name
+                break
+        logger.info("OCR startup probe: first available provider = %s", active)
 
         _STATUS = OcrStartupStatus(
             ready=bool(active),

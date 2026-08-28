@@ -16,25 +16,43 @@ from app.services.document_ocr_service import extract_document
 logger = logging.getLogger(__name__)
 
 # All known Uttarakhand e-Stamp labels in document order (used to slice values).
+# Patterns tolerate Tesseract typos on VPS (Fst Party, stamp Duty Pai By, etc.).
 DOCUMENT_LABELS: list[tuple[str, str]] = [
     ("CertificateNumber", r"Certif[il1]cate\s*(?:No\.?|Number|Num\.?)"),
-    ("CertificateIssuedDate", r"Certif[il1]cate\s*Issued\s*Date"),
-    ("AccountReference", r"Account\s*Reference"),
-    ("UniqueDocumentReference", r"Unique\s*(?:Doc\.?\s*)?Reference"),
-    ("PurchasedBy", r"Purchased\s*by"),
-    ("DescriptionOfDocument", r"Description\s+of\s+Document"),
-    ("PropertyDescription", r"Property\s*Description"),
+    ("CertificateIssuedDate", r"Certif[il1]cate\s*Issu(?:ed|e)?\s*Date"),
+    ("AccountReference", r"Account\s*Ref(?:erence)?"),
+    ("UniqueDocumentReference", r"Unique\s*(?:Doc(?:ument|\.)?\s*)?Ref(?:erence)?"),
+    ("PurchasedBy", r"Purchas(?:ed|e)\s*b[yv]"),
+    ("DescriptionOfDocument", r"Descript[il1]on\s+(?:of\s+)?Document"),
+    ("PropertyDescription", r"Propert[yv]\s*Descript[il1]on"),
     ("ConsiderationPrice", r"Consideration\s*Price"),
-    ("FirstPartyName", r"First\s*Party"),
-    ("SecondPartyName", r"Second\s*Party"),
-    ("StampDutyPaidBy", r"Stamp\s*Duty\s*Paid\s*By"),
-    ("StampDutyAmount", r"Stamp\s*Duty\s*Am[o0]?u?n?t\s*(?:\(\s*Rs[\.:]?\s*\))?"),
+    ("FirstPartyName", r"F(?:ir)?st\s*Part[yv]"),
+    ("SecondPartyName", r"Second\s*Part[yv]"),
+    ("StampDutyPaidBy", r"Stam[p]?\s*Dut[yv]\s*Pa[il]d?\s*B[yv]"),
+    ("StampDutyAmount", r"Stam[p]?\s*Dut[yv]\s*Am[o0]?u?n?t\s*(?:\(\s*Rs[\.:]?\s*\))?"),
 ]
 
 _CERT_NUMBER_RE = re.compile(
     r"\bIN[\s\-]?UK[\s\-]?[A-Z0-9]{8,}\b",
     re.IGNORECASE,
 )
+_SUBIN_RE = re.compile(r"\bSUBIN[\-A-Z0-9]{8,}\b", re.IGNORECASE)
+_ACCOUNT_REF_RE = re.compile(r"\bNONACC\b[^\n]{0,90}", re.IGNORECASE)
+_ISSUED_DATE_RE = re.compile(
+    r"\b(\d{1,2}[-/][A-Za-z]{3,9}[-/]\d{2,4})(?:\s+\d{1,2}[:.]\d{2}\s*[AP]M)?\b",
+    re.IGNORECASE,
+)
+_AMOUNT_WORDS_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*\(\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+only\s*\)",
+    re.IGNORECASE,
+)
+
+_FUZZY_NAME_LABELS: list[tuple[str, re.Pattern[str]]] = [
+    ("PurchasedBy", re.compile(r"purchas(?:ed|e)\s*b[yv]", re.I)),
+    ("FirstPartyName", re.compile(r"f(?:ir)?st\s*part[yv]", re.I)),
+    ("SecondPartyName", re.compile(r"second\s*part[yv]", re.I)),
+    ("StampDutyPaidBy", re.compile(r"stam[p]?\s*dut[yv]\s*pa[il]d?\s*b[yv]", re.I)),
+]
 
 # Fields returned to the Stamp Activity form (label mapping only — no positional OCR).
 EXTRACT_FIELDS = {
@@ -156,6 +174,8 @@ class StampOcrService:
             result["CertificateNumber"] = cert
         elif not result.get("CertificateNumber"):
             logger.warning("Certificate number not detected. Returning partial OCR fields: %s", sorted(result))
+
+        self._fill_independent_fields(result, normalized)
         return result
 
     @staticmethod
@@ -314,6 +334,9 @@ class StampOcrService:
             match = re.search(r"(SUBIN[\-A-Z0-9]+|[A-Z0-9][A-Z0-9\-]{8,})", value, re.IGNORECASE)
             return match.group(1).upper() if match else value[:200]
 
+        if field in {"PurchasedBy", "FirstPartyName", "SecondPartyName", "StampDutyPaidBy"}:
+            return self._clean_party_name(value)
+
         if field == "PropertyDescription":
             cleaned = value[:1000].strip()
             return "" if re.match(r"^(na|n/?a|nil|none|-)$", cleaned, re.I) else cleaned
@@ -380,6 +403,145 @@ class StampOcrService:
 
         return StampOcrService._parse_numeric_amount(original)
 
+    @classmethod
+    def _fill_independent_fields(cls, result: dict[str, str], normalized: str) -> None:
+        """Recover fields when Tesseract garbles labels so sequential slicing fails."""
+        unique = cls._extract_unique_reference(normalized)
+        if unique:
+            current = (result.get("UniqueDocumentReference") or "").strip().upper()
+            if not current or current.startswith("IN-UK") or unique.upper().startswith("SUBIN"):
+                result["UniqueDocumentReference"] = unique
+
+        if not result.get("CertificateIssuedDate"):
+            issued = cls._extract_issued_date_anywhere(normalized)
+            if issued:
+                result["CertificateIssuedDate"] = issued
+
+        if not result.get("AccountReference"):
+            account = cls._extract_account_reference(normalized)
+            if account:
+                result["AccountReference"] = account
+
+        current_amount = (result.get("StampDutyAmount") or "").strip()
+        if not current_amount or current_amount in {"0", "0.00"}:
+            amount = cls._extract_stamp_duty_independent(normalized)
+            if amount:
+                result["StampDutyAmount"] = amount
+
+        cls._fill_names_from_lines(result, normalized)
+
+    @staticmethod
+    def _extract_unique_reference(text: str) -> str | None:
+        match = _SUBIN_RE.search(text or "")
+        if not match:
+            return None
+        return re.sub(r"\s+", "", match.group(0).upper())
+
+    @classmethod
+    def _extract_issued_date_anywhere(cls, text: str) -> str | None:
+        match = _ISSUED_DATE_RE.search(text or "")
+        if not match:
+            return None
+        parsed = cls._parse_issued_date(match.group(1))
+        return parsed.isoformat() if parsed else None
+
+    @staticmethod
+    def _extract_account_reference(text: str) -> str | None:
+        match = _ACCOUNT_REF_RE.search(text or "")
+        if not match:
+            return None
+        value = re.sub(r"\s+", " ", match.group(0)).strip(" :;-|")
+        value = re.split(r"\b(?:Unique|Purchased|Description|Property)\b", value, maxsplit=1, flags=re.I)[0]
+        return value.strip(" :;-|")[:200] or None
+
+    @classmethod
+    def _extract_stamp_duty_independent(cls, text: str) -> str | None:
+        blob = text or ""
+        duty_match = re.search(
+            r"stam[p]?\s*dut[yv]\s*am[o0]?u?n?t.{0,80}?(\d+(?:\.\d+)?)\s*\(",
+            blob,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if duty_match:
+            amount = cls._quantize_amount(duty_match.group(1).replace(",", ""))
+            if amount:
+                return amount
+        word_match = re.search(
+            r"stam[p]?\s*dut[yv]\s*am[o0]?u?n?t.{0,80}?\(\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)\s+only\s*\)",
+            blob,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if word_match:
+            amount = cls._word_amount(word_match.group(1))
+            if amount:
+                return amount
+        candidates: list[tuple[Decimal, str]] = []
+        for match in _AMOUNT_WORDS_RE.finditer(blob):
+            numeric = cls._quantize_amount(match.group(1).replace(",", ""))
+            if not numeric:
+                continue
+            try:
+                value = Decimal(numeric)
+            except InvalidOperation:
+                continue
+            if value == 0:
+                continue
+            candidates.append((value, numeric))
+        if candidates:
+            candidates.sort(key=lambda item: item[0], reverse=True)
+            return candidates[0][1]
+        return None
+
+    @classmethod
+    def _fill_names_from_lines(cls, result: dict[str, str], normalized: str) -> None:
+        lines = [re.sub(r"\s+", " ", line).strip() for line in (normalized or "").split("\n")]
+        lines = [line for line in lines if line]
+        for index, line in enumerate(lines):
+            for field, pattern in _FUZZY_NAME_LABELS:
+                existing = (result.get(field) or "").strip()
+                if existing and not cls._looks_garbled_name(existing):
+                    continue
+                match = pattern.search(line)
+                if not match:
+                    continue
+                tail = line[match.end() :]
+                tail = re.sub(r"^\s*:?\s*", "", tail).strip(" :;-|'\"^")
+                if not tail and index + 1 < len(lines):
+                    nxt = lines[index + 1]
+                    if not any(other.search(nxt) for _, other in _FUZZY_NAME_LABELS):
+                        tail = re.sub(r"^\s*:?\s*", "", nxt).strip(" :;-|'\"^")
+                cleaned = cls._clean_party_name(tail)
+                if cleaned:
+                    result[field] = cleaned
+
+    @staticmethod
+    def _clean_party_name(value: str) -> str | None:
+        text = (value or "").strip(" :;-|'\"^")
+        if not text:
+            return None
+        text = re.split(
+            r"\b(?:Article|Stamp\s*Duty|First\s*Party|Second\s*Party|Purchased|Property|Consideration)\b",
+            text,
+            maxsplit=1,
+            flags=re.I,
+        )[0]
+        text = re.sub(r"\s+", " ", text).strip(" :;-|'\"^")
+        if not text or re.match(r"^(na|n/?a|nil|none|-)$", text, re.I):
+            return None
+        return text[:300]
+
+    @staticmethod
+    def _looks_garbled_name(value: str) -> bool:
+        blob = (value or "").lower()
+        if not blob:
+            return True
+        return bool(
+            re.search(
+                r"stamp\s*dut|article|first\s*part|second\s*part|purchas|fst\s*part|property|consideration",
+                blob,
+            )
+        )
+
     @staticmethod
     def _word_amount(text: str) -> str | None:
         words = {
@@ -415,13 +577,31 @@ class StampOcrService:
             "thousand": 1000,
         }
         tokens = re.findall(r"[a-z]+", text.lower())
+        skip = {"only", "rupees", "rupee", "rs", "and", "inr"}
+        tokens = [tok for tok in tokens if tok not in skip]
         if not tokens:
             return None
-        if len(tokens) == 1 and tokens[0] in words:
-            return StampOcrService._quantize_amount(str(words[tokens[0]]))
-        if tokens == ["one"]:
-            return StampOcrService._quantize_amount("1")
-        return None
+        total = 0
+        current = 0
+        recognized = False
+        for tok in tokens:
+            if tok not in words:
+                if recognized:
+                    break
+                continue
+            recognized = True
+            val = words[tok]
+            if val == 100:
+                current = max(current, 1) * 100
+            elif val == 1000:
+                current = max(current, 1) * 1000
+                total += current
+                current = 0
+            else:
+                current += val
+        if not recognized:
+            return None
+        return StampOcrService._quantize_amount(str(total + current))
 
     @staticmethod
     def _quantize_amount(raw: str) -> str | None:

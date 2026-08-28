@@ -165,6 +165,46 @@ Stamp Duty Amount(Rs.)
                     "Unlabeled certificate number",
                     f"got {unlabeled_fields.get('CertificateNumber')!r}",
                 )
+            vps_tesseract = """
+            Government of Uttarakhand
+            Certificate No. IN-UK93689528000869Y
+            Certifcate Issued Date
+            28-Aug-2026 05:47 PM
+            Account Reference NONACC (SV)/ uk1423304/ HALDWANI/ UK-NT
+            Unique Doc. Reference SUBIN-UKUK142330491727791236986Y
+            Purchased by PUSHPA JOSHI
+            Description of Document Article 5 Agreement or Memorandum of an agreement
+            Property Description NA
+            Consideration Price (Rs.) 0 (Zero)
+            Fst Party^ PUSHPA JOSHI
+            Second Party EE TD PWD BHOWALI
+            'stamp Duty Pai By PUSHPA JOSHI
+            Stamp Duty Amount(Rs.) 100 (One Hundred only)
+            """
+            vps_fields = ocr.parse_certificate_text(vps_tesseract)
+            vps_expectations = {
+                "CertificateNumber": "IN-UK93689528000869Y",
+                "CertificateIssuedDate": "2026-08-28",
+                "PurchasedBy": "PUSHPA JOSHI",
+                "FirstPartyName": "PUSHPA JOSHI",
+                "SecondPartyName": "EE TD PWD BHOWALI",
+                "StampDutyPaidBy": "PUSHPA JOSHI",
+                "StampDutyAmount": "100.00",
+                "UniqueDocumentReference": "SUBIN-UKUK142330491727791236986Y",
+            }
+            vps_ok = True
+            for key, expected in vps_expectations.items():
+                actual = vps_fields.get(key)
+                if actual != expected:
+                    fail(f"VPS Tesseract {key}", f"expected {expected!r}, got {actual!r}")
+                    vps_ok = False
+            if vps_ok:
+                ok("VPS-like Tesseract certificate extracts all required fields")
+            hundred = ocr._word_amount("One Hundred")
+            if hundred == "100.00":
+                ok("Word amount One Hundred -> 100.00")
+            else:
+                fail("Word amount One Hundred", f"got {hundred!r}")
             try:
                 partial = ocr.parse_certificate_text("First Party : RAM SINGH\nStamp Duty Amount(Rs.) : 1 (One only)")
                 if partial.get("FirstPartyName") == "RAM SINGH":
