@@ -3,101 +3,35 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260829duty1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260829row1">
 {% endblock %}
 
 {% block content %}
 <div class="stamp-erp-page">
-  <div class="row g-2 mb-2 align-items-stretch stamp-page-topbar">
-    <div class="col-xl-8 col-lg-7 order-2 order-lg-1">
-      <div class="jtcs-card stamp-filter-bar h-100">
-        <div class="stamp-section-head mb-2">Search &amp; Filter</div>
-        <div class="row g-2 align-items-end">
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterPeriod">Period</label>
-            <select class="form-select form-select-sm" id="stampFilterPeriod">
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="year">This Year</option>
-              <option value="custom" selected>Custom Range</option>
-            </select>
-          </div>
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterDateFrom">Date From</label>
-            <input type="date" class="form-control form-control-sm" id="stampFilterDateFrom" value="">
-          </div>
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterDateTo">Date To</label>
-            <input type="date" class="form-control form-control-sm" id="stampFilterDateTo" value="{{ default_date_to }}">
-          </div>
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterCert">Certificate No.</label>
-            <input type="text" class="form-control form-control-sm" id="stampFilterCert" placeholder="Search certificate">
-          </div>
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterMobile">Mobile</label>
-            <input type="tel" class="form-control form-control-sm" id="stampFilterMobile" maxlength="10" placeholder="10-digit">
-          </div>
-          <div class="col-6 col-md-4 col-lg-2">
-            <label class="form-label" for="stampFilterCustomer">Customer</label>
-            <input type="text" class="form-control form-control-sm" id="stampFilterCustomer" placeholder="Customer name">
-          </div>
-          <div class="col-12 col-lg-auto ms-lg-auto">
-            <div class="d-flex flex-wrap gap-1">
-              <button type="button" class="btn btn-primary btn-sm" id="stampFilterApplyBtn">
-                <i class="bi bi-funnel"></i> Apply
-              </button>
-              <button type="button" class="btn btn-outline-secondary btn-sm" id="stampFilterResetBtn">Reset</button>
-            </div>
-          </div>
-        </div>
+  <div class="stamp-dash-top">
+    <div class="stamp-dash-left">
+    <div class="jtcs-card stamp-period-panel">
+      <div class="stamp-period-head">
+        <div class="stamp-section-head mb-0">Period Summary</div>
+        <span class="small text-muted" id="stampPeriodLabel">Loading...</span>
       </div>
-    </div>
-    <div class="col-xl-4 col-lg-5 order-1 order-lg-2">
-      <div class="stamp-shcil-logins mb-2">
-        <button type="button" class="btn btn-sm stamp-login-deo" id="stampLoginDeoBtn">Login Deo</button>
-        <button type="button" class="btn btn-sm stamp-login-admin" id="stampLoginAdminBtn">Login Admin</button>
-      </div>
-      <div id="stampShcilLoginStatus" class="stamp-shcil-login-status d-none" role="status"></div>
-      <div id="stampShcilCreds" class="stamp-shcil-creds d-none">
-        <a id="stampShcilOpenLink" class="stamp-shcil-open-link" href="#" target="_blank" rel="noopener">Open SHCIL login page</a>
-        <div class="stamp-shcil-cred-line">
-          <span>User ID</span>
-          <strong id="stampShcilUserIdText"></strong>
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyUserBtn">Copy</button>
-        </div>
-        <div class="stamp-shcil-cred-line">
-          <span>Password</span>
-          <strong id="stampShcilPasswordText"></strong>
-          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyPassBtn">Copy</button>
-        </div>
-      </div>
-      <div id="stampMobileGate" class="jtcs-card stamp-mobile-gate stamp-mobile-gate-top">
+      <div class="stamp-period-body">
+      <div class="stamp-period-grid" id="stampPeriodGrid"></div>
+      <div id="stampMobileGate" class="stamp-mobile-gate stamp-mobile-gate-inline">
         <div class="stamp-section-head">Start Stamp Activity</div>
-        <p class="small text-muted mb-2">Enter mobile number to begin. The form will clear each new entry.</p>
-        <div class="d-flex flex-wrap gap-2 align-items-end">
-          <div class="flex-grow-1" style="min-width: 140px;">
-            <label class="form-label" for="stampMobileInput">Enter Mobile Number:</label>
+        <p class="small text-muted stamp-mobile-gate-hint">Enter mobile to begin.</p>
+        <div class="stamp-mobile-gate-row">
+          <div class="stamp-mobile-gate-field">
+            <label class="form-label" for="stampMobileInput">Mobile</label>
             <input type="tel" class="form-control form-control-sm" id="stampMobileInput" maxlength="10" inputmode="numeric" autocomplete="tel" placeholder="10-digit mobile">
           </div>
           <button type="button" class="btn btn-primary btn-sm" id="stampMobileContinueBtn">Continue</button>
         </div>
-        <div id="stampMobileError" class="small text-danger mt-2 d-none"></div>
+        <div id="stampMobileError" class="small text-danger mt-1 d-none"></div>
+      </div>
       </div>
     </div>
-  </div>
-
-  <div class="jtcs-card stamp-period-panel mb-2">
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-      <div class="stamp-section-head mb-0">Period Summary</div>
-      <span class="small text-muted" id="stampPeriodLabel">Loading...</span>
-    </div>
-    <div class="stamp-period-grid" id="stampPeriodGrid"></div>
-  </div>
-
-  <div class="stamp-records-layout mb-2">
-  <div class="jtcs-card stamp-data-grid-panel">
+    <div class="jtcs-card stamp-data-grid-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
       <div class="d-flex flex-wrap align-items-center gap-2">
         <div class="stamp-section-head mb-0">Stamp Activity Records</div>
@@ -170,49 +104,111 @@
         <ul class="pagination pagination-sm mb-0" id="stampPagerNav"></ul>
       </nav>
     </div>
-  </div>
+    </div>
+    </div>
 
-  <aside class="jtcs-card stamp-duty-group-card" aria-label="Stamp duty paid grouping">
-    <div class="stamp-duty-group-head">
-      <div class="stamp-section-head mb-0">Stamp Duty Paid</div>
-      <span class="stamp-duty-group-hint" id="stampDutyGroupHint">All dates</span>
-    </div>
-    <div class="stamp-duty-group-filters">
-      <div>
-        <label class="form-label" for="stampDutyGroupFrom">Date From</label>
-        <input type="date" class="form-control form-control-sm" id="stampDutyGroupFrom" value="">
+    <div class="stamp-dash-right">
+      <div class="jtcs-card stamp-filter-bar">
+        <div class="stamp-section-head mb-2">Search &amp; Filter</div>
+        <div class="stamp-filter-grid">
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterPeriod">Period</label>
+            <select class="form-select form-select-sm" id="stampFilterPeriod">
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+              <option value="year">This Year</option>
+              <option value="custom" selected>Custom Range</option>
+            </select>
+          </div>
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterDateFrom">Date From</label>
+            <input type="date" class="form-control form-control-sm" id="stampFilterDateFrom" value="">
+          </div>
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterDateTo">Date To</label>
+            <input type="date" class="form-control form-control-sm" id="stampFilterDateTo" value="{{ default_date_to }}">
+          </div>
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterCert">Certificate No.</label>
+            <input type="text" class="form-control form-control-sm" id="stampFilterCert" placeholder="Search certificate">
+          </div>
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterMobile">Mobile</label>
+            <input type="tel" class="form-control form-control-sm" id="stampFilterMobile" maxlength="10" placeholder="10-digit">
+          </div>
+          <div class="stamp-filter-field">
+            <label class="form-label" for="stampFilterCustomer">Customer</label>
+            <input type="text" class="form-control form-control-sm" id="stampFilterCustomer" placeholder="Customer name">
+          </div>
+          <div class="stamp-filter-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="stampFilterApplyBtn">
+              <i class="bi bi-funnel"></i> Apply
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="stampFilterResetBtn">Reset</button>
+          </div>
+        </div>
       </div>
-      <div>
-        <label class="form-label" for="stampDutyGroupTo">Date To</label>
-        <input type="date" class="form-control form-control-sm" id="stampDutyGroupTo" value="">
+      <div class="stamp-shcil-logins">
+        <button type="button" class="btn btn-sm stamp-login-deo" id="stampLoginDeoBtn">Login Deo</button>
+        <button type="button" class="btn btn-sm stamp-login-admin" id="stampLoginAdminBtn">Login Admin</button>
       </div>
-      <div class="stamp-duty-group-filter-actions">
-        <button type="button" class="btn btn-primary btn-sm" id="stampDutyGroupApplyBtn">Apply</button>
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="stampDutyGroupClearBtn">Clear</button>
+      <div id="stampShcilLoginStatus" class="stamp-shcil-login-status d-none" role="status"></div>
+      <div id="stampShcilCreds" class="stamp-shcil-creds d-none">
+        <a id="stampShcilOpenLink" class="stamp-shcil-open-link" href="#" target="_blank" rel="noopener">Open SHCIL login page</a>
+        <div class="stamp-shcil-cred-line">
+          <span>User ID</span>
+          <strong id="stampShcilUserIdText"></strong>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyUserBtn">Copy</button>
+        </div>
+        <div class="stamp-shcil-cred-line">
+          <span>Password</span>
+          <strong id="stampShcilPasswordText"></strong>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="stampShcilCopyPassBtn">Copy</button>
+        </div>
       </div>
+      <aside class="jtcs-card stamp-duty-group-card" aria-label="Stamp duty paid grouping">
+        <div class="stamp-duty-group-head">
+          <div class="stamp-section-head mb-0">Stamp Duty Paid</div>
+          <span class="stamp-duty-group-hint" id="stampDutyGroupHint">All dates</span>
+        </div>
+        <div class="stamp-duty-group-filters">
+          <div>
+            <label class="form-label" for="stampDutyGroupFrom">Date From</label>
+            <input type="date" class="form-control form-control-sm" id="stampDutyGroupFrom" value="">
+          </div>
+          <div>
+            <label class="form-label" for="stampDutyGroupTo">Date To</label>
+            <input type="date" class="form-control form-control-sm" id="stampDutyGroupTo" value="">
+          </div>
+          <div class="stamp-duty-group-filter-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="stampDutyGroupApplyBtn">Apply</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="stampDutyGroupClearBtn">Clear</button>
+          </div>
+        </div>
+        <div class="stamp-duty-group-table-wrap">
+          <table class="table table-sm mb-0" id="stampDutyGroupTable">
+            <thead>
+              <tr>
+                <th>Value</th>
+                <th class="text-end">nos</th>
+                <th class="text-end">amount</th>
+              </tr>
+            </thead>
+            <tbody id="stampDutyGroupBody">
+              <tr><td colspan="3" class="text-muted text-center py-3">Loading…</td></tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <th>Total</th>
+                <th class="text-end" id="stampDutyGroupTotalNos">0</th>
+                <th class="text-end" id="stampDutyGroupTotalAmt">0.00</th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </aside>
     </div>
-    <div class="stamp-duty-group-table-wrap">
-      <table class="table table-sm mb-0" id="stampDutyGroupTable">
-        <thead>
-          <tr>
-            <th>Value</th>
-            <th class="text-end">nos</th>
-            <th class="text-end">amount</th>
-          </tr>
-        </thead>
-        <tbody id="stampDutyGroupBody">
-          <tr><td colspan="3" class="text-muted text-center py-3">Loading…</td></tr>
-        </tbody>
-        <tfoot>
-          <tr>
-            <th>Total</th>
-            <th class="text-end" id="stampDutyGroupTotalNos">0</th>
-            <th class="text-end" id="stampDutyGroupTotalAmt">0.00</th>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  </aside>
   </div>
 
   <div class="modal fade" id="stampCardDetailModal" tabindex="-1" aria-labelledby="stampCardDetailTitle" aria-hidden="true">
