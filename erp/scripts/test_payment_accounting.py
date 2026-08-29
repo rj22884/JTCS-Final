@@ -38,10 +38,12 @@ def run_tests() -> int:
     bill_b = f"ITR-TEST-{suffix}-B"
     bill_c = f"ITR-TEST-{suffix}-C"
     bill_h = f"ITR-TEST-{suffix}-H"
+    bill_i = f"ITR-TEST-{suffix}-I"
     inv_a = f"JTCS-TEST-{suffix}-A"
     inv_b = f"JTCS-TEST-{suffix}-B"
     inv_c = f"JTCS-TEST-{suffix}-C"
     inv_h = f"JTCS-TEST-{suffix}-H"
+    inv_i = f"JTCS-TEST-{suffix}-I"
 
     def ok(name: str) -> None:
         print(f"  OK  {name}")
@@ -340,6 +342,40 @@ def run_tests() -> int:
             else:
                 ok("H Recon deletes leftover Follow-up debit when invoice exists")
 
+            # I. Payment Received must not overwrite the GST invoice daily
+            gst_i = post_invoice(bill_i, inv_i, Decimal("2000.00"))
+            gst_id = gst_i.TransactionID
+            pay_i = svc.post_payment(
+                bill_no=bill_i,
+                work_date=today,
+                entry_amount=Decimal("2000.00"),
+                payment_lines=lines(Decimal("2000.00")),
+                customer_name=customer_name,
+                customer_id=customer_id,
+                remarks="test I",
+                created_by=created_by,
+                existing_daily=gst_i,
+            )
+            db.session.flush()
+            gst_i = db.session.get(JTCSDailyTransaction, gst_id)
+            found_i = acct.find_receipt_daily(bill_i)
+            dates_i = svc.payment_dates_by_bills({bill_i})
+            if gst_i is None or Decimal(str(gst_i.SaleAmount)) != Decimal("2000.00"):
+                fail("I gst debit kept", f"sale={None if gst_i is None else gst_i.SaleAmount}")
+            elif (gst_i.SubWorkType or "") != "Sale / Service Invoice":
+                fail("I gst subwork kept", f"sub={gst_i.SubWorkType}")
+            elif pay_i is None or pay_i.TransactionID == gst_id:
+                fail("I separate receipt", f"pay={None if pay_i is None else pay_i.TransactionID}")
+            elif found_i is None or found_i.TransactionID != pay_i.TransactionID:
+                fail("I find_receipt_daily", f"found={None if found_i is None else found_i.TransactionID}")
+            elif not dates_i.get(bill_i.upper()):
+                fail("I payment dates", f"dates={dates_i}")
+            elif (pay_i.WorkType or "") != "ITR":
+                fail("I receipt work type", f"work={pay_i.WorkType}")
+            else:
+                ok("I Payment Received does not overwrite GST invoice daily")
+            cleanup(bill_i)
+
             db.session.commit()
 
             # J. Customer ledger closing for scenario A
@@ -374,7 +410,7 @@ def run_tests() -> int:
                 ok("J Customer Ledger invoice Dr 1500 / payment Cr 1500 / closing 0")
 
         finally:
-            cleanup(bill_a, bill_b, bill_c, bill_h)
+            cleanup(bill_a, bill_b, bill_c, bill_h, bill_i)
             db.session.commit()
 
     if failures:

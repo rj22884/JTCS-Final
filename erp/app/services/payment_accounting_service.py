@@ -366,8 +366,40 @@ class PaymentAccountingService:
                 return daily
         return None
 
+    def _dailies_for_bill_any_work_type(self, bill_no: str) -> list[JTCSDailyTransaction]:
+        """All posted dailies for a tally bill, including leftover wrong-WorkType receipts."""
+        ref = self.norm_ref(bill_no)
+        if not ref:
+            return []
+        seen: dict[int, JTCSDailyTransaction] = {}
+        for daily in self._module_dailies(ref):
+            seen[int(daily.TransactionID)] = daily
+        extras = db.session.scalars(
+            select(JTCSDailyTransaction)
+            .where(
+                JTCSDailyTransaction.Status == "Posted",
+                or_(
+                    JTCSDailyTransaction.ReferenceNo == ref,
+                    JTCSDailyTransaction.Remarks == ref,
+                ),
+            )
+            .order_by(JTCSDailyTransaction.TransactionID.asc())
+        ).all()
+        for daily in extras:
+            seen.setdefault(int(daily.TransactionID), daily)
+        return list(seen.values())
+
+    def _cannot_reuse_as_receipt(self, daily: JTCSDailyTransaction | None) -> bool:
+        if daily is None:
+            return True
+        if self._is_gst_sale_daily(daily):
+            return True
+        if self._is_followup_sale_daily(daily) and not self._is_combined_daily(daily):
+            return True
+        return False
+
     def find_receipt_daily(self, bill_no: str) -> JTCSDailyTransaction | None:
-        dailies = self._module_dailies(bill_no)
+        dailies = self._dailies_for_bill_any_work_type(bill_no)
         receipts = [d for d in dailies if self._is_receipt_daily(d)]
         if receipts:
             return receipts[-1]
@@ -377,7 +409,11 @@ class PaymentAccountingService:
         return None
 
     def find_receipt_dailies(self, bill_no: str) -> list[JTCSDailyTransaction]:
-        return [d for d in self._module_dailies(bill_no) if self._is_receipt_daily(d) or self._is_combined_daily(d)]
+        return [
+            d
+            for d in self._dailies_for_bill_any_work_type(bill_no)
+            if self._is_receipt_daily(d) or self._is_combined_daily(d)
+        ]
 
     def allocated_receipt_amount(
         self,
@@ -755,10 +791,12 @@ class PaymentAccountingService:
         self.ensure_gst_invoice_posted(ref)
         billed = self.invoice_amount(ref)
         canonical = existing_daily
-        if canonical is not None and self._is_followup_sale_daily(canonical) and not self._is_combined_daily(canonical):
+        if self._cannot_reuse_as_receipt(canonical):
             canonical = None
         if canonical is None:
             canonical = self.find_receipt_daily(ref)
+        if self._cannot_reuse_as_receipt(canonical):
+            canonical = None
 
         exclude_id = canonical.TransactionID if canonical is not None else None
         already_paid = self.allocated_receipt_amount(ref, exclude_daily_id=exclude_id)
@@ -801,6 +839,8 @@ class PaymentAccountingService:
 
         if canonical is None:
             canonical = self.find_receipt_daily(ref)
+        if self._cannot_reuse_as_receipt(canonical):
+            canonical = None
 
         payload_header = {
             "TransactionDate": work_date,
@@ -824,6 +864,7 @@ class PaymentAccountingService:
         if canonical is not None:
             self._clear_payments(canonical)
             canonical.TransactionDate = work_date
+            canonical.WorkType = self.work_type or canonical.WorkType
             canonical.CustomerID = customer_id
             canonical.CustomerName = customer_name
             canonical.ReferenceNo = ref

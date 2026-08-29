@@ -94,11 +94,11 @@ class ThankYouLetterService:
     @staticmethod
     def format_payment_account(payment_account: str | None) -> str:
         text = (payment_account or "").strip()
-        if text.lower() == "cash" or text.upper() == "CASH":
+        if text.lower() == "cash":
             return "Cash"
-        if text in {"—", "-", "–"}:
-            return "Cash"
-        return text or "—"
+        if text in {"—", "-", "–", ""}:
+            return "—"
+        return text
 
     @classmethod
     def _draw_header(cls, draw: ImageDraw.ImageDraw, width: int) -> int:

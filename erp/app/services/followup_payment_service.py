@@ -3,14 +3,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import or_, select
-
 from app.extensions import db
-from app.models.transactions import (
-    JTCSDailyTransaction,
-    JTCSDailyTransactionPayment,
-    JtcsBankTransaction,
-)
+from app.models.transactions import JTCSDailyTransaction
 from app.repositories.transaction_repository import (
     BankTransactionRepository,
     DailyTransactionPaymentRepository,
@@ -182,101 +176,19 @@ class FollowupPaymentService:
         if not normalized:
             return {}
 
-        # All followup sale + receipt dailies per bill (not only the latest row).
-        daily_rows = db.session.execute(
-            select(
-                JTCSDailyTransaction.ReferenceNo,
-                JTCSDailyTransaction.TransactionID,
-                JTCSDailyTransaction.TransactionDate,
-            )
-            .where(
-                JTCSDailyTransaction.ReferenceNo.in_(normalized),
-                JTCSDailyTransaction.WorkType == self.work_type,
-                or_(
-                    JTCSDailyTransaction.SubWorkType == self.sub_work_type,
-                    JTCSDailyTransaction.SubWorkType == self.receipt_sub_work_type,
-                ),
-            )
-            .order_by(
-                JTCSDailyTransaction.ReferenceNo.asc(),
-                JTCSDailyTransaction.TransactionID.desc(),
-            )
-        ).all()
-
-        bill_daily: dict[str, tuple[int, date | None]] = {}
-        txn_to_bill: dict[int, str] = {}
-        txn_ids: list[int] = []
-        for ref, txn_id, txn_date in daily_rows:
-            key = (ref or "").strip().upper()
-            if not key:
-                continue
-            txn_to_bill[int(txn_id)] = key
-            txn_ids.append(int(txn_id))
-            if key not in bill_daily:
-                bill_daily[key] = (int(txn_id), txn_date)
-
-        if not bill_daily:
-            return {}
-
-        # Dates from payment lines → linked bank rows.
-        pay_rows = db.session.execute(
-            select(
-                JTCSDailyTransactionPayment.TransactionID,
-                JtcsBankTransaction.TransactionDate,
-            )
-            .outerjoin(
-                JtcsBankTransaction,
-                JtcsBankTransaction.JtcsBankTransactionID
-                == JTCSDailyTransactionPayment.BankTransactionID,
-            )
-            .where(JTCSDailyTransactionPayment.TransactionID.in_(txn_ids))
-        ).all()
-
-        # Also include bank rows linked by SourceRecordID / SourceID.
-        bank_rows = db.session.execute(
-            select(
-                JtcsBankTransaction.SourceRecordID,
-                JtcsBankTransaction.SourceID,
-                JtcsBankTransaction.TransactionDate,
-            ).where(
-                JtcsBankTransaction.SourceTable == self.bank_repo.SOURCE_TABLE,
-                or_(
-                    JtcsBankTransaction.SourceRecordID.in_(txn_ids),
-                    JtcsBankTransaction.SourceID.in_(txn_ids),
-                ),
-            )
-        ).all()
-
-        dates_by_bill: dict[str, set[str]] = {bill: set() for bill in bill_daily}
-        for txn_id, txn_date in pay_rows:
-            bill = txn_to_bill.get(int(txn_id))
-            if not bill or not txn_date:
-                continue
-            dates_by_bill[bill].add(txn_date.isoformat())
-
-        for source_record_id, source_id, txn_date in bank_rows:
-            if not txn_date:
-                continue
-            for candidate in (source_record_id, source_id):
-                if candidate is None:
-                    continue
-                bill = txn_to_bill.get(int(candidate))
-                if bill:
-                    dates_by_bill[bill].add(txn_date.isoformat())
-                    break
-
-        # Fallback: daily work/transaction date when no bank dates exist.
-        for bill, (_, daily_date) in bill_daily.items():
-            if dates_by_bill[bill]:
-                continue
-            if daily_date:
-                dates_by_bill[bill].add(daily_date.isoformat())
-
-        return {
-            bill: sorted(date_set)
-            for bill, date_set in dates_by_bill.items()
-            if date_set
-        }
+        dates_by_bill: dict[str, list[str]] = {}
+        for bill in normalized:
+            found: set[str] = set()
+            for daily in self.accounting.find_receipt_dailies(bill):
+                for line in self.load_payment_lines(daily):
+                    raw = (line.get("payment_date") or "").strip()
+                    if raw:
+                        found.add(raw[:10])
+                if daily.TransactionDate:
+                    found.add(daily.TransactionDate.isoformat())
+            if found:
+                dates_by_bill[bill] = sorted(found)
+        return dates_by_bill
 
     @classmethod
     def format_payment_account_label(
@@ -391,6 +303,8 @@ class FollowupPaymentService:
                     masked_account_number=masked,
                 ),
             }
+            if not payment_date and daily.TransactionDate:
+                payment_date = daily.TransactionDate.isoformat()
             if payment_date:
                 line_data["payment_date"] = payment_date
             lines.append(line_data)

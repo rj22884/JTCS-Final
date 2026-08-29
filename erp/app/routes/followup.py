@@ -308,11 +308,22 @@ def _make_activity_blueprint(
             "invoice_no": record.get("bill_no") or "",
         }
         if module_code == "ITR":
-            kwargs["payment_account"] = ThankYouLetterService.format_payment_account(
-                FollowupPaymentService(module_code).payment_account_for_letter(
-                    record.get("bill_no") or ""
-                )
-            )
+            pay_svc = FollowupPaymentService(module_code)
+            account = pay_svc.payment_account_for_letter(record.get("bill_no") or "")
+            if not (account or "").strip():
+                labels = []
+                for payment in record.get("payments") or []:
+                    label = (
+                        payment.get("label")
+                        or payment.get("masked_account_number")
+                        or payment.get("account_number")
+                        or payment.get("bank_name")
+                        or ""
+                    ).strip()
+                    if label and label != "Udhaar" and label not in labels:
+                        labels.append(label)
+                account = ", ".join(labels)
+            kwargs["payment_account"] = ThankYouLetterService.format_payment_account(account)
             udhaar_amt = FollowupService.udhaar_amount_for_record(record)
             if udhaar_amt > 0.001:
                 try:

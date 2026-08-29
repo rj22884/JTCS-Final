@@ -290,6 +290,12 @@
     );
   }
 
+  function defaultPaymentAmount() {
+    const bill = els.billAmount?.value;
+    if (bill && parseFloat(bill) > 0) return String(bill);
+    return "0";
+  }
+
   function syncPaymentDatesBeforeSave() {
     if (!paymentLineHasDate) return;
     const fallback = defaultPaymentDate();
@@ -410,7 +416,9 @@
     amount.step = "0.01";
     amount.min = "0";
     amount.className = "form-control form-control-sm fu-payment-amount";
-    amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
+    amount.value = options.amount != null && options.amount !== "" && parseFloat(options.amount) > 0
+      ? options.amount
+      : defaultPaymentAmount();
     amount.addEventListener("input", updatePaymentSummary);
     amountWrap.appendChild(amountLabel);
     amountWrap.appendChild(amount);
@@ -444,7 +452,9 @@
     rowsData.forEach(function (row) { addPaymentLine(row); });
     if (els.billAmount?.value && rowsData.length === 1) {
       const firstAmount = els.paymentLines.querySelector(".fu-payment-amount");
-      if (firstAmount && !firstAmount.value) firstAmount.value = els.billAmount.value;
+      if (firstAmount && (!firstAmount.value || parseFloat(firstAmount.value) === 0)) {
+        firstAmount.value = els.billAmount.value;
+      }
     }
     updatePaymentSummary();
   }

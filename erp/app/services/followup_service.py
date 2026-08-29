@@ -1292,7 +1292,7 @@ class FollowupService:
                     for line in payment_lines:
                         if not line.get("payment_date"):
                             raise ValueError("Each payment line must have a date.")
-                existing_daily = payment_service.find_daily_for_bill(new_bill)
+                existing_daily = payment_service.accounting.find_receipt_daily(new_bill)
                 daily_work_date = work_date if self.module_code == "ITR" else (bill_date or work_date)
                 payment_service.post_payment(
                     bill_no=new_bill,
