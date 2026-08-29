@@ -529,20 +529,6 @@
         setMissing(pane, data.missing_labels || []);
         clearSecretInputs(pane, data.secret_configured || null);
 
-        // WhatsApp: Save → Facebook OAuth (password / OTP on Facebook, not in ERP)
-        if (provider === "whatsapp_meta" && data.auto_connect && data.authorize_url) {
-          showAlert(
-            alertEl,
-            data.message ||
-              "Saved. Facebook login page open ho rahi hai — password/OTP wahan daalein…",
-            "info"
-          );
-          window.setTimeout(function () {
-            window.location.href = data.authorize_url;
-          }, 600);
-          return;
-        }
-
         var msg = data.message || "Settings saved successfully";
         showToast(msg, "success");
         showAlert(alertEl, msg, "success");
@@ -809,20 +795,39 @@
     var connectBtn = root.querySelector("[data-intset-connect-meta]");
     if (connectBtn) {
       connectBtn.addEventListener("click", async function () {
+        var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
         connectBtn.disabled = true;
         try {
+          if (pane) {
+            var saved = await api(
+              urls.settings,
+              {
+                method: "POST",
+                body: { provider: "whatsapp_meta", values: collectValues(pane) },
+              },
+              root
+            );
+            applyValues(pane, saved.field_values || saved.values || {}, saved);
+            setMissing(pane, saved.missing_labels || []);
+            clearSecretInputs(pane, saved.secret_configured || null);
+          }
           var data = await api(
             urls.connect + (urls.connect.indexOf("?") >= 0 ? "&" : "?") + "format=json",
             {},
             root
           );
           if (data.authorize_url) {
+            showAlert(
+              alertEl,
+              "Facebook login page open ho rahi hai — password/OTP wahan daalein…",
+              "info"
+            );
             window.location.href = data.authorize_url;
             return;
           }
-          showAlert(alertEl, data.error || "Unable to start Connect Meta.", "danger");
+          showAlert(alertEl, data.error || "Unable to start Connect Facebook.", "danger");
         } catch (err) {
-          showAlert(alertEl, err.message || "Connect Meta failed", "danger");
+          showAlert(alertEl, err.message || "Connect Facebook failed", "danger");
         } finally {
           connectBtn.disabled = false;
         }

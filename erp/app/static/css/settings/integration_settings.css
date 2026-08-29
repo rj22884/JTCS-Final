@@ -301,3 +301,8 @@
   border-radius: 0.5rem;
   padding: 0.65rem 0.75rem;
 }
+
+.intset-req {
+  color: #dc2626;
+  font-weight: 700;
+}

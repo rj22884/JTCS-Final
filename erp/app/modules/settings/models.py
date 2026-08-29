@@ -9,6 +9,16 @@ PROVIDERS: tuple[dict[str, str], ...] = tuple(
     {"code": p["code"], "label": p["label"]} for p in PROVIDER_CATALOG
 )
 
+# Fields required to send WhatsApp messages (optional profile/status fields are not).
+WHATSAPP_SEND_REQUIRED_KEYS: tuple[str, ...] = (
+    "app_id",
+    "app_secret",
+    "phone_number_id",
+    "waba_id",
+    "access_token",
+    "webhook_verify_token",
+)
+
 # Keys that must be encrypted at rest and masked on read.
 SECRET_KEYS: frozenset[str] = frozenset(
     {

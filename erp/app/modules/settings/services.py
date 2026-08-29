@@ -18,7 +18,13 @@ from app.modules.settings.crypto import (
     mask_secret,
     MASK_PLACEHOLDER,
 )
-from app.modules.settings.models import PROVIDER_FIELDS, PROVIDERS, get_providers_catalog, is_secret_key
+from app.modules.settings.models import (
+    PROVIDER_FIELDS,
+    PROVIDERS,
+    WHATSAPP_SEND_REQUIRED_KEYS,
+    get_providers_catalog,
+    is_secret_key,
+)
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.shared.audit_service import AuditService
 from app.utils.smtp_health import check_smtp_connection, mask_email
@@ -218,53 +224,16 @@ class IntegrationSettingsService:
             result["clear_secrets"] = True
             result["password_updated"] = password_updated
 
-        # WhatsApp: after App ID + App Secret are saved, start Meta OAuth so the
-        # admin enters Facebook password / OTP on Facebook's page (never in ERP).
         if provider == "whatsapp_meta":
-            result.update(self._whatsapp_auto_connect_payload())
+            missing = result.get("missing_labels") or []
+            if missing:
+                result["message"] = (
+                    "Settings saved. WhatsApp send ke liye * wale fields complete karein, "
+                    "phir Connect Facebook."
+                )
+            else:
+                result["message"] = "Settings saved successfully."
         return result
-
-    def _whatsapp_auto_connect_payload(self) -> dict[str, Any]:
-        """Return authorize_url when credentials exist but Meta is not connected yet."""
-        cfg = self.get_provider_config_decrypted("whatsapp_meta")
-        app_id = (cfg.get("app_id") or "").strip()
-        app_secret = (cfg.get("app_secret") or "").strip()
-        access_token = (cfg.get("access_token") or "").strip()
-        phone_id = (cfg.get("phone_number_id") or "").strip()
-        status = (cfg.get("connection_status") or "").strip().lower()
-
-        if not app_id or not app_secret:
-            return {
-                "auto_connect": False,
-                "message": "App ID aur App Secret save karein, phir Connect Meta.",
-            }
-        # Already fully connected — do not force another OAuth redirect on every Save.
-        if access_token and phone_id and status.startswith("connected"):
-            return {
-                "auto_connect": False,
-                "message": "Settings saved. WhatsApp already connected.",
-            }
-        try:
-            from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
-
-            oauth = WhatsAppOAuthService(self, self.repository).start_connect()
-            return {
-                "auto_connect": True,
-                "authorize_url": oauth.get("authorize_url"),
-                "redirect_uri": oauth.get("redirect_uri"),
-                "message": (
-                    "Credentials saved. Facebook login page open ho rahi hai — "
-                    "password aur OTP Facebook par enter karein. ERP Facebook password store nahi karta."
-                ),
-            }
-        except ValueError as exc:
-            return {"auto_connect": False, "message": str(exc)}
-        except Exception as exc:
-            logger.exception("Auto Connect Meta after save failed")
-            return {
-                "auto_connect": False,
-                "message": f"Saved, but Connect Meta could not start: {exc}",
-            }
 
     def validate_whatsapp_payload(
         self,
@@ -274,8 +243,8 @@ class IntegrationSettingsService:
     ) -> list[str]:
         """Validate WhatsApp fields on Save (respects masked secrets).
 
-        Progressive setup: App ID + App Secret alone is allowed before Connect Meta.
-        Once discovery/token fields exist, full required set is enforced.
+        Save only requires App ID + App Secret. Send-required token/WABA/phone
+        fields are optional here so Connect Facebook can fill them later.
         """
         cfg = self.get_provider_config_decrypted("whatsapp_meta")
         merged = dict(cfg)
@@ -291,27 +260,10 @@ class IntegrationSettingsService:
         errors = []
         if not (merged.get("app_id") or "").strip():
             errors.append("App ID is required")
-        # App secret: required in merged (existing encrypted or newly posted)
         secret_posted = payload.get("app_secret") if payload else None
         if not (merged.get("app_secret") or "").strip():
             if not (secret_posted and not is_masked_or_unchanged(str(secret_posted))):
                 errors.append("App Secret is required")
-
-        advanced = any(
-            (merged.get(k) or "").strip()
-            for k in ("business_id", "waba_id", "phone_number_id", "access_token")
-        )
-        if advanced:
-            for key, label in (
-                ("business_id", "Business ID"),
-                ("waba_id", "WhatsApp Business Account ID"),
-                ("phone_number_id", "Phone Number ID"),
-                ("access_token", "Access Token"),
-                ("webhook_verify_token", "Webhook Verify Token"),
-                ("webhook_url", "Webhook URL"),
-            ):
-                if not (merged.get(key) or "").strip():
-                    errors.append(f"{label} is required")
         return errors
 
     def validate_smtp_payload(self, payload: dict[str, Any]) -> list[str]:
@@ -652,18 +604,7 @@ class IntegrationSettingsService:
 
     @staticmethod
     def whatsapp_missing_fields(cfg: dict[str, str]) -> list[str]:
-        required = [
-            "app_id",
-            "app_secret",
-            "access_token",
-            "business_id",
-            "waba_id",
-            "phone_number_id",
-            "graph_api_version",
-            "webhook_verify_token",
-            "webhook_url",
-        ]
-        return [k for k in required if not (cfg.get(k) or "").strip()]
+        return [k for k in WHATSAPP_SEND_REQUIRED_KEYS if not (cfg.get(k) or "").strip()]
 
     @staticmethod
     def _missing_labels(keys: list[str]) -> list[str]:

@@ -55,7 +55,7 @@ class WhatsAppOAuthService:
         app_id = (cfg.get("app_id") or "").strip()
         app_secret = (cfg.get("app_secret") or "").strip()
         if not app_id or not app_secret:
-            raise ValueError("Save App ID and App Secret before clicking Connect Meta.")
+            raise ValueError("Save App ID and App Secret before clicking Connect Facebook.")
 
         version = (cfg.get("graph_api_version") or DEFAULT_GRAPH_VERSION).strip() or DEFAULT_GRAPH_VERSION
         redirect_uri = (cfg.get("oauth_redirect_uri") or "").strip() or self.default_oauth_redirect_uri()
