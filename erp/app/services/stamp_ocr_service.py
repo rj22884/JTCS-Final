@@ -176,12 +176,20 @@ class StampOcrService:
             logger.warning("Certificate number not detected. Returning partial OCR fields: %s", sorted(result))
 
         self._fill_independent_fields(result, normalized)
+        self._fill_colon_line_values(result, normalized)
         return result
+
+    @staticmethod
+    def _strip_leading_separators(value: str) -> str:
+        """Drop OCR leftovers before the real value (`:`, `>`, `|`)."""
+        return re.sub(r"^[\s:>|]+", "", value or "").strip()
 
     @staticmethod
     def _normalize_ocr_text(text: str) -> str:
         """Normalize OCR output: line breaks around colons, spaces, punctuation."""
         t = re.sub(r"\r\n?", "\n", text or "")
+        # Tesseract/EasyOCR often reads the label colon as ">"
+        t = re.sub(r"([A-Za-z0-9.)])\s*>\s*", r"\1: ", t)
         t = re.sub(r"\n\s*:\s*\n", "\n: ", t)
         t = re.sub(r"\n\s*:\s*", "\n: ", t)
         t = re.sub(r"(\w)\s*\n\s*:\s*", r"\1: ", t)
@@ -207,7 +215,7 @@ class StampOcrService:
         for index, (_start, end, field) in enumerate(markers):
             next_start = markers[index + 1][0] if index + 1 < len(markers) else len(flat_text)
             chunk = flat_text[end:next_start]
-            chunk = re.sub(r"^\s*:?\s*", "", chunk)
+            chunk = StampOcrService._strip_leading_separators(chunk)
             chunk = chunk.strip(" :;-|")
             if chunk:
                 values[field] = chunk
@@ -309,7 +317,7 @@ class StampOcrService:
         return None
 
     def _clean_field_value(self, field: str, raw: str) -> str | None:
-        value = raw.strip()
+        value = self._strip_leading_separators(raw)
         if not value:
             return None
 
@@ -505,18 +513,42 @@ class StampOcrService:
                 if not match:
                     continue
                 tail = line[match.end() :]
-                tail = re.sub(r"^\s*:?\s*", "", tail).strip(" :;-|'\"^")
+                tail = cls._strip_leading_separators(tail).strip(" :;-|'\"^")
                 if not tail and index + 1 < len(lines):
                     nxt = lines[index + 1]
                     if not any(other.search(nxt) for _, other in _FUZZY_NAME_LABELS):
-                        tail = re.sub(r"^\s*:?\s*", "", nxt).strip(" :;-|'\"^")
+                        tail = cls._strip_leading_separators(nxt).strip(" :;-|'\"^")
                 cleaned = cls._clean_party_name(tail)
                 if cleaned:
                     result[field] = cleaned
 
+    @classmethod
+    def _fill_colon_line_values(cls, result: dict[str, str], normalized: str) -> None:
+        """Certificate rows are `Label : value` — take everything after `:` or `>`."""
+        lines = [re.sub(r"\s+", " ", line).strip() for line in (normalized or "").split("\n")]
+        cleaner = cls()
+        for line in lines:
+            if not line:
+                continue
+            for field, label_pattern in DOCUMENT_LABELS:
+                match = re.match(
+                    rf"^(?:{label_pattern})\s*[:.>]\s*(.*)$",
+                    line,
+                    re.IGNORECASE,
+                )
+                if not match:
+                    continue
+                raw = cls._strip_leading_separators(match.group(1))
+                if not raw:
+                    break
+                cleaned = cleaner._clean_field_value(field, raw)
+                if cleaned:
+                    result[field] = cleaned
+                break
+
     @staticmethod
     def _clean_party_name(value: str) -> str | None:
-        text = (value or "").strip(" :;-|'\"^")
+        text = StampOcrService._strip_leading_separators(value).strip(" :;-|'\"^")
         if not text:
             return None
         text = re.split(

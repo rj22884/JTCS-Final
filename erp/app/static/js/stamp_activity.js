@@ -924,7 +924,7 @@
         "<td class=\"text-end stamp-col-num\">" + escapeHtml(row.stamp_duty_amount || "") + "</td>" +
         "<td class=\"text-end stamp-col-num\">" + escapeHtml(row.sale_amount || "") + "</td>" +
         "<td class=\"stamp-col-date\">" + escapeHtml(formatDisplayDate(row.transaction_date)) + "</td>" +
-        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(row.customer_name || "") + "\">" + escapeHtml(row.customer_name || "") + "</td>" +
+        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "\">" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "</td>" +
         "<td class=\"stamp-col-mobile\">" + escapeHtml(row.mobile_number || "") + "</td>" +
         "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(row.payment_mode || "") + "\">" + escapeHtml(row.payment_mode || "") + "</td>" +
         "<td class=\"text-end stamp-col-daily\">" + escapeHtml(row.transaction_id != null ? String(row.transaction_id) : "") + "</td>" +
@@ -993,18 +993,21 @@
     }
   }
 
+  function applySessionMobile(mobile) {
+    const digits = normalizeMobile(mobile);
+    if (!digits) return false;
+    mobileConfirmed = true;
+    if (els.mobileHidden) els.mobileHidden.value = digits;
+    if (els.mobileInput) els.mobileInput.value = digits;
+    refreshMobileCustomers(digits);
+    return true;
+  }
+
   async function openRecordFromGrid(stampId) {
     if (!stampId) return;
     const row = mainGridRows.find(function (r) { return r.stamp_id === stampId; });
-    if (row?.mobile_number && els.mobileHidden) {
-      mobileConfirmed = true;
-      els.mobileHidden.value = normalizeMobile(row.mobile_number);
-      if (els.mobileInput) els.mobileInput.value = els.mobileHidden.value;
-      refreshMobileCustomers(els.mobileHidden.value);
-    } else if (!mobileConfirmed) {
-      alert("Enter mobile number and click Continue to edit a record.");
-      els.mobileInput?.focus();
-      return;
+    if (row?.mobile_number) {
+      applySessionMobile(row.mobile_number);
     }
     await loadStampRecord(stampId);
     openEntryModal();
@@ -1282,7 +1285,7 @@
     };
     Object.keys(optionalMap).forEach(function (key) {
       const input = document.getElementById(optionalMap[key]);
-      if (input && record[key] != null) input.value = record[key];
+      if (input && record[key] != null) input.value = sanitizeOcrValue(record[key]);
     });
     if (record.TransactionDate) {
       if (els.transactionDate) els.transactionDate.value = record.TransactionDate;
@@ -1333,6 +1336,7 @@
     } else {
       setManualFieldLock(true);
     }
+    applySessionMobile(record.MobileNumber || record.mobile_number || "");
     enterSaveMode();
     ensureTransactionDateEditable();
   }
@@ -1868,10 +1872,17 @@
       return false;
     }
     const mobile = normalizeMobile(els.mobileInput.value);
+    const keepOpenEdit = !!resolveEditingStampId();
     mobileConfirmed = true;
     if (els.mobileHidden) els.mobileHidden.value = mobile;
     setMobileError("");
     els.mobileGate?.classList.add("d-none");
+    if (keepOpenEdit) {
+      refreshMobileCustomers(mobile);
+      openEntryModal();
+      enterSaveMode();
+      return true;
+    }
     clearEntryFields();
     resetPaymentLines();
     if (els.modeManual) els.modeManual.checked = true;
@@ -2122,11 +2133,15 @@
     updatePaymentSummary();
   }
 
+  function sanitizeOcrValue(value) {
+    return String(value == null ? "" : value).replace(/^[\s:>|]+/, "").trim();
+  }
+
   function populateFields(fields, options) {
     options = options || {};
     Object.keys(fieldMap).forEach(function (key) {
       const input = document.getElementById(fieldMap[key]);
-      if (input && fields[key] != null) input.value = fields[key];
+      if (input && fields[key] != null) input.value = sanitizeOcrValue(fields[key]);
     });
     if (options.preserveSale && fields.SaleAmount != null && els.saleAmount) {
       els.saleAmount.value = fields.SaleAmount;
@@ -2626,10 +2641,16 @@
   }
 
   form.addEventListener("submit", function (e) {
-    if (!mobileConfirmed || !els.mobileHidden?.value) {
+    const sessionMobile = normalizeMobile(els.mobileHidden?.value || els.mobileInput?.value || "");
+    if (sessionMobile && els.mobileHidden) {
+      els.mobileHidden.value = sessionMobile;
+      mobileConfirmed = true;
+    }
+    if (!normalizeMobile(els.mobileHidden?.value || "")) {
       e.preventDefault();
-      resetToMobileGate();
       setMobileError("Enter mobile number before saving.");
+      els.mobileGate?.classList.remove("d-none");
+      els.mobileInput?.focus();
       return;
     }
     enableFormFieldsForSubmit();

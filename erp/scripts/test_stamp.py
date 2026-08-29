@@ -200,6 +200,57 @@ Stamp Duty Amount(Rs.)
                     vps_ok = False
             if vps_ok:
                 ok("VPS-like Tesseract certificate extracts all required fields")
+
+            colon_cert = """
+            Government of Uttarakhand
+            Certificate No. : IN-UK93722611761431Y
+            Certificate Issued Date : 29-Aug-2026 11:13 AM
+            Account Reference : NONACC (SV)/ uk1423304/ HALDWANI/ UK-NT
+            Unique Doc. Reference : SUBIN-UKUK142330491797720836181Y
+            Purchased by : LAL CHAND KUMAWAT
+            Description of Document : Article 35 Lease
+            Property Description : NA
+            Consideration Price (Rs.) : 0 (Zero)
+            First Party : PREM BALLABH SHARMA SO NARAYAN DATT SHARMA
+            Second Party : LAL CHAND KUMAWAT
+            Stamp Duty Paid By : LAL CHAND KUMAWAT
+            Stamp Duty Amount(Rs.) : 100 (One Hundred only)
+            """
+            colon_fields = ocr.parse_certificate_text(colon_cert)
+            colon_expectations = {
+                "CertificateNumber": "IN-UK93722611761431Y",
+                "PurchasedBy": "LAL CHAND KUMAWAT",
+                "StampDutyPaidBy": "LAL CHAND KUMAWAT",
+                "FirstPartyName": "PREM BALLABH SHARMA SO NARAYAN DATT SHARMA",
+                "SecondPartyName": "LAL CHAND KUMAWAT",
+                "DescriptionOfDocument": "Article 35 Lease",
+                "StampDutyAmount": "100.00",
+            }
+            colon_ok = True
+            for key, expected in colon_expectations.items():
+                actual = colon_fields.get(key)
+                if actual != expected:
+                    fail(f"Colon-line {key}", f"expected {expected!r}, got {actual!r}")
+                    colon_ok = False
+            if colon_ok:
+                ok("Colon-line certificate maps values after ':'")
+
+            gt_cert = """
+            Purchased by > LAL CHAND KUMAWAT
+            Stamp Duty Paid By > LAL CHAND KUMAWAT
+            First Party > PREM BALLABH SHARMA
+            Second Party > LAL CHAND KUMAWAT
+            Stamp Duty Amount(Rs.) : 100 (One Hundred only)
+            Certificate No. : IN-UK93722611761431Y
+            """
+            gt_fields = ocr.parse_certificate_text(gt_cert)
+            if gt_fields.get("PurchasedBy") == "LAL CHAND KUMAWAT" and gt_fields.get("StampDutyPaidBy") == "LAL CHAND KUMAWAT":
+                ok("OCR '>' prefix is stripped from party names")
+            else:
+                fail(
+                    "OCR '>' prefix",
+                    f"PurchasedBy={gt_fields.get('PurchasedBy')!r} PaidBy={gt_fields.get('StampDutyPaidBy')!r}",
+                )
             hundred = ocr._word_amount("One Hundred")
             if hundred == "100.00":
                 ok("Word amount One Hundred -> 100.00")
@@ -491,7 +542,7 @@ Stamp Duty Amount(Rs.)
             customer_mobile = "9876543210"
             customer_name = f"Stamp Customer {suffix}"
             before = {c.CustomerID for c in master_repo.list_customers_by_mobile(customer_mobile)}
-            stamp_service.save_stamp_activity(
+            mobile_save = stamp_service.save_stamp_activity(
                 {
                     "EntryMode": "manual",
                     "CertificateNumber": customer_cert,
@@ -510,6 +561,24 @@ Stamp Duty Amount(Rs.)
                 fail("CustomerMaster isolation", f"stamp saved {customer_name!r} into CustomerMaster")
             else:
                 ok("Stamp party name is not written to CustomerMaster")
+            saved = stamp_service.get_record(mobile_save.stamp_id)
+            if saved.get("MobileNumber") == customer_mobile:
+                ok("Stamp save persists MobileNumber on StampMaster")
+            else:
+                fail("Stamp mobile persist", f"expected {customer_mobile!r}, got {saved.get('MobileNumber')!r}")
+            from app.repositories.stamp_repository import StampGridFilters
+
+            grid = stamp_service.grid_data(
+                StampGridFilters(certificate=customer_cert, mobile=customer_mobile)
+            )
+            grid_row = next(
+                (r for r in grid.get("rows") or [] if r.get("certificate_number") == customer_cert),
+                None,
+            )
+            if grid_row and grid_row.get("mobile_number") == customer_mobile:
+                ok("Stamp grid shows saved mobile without CustomerMaster")
+            else:
+                fail("Stamp grid mobile", f"got {grid_row!r}")
         except Exception as exc:
             fail("CustomerMaster isolation", str(exc))
 

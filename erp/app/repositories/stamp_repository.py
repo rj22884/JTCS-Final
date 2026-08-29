@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
@@ -20,6 +21,8 @@ from app.models.transactions import (
 )
 from app.utils.shcil_bank_accounts import stamp_purchase_account_id
 
+_STAMP_SCHEMA_READY = False
+
 
 @dataclass
 class StampGridFilters:
@@ -31,8 +34,32 @@ class StampGridFilters:
 
 
 class StampRepository:
+    @staticmethod
+    def _display_name(*parts: str) -> str:
+        for part in parts:
+            text = re.sub(r"^[\s:>|]+", "", (part or "").strip())
+            if text:
+                return text
+        return ""
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
+        self.ensure_schema()
+
+    def ensure_schema(self) -> None:
+        global _STAMP_SCHEMA_READY
+        if _STAMP_SCHEMA_READY:
+            return
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.StampMaster', N'MobileNumber') IS NULL
+                    ALTER TABLE dbo.StampMaster ADD MobileNumber NVARCHAR(15) NULL;
+                """
+            )
+        )
+        self.session.commit()
+        _STAMP_SCHEMA_READY = True
 
     def get_by_id(self, stamp_id: int) -> StampMaster | None:
         return self.session.get(StampMaster, stamp_id)
@@ -204,10 +231,11 @@ class StampRepository:
                     else "",
                     "payment_mode": payment_mode,
                     "bank_account_id": bank_account_id,
-                    "customer_name": (daily.CustomerName if daily else "")
-                    or stamp.StampDutyPaidBy
-                    or stamp.FirstPartyName
-                    or "",
+                    "customer_name": self._display_name(
+                        daily.CustomerName if daily else "",
+                        stamp.StampDutyPaidBy,
+                        stamp.FirstPartyName,
+                    ),
                     "created_by": stamp.CreatedBy,
                 }
             )
@@ -262,7 +290,13 @@ class StampRepository:
         stmt = self._apply_transaction_filters(stmt, filters)
         mobile = "".join(ch for ch in (filters.mobile or "") if ch.isdigit())
         if mobile:
-            stmt = stmt.where(CustomerMaster.MobileNumber.like(f"%{mobile}%"))
+            needle = f"%{mobile}%"
+            stmt = stmt.where(
+                or_(
+                    CustomerMaster.MobileNumber.like(needle),
+                    StampMaster.MobileNumber.like(needle),
+                )
+            )
         return stmt
 
     def _cash_account_match(self):
@@ -723,6 +757,9 @@ class StampRepository:
                 )
                 if daily.CustomerID:
                     mobile_number = mobiles.get(daily.CustomerID, "")
+            stamp_mobile = (getattr(stamp, "MobileNumber", None) or "").strip()
+            if stamp_mobile:
+                mobile_number = stamp_mobile
             rows.append(
                 {
                     "stamp_id": stamp.StampID,
@@ -736,14 +773,15 @@ class StampRepository:
                     "transaction_date": daily.TransactionDate.isoformat()
                     if daily and daily.TransactionDate
                     else "",
-                    "customer_name": (daily.CustomerName if daily else "")
-                    or stamp.StampDutyPaidBy
-                    or stamp.FirstPartyName
-                    or "",
+                    "customer_name": self._display_name(
+                        daily.CustomerName if daily else "",
+                        stamp.StampDutyPaidBy,
+                        stamp.FirstPartyName,
+                    ),
                     "mobile_number": mobile_number,
-                    "first_party": stamp.FirstPartyName or "",
+                    "first_party": self._display_name(stamp.FirstPartyName),
                     "payment_mode": payment_mode,
-                    "stamp_duty_paid_by": stamp.StampDutyPaidBy or "",
+                    "stamp_duty_paid_by": self._display_name(stamp.StampDutyPaidBy),
                     "is_ocr_entry": stamp.StampID in ocr_stamp_ids,
                     "has_cash": has_cash,
                     "has_non_cash": has_non_cash,

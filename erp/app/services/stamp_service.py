@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import socket
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -400,12 +401,19 @@ class StampService:
         customer_name = stamp_duty_paid_by or None
         customer_id = None
         mobile_digits = "".join(ch for ch in (form.get("MobileNumber") or "") if ch.isdigit())[-10:]
-        if len(mobile_digits) == 10:
-            matches = self.master_repo.list_customers_by_mobile(mobile_digits)
+        saved_mobile = mobile_digits if len(mobile_digits) == 10 else None
+        if saved_mobile:
+            matches = self.master_repo.list_customers_by_mobile(saved_mobile)
             if matches:
                 customer_id = matches[0].CustomerID
                 if not customer_name:
                     customer_name = matches[0].CustomerName
+        if not saved_mobile and stamp_id:
+            existing_stamp = self.stamp_repo.get_by_id(stamp_id)
+            existing_mobile = (getattr(existing_stamp, "MobileNumber", None) or "").strip() if existing_stamp else ""
+            existing_digits = "".join(ch for ch in existing_mobile if ch.isdigit())[-10:]
+            if len(existing_digits) == 10:
+                saved_mobile = existing_digits
         if customer_id is None and stamp_id:
             existing_for_customer = self.stamp_repo.get_daily_for_stamp(stamp_id)
             if existing_for_customer and existing_for_customer.CustomerID:
@@ -437,6 +445,7 @@ class StampService:
             "Remarks": self._clean(form.get("Remarks"), 500),
             "MachineName": machine_name,
             "IPAddress": ip_address,
+            "MobileNumber": saved_mobile,
         }
 
         reference_no = (form.get("ReferenceNo") or certificate_number).strip()
@@ -629,13 +638,13 @@ class StampService:
             else "",
             "AccountReference": stamp.AccountReference or "",
             "UniqueDocumentReference": stamp.UniqueDocumentReference or "",
-            "PurchasedBy": stamp.PurchasedBy or "",
-            "DescriptionOfDocument": stamp.DescriptionOfDocument or "",
-            "PropertyDescription": stamp.PropertyDescription or "",
+            "PurchasedBy": self._clean(stamp.PurchasedBy) or "",
+            "DescriptionOfDocument": self._clean(stamp.DescriptionOfDocument, 1000) or "",
+            "PropertyDescription": self._clean(stamp.PropertyDescription, 1000) or "",
             "ConsiderationPrice": str(stamp.ConsiderationPrice or ""),
-            "FirstPartyName": stamp.FirstPartyName or "",
-            "SecondPartyName": stamp.SecondPartyName or "",
-            "StampDutyPaidBy": stamp.StampDutyPaidBy or "",
+            "FirstPartyName": self._clean(stamp.FirstPartyName) or "",
+            "SecondPartyName": self._clean(stamp.SecondPartyName) or "",
+            "StampDutyPaidBy": self._clean(stamp.StampDutyPaidBy) or "",
             "StampDutyAmount": str(stamp.StampDutyAmount or ""),
             "SaleAmount": str(daily.SaleAmount if daily else ""),
             "TransactionDate": daily.TransactionDate.isoformat()
@@ -648,6 +657,8 @@ class StampService:
             "BankAccountID": payments[0]["bank_account_id"] if payments else "",
             "payments": payments,
             "payment_split_count": daily.PaymentSplitCount if daily else 1,
+            "MobileNumber": (getattr(stamp, "MobileNumber", None) or "").strip(),
+            "mobile_number": (getattr(stamp, "MobileNumber", None) or "").strip(),
         }
 
     def delete_stamp(self, stamp_id: int, *, deleted_by: str) -> str:
@@ -682,7 +693,7 @@ class StampService:
 
     @staticmethod
     def _clean(value, max_len: int = 300) -> str | None:
-        text = (value or "").strip()
+        text = re.sub(r"^[\s:>|]+", "", (value or "").strip())
         return text[:max_len] if text else None
 
     @staticmethod

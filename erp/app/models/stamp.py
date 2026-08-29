@@ -63,6 +63,7 @@ class StampMaster(db.Model):
     MachineName: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
 
     IPAddress: Mapped[str | None] = mapped_column(Unicode(45), nullable=True)
+    MobileNumber: Mapped[str | None] = mapped_column(Unicode(15), nullable=True)
 
 
 
