@@ -18,6 +18,7 @@ from flask import current_app
 logger = logging.getLogger(__name__)
 
 MASK_PLACEHOLDER = "********"
+SECRET_INPUT_MASK = "*********************"
 UNCHANGED_SENTINEL = "__UNCHANGED__"
 
 
@@ -87,7 +88,7 @@ def is_masked_or_unchanged(value: str | None) -> bool:
     text = str(value).strip()
     if text == "" or text == UNCHANGED_SENTINEL:
         return True
-    if text == MASK_PLACEHOLDER or text.startswith(MASK_PLACEHOLDER):
+    if text in {MASK_PLACEHOLDER, SECRET_INPUT_MASK} or text.startswith(MASK_PLACEHOLDER):
         return True
     # Browser / UI may show a different number of bullets than MASK_PLACEHOLDER.
     if text and set(text) <= {"*"}:

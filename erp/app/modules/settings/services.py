@@ -17,6 +17,7 @@ from app.modules.settings.crypto import (
     mask_access_token,
     mask_secret,
     MASK_PLACEHOLDER,
+    SECRET_INPUT_MASK,
 )
 from app.modules.settings.models import (
     PROVIDER_FIELDS,
@@ -72,9 +73,11 @@ class IntegrationSettingsService:
             cipher = stored.get(key)
             plain = decrypt_value(cipher) if cipher not in (None, "") else ""
             if is_secret_key(key):
-                # NEVER send decrypted or masked secrets into password inputs.
-                values[key] = ""
-                secret_configured[key] = bool((plain or "").strip())
+                # Never send the real secret. Show a fixed mask so the admin
+                # can see the value is saved. Save treats this mask as unchanged.
+                configured = bool((plain or "").strip())
+                values[key] = SECRET_INPUT_MASK if configured else ""
+                secret_configured[key] = configured
             else:
                 # Never surface token-like values in non-secret ID fields.
                 if key in {"business_id", "waba_id", "phone_number_id"} and self._looks_like_token(plain):
@@ -162,13 +165,14 @@ class IntegrationSettingsService:
             if is_secret_key(key):
                 text = value.strip()
                 # Blank / placeholder → keep existing encrypted secret (never clear it).
-                if not text or text in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL}:
+                if not text or text in {MASK_PLACEHOLDER, SECRET_INPUT_MASK, UNCHANGED_SENTINEL}:
                     continue
                 if set(text) <= {"*"}:
                     # Browser/UI mask autofill — do not overwrite the real secret.
                     logger.info("Secret %s.%s skipped (mask autofill)", provider, key)
                     continue
                 stored = encrypt_value(text)
+                logger.info("Secret %s.%s updated (encrypted)", provider, key)
                 if key == "smtp_password":
                     password_updated = True
             else:

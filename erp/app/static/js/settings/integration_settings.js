@@ -79,6 +79,13 @@
     return true;
   }
 
+  var SECRET_MASK = "*********************";
+
+  function isSecretMask(value) {
+    var text = String(value == null ? "" : value).trim();
+    return !text || /^\*+$/.test(text);
+  }
+
   function collectValues(pane) {
     var values = {};
     pane.querySelectorAll("[data-setting-key]").forEach(function (input) {
@@ -86,6 +93,10 @@
       if (!key) return;
       if (input.getAttribute("data-input-type") === "checkbox" || input.type === "checkbox") {
         values[key] = input.checked ? "true" : "false";
+        return;
+      }
+      if (input.getAttribute("data-secret") === "1" && isSecretMask(input.value)) {
+        values[key] = input.getAttribute("data-has-secret") === "1" ? SECRET_MASK : "";
         return;
       }
       values[key] = input.value;
@@ -96,7 +107,6 @@
   function clearSecretInputs(pane, secretConfigured) {
     if (!pane) return;
     pane.querySelectorAll("[data-secret='1']").forEach(function (input) {
-      input.value = "";
       input.type = "password";
       var key = input.getAttribute("data-setting-key");
       var configured =
@@ -104,6 +114,13 @@
           ? !!secretConfigured[key]
           : input.getAttribute("data-has-secret") === "1";
       input.setAttribute("data-has-secret", configured ? "1" : "0");
+      if (configured) {
+        input.value = SECRET_MASK;
+        input.placeholder = "Saved (encrypted)";
+      } else {
+        input.value = "";
+        input.placeholder = "Enter new password";
+      }
       var badge = pane.querySelector('[data-secret-badge="' + key + '"]');
       if (badge) badge.classList.toggle("d-none", !configured);
       var toggleBtn = pane.querySelector(
@@ -206,8 +223,6 @@
         return;
       }
       if (input.getAttribute("data-secret") === "1") {
-        // Never prefill secrets from server (including masked placeholders).
-        input.value = "";
         return;
       }
       if (input.getAttribute("data-input-type") === "checkbox" || input.type === "checkbox") {
@@ -490,8 +505,8 @@
         var copyTarget = document.querySelector(copyBtnSecret.getAttribute("data-target") || "");
         if (!copyTarget) return;
         var typed = copyTarget.value || "";
-        if (!typed) {
-          showAlert(alertEl, "Nothing to copy — type a value first.", "warning");
+        if (!typed || isSecretMask(typed)) {
+          showAlert(alertEl, "Nothing to copy — type a new value first. Saved secrets are never copied.", "warning");
           return;
         }
         var done = function () {
@@ -564,10 +579,6 @@
           var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
           applyValues(pane, data.field_values || {}, data);
           var input = pane && pane.querySelector('[data-setting-key="webhook_verify_token"]');
-          if (input) {
-            input.value = "";
-            input.setAttribute("data-has-secret", "1");
-          }
           clearSecretInputs(pane, data.secret_configured || { webhook_verify_token: true });
           showAlert(alertEl, data.message || "Verify token generated.", "success");
           if (data.webhook_verify_token_plain) {
@@ -853,6 +864,15 @@
       setStatusBadge(pane, status, code);
       var missingRaw = pane.getAttribute("data-initial-missing") || "";
       if (missingRaw) setMissing(pane, missingRaw.split("|").filter(Boolean));
+      clearSecretInputs(pane, null);
+    });
+
+    root.querySelectorAll("[data-secret='1']").forEach(function (input) {
+      input.addEventListener("focus", function () {
+        if (input.getAttribute("data-has-secret") === "1" && isSecretMask(input.value)) {
+          input.select();
+        }
+      });
     });
 
     if (new URLSearchParams(window.location.search).get("wa_connect") === "1") {

@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260829wa1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260829wa2">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
@@ -240,10 +240,10 @@
                          data-setting-key="{{ field.key }}"
                          data-secret="1"
                          data-has-secret="{{ '1' if secret_cfg.get(field.key) else '0' }}"
-                         value=""
+                         value="{% if secret_cfg.get(field.key) %}*********************{% endif %}"
                          autocomplete="new-password"
                          spellcheck="false"
-                         placeholder="Enter new password">
+                         placeholder="{{ 'Saved (encrypted)' if secret_cfg.get(field.key) else 'Enter new password' }}">
                   <button type="button"
                           class="btn btn-outline-secondary intset-secret-toggle"
                           data-intset-toggle-secret
@@ -262,8 +262,8 @@
                   </button>
                 </div>
                 <div class="intset-secret-hint">
-                  Leave blank to keep existing password.
-                  Show/Hide and Copy apply only to what you type here — stored secrets are never revealed.
+                  <code>*********************</code> means the secret is already saved.
+                  Type a new value only to replace it. Stored secrets are never revealed or copied.
                 </div>
               </div>
             {% elif field.input == 'checkbox' %}
@@ -495,6 +495,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260829wa1"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260829wa2"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}
