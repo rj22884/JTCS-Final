@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260827fit1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260829duty1">
 {% endblock %}
 
 {% block content %}
@@ -96,7 +96,8 @@
     <div class="stamp-period-grid" id="stampPeriodGrid"></div>
   </div>
 
-  <div class="jtcs-card stamp-data-grid-panel mb-2">
+  <div class="stamp-records-layout mb-2">
+  <div class="jtcs-card stamp-data-grid-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
       <div class="d-flex flex-wrap align-items-center gap-2">
         <div class="stamp-section-head mb-0">Stamp Activity Records</div>
@@ -169,6 +170,49 @@
         <ul class="pagination pagination-sm mb-0" id="stampPagerNav"></ul>
       </nav>
     </div>
+  </div>
+
+  <aside class="jtcs-card stamp-duty-group-card" aria-label="Stamp duty paid grouping">
+    <div class="stamp-duty-group-head">
+      <div class="stamp-section-head mb-0">Stamp Duty Paid</div>
+      <span class="stamp-duty-group-hint" id="stampDutyGroupHint">All dates</span>
+    </div>
+    <div class="stamp-duty-group-filters">
+      <div>
+        <label class="form-label" for="stampDutyGroupFrom">Date From</label>
+        <input type="date" class="form-control form-control-sm" id="stampDutyGroupFrom" value="">
+      </div>
+      <div>
+        <label class="form-label" for="stampDutyGroupTo">Date To</label>
+        <input type="date" class="form-control form-control-sm" id="stampDutyGroupTo" value="">
+      </div>
+      <div class="stamp-duty-group-filter-actions">
+        <button type="button" class="btn btn-primary btn-sm" id="stampDutyGroupApplyBtn">Apply</button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="stampDutyGroupClearBtn">Clear</button>
+      </div>
+    </div>
+    <div class="stamp-duty-group-table-wrap">
+      <table class="table table-sm mb-0" id="stampDutyGroupTable">
+        <thead>
+          <tr>
+            <th>Value</th>
+            <th class="text-end">nos</th>
+            <th class="text-end">amount</th>
+          </tr>
+        </thead>
+        <tbody id="stampDutyGroupBody">
+          <tr><td colspan="3" class="text-muted text-center py-3">Loading…</td></tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            <th class="text-end" id="stampDutyGroupTotalNos">0</th>
+            <th class="text-end" id="stampDutyGroupTotalAmt">0.00</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </aside>
   </div>
 
   <div class="modal fade" id="stampCardDetailModal" tabindex="-1" aria-labelledby="stampCardDetailTitle" aria-hidden="true">
@@ -526,6 +570,7 @@
   window.STAMP_RECORD_URL = {{ url_for('stamp.stamp_record', stamp_id=0) | tojson }};
   window.STAMP_DELETE_URL = {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }};
   window.STAMP_GRID_URL = {{ url_for('stamp.stamp_grid_data') | tojson }};
+  window.STAMP_DUTY_GROUP_URL = {{ url_for('stamp.stamp_duty_grouping') | tojson }};
   window.STAMP_CARD_DETAIL_URL = {{ url_for('stamp.stamp_card_detail') | tojson }};
   window.STAMP_DEFAULT_DATE_FROM = {{ default_date_from | tojson }};
   window.STAMP_DEFAULT_DATE_TO = {{ default_date_to | tojson }};
@@ -537,5 +582,5 @@
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260829edit1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260829duty1"></script>
 {% endblock %}

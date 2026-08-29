@@ -85,6 +85,14 @@
     cardDetailHead: document.getElementById("stampCardDetailHead"),
     cardDetailBody: document.getElementById("stampCardDetailBody"),
     cardDetailEmpty: document.getElementById("stampCardDetailEmpty"),
+    dutyGroupFrom: document.getElementById("stampDutyGroupFrom"),
+    dutyGroupTo: document.getElementById("stampDutyGroupTo"),
+    dutyGroupApplyBtn: document.getElementById("stampDutyGroupApplyBtn"),
+    dutyGroupClearBtn: document.getElementById("stampDutyGroupClearBtn"),
+    dutyGroupBody: document.getElementById("stampDutyGroupBody"),
+    dutyGroupHint: document.getElementById("stampDutyGroupHint"),
+    dutyGroupTotalNos: document.getElementById("stampDutyGroupTotalNos"),
+    dutyGroupTotalAmt: document.getElementById("stampDutyGroupTotalAmt"),
   };
 
   let mainGridRows = [];
@@ -333,6 +341,66 @@
     const num = parseFloat(value || "0");
     if (Number.isNaN(num)) return "0.00";
     return num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatDutyValue(value) {
+    const num = parseFloat(value || "0");
+    if (Number.isNaN(num)) return "0";
+    if (Math.abs(num - Math.round(num)) < 0.001) return String(Math.round(num));
+    return num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function dutyGroupDateParams() {
+    const params = new URLSearchParams();
+    const from = (els.dutyGroupFrom?.value || "").trim();
+    const to = (els.dutyGroupTo?.value || "").trim();
+    if (from) params.set("date_from", from);
+    if (to) params.set("date_to", to);
+    return params;
+  }
+
+  function renderDutyGrouping(data) {
+    const rows = (data && data.rows) || [];
+    if (els.dutyGroupHint) {
+      const from = (data && data.date_from) || "";
+      const to = (data && data.date_to) || "";
+      if (!from && !to) els.dutyGroupHint.textContent = "All dates";
+      else if (from && to) els.dutyGroupHint.textContent = from + " – " + to;
+      else els.dutyGroupHint.textContent = from ? ("From " + from) : ("Upto " + to);
+    }
+    if (els.dutyGroupBody) {
+      if (!rows.length) {
+        els.dutyGroupBody.innerHTML =
+          '<tr><td colspan="3" class="text-muted text-center py-3">No duty records</td></tr>';
+      } else {
+        els.dutyGroupBody.innerHTML = rows.map(function (row) {
+          return (
+            "<tr>" +
+            "<td>" + escapeHtml(formatDutyValue(row.value)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(String(row.nos || 0)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(formatMoney(row.amount)) + "</td>" +
+            "</tr>"
+          );
+        }).join("");
+      }
+    }
+    if (els.dutyGroupTotalNos) els.dutyGroupTotalNos.textContent = String((data && data.total_nos) || 0);
+    if (els.dutyGroupTotalAmt) els.dutyGroupTotalAmt.textContent = formatMoney((data && data.total_amount) || 0);
+  }
+
+  async function loadDutyGrouping() {
+    if (!window.STAMP_DUTY_GROUP_URL || !els.dutyGroupBody) return;
+    try {
+      const res = await fetch(window.STAMP_DUTY_GROUP_URL + "?" + dutyGroupDateParams().toString(), {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load duty grouping.");
+      renderDutyGrouping(data);
+    } catch (err) {
+      if (els.dutyGroupHint) els.dutyGroupHint.textContent = err.message || "Load failed";
+      renderDutyGrouping({ rows: [], total_nos: 0, total_amount: "0.00" });
+    }
   }
 
   function toIsoDate(date) {
@@ -1029,6 +1097,7 @@
       }
       renderPeriodSummary(data.period_summary || {});
       renderMainDataGrid(data.rows || [], options);
+      loadDutyGrouping();
     } catch (err) {
       if (els.periodLabel) els.periodLabel.textContent = err.message || "Load failed";
       renderPeriodSummary({});
@@ -2719,6 +2788,24 @@
   els.filterResetBtn?.addEventListener("click", function (e) {
     e.preventDefault();
     resetGridFilters();
+  });
+  els.dutyGroupApplyBtn?.addEventListener("click", function (e) {
+    e.preventDefault();
+    loadDutyGrouping();
+  });
+  els.dutyGroupClearBtn?.addEventListener("click", function (e) {
+    e.preventDefault();
+    if (els.dutyGroupFrom) els.dutyGroupFrom.value = "";
+    if (els.dutyGroupTo) els.dutyGroupTo.value = "";
+    loadDutyGrouping();
+  });
+  [els.dutyGroupFrom, els.dutyGroupTo].forEach(function (input) {
+    input?.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        loadDutyGrouping();
+      }
+    });
   });
   if (els.pageSize) {
     const storedSize = readStoredPageSize();

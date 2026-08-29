@@ -549,6 +549,9 @@ class StampService:
     def grid_data(self, filters: StampGridFilters) -> dict:
         return self.stamp_repo.list_grid_data(filters)
 
+    def duty_grouping(self, *, date_from: date | None = None, date_to: date | None = None) -> dict:
+        return self.stamp_repo.duty_grouping(date_from=date_from, date_to=date_to)
+
     CARD_LABELS = {
         "total_sale_amount": "Total Stamp Sale Amount",
         "payment_received_amount": "Payment Received Amount",

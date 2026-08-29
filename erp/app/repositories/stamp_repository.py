@@ -789,6 +789,53 @@ class StampRepository:
             )
         return rows
 
+    def duty_grouping(
+        self,
+        *,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> dict:
+        """Group active stamps by duty value. Blank dates = all dates."""
+        work_date = func.coalesce(
+            JTCSDailyTransaction.TransactionDate,
+            StampMaster.CertificateIssuedDate,
+        )
+        base = (
+            select(StampMaster.StampID, StampMaster.StampDutyAmount)
+            .select_from(StampMaster)
+            .outerjoin(JTCSDailyTransaction, JTCSDailyTransaction.StampID == StampMaster.StampID)
+            .where(StampMaster.IsActive == True)  # noqa: E712
+            .where(StampMaster.StampDutyAmount.is_not(None))
+            .where(StampMaster.StampDutyAmount > 0)
+        )
+        if date_from:
+            base = base.where(work_date >= date_from)
+        if date_to:
+            base = base.where(work_date <= date_to)
+        subq = base.distinct().subquery()
+        stmt = (
+            select(subq.c.StampDutyAmount, func.count())
+            .group_by(subq.c.StampDutyAmount)
+            .order_by(subq.c.StampDutyAmount.asc())
+        )
+        rows: list[dict] = []
+        total_nos = 0
+        total_amount = Decimal("0.00")
+        for value, nos in self.session.execute(stmt).all():
+            duty = Decimal(str(value or 0)).quantize(Decimal("0.01"))
+            count = int(nos or 0)
+            amount = (duty * Decimal(count)).quantize(Decimal("0.01"))
+            rows.append({"value": str(duty), "nos": count, "amount": str(amount)})
+            total_nos += count
+            total_amount += amount
+        return {
+            "rows": rows,
+            "total_nos": total_nos,
+            "total_amount": str(total_amount.quantize(Decimal("0.01"))),
+            "date_from": date_from.isoformat() if date_from else "",
+            "date_to": date_to.isoformat() if date_to else "",
+        }
+
     def list_grid_data(self, filters: StampGridFilters) -> dict:
         rows = self.grid_rows(filters)
         period_summary = self.period_summary(filters)

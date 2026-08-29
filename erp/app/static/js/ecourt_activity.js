@@ -739,6 +739,175 @@
     });
   }
 
+  function hideSaleModalThen(done) {
+    const el = els.saleModalEl;
+    if (!saleModal || !el) {
+      return Promise.resolve().then(done);
+    }
+    return new Promise(function (resolve) {
+      const onHidden = function () {
+        el.removeEventListener("hidden.bs.modal", onHidden);
+        Promise.resolve()
+          .then(done)
+          .then(resolve, resolve);
+      };
+      el.addEventListener("hidden.bs.modal", onHidden);
+      saleModal.hide();
+    });
+  }
+
+  let pendingFocusAfterSale = null;
+
+  function receiptKey(value) {
+    return String(value || "").trim().toUpperCase();
+  }
+
+  function listVisualReceipts(data) {
+    const prepared = prepareTreeGroups(((data || lastTreeData || {}).groups) || []);
+    const items = [];
+    prepared.forEach(function (item) {
+      const stationery = ((item.group && item.group.stationerynumber) || "").trim();
+      (item.receipts || []).forEach(function (row) {
+        const receiptNo = receiptKey(row.receipt_no);
+        if (!receiptNo) return;
+        items.push({
+          receipt_no: receiptNo,
+          stationery: (row.stationerynumber || stationery || "").trim(),
+          sold: row.sale_status === "Sold",
+        });
+      });
+    });
+    if (items.length) return items;
+    return Array.from(els.gridBody?.querySelectorAll("tr.ecourt-tree-child") || [])
+      .map(function (tr) {
+        return {
+          receipt_no: receiptKey(tr.dataset.receiptNo),
+          stationery: (tr.dataset.stationery || "").trim(),
+          sold: tr.classList.contains("ecourt-row-sold"),
+        };
+      })
+      .filter(function (item) {
+        return !!item.receipt_no;
+      });
+  }
+
+  function findNeighborUnsold(soldReceipts) {
+    const soldSet = {};
+    (soldReceipts || []).forEach(function (row) {
+      const key = receiptKey(row && row.receipt_no);
+      if (key) soldSet[key] = true;
+    });
+    const items = listVisualReceipts(lastTreeData);
+    let firstSold = -1;
+    let lastSold = -1;
+    items.forEach(function (item, index) {
+      if (!soldSet[item.receipt_no]) return;
+      lastSold = index;
+      if (firstSold < 0) firstSold = index;
+    });
+    function isUnsoldKeep(item) {
+      return item && !item.sold && !soldSet[item.receipt_no];
+    }
+    if (lastSold >= 0) {
+      for (let i = lastSold + 1; i < items.length; i++) {
+        if (isUnsoldKeep(items[i])) return items[i];
+      }
+    }
+    if (firstSold > 0) {
+      for (let i = firstSold - 1; i >= 0; i--) {
+        if (isUnsoldKeep(items[i])) return items[i];
+      }
+    }
+    return null;
+  }
+
+  function expandStationeryGroup(stationery) {
+    if (!stationery || !els.gridBody) return null;
+    const parent = els.gridBody.querySelector(
+      'tr.ecourt-tree-parent[data-stationery="' + String(stationery).replace(/"/g, "") + '"]'
+    );
+    if (!parent) return null;
+    const gi = parent.dataset.group;
+    els.gridBody.querySelectorAll(".ecourt-tree-child-" + gi).forEach(function (tr) {
+      tr.classList.remove("d-none");
+    });
+    const toggle = parent.querySelector(".ecourt-tree-toggle");
+    if (toggle) toggle.textContent = "−";
+    return parent;
+  }
+
+  function findChildRowByReceipt(receiptNo) {
+    const key = String(receiptNo || "").trim().toUpperCase();
+    if (!key || !els.gridBody) return null;
+    const rows = els.gridBody.querySelectorAll("tr.ecourt-tree-child");
+    for (let i = 0; i < rows.length; i++) {
+      if ((rows[i].dataset.receiptNo || "").trim().toUpperCase() === key) return rows[i];
+    }
+    return null;
+  }
+
+  function scrollGridRowIntoView(row) {
+    const wrap = els.gridBody?.closest(".ecourt-grid-wrap");
+    if (!row) return;
+    if (!wrap) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const thead = wrap.querySelector("thead");
+    const headerH = thead ? thead.offsetHeight : 0;
+    const mid = headerH + Math.max(40, (wrap.clientHeight - headerH - rowRect.height) / 2);
+    wrap.scrollTop += rowRect.top - wrapRect.top - mid;
+  }
+
+  function focusGridReceipt(target) {
+    if (!target || !target.receipt_no || !els.gridBody) return false;
+    expandStationeryGroup(target.stationery);
+    const row = findChildRowByReceipt(target.receipt_no);
+    if (!row) return false;
+    row.classList.remove("d-none");
+    els.gridBody.querySelectorAll(".ecourt-row-keep-focus").forEach(function (el) {
+      el.classList.remove("ecourt-row-keep-focus");
+    });
+    row.classList.add("ecourt-row-keep-focus");
+    scrollGridRowIntoView(row);
+    const sellBtn = row.querySelector(".ecourt-sell-one-btn");
+    if (sellBtn) sellBtn.focus({ preventScroll: true });
+    pendingFocusAfterSale = null;
+    return true;
+  }
+
+  function restoreGridAfterSale(options) {
+    options = options || {};
+    const wrap = els.gridBody?.closest(".ecourt-grid-wrap");
+    const apply = function () {
+      const target = options.focusAfterSale || pendingFocusAfterSale;
+      if (target && focusGridReceipt(target)) {
+        if (options.restorePageScroll) {
+          window.scrollTo(options.restorePageScroll.x, options.restorePageScroll.y);
+        }
+        return;
+      }
+      const sold = options.soldReceipts || [];
+      const stationery =
+        (sold[0] && sold[0].stationerynumber) || (options.expandStationery || "");
+      const parent = expandStationeryGroup(stationery);
+      const scroll = options.restoreScroll;
+      if (wrap && scroll) {
+        wrap.scrollTop = scroll.wrapTop || 0;
+        wrap.scrollLeft = scroll.wrapLeft || 0;
+      }
+      if (parent) scrollGridRowIntoView(parent);
+      if (options.restorePageScroll) {
+        window.scrollTo(options.restorePageScroll.x, options.restorePageScroll.y);
+      }
+    };
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        apply();
+        window.setTimeout(apply, 60);
+      });
+    });
+  }
+
   function getCheckedReceipts() {
     const selected = [];
     els.gridBody?.querySelectorAll(".ecourt-receipt-select:checked").forEach(function (input) {
@@ -790,13 +959,33 @@
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || "Sale failed.");
-      alert(data.message || "Sale saved.");
+      const soldReceipts = pendingSaleReceipts.slice();
+      const neighbor = findNeighborUnsold(soldReceipts);
+      pendingFocusAfterSale = neighbor;
+      const wrap = els.gridBody?.closest(".ecourt-grid-wrap");
+      const scrollState = {
+        wrapTop: wrap ? wrap.scrollTop : 0,
+        wrapLeft: wrap ? wrap.scrollLeft : 0,
+      };
+      const pageScroll = { x: window.scrollX, y: window.scrollY };
       pendingSaleReceipts = [];
       pendingManualCreate = false;
       pendingManualMeta = null;
       els.saleForm?.reset();
-      saleModal?.hide();
-      await loadImportTree(null);
+      await hideSaleModalThen(function () {
+        return loadImportTree(null, {
+          expandStationery:
+            (neighbor && neighbor.stationery) ||
+            (soldReceipts[0] && soldReceipts[0].stationerynumber) ||
+            "",
+          focusAfterSale: neighbor,
+          soldReceipts: soldReceipts,
+          restoreScroll: scrollState,
+          restorePageScroll: pageScroll,
+        });
+      });
+      if (neighbor) focusGridReceipt(neighbor);
+      window.scrollTo(pageScroll.x, pageScroll.y);
     } catch (err) {
       alert(err.message || String(err));
     } finally {
@@ -1035,11 +1224,17 @@
           sold_count: group.sold_count,
           total_receipts: group.total_receipts,
         });
-        parentTr.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!options.focusAfterSale && !options.restoreScroll && !pendingFocusAfterSale) {
+          parentTr.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
       }
     });
     updateSellSelectedButton();
     updateGridSortHeaders();
+    const focusTarget = options.focusAfterSale || pendingFocusAfterSale;
+    if (focusTarget || options.restoreScroll || options.soldReceipts) {
+      restoreGridAfterSale(Object.assign({}, options, { focusAfterSale: focusTarget }));
+    }
   }
 
   function toggleTreeGroup(groupIndex) {

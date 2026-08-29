@@ -157,6 +157,25 @@ def stamp_grid_data():
     return jsonify({"ok": True, **data})
 
 
+@bp.route("/stamp-activity/duty-grouping", methods=["GET"])
+@login_required
+def stamp_duty_grouping():
+    def _parse_date(name: str):
+        raw = (request.args.get(name) or "").strip()
+        if not raw:
+            return None
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+
+    data = StampService().duty_grouping(
+        date_from=_parse_date("date_from"),
+        date_to=_parse_date("date_to"),
+    )
+    return jsonify({"ok": True, **data})
+
+
 @bp.route("/stamp-activity/card-detail", methods=["GET"])
 @login_required
 def stamp_card_detail():

@@ -142,6 +142,11 @@
 .ecourt-tree-table tr.ecourt-row-sold > td .text-muted {
   color: #8b4513 !important;
 }
+.ecourt-tree-table tr.ecourt-row-keep-focus > td {
+  background: #e8f5e9;
+  box-shadow: inset 0 0 0 2px #198754;
+}
+
 .ecourt-tree-table tr.ecourt-row-sold .ecourt-tree-toggle {
   color: #8b4513 !important;
 }

@@ -125,6 +125,106 @@
 .stamp-period-card.is-cash { border-left: 4px solid #2a9d8f; }
 .stamp-period-card.is-noncash { border-left: 4px solid #e76f51; }
 .stamp-period-card.is-shcil { border-left: 4px solid #2d6a4f; }
+.stamp-records-layout {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  min-width: 0;
+}
+.stamp-records-layout .stamp-data-grid-panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.stamp-duty-group-card {
+  flex: 0 0 272px;
+  width: 272px;
+  max-width: 100%;
+  padding: 0.7rem 0.75rem !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+  background: linear-gradient(180deg, #fff 0%, #f6f8fc 100%);
+  border: 1px solid #d4dbe8;
+}
+.stamp-duty-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+.stamp-duty-group-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5c667a;
+  white-space: nowrap;
+}
+.stamp-duty-group-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.45rem;
+  margin-bottom: 0.55rem;
+}
+.stamp-duty-group-filters .form-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 0.12rem;
+}
+.stamp-duty-group-filter-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.35rem;
+}
+.stamp-duty-group-filter-actions .btn {
+  flex: 1 1 auto;
+}
+.stamp-duty-group-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+#stampDutyGroupTable {
+  font-size: 12.5px;
+}
+#stampDutyGroupTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #243b7b;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.35rem 0.45rem;
+  white-space: nowrap;
+}
+#stampDutyGroupTable td,
+#stampDutyGroupTable tfoot th {
+  padding: 0.32rem 0.45rem;
+  white-space: nowrap;
+}
+#stampDutyGroupTable tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+#stampDutyGroupTable tfoot th {
+  position: sticky;
+  bottom: 0;
+  background: #eef2ff;
+  color: #1e3a8a;
+  border-top: 2px solid #c7d2fe;
+}
+@media (max-width: 1100px) {
+  .stamp-records-layout {
+    flex-direction: column;
+  }
+  .stamp-duty-group-card {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
 .stamp-data-grid-panel { flex: 1 1 auto; min-height: 180px; display: flex; flex-direction: column; }
 .stamp-data-grid-wrap {
   flex: 1 1 auto;
