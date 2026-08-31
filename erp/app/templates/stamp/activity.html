@@ -37,8 +37,8 @@
         <div class="stamp-section-head mb-0">Stamp Activity Records</div>
         <label class="form-label mb-0 small text-muted" for="stampPageSize">Rows</label>
         <select class="form-select form-select-sm stamp-page-size" id="stampPageSize" aria-label="Rows per page">
-          <option value="25">25</option>
-          <option value="50" selected>50</option>
+          <option value="25" selected>25</option>
+          <option value="50">50</option>
           <option value="100">100</option>
           <option value="200">200</option>
           <option value="500">500</option>
@@ -573,10 +573,11 @@
   {% set auto_load_stamp = load_stamp_id or (duplicate_existing.stamp_id if duplicate_existing else none) %}
   window.STAMP_AUTO_LOAD_STAMP_ID = {{ auto_load_stamp | tojson }};
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
+  window.STAMP_CONTINUE_MOBILE = {{ continue_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
   window.STAMP_OPEN_LOGIN_URL = {{ url_for('stamp.stamp_open_login') | tojson }};
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260829duty1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260831rows25"></script>
 {% endblock %}

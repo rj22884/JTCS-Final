@@ -103,8 +103,8 @@
   let lastPeriodSummary = {};
   let cardDetailModal = null;
   const PAGE_SIZES = [25, 50, 100, 200, 500, 1000];
-  const PAGE_SIZE_KEY = "stamp-page-size";
-  let pageState = { page: 1, pageSize: 50 };
+  const PAGE_SIZE_KEY = "stamp-page-size-v2";
+  let pageState = { page: 1, pageSize: 25 };
   const CARD_META = {
     total_sale_amount: { label: "Total Stamp Sale Amount", className: "is-sale" },
     payment_received_amount: { label: "Payment Received Amount", className: "is-payment" },
@@ -830,7 +830,7 @@
     } catch (err) {
       /* ignore */
     }
-    return 50;
+    return 25;
   }
 
   function persistPageSize(size) {
@@ -845,7 +845,7 @@
     const raw = els.pageSize?.value || String(pageState.pageSize);
     if (raw === "all") return "all";
     const num = Number(raw);
-    return PAGE_SIZES.indexOf(num) !== -1 ? num : 50;
+    return PAGE_SIZES.indexOf(num) !== -1 ? num : 25;
   }
 
   function pageWindow(current, total) {
@@ -1965,6 +1965,35 @@
     return true;
   }
 
+  async function offerContinueSameMobile(mobile) {
+    const digits = normalizeMobile(mobile);
+    if (!digits) {
+      resetToMobileGate();
+      updateToolbarButtons();
+      return;
+    }
+    if (els.mobileInput) els.mobileInput.value = digits;
+    if (els.mobileHidden) els.mobileHidden.value = digits;
+    els.mobileGate?.classList.add("d-none");
+    let again = false;
+    if (window.JTCSDialog && typeof JTCSDialog.confirm === "function") {
+      again = await JTCSDialog.confirm("Do you want to continue same mobile number?", {
+        title: "Continue",
+        okLabel: "Yes",
+        cancelLabel: "No",
+        okClass: "btn-primary",
+      });
+    } else {
+      again = window.confirm("Do you want to continue same mobile number?");
+    }
+    if (again) {
+      confirmMobile();
+    } else {
+      resetToMobileGate();
+    }
+    updateToolbarButtons();
+  }
+
   function resetToMobileGate() {
     if (ocrRunning) return;
     mobileConfirmed = false;
@@ -3021,8 +3050,11 @@
   refreshOcrStatus();
   resetPaymentLines();
   const autoStampId = parseInt(window.STAMP_AUTO_LOAD_STAMP_ID, 10) || 0;
+  const continueMobile = normalizeMobile(window.STAMP_CONTINUE_MOBILE || "");
   const openedFromRepost = initMobileFromRepost();
-  if (openedFromRepost) {
+  if (continueMobile) {
+    offerContinueSameMobile(continueMobile);
+  } else if (openedFromRepost) {
     if (autoStampId) {
       setEditStampIds(autoStampId);
       setSelectedStamp(autoStampId);

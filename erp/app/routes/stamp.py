@@ -36,6 +36,13 @@ def stamp_activity():
                 created_by=session.get("user_name", "System"),
             )
             flash(result.message, "success")
+            mobile_digits = "".join(
+                ch for ch in (request.form.get("MobileNumber") or "") if ch.isdigit()
+            )[-10:]
+            if len(mobile_digits) == 10:
+                return redirect(
+                    url_for("stamp.stamp_activity", continue_mobile=mobile_digits)
+                )
             return redirect(url_for("stamp.stamp_activity", load_stamp=result.stamp_id))
         except StampDuplicateError as exc:
             duplicate_existing = exc.existing
@@ -46,6 +53,7 @@ def stamp_activity():
             flash(f"Unable to save stamp activity: {exc}", "danger")
 
     load_stamp_id = request.args.get("load_stamp", type=int)
+    continue_mobile = (request.args.get("continue_mobile") or "").strip() or None
     if load_stamp_id is None and repost_stamp_id:
         try:
             load_stamp_id = int(repost_stamp_id)
@@ -68,6 +76,7 @@ def stamp_activity():
         is_vps=is_vps_runtime(),
         shcil_login_url=SHCIL_LOGIN_URL,
         load_stamp_id=load_stamp_id,
+        continue_mobile=continue_mobile,
         website_prefill={
             "mobile": (request.args.get("mobile") or "").strip(),
             "first_party": (request.args.get("first_party") or "").strip(),
