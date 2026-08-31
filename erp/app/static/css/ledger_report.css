@@ -222,6 +222,15 @@
 }
 
 @media (max-width: 768px) {
+  #ledgerPreviewModal .modal-dialog {
+    max-width: calc(100vw - 0.75rem);
+    margin: 0.35rem auto;
+  }
+
+  .ledger-html-preview {
+    padding: 12px 10px 12px;
+  }
+
   .ledger-html-top,
   .ledger-html-meta-box {
     display: block;
@@ -230,5 +239,20 @@
   .ledger-html-right {
     text-align: left;
     margin-top: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ledger-preview-dates input[type="date"] {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .ledger-preview-filter {
+    max-width: none;
+  }
+
+  .jtcs-dialog-footer {
+    flex-wrap: wrap;
   }
 }

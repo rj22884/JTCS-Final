@@ -277,6 +277,10 @@
     busy = true;
     applyType(resolved);
 
+    if (item.okClass && node.okBtn) {
+      node.okBtn.className = "btn btn-sm jtcs-dialog-ok " + item.okClass;
+    }
+
     if (kind === "confirm") {
       node.title.textContent = item.title || "Confirm";
       if (node.okBtn) node.okBtn.textContent = item.okLabel || "OK";
@@ -385,6 +389,7 @@
         title: options.title || "Confirm",
         okLabel: options.okLabel || "OK",
         cancelLabel: options.cancelLabel || "Cancel",
+        okClass: options.okClass,
         resolve: resolve,
       });
     });

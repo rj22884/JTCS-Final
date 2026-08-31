@@ -1,0 +1,50 @@
+<div class="modal fade" id="ledgerPreviewModal" tabindex="-1" aria-labelledby="ledgerPreviewModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable modal-xl" id="ledgerPreviewDialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="ledgerPreviewModalTitle">Ledger Preview</h5>
+        <div class="d-flex align-items-center gap-2 ms-auto">
+          <div class="dropdown">
+            <button class="btn btn-outline-success btn-sm dropdown-toggle" type="button"
+                    id="ledgerExportBtn" data-bs-toggle="dropdown" aria-expanded="false" disabled>
+              <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="ledgerExportBtn">
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="pdf">
+                  <i class="bi bi-file-earmark-pdf text-danger me-2"></i> PDF
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xlsx">
+                  <i class="bi bi-file-earmark-excel text-success me-2"></i> Excel (XLSX)
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="csv">
+                  <i class="bi bi-filetype-csv text-primary me-2"></i> CSV
+                </button>
+              </li>
+              <li>
+                <button type="button" class="dropdown-item ledger-export-opt" data-fmt="xml">
+                  <i class="bi bi-filetype-xml text-warning me-2"></i> XML
+                </button>
+              </li>
+            </ul>
+          </div>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="ledgerMaximizeBtn"
+                  title="Maximize" aria-label="Maximize">
+            <i class="bi bi-arrows-fullscreen" id="ledgerMaximizeIcon"></i>
+          </button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+      </div>
+      <div class="modal-body" id="ledgerPreviewBody">
+        <div class="text-muted small text-center py-4">Loading preview…</div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>

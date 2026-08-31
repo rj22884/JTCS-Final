@@ -1,7 +1,10 @@
+from datetime import date
+
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from app.decorators import login_required, require_delete_reauth
 from app.services.bank_master_service import BankMasterService
+from app.services.ledger_report_service import LedgerReportService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
 from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
@@ -25,6 +28,7 @@ def index():
     menu_service = MenuService()
     service = BankMasterService()
     rows = service.list_records()
+    today = date.today()
     return render_template(
         "bank_master/index.html",
         page_title="Bank Master",
@@ -34,6 +38,8 @@ def index():
         default_bank_group_id=service._default_chart_group_id(is_cash=False),
         default_cash_group_id=service._default_chart_group_id(is_cash=True),
         initial_rows=rows,
+        fy_start=LedgerReportService._fy_start(today).isoformat(),
+        today=today.isoformat(),
     )
 
 
