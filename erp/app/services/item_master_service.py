@@ -11,6 +11,7 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
+from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
 
 
 def _q2(value: Decimal) -> Decimal:
@@ -252,6 +253,8 @@ class ItemMasterService:
         if row is None:
             raise ValueError("Item not found.")
         label = (row.ItemName or row.ItemCode or "Item").strip()
+        ledger = ledger_payload("item", item_id)
+        raise_if_ledger_in_use("item", item_id, label)
         assert_master_unused(
             table="ItemMaster",
             pk_column="ItemID",
@@ -265,6 +268,7 @@ class ItemMasterService:
                     "label": "GST Invoice",
                 },
             ],
+            ledger=ledger,
         )
 
         def _write() -> str:
@@ -274,5 +278,5 @@ class ItemMasterService:
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise_if_integrity_in_use(exc, label)
+            raise_if_integrity_in_use(exc, label, ledger=ledger)
             raise

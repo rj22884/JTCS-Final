@@ -1,6 +1,6 @@
 /**
  * Open the shared Ledger Report preview modal from other pages
- * (e.g. Bank Master delete-in-use → "Do you want to see transaction?").
+ * (e.g. Master delete-in-use → "Do you want to see transaction?").
  */
 (function () {
   "use strict";
@@ -25,6 +25,7 @@
 
   let currentKind = "";
   let currentId = "";
+  let currentAllDates = false;
   let isMaximized = false;
 
   function escapeHtml(value) {
@@ -54,9 +55,18 @@
       );
   }
 
-  function dateQuery() {
+  function allDatesQuery() {
+    const params = new URLSearchParams();
+    params.set("date_from", "2000-01-01");
+    params.set("date_to", cfg.today || new Date().toISOString().slice(0, 10));
+    return "?" + params.toString();
+  }
+
+  function dateQuery(allDates) {
+    if (allDates) return allDatesQuery();
     if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.dateQuery === "function") {
-      return window.JTCSLedgerPreview.dateQuery();
+      const q = window.JTCSLedgerPreview.dateQuery();
+      if (q) return q;
     }
     const params = new URLSearchParams();
     if (cfg.fyStart) params.set("date_from", cfg.fyStart);
@@ -88,7 +98,36 @@
     }
   }
 
-  async function openPreview(kind, id) {
+  function previewHasTxnRows() {
+    const grid = document.getElementById("ledgerPreviewGrid");
+    if (!grid) return false;
+    return !!grid.querySelector('tbody tr[data-kind="txn"]');
+  }
+
+  async function fetchPreview(kind, id, allDates) {
+    const url = previewUrl(kind, id);
+    const res = await fetch(url + dateQuery(allDates), {
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load preview.");
+    return data;
+  }
+
+  function renderPreview(data) {
+    els.previewBody.innerHTML = data.html || "";
+    if (els.previewTitle) {
+      const bits = [data.title || "Ledger Preview"];
+      if (data.entity_name) bits.push(data.entity_name);
+      els.previewTitle.textContent = bits.join(" — ");
+    }
+    setExportEnabled(true);
+    if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.afterRender === "function") {
+      window.JTCSLedgerPreview.afterRender();
+    }
+  }
+
+  async function openPreview(kind, id, options) {
     if (!previewModal || !els.previewBody) {
       alert("Preview is not available.");
       return;
@@ -98,8 +137,10 @@
       alert("Preview URL is not configured.");
       return;
     }
+    const opts = options || {};
     currentKind = kind;
     currentId = String(id);
+    currentAllDates = !!opts.allDates;
     setExportEnabled(false);
     setMaximized(false);
     if (els.previewTitle) els.previewTitle.textContent = "Ledger Preview";
@@ -107,30 +148,45 @@
       '<div class="text-muted small py-4 text-center">Loading preview…</div>';
     previewModal.show();
     try {
-      const res = await fetch(url + dateQuery(), {
-        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load preview.");
-      els.previewBody.innerHTML = data.html || "";
-      if (els.previewTitle) {
-        const bits = [data.title || "Ledger Preview"];
-        if (data.entity_name) bits.push(data.entity_name);
-        els.previewTitle.textContent = bits.join(" — ");
-      }
-      setExportEnabled(true);
-      if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.afterRender === "function") {
-        window.JTCSLedgerPreview.afterRender();
+      let data = await fetchPreview(kind, id, currentAllDates);
+      renderPreview(data);
+      if (!currentAllDates && !previewHasTxnRows()) {
+        currentAllDates = true;
+        data = await fetchPreview(kind, id, true);
+        renderPreview(data);
       }
     } catch (err) {
       currentKind = "";
       currentId = "";
+      currentAllDates = false;
       setExportEnabled(false);
       els.previewBody.innerHTML =
         '<div class="alert alert-danger mb-0">' +
         escapeHtml(err.message || "Unable to load preview.") +
         "</div>";
     }
+  }
+
+  async function offerSeeTransaction(kind, id, errorMessage) {
+    const message =
+      (errorMessage || "This record is linked to other records and cannot be deleted.") +
+      "\n\nDo you want to see transaction?";
+    let see = false;
+    if (window.JTCSDialog && typeof JTCSDialog.confirm === "function") {
+      see = await JTCSDialog.confirm(message, {
+        title: "Error",
+        type: "error",
+        okLabel: "Yes",
+        cancelLabel: "No",
+        okClass: "btn-primary",
+      });
+    } else {
+      see = window.confirm(message);
+    }
+    if (!see) return;
+    setTimeout(function () {
+      openPreview(kind, id, { allDates: true });
+    }, 80);
   }
 
   function downloadExport(fmt) {
@@ -143,7 +199,7 @@
       alert("Export URL is not configured.");
       return;
     }
-    window.location.href = url + dateQuery();
+    window.location.href = url + dateQuery(currentAllDates);
   }
 
   function onExportClick(event) {
@@ -164,16 +220,20 @@
     setExportEnabled(false);
     currentKind = "";
     currentId = "";
+    currentAllDates = false;
   });
 
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
-      if (currentKind && currentId) openPreview(currentKind, currentId);
+      if (currentKind && currentId) {
+        openPreview(currentKind, currentId, { allDates: currentAllDates });
+      }
     });
   }
 
   window.JTCSLedgerPreviewHost = {
     open: openPreview,
+    offerSeeTransaction: offerSeeTransaction,
   };
   if (window.JTCSLedgerPreview) {
     window.JTCSLedgerPreview.open = openPreview;

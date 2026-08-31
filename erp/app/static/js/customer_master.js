@@ -1592,10 +1592,14 @@
         : {}),
     })
       .then(function (res) { return res.json(); })
-      .then(function (data) {
+      .then(async function (data) {
         if (data.in_use) {
           if (row) row.has_links = true;
-          if (window.JTCSDialog?.alert) {
+          const kind = (data.ledger && data.ledger.kind) || "customer";
+          const lid = (data.ledger && data.ledger.id) || customerId;
+          if (window.JTCSLedgerPreviewHost && typeof JTCSLedgerPreviewHost.offerSeeTransaction === "function") {
+            await JTCSLedgerPreviewHost.offerSeeTransaction(kind, lid, data.error);
+          } else if (window.JTCSDialog?.alert) {
             JTCSDialog.alert(
               data.error || "Stop: this customer is in use and cannot be deleted.",
               "error"

@@ -297,7 +297,22 @@
       },
       body: JSON.stringify(creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {}),
     });
-    const data = await parseJsonResponse(res);
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (res.status === 409 && data.in_use) {
+      const kind = (data.ledger && data.ledger.kind) || "item";
+      const lid = (data.ledger && data.ledger.id) || id;
+      if (window.JTCSLedgerPreviewHost && typeof JTCSLedgerPreviewHost.offerSeeTransaction === "function") {
+        await JTCSLedgerPreviewHost.offerSeeTransaction(kind, lid, data.error);
+      } else {
+        throw new Error(data.error || "This item is linked to other records and cannot be deleted.");
+      }
+      return;
+    }
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || "Request failed.");
+    }
     showStatus(data.message || "Deleted.", "success");
     await loadRows();
   }

@@ -869,22 +869,6 @@ class LedgerExportService:
                 ob_date=ob_date,
                 seen_ids=seen_purchase_dailies,
             )
-            obc_prior_dr, obc_prior_cr = self._append_orphan_obc_deposits(
-                [],
-                account_id=account_id,
-                range_from=prior_from,
-                range_to_next=date_from,
-                ob_date=ob_date,
-            )
-            extra_prior_debit = self._money(extra_prior_debit + obc_prior_dr)
-            extra_prior_credit = self._money(extra_prior_credit + obc_prior_cr)
-            self._append_orphan_obc_deposits(
-                txn_rows,
-                account_id=account_id,
-                range_from=txn_params["range_from"],
-                range_to_next=date_to_next,
-                ob_date=ob_date,
-            )
         elif wallet.get("ecourt"):
             from app.utils.shcil_bank_accounts import ECOURT_PURCHASE_DESCRIPTION
 
@@ -910,6 +894,22 @@ class LedgerExportService:
                 ob_date=ob_date,
                 seen_ids=seen_purchase_dailies,
             )
+        obc_prior_dr, obc_prior_cr = self._append_orphan_obc_deposits(
+            [],
+            account_id=account_id,
+            range_from=prior_from,
+            range_to_next=date_from,
+            ob_date=ob_date,
+        )
+        extra_prior_debit = self._money(extra_prior_debit + obc_prior_dr)
+        extra_prior_credit = self._money(extra_prior_credit + obc_prior_cr)
+        self._append_orphan_obc_deposits(
+            txn_rows,
+            account_id=account_id,
+            range_from=txn_params["range_from"],
+            range_to_next=date_to_next,
+            ob_date=ob_date,
+        )
         prior_debit = self._money(prior_debit + extra_prior_debit)
         prior_credit = self._money(prior_credit + extra_prior_credit)
         opening = self._apply_bank_running(

@@ -340,6 +340,16 @@
         headers: { "X-Requested-With": "XMLHttpRequest" },
       });
       const data = await res.json();
+      if (res.status === 409 && data.in_use) {
+        const kind = (data.ledger && data.ledger.kind) || "work";
+        const lid = (data.ledger && data.ledger.id) || targetId;
+        if (window.JTCSLedgerPreviewHost && typeof JTCSLedgerPreviewHost.offerSeeTransaction === "function") {
+          await JTCSLedgerPreviewHost.offerSeeTransaction(kind, lid, data.error);
+        } else {
+          throw new Error(data.error || "This work type is linked to other records and cannot be deleted.");
+        }
+        return;
+      }
       if (!res.ok || !data.ok) throw new Error(data.error || "Delete failed.");
       showStatus(data.message || "Work type marked inactive.", "success");
       if (selectedId === targetId) selectedId = null;

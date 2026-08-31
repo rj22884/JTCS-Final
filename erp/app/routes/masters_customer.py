@@ -1,3 +1,5 @@
+from datetime import date
+
 from flask import Blueprint, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from app.customer_master.constants import (
@@ -20,20 +22,15 @@ from app.services.customer_master_service import (
 )
 from app.services.menu_service import MenuService
 from app.services.work_master_service import WorkMasterService
+from app.services.ledger_report_service import LedgerReportService
+from app.utils.master_delete_guard import json_in_use_response
 
 bp = Blueprint("masters_customer", __name__, url_prefix="/masters/customer")
 MENU_PATH = "/masters/customer"
 
 
 def _in_use_response(exc: CustomerInUseError):
-    return jsonify(
-        {
-            "ok": False,
-            "error": str(exc),
-            "in_use": True,
-            "usage": exc.usage,
-        }
-    ), 409
+    return json_in_use_response(exc)
 
 
 @bp.route("", strict_slashes=False)
@@ -61,6 +58,7 @@ def index():
         "dscDoc": url_for("masters_customer.dsc_document", customer_id=0, kind="KIND"),
     }
     is_admin = has_admin_role(session.get("role"))
+    today = date.today()
     try:
         chart_of_groups = ChartGroupService().list_active_for_dropdown()
     except Exception:
@@ -103,6 +101,8 @@ def index():
         ui_config=ui,
         cm_api=cm_api,
         is_admin=is_admin,
+        fy_start=LedgerReportService._fy_start(today).isoformat(),
+        today=today.isoformat(),
     )
 
 

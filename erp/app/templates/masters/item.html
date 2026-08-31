@@ -14,6 +14,7 @@
 {% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
 <style>
   .itm-hsn-suggest {
     position: absolute;
@@ -193,5 +194,6 @@
   window.ITEM_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.ITEM_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260811chart1"></script>
+{% include 'ledger_report/_embed.html' %}
+<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260831ob1"></script>
 {% endblock %}

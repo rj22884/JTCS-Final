@@ -23,6 +23,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/work_master.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
 {% endblock %}
 
 {% block content %}
@@ -201,5 +202,6 @@
   window.WORK_MASTER_CHART_GROUPS = {{ chart_groups | tojson }};
   window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260804activefix"></script>
+{% include 'ledger_report/_embed.html' %}
+<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260831ob1"></script>
 {% endblock %}

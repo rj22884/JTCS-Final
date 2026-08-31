@@ -10,6 +10,7 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
+from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 
 
@@ -325,6 +326,8 @@ class WorkMasterService:
         if row is None:
             raise ValueError("Work type not found.")
         work_name = (row.WorkName or "").strip()
+        ledger = ledger_payload("work", work_id)
+        raise_if_ledger_in_use("work", work_id, work_name or "Work")
         assert_master_unused(
             table="WorkMaster",
             pk_column="WorkID",
@@ -344,6 +347,7 @@ class WorkMasterService:
                     "label": "Sub Work Master",
                 },
             ],
+            ledger=ledger,
         )
         if not row.ActiveStatus:
             return "Work type is already inactive."
@@ -355,5 +359,5 @@ class WorkMasterService:
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise_if_integrity_in_use(exc, work_name or "Work")
+            raise_if_integrity_in_use(exc, work_name or "Work", ledger=ledger)
             raise

@@ -339,35 +339,6 @@
     }
   }
 
-  async function offerSeeTransaction(accountId, errorMessage) {
-    const message =
-      (errorMessage || "This bank account is linked to other records and cannot be deleted.") +
-      "\n\nDo you want to see transaction?";
-    let see = false;
-    if (window.JTCSDialog && typeof JTCSDialog.confirm === "function") {
-      see = await JTCSDialog.confirm(message, {
-        title: "Error",
-        type: "error",
-        okLabel: "Yes",
-        cancelLabel: "No",
-        okClass: "btn-primary",
-      });
-    } else {
-      see = window.confirm(message);
-    }
-    if (!see) return;
-    const opener =
-      (window.JTCSLedgerPreviewHost && window.JTCSLedgerPreviewHost.open) ||
-      (window.JTCSLedgerPreview && window.JTCSLedgerPreview.open);
-    if (typeof opener !== "function") {
-      alert("Ledger preview is not available.");
-      return;
-    }
-    setTimeout(function () {
-      opener("bank", accountId);
-    }, 80);
-  }
-
   async function deleteAccount(accountId) {
     const id = accountId || selectedId;
     if (!id) {
@@ -409,7 +380,13 @@
       }
       const data = await res.json();
       if (res.status === 409 && data.in_use) {
-        await offerSeeTransaction(id, data.error);
+        const kind = (data.ledger && data.ledger.kind) || "bank";
+        const lid = (data.ledger && data.ledger.id) || id;
+        if (window.JTCSLedgerPreviewHost && typeof JTCSLedgerPreviewHost.offerSeeTransaction === "function") {
+          await JTCSLedgerPreviewHost.offerSeeTransaction(kind, lid, data.error);
+        } else {
+          alert(data.error || "This bank account is linked to other records and cannot be deleted.");
+        }
         return;
       }
       if (!res.ok || data.ok === false) {

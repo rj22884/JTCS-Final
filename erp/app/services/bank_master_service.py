@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from app.extensions import db
 
 from app.repositories.bank_master_repository import BankMasterRepository
 from app.services.account_type_master_service import AccountTypeMasterService
@@ -13,6 +16,7 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
+from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -339,6 +343,61 @@ class BankMasterService:
 
         return persist(_write)
 
+    def _unlink_unused_payment_modes(self, account_id: int) -> None:
+        """Payment Mode is not a ledger posting. Clear the bank link before delete."""
+        try:
+            with db.session.begin_nested():
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE dbo.PaymentModeMaster
+                        SET BankAccountID = NULL
+                        WHERE BankAccountID = :id
+                        """
+                    ),
+                    {"id": int(account_id)},
+                )
+        except SQLAlchemyError:
+            return
+
+    def _detach_inactive_bank_cash(self, account_id: int) -> None:
+        """Soft-deleted Bank/Cash rows still hold FKs and would block delete."""
+        try:
+            with db.session.begin_nested():
+                db.session.execute(
+                    text(
+                        """
+                        UPDATE dbo.OthersBankCashTransaction
+                        SET DebitBankAccountID = CASE
+                                WHEN DebitBankAccountID = :id THEN NULL
+                                ELSE DebitBankAccountID
+                            END,
+                            CreditBankAccountID = CASE
+                                WHEN CreditBankAccountID = :id THEN NULL
+                                ELSE CreditBankAccountID
+                            END
+                        WHERE ISNULL(IsActive, 1) = 0
+                          AND (DebitBankAccountID = :id OR CreditBankAccountID = :id)
+                        """
+                    ),
+                    {"id": int(account_id)},
+                )
+        except SQLAlchemyError:
+            try:
+                with db.session.begin_nested():
+                    db.session.execute(
+                        text(
+                            """
+                            DELETE FROM dbo.OthersBankCashTransaction
+                            WHERE ISNULL(IsActive, 1) = 0
+                              AND (DebitBankAccountID = :id OR CreditBankAccountID = :id)
+                            """
+                        ),
+                        {"id": int(account_id)},
+                    )
+            except SQLAlchemyError:
+                return
+
     def delete_record(self, account_id: int) -> str:
         def _write() -> str:
             self.repo.ensure_schema()
@@ -346,6 +405,10 @@ class BankMasterService:
             if row is None:
                 raise ValueError("Bank account not found.")
             label = (row.BankName or "").strip() or "Bank account"
+            ledger = ledger_payload("bank", account_id)
+            raise_if_ledger_in_use("bank", account_id, label)
+            self._unlink_unused_payment_modes(account_id)
+            self._detach_inactive_bank_cash(account_id)
             assert_master_unused(
                 table="JtcsBankAccountMaster",
                 pk_column="JtcsBankAccountID",
@@ -361,16 +424,20 @@ class BankMasterService:
                 extra_checks=[
                     {
                         "table": "OthersBankCashTransaction",
-                        "where": "CreditLedgerKey = :key OR DebitLedgerKey = :key",
+                        "where": (
+                            "(CreditLedgerKey = :key OR DebitLedgerKey = :key) "
+                            "AND ISNULL(IsActive, 1) = 1"
+                        ),
                         "params": {"key": f"bank-{int(account_id)}"},
                         "label": "Bank / Cash Transaction",
                     },
                 ],
+                ledger=ledger,
             )
             try:
                 self.repo.delete(row)
             except IntegrityError as exc:
-                raise_if_integrity_in_use(exc, label)
+                raise_if_integrity_in_use(exc, label, ledger=ledger)
                 raise
             return "Bank account permanently deleted from the database."
 

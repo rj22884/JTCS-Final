@@ -20,6 +20,7 @@ from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import MasterInUseError
+from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,13 @@ class DuplicateMobileWarning(ValueError):
 
 
 class CustomerInUseError(MasterInUseError):
-    def __init__(self, usage: dict, message: str):
-        super().__init__(message, links=list(usage.get("links") or []), usage=usage)
+    def __init__(self, usage: dict, message: str, *, ledger=None):
+        super().__init__(
+            message,
+            links=list(usage.get("links") or []),
+            usage=usage,
+            ledger=ledger,
+        )
 
 
 _IN_USE_MESSAGE = (
@@ -414,11 +420,20 @@ class CustomerMasterService:
     def delete_record(self, customer_id: int) -> str:
         usage = self.repository.get_usage(customer_id)
         row = self.repository.get_detail(customer_id)
+        if not row:
+            raise ValueError("Customer not found.")
         inactive = (row.get("CustomerStatus") or "").strip().lower() == "inactive"
+        name = (row.get("CustomerName") or "Customer").strip() or "Customer"
+        ledger = ledger_payload("customer", customer_id)
         if not usage.get("can_delete"):
+            try:
+                raise_if_ledger_in_use("customer", customer_id, name)
+            except MasterInUseError as exc:
+                raise CustomerInUseError(usage, str(exc), ledger=ledger) from exc
             raise CustomerInUseError(
                 usage,
                 _IN_USE_PERMANENT_MESSAGE if inactive else _IN_USE_MESSAGE,
+                ledger=ledger,
             )
 
         def _write() -> str:
@@ -434,7 +449,7 @@ class CustomerMasterService:
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE) from exc
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE, ledger=ledger) from exc
 
     def restore_record(self, customer_id: int) -> str:
         def _write() -> str:

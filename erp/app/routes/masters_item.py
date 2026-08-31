@@ -1,9 +1,12 @@
+from datetime import date
+
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 
 from app.decorators import login_required, require_delete_reauth
 from app.services.chart_group_service import ChartGroupService
 from app.services.hsn_sac_search_service import search_hsn_sac
 from app.services.item_master_service import ItemMasterService
+from app.services.ledger_report_service import LedgerReportService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
 from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
@@ -74,12 +77,15 @@ def index():
 
         db.session.rollback()
         chart_groups = []
+    today = date.today()
     return render_template(
         "masters/item.html",
         page_title="Item Master",
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
         chart_groups=chart_groups,
+        fy_start=LedgerReportService._fy_start(today).isoformat(),
+        today=today.isoformat(),
     )
 
 
