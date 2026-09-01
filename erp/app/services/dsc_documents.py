@@ -153,11 +153,15 @@ def save_customer_doc(customer_id: int, kind: str, file_storage, *, actor: str =
         raise ValueError("Unknown DSC document type.")
     ensure_dsc_doc_schema()
     row = db.session.execute(
-        text("SELECT CustomerID FROM dbo.CustomerMaster WHERE CustomerID = :id"),
+        text(
+            f"SELECT CustomerID, {meta['path_col']} AS DocPath "
+            "FROM dbo.CustomerMaster WHERE CustomerID = :id"
+        ),
         {"id": int(customer_id)},
-    ).first()
+    ).mappings().first()
     if not row:
         raise ValueError("Customer not found.")
+    old_path = (row.get("DocPath") or "").strip()
     folder = Path(current_app.config["UPLOAD_FOLDER"]) / "customer_dsc" / str(int(customer_id))
     path, name = _save_upload(folder, meta["path_col"], file_storage)
     db.session.execute(
@@ -168,6 +172,7 @@ def save_customer_doc(customer_id: int, kind: str, file_storage, *, actor: str =
         {"path": path, "name": name, "id": int(customer_id)},
     )
     db.session.commit()
+    _delete_stored_file_if_replaced(old_path, path)
     _mirror_crm_document(int(customer_id), meta["label"], name, path, actor)
     return {"ok": True, "kind": kind, "file_name": name, "has_file": True}
 
@@ -190,6 +195,33 @@ def customer_doc_file(customer_id: int, kind: str) -> tuple[Path, str]:
     if not path.exists():
         raise ValueError("Document file is missing.")
     return path, row.get("DocName") or path.name
+
+
+def _delete_stored_file_if_replaced(old_stored: str, new_stored: str) -> None:
+    old_raw = str(old_stored or "").strip()
+    new_raw = str(new_stored or "").strip()
+    if not old_raw or old_raw == new_raw:
+        return
+    try:
+        old_path = _resolve_stored_path(old_raw)
+        new_path = _resolve_stored_path(new_raw) if new_raw else None
+        if new_path and old_path.resolve() == new_path.resolve():
+            return
+        if old_path.is_file():
+            old_path.unlink()
+    except Exception:
+        logger.warning("Old DSC document kept because replace cleanup failed", exc_info=True)
+
+
+def docs_for_pan(pan: str) -> list[dict]:
+    found = CustomerRepository().find_by_pan(pan)
+    if not found:
+        return []
+    try:
+        return customer_doc_status(int(found["CustomerID"]))
+    except Exception:
+        logger.warning("DSC document status for PAN skipped", exc_info=True)
+        return []
 
 
 def _resolve_stored_path(stored: str) -> Path:
@@ -240,6 +272,11 @@ def pan_exists(pan: str) -> bool:
     repo = CustomerRepository()
     found = repo.find_by_pan(pan)
     return bool(found)
+
+
+def customer_master_count() -> int:
+    row = db.session.execute(text("SELECT COUNT(1) FROM dbo.CustomerMaster")).scalar()
+    return int(row or 0)
 
 
 def search_gstin(gstin: str) -> dict:

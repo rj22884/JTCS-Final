@@ -502,6 +502,7 @@ def dsc_document(kind: str):
             return jsonify({"ok": False, "error": str(exc)}), 400
     try:
         path, name = dsc_documents.customer_doc_file(cid, kind)
-        return send_file(path, as_attachment=True, download_name=name)
+        inline = str(request.args.get("inline") or "") == "1"
+        return send_file(path, as_attachment=not inline, download_name=name)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404

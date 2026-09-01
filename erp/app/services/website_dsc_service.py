@@ -117,6 +117,11 @@ class WebsiteDscService:
         dsc_documents.ensure_dsc_doc_schema()
 
     def options(self) -> dict:
+        count = 0
+        try:
+            count = dsc_documents.customer_master_count()
+        except Exception:
+            count = 0
         return {
             "ok": True,
             "professional_charge": PROFESSIONAL_CHARGE,
@@ -126,6 +131,8 @@ class WebsiteDscService:
                 {"code": "individual", "label": "Individual"},
                 {"code": "organization", "label": "Organization"},
             ],
+            "customer_count": count,
+            "dsc_issued": count,
         }
 
     def list_applications(self, limit: int = 300) -> list[dict]:
@@ -198,14 +205,22 @@ class WebsiteDscService:
         if not meta:
             raise ValueError("Unknown DSC document type.")
         folder = Path(current_app.config["UPLOAD_FOLDER"]) / "dsc_applications"
+        old_path = (getattr(row, meta["app_path"], None) or "").strip()
         path, name = dsc_documents._save_upload(folder, f"{row.ReferenceNo}_{kind}", file_storage)
         setattr(row, meta["app_path"], path)
         setattr(row, meta["app_name"], name)
         row.ModifiedDate = datetime.utcnow()
         db.session.commit()
+        dsc_documents._delete_stored_file_if_replaced(old_path, path)
         if row.CustomerID:
             try:
                 dsc_documents.ensure_dsc_doc_schema()
+                old_cm = db.session.execute(
+                    text(
+                        f"SELECT {meta['path_col']} AS DocPath FROM dbo.CustomerMaster WHERE CustomerID = :id"
+                    ),
+                    {"id": int(row.CustomerID)},
+                ).mappings().first()
                 db.session.execute(
                     text(
                         f"UPDATE dbo.CustomerMaster SET {meta['path_col']} = :path, {meta['name_col']} = :name, "
@@ -214,6 +229,7 @@ class WebsiteDscService:
                     {"path": path, "name": name, "id": int(row.CustomerID)},
                 )
                 db.session.commit()
+                dsc_documents._delete_stored_file_if_replaced((old_cm or {}).get("DocPath") or "", path)
                 dsc_documents._mirror_crm_document(int(row.CustomerID), meta["label"], name, path, "Website DSC")
             except Exception:
                 db.session.rollback()
