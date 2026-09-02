@@ -38,7 +38,7 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _META_ID_RE = re.compile(r"^\d{5,30}$")
 _TOKEN_RE = re.compile(r"(EAA[A-Za-z0-9]+|(?:ya29|sk-|sk-ant-|AIza)[A-Za-z0-9_\-]+)")
 _SECRET_QS_RE = re.compile(
-    r"(?i)(access_token|client_secret|api[_-]?key|password|auth(?:key|token)?|secret)=[^&\s]+"
+    r"(?i)(access_token|client_secret|api[_-]?key|(?<=[?&])key|password|auth(?:key|token)?|secret)=[^&\s]+"
 )
 
 # Fields that can be live-tested. Notes / status-only values are omitted.
@@ -86,9 +86,50 @@ _TESTABLE: dict[str, frozenset[str]] = {
     "cloud_storage": frozenset({"bucket_name", "access_key", "secret_key", "region"}),
     "google_drive": frozenset({"api_key", "api_secret", "endpoint_url"}),
     "google_calendar": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "fyers": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "income_tax": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "gst_api": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "mca_api": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "pan_verify": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "aadhaar_ekyc": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "digilocker": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "tally": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "zoho_books": frozenset({"api_key", "api_secret", "endpoint_url"}),
 }
 
 _GENERIC_TESTABLE = frozenset({"api_key", "api_secret", "endpoint_url", "client_secret"})
+
+# Read-only account/profile endpoints. Never used for send/pay/file/order.
+_SAFE_DEFAULT_GET = {
+    "zoho_books": "https://www.zohoapis.com/books/v3/organizations",
+    "fyers": "https://api.fyers.in/api/v2/profile",
+    "google_drive": "https://www.googleapis.com/drive/v3/about?fields=kind",
+    "google_calendar": "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1",
+}
+
+_OFFICIAL_HOSTS = {
+    "zoho_books": frozenset({"www.zohoapis.com", "zohoapis.com", "www.zohoapis.in", "zohoapis.in"}),
+    "fyers": frozenset({"api.fyers.in", "api-t1.fyers.in"}),
+    "google": frozenset({"www.googleapis.com", "googleapis.com", "oauth2.googleapis.com"}),
+    "google_drive": frozenset({"www.googleapis.com", "googleapis.com"}),
+    "google_calendar": frozenset({"www.googleapis.com", "googleapis.com"}),
+    "openai": frozenset({"api.openai.com"}),
+    "gemini": frozenset({"generativelanguage.googleapis.com"}),
+    "claude": frozenset({"api.anthropic.com"}),
+}
+
+_UNSAFE_PATH_RE = re.compile(
+    r"(?i)(?:^|/)(?:send|sms|otp|whatsapp|bulk(?:v2)?|campaign|pay(?:ment)?s?|"
+    r"charge|capture|transfer|payout|refund|create|delete|remove|update|"
+    r"submit|filing|gstr\d*|place[-_]?order|buy|sell|trade|ekyc|"
+    r"otp[-_]?send)(?:/|$|\?)"
+)
+
+_SMS_WALLET_URLS = {
+    "msg91": "https://control.msg91.com/api/v5/wallet/credits",
+    "fast2sms": "https://www.fast2sms.com/dev/wallet",
+}
+_SMS_SENDER_LIST_URL = "https://control.msg91.com/api/v5/sender_id"
 
 _AWS_REGIONS = frozenset(
     {
@@ -698,7 +739,26 @@ class IntegrationFieldTestService:
             return self._google_api_key(api_key)
         return _fail("This Google field cannot be live-tested.")
 
+    def _google_oauth_error(self, payload: dict[str, Any] | None, raw_err: str) -> tuple[str, str]:
+        err = ""
+        desc = ""
+        if isinstance(payload, dict):
+            raw_error = payload.get("error")
+            if isinstance(raw_error, dict):
+                err = str(raw_error.get("status") or raw_error.get("code") or "")
+                desc = str(raw_error.get("message") or "")
+            else:
+                err = str(raw_error or "")
+            desc = desc or str(payload.get("error_description") or "")
+        desc = desc or (raw_err or "")
+        return err.strip(), desc.strip()
+
     def _google_oauth_client(self, client_id: str, client_secret: str) -> dict[str, Any]:
+        """Call Google's token endpoint and report the actual result.
+
+        A dummy authorization code is used so no user grant is consumed.
+        invalid_grant is NOT treated as proof that Client ID/Secret are valid.
+        """
         body = urlencode(
             {
                 "client_id": client_id,
@@ -714,33 +774,55 @@ class IntegrationFieldTestService:
             headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
             data=body,
         )
-        err = str((payload or {}).get("error") or raw_err or "")
-        # invalid_grant / redirect_uri_mismatch => client_id+secret accepted
-        if err in {"invalid_grant", "redirect_uri_mismatch", "invalid_request"}:
-            return _ok("Google accepted Client ID and Client Secret.")
+        err, desc = self._google_oauth_error(payload, raw_err)
+        actual = f"Google OAuth token endpoint HTTP {status}"
+        if err:
+            actual += f". error={err}"
+        if desc:
+            actual += f". {desc}"
+        if status == 200 and isinstance(payload, dict) and payload.get("access_token"):
+            return _ok("Google OAuth token endpoint HTTP 200 — Client ID and Client Secret were accepted.")
         if err in {"invalid_client", "unauthorized_client"}:
-            return _fail("Google rejected Client ID / Client Secret.")
-        if status == 200:
-            return _ok("Google OAuth token endpoint accepted the client.")
-        return _fail(_safe_error(err or f"Google OAuth probe failed (HTTP {status})."))
+            return _fail(actual + " Client ID/Secret were rejected.")
+        if err == "invalid_grant":
+            return _fail(
+                actual
+                + " invalid_grant means the authorization code was rejected; "
+                "it is not proof that Client ID/Secret are valid."
+            )
+        return _fail(actual + " Client ID/Secret were not confirmed.")
 
     def _google_api_key(self, api_key: str) -> dict[str, Any]:
         status, payload, raw_err = self._http_json(
             "https://www.googleapis.com/drive/v3/about?fields=kind&key=" + api_key,
             headers={"Accept": "application/json"},
         )
-        err = ((payload or {}).get("error") or {})
+        err_obj = (payload or {}).get("error") if isinstance(payload, dict) else {}
         reason = ""
-        if isinstance(err, dict):
-            errors = err.get("errors") or []
+        message = ""
+        if isinstance(err_obj, dict):
+            errors = err_obj.get("errors") or []
             if errors and isinstance(errors[0], dict):
                 reason = str(errors[0].get("reason") or "")
-            reason = reason or str(err.get("status") or err.get("message") or "")
-        if reason in {"keyInvalid", "API_KEY_INVALID", "invalid"} or "key invalid" in (raw_err or "").lower():
-            return _fail("Google rejected this API Key.")
-        if status in {200, 401, 403}:
-            return _ok("Google API Key is recognized (Drive API responded).")
-        return _fail(_safe_error(raw_err or reason or f"Google API Key probe failed (HTTP {status})."))
+            reason = reason or str(err_obj.get("status") or "")
+            message = str(err_obj.get("message") or "")
+        actual = f"Google Drive API HTTP {status}"
+        if reason:
+            actual += f". reason={reason}"
+        if message:
+            actual += f". {message}"
+        elif raw_err:
+            actual += f". {raw_err}"
+        if reason in {"keyInvalid", "API_KEY_INVALID"} or "api key not valid" in (message or raw_err or "").lower():
+            return _fail(actual + " API Key was rejected.")
+        if status == 200:
+            return _ok(actual + " API Key was accepted.")
+        if reason in {"loginRequired", "required"}:
+            return _ok(
+                actual
+                + " API Key was accepted for the request; Drive about also needs a user OAuth token for profile data."
+            )
+        return _fail(actual)
 
     def _test_openai(self, field: str, cfg: dict[str, str]) -> dict[str, Any]:
         key = (cfg.get("api_key") or "").strip()
@@ -824,84 +906,148 @@ class IntegrationFieldTestService:
             return _fail("Claude rejected this API Key.")
         return _fail(_safe_error(raw_err or f"Claude probe failed (HTTP {status})."))
 
+    def _sms_vendor(self, cfg: dict[str, str]) -> str:
+        name = (cfg.get("provider_name") or "").strip().lower()
+        if "msg91" in name:
+            return "msg91"
+        if "fast2sms" in name or "fast 2 sms" in name:
+            return "fast2sms"
+        return ""
+
     def _test_sms(self, field: str, cfg: dict[str, str]) -> dict[str, Any]:
-        provider_name = (cfg.get("provider_name") or "").strip().lower()
+        """Wallet/account validation only — never calls send/bulk/otp SMS APIs."""
+        vendor = self._sms_vendor(cfg)
         key = (cfg.get("api_key") or "").strip()
-        secret = (cfg.get("api_secret") or "").strip()
         sender = (cfg.get("sender_id") or "").strip()
+        if field == "api_secret":
+            return _fail(
+                "MSG91/Fast2SMS wallet APIs validate the Auth Key (API Key) only. "
+                "API Secret is not sent to any SMS or send endpoint."
+            )
+        if not vendor:
+            return _fail(
+                "Set Provider Name to MSG91 or Fast2SMS. "
+                "Unknown gateways are not called, and no SMS is sent."
+            )
+        if not key:
+            return _fail("API Key is not configured.")
+
         if field == "sender_id":
             if not sender:
                 return _fail("Sender ID is empty.")
-            if not re.match(r"^[A-Za-z0-9]{3,11}$", sender):
-                return _fail("Sender ID should be 3–11 alphanumeric characters.")
-            if not key:
-                return _fail("API Key is required to verify Sender ID with the SMS gateway.")
-        if "msg91" in provider_name and key:
+            if vendor != "msg91":
+                return _fail(
+                    "Fast2SMS has no safe sender-id list API. "
+                    "Use API Key Test (wallet). SMS is never sent."
+                )
             status, payload, raw_err = self._http_json(
-                "https://control.msg91.com/api/v5/wallet/credits",
+                _SMS_SENDER_LIST_URL,
                 headers={"Accept": "application/json", "authkey": key},
             )
-            if status == 200 and (payload or {}).get("type") != "error":
-                if field == "sender_id":
-                    return _ok("MSG91 accepted the API Key; Sender ID format is valid.")
-                return _ok("MSG91 accepted the API Key.")
-            return _fail(_safe_error(raw_err or "MSG91 rejected these credentials."))
-        if "fast2sms" in provider_name and key:
+            actual = f"MSG91 sender-id list HTTP {status}"
+            if raw_err:
+                actual += f". {raw_err}"
+            if status != 200:
+                return _fail(actual + " Sender ID was not verified. SMS was not sent.")
+            blob = json.dumps(payload or {}, default=str).lower()
+            if sender.lower() in blob:
+                return _ok(f"{actual} — Sender ID is present on the account. SMS was not sent.")
+            return _fail(f"{actual} — Sender ID was not found on the account. SMS was not sent.")
+
+        url = _SMS_WALLET_URLS[vendor]
+        if vendor == "msg91":
             status, payload, raw_err = self._http_json(
-                "https://www.fast2sms.com/dev/wallet",
-                headers={"Accept": "application/json", "authorization": key},
+                url,
+                headers={"Accept": "application/json", "authkey": key},
             )
-            if status == 200 and str((payload or {}).get("return")).lower() in {"true", "1"}:
-                return _ok("Fast2SMS accepted the API Key.")
-            return _fail(_safe_error(raw_err or "Fast2SMS rejected these credentials."))
-        if field == "sender_id":
-            return _fail("Live Sender ID check needs a known provider name (MSG91 / Fast2SMS).")
-        if not key:
-            return _fail("API Key is not configured.")
-        return _fail(
-            "Live SMS verification needs a known provider name (MSG91 / Fast2SMS) "
-            "or an endpoint URL. Credentials were not sent to an unknown gateway."
+            actual = f"MSG91 wallet HTTP {status}"
+            if isinstance(payload, dict) and payload.get("type"):
+                actual += f". type={payload.get('type')}"
+            if raw_err:
+                actual += f". {raw_err}"
+            if status == 200 and str((payload or {}).get("type") or "").lower() != "error":
+                return _ok(actual + " API Key was accepted. SMS was not sent.")
+            return _fail(actual + " API Key was not accepted. SMS was not sent.")
+
+        status, payload, raw_err = self._http_json(
+            url,
+            headers={"Accept": "application/json", "authorization": key},
         )
+        actual = f"Fast2SMS wallet HTTP {status}"
+        if isinstance(payload, dict) and payload.get("return") is not None:
+            actual += f". return={payload.get('return')}"
+        if raw_err:
+            actual += f". {raw_err}"
+        if status == 200 and str((payload or {}).get("return")).lower() in {"true", "1"}:
+            return _ok(actual + " API Key was accepted. SMS was not sent.")
+        return _fail(actual + " API Key was not accepted. SMS was not sent.")
+
+    def _payment_gateway(self, cfg: dict[str, str]) -> str:
+        name = (cfg.get("gateway_name") or "").strip().lower()
+        if "razorpay" in name:
+            return "razorpay"
+        if "stripe" in name:
+            return "stripe"
+        # Prefix is a format hint only — never treated as validation success.
+        key = (cfg.get("api_key") or "").strip()
+        if key.startswith("rzp_"):
+            return "razorpay"
+        if key.startswith("sk_"):
+            return "stripe"
+        return ""
 
     def _test_payment(self, field: str, cfg: dict[str, str]) -> dict[str, Any]:
-        gateway = (cfg.get("gateway_name") or "").strip().lower()
+        gateway = self._payment_gateway(cfg)
         key = (cfg.get("api_key") or "").strip()
         secret = (cfg.get("api_secret") or "").strip()
         merchant = (cfg.get("merchant_id") or "").strip()
-        if field == "webhook_secret":
-            if not (cfg.get("webhook_secret") or "").strip():
-                return _fail("Webhook Secret is not configured.")
-            return _ok("Webhook Secret is stored. It is verified when the gateway posts a signed webhook.")
-        if key.startswith("rzp_") or "razorpay" in gateway:
-            if field == "merchant_id" and not merchant:
-                return _fail("Merchant ID is empty.")
+        if not gateway:
+            return _fail(
+                "Set Gateway Name to Razorpay or Stripe. "
+                "Key prefixes (rzp_/sk_) are format hints only and are not treated as valid."
+            )
+        if gateway == "razorpay":
             if not key or not secret:
-                return _fail("Razorpay Key and Secret are required for a live check.")
+                return _fail("Razorpay Key Id and Key Secret are required for an authenticated check.")
             token = base64.b64encode(f"{key}:{secret}".encode("utf-8")).decode("ascii")
             status, payload, raw_err = self._http_json(
-                "https://api.razorpay.com/v1/payments?count=1",
+                "https://api.razorpay.com/v1/customers?count=1",
                 headers={"Authorization": f"Basic {token}", "Accept": "application/json"},
             )
-            if status == 200:
-                if field == "merchant_id":
-                    return _ok("Razorpay credentials are valid. Merchant ID is stored with this key.")
-                return _ok("Razorpay API credentials are valid.")
-            return _fail(_safe_error(raw_err or "Razorpay rejected these credentials."))
-        if key.startswith("sk_") or "stripe" in gateway:
-            if not key:
-                return _fail("Stripe secret key is not configured.")
-            status, payload, raw_err = self._http_json(
-                "https://api.stripe.com/v1/balance",
-                headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-            )
-            if status == 200:
-                return _ok("Stripe API key is valid.")
-            return _fail(_safe_error(raw_err or "Stripe rejected this API key."))
+            actual = f"Razorpay GET /v1/customers HTTP {status}"
+            if raw_err:
+                actual += f". {raw_err}"
+            if status != 200:
+                return _fail(actual)
+            if field == "merchant_id":
+                if not merchant:
+                    return _fail("Merchant ID is empty.")
+                return _fail(
+                    actual
+                    + " Credentials were accepted. Razorpay has no safe merchant-id lookup; "
+                    "Merchant ID was not confirmed."
+                )
+            return _ok(actual + " API credentials were accepted.")
+        if not key:
+            return _fail("Stripe secret key is not configured.")
+        status, payload, raw_err = self._http_json(
+            "https://api.stripe.com/v1/balance",
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+        )
+        actual = f"Stripe GET /v1/balance HTTP {status}"
+        if raw_err:
+            actual += f". {raw_err}"
+        if status != 200:
+            return _fail(actual)
         if field == "merchant_id":
             if not merchant:
                 return _fail("Merchant ID is empty.")
-            return _fail("Live merchant check needs a known gateway (Razorpay / Stripe).")
-        return _fail("Live payment check needs gateway name Razorpay or Stripe (or rzp_/sk_ keys).")
+            return _fail(
+                actual
+                + " Secret key was accepted. Stripe balance does not return Merchant ID; "
+                "the ID was not confirmed."
+            )
+        return _ok(actual + " Secret key was accepted.")
 
     def _test_cloud_storage(self, field: str, cfg: dict[str, str]) -> dict[str, Any]:
         bucket = (cfg.get("bucket_name") or "").strip()
@@ -913,13 +1059,9 @@ class IntegrationFieldTestService:
         if field == "region":
             if not region:
                 return _fail("Region is empty.")
-            if access_key and secret and access_key.startswith("AKIA"):
-                return self._aws_sts(access_key, secret, region)
-            if region in _AWS_REGIONS:
-                return _ok(f"Region '{region}' is a valid AWS region.")
-            if region.startswith(("us-", "ap-", "eu-", "sa-", "ca-", "me-")):
-                return _fail(f"'{region}' is not a recognized AWS region.")
-            return _ok(f"Region '{region}' is stored. Add AWS keys to verify it live.")
+            if not access_key or not secret:
+                return _fail("Access Key and Secret Key are required to verify Region with AWS STS.")
+            return self._aws_sts(access_key, secret, region)
 
         if field == "bucket_name":
             if not bucket:
@@ -981,37 +1123,124 @@ class IntegrationFieldTestService:
             return _fail("AWS STS rejected these keys.")
         return _fail(_safe_error(raw_err or f"AWS STS probe failed (HTTP {status})."))
 
+    def _url_is_unsafe(self, url: str) -> str | None:
+        parsed = urlparse(url)
+        path = (parsed.path or "") + ("?" + (parsed.query or "") if parsed.query else "")
+        if _UNSAFE_PATH_RE.search(path):
+            return "Refusing this URL — path looks like a send/pay/file/order action. Test uses read-only GETs only."
+        return None
+
+    def _credential_url(self, provider: str, cfg: dict[str, str]) -> tuple[str | None, str | None]:
+        configured = (cfg.get("endpoint_url") or "").strip()
+        default = _SAFE_DEFAULT_GET.get(provider) or ""
+        official = _OFFICIAL_HOSTS.get(provider)
+
+        if provider in {"google_drive", "google_calendar"}:
+            return default, None
+        if official:
+            if configured:
+                host = (urlparse(configured).hostname or "").lower()
+                if host in official:
+                    unsafe = self._url_is_unsafe(configured)
+                    if unsafe:
+                        return None, unsafe
+                    return configured, None
+                return default, None
+            return default or None, None if default else "Official read-only endpoint is not configured."
+
+        # GSP / Tally / other: only the admin-configured endpoint (never invent a host).
+        if not configured:
+            return None, "Configure Endpoint URL to the provider's safe status/account GET."
+        unsafe = self._url_is_unsafe(configured)
+        if unsafe:
+            return None, unsafe
+        return configured, None
+
+    def _auth_headers_for(self, provider: str, cfg: dict[str, str], url: str) -> dict[str, str]:
+        key = (cfg.get("api_key") or "").strip()
+        secret = (cfg.get("api_secret") or cfg.get("client_secret") or "").strip()
+        headers = {"Accept": "application/json"}
+        if provider == "zoho_books" or "zoho" in url.lower():
+            if key:
+                headers["Authorization"] = f"Zoho-oauthtoken {key}"
+            return headers
+        if provider == "fyers" and key:
+            headers["Authorization"] = f"Bearer {key}"
+            return headers
+        if provider in {"google_drive", "google_calendar"}:
+            return headers
+        if key and secret:
+            token = base64.b64encode(f"{key}:{secret}".encode("utf-8")).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
+        elif key:
+            headers["Authorization"] = f"Bearer {key}"
+        return headers
+
     def _test_generic(self, provider: str, field: str, cfg: dict[str, str]) -> dict[str, Any]:
         endpoint = (cfg.get("endpoint_url") or "").strip()
         api_key = (cfg.get("api_key") or "").strip()
         secret = (cfg.get("api_secret") or cfg.get("client_secret") or "").strip()
+
         if provider in {"google_drive", "google_calendar"} and field == "api_key" and api_key:
+            if provider == "google_calendar":
+                status, payload, raw_err = self._http_json(
+                    _SAFE_DEFAULT_GET["google_calendar"] + "&key=" + api_key,
+                    headers={"Accept": "application/json"},
+                )
+                err = (payload or {}).get("error") if isinstance(payload, dict) else {}
+                reason = ""
+                message = ""
+                if isinstance(err, dict):
+                    errors = err.get("errors") or []
+                    if errors and isinstance(errors[0], dict):
+                        reason = str(errors[0].get("reason") or "")
+                    message = str(err.get("message") or "")
+                actual = f"Google Calendar API HTTP {status}"
+                if reason:
+                    actual += f". reason={reason}"
+                if message or raw_err:
+                    actual += f". {message or raw_err}"
+                if reason in {"keyInvalid", "API_KEY_INVALID"}:
+                    return _fail(actual + " API Key was rejected.")
+                if status == 200:
+                    return _ok(actual + " API Key was accepted.")
+                if reason in {"loginRequired", "required"}:
+                    return _ok(actual + " API Key was accepted; Calendar list also needs user OAuth.")
+                return _fail(actual)
             return self._google_api_key(api_key)
+
         if field == "endpoint_url":
             if not endpoint:
                 return _fail("Endpoint URL is empty.")
-            return self._probe_url(endpoint, label="Endpoint")
+            unsafe = self._url_is_unsafe(endpoint)
+            if unsafe:
+                return _fail(unsafe)
+            allow_private = provider == "tally"
+            return self._probe_url(endpoint, label="Endpoint", allow_private=allow_private)
+
         if field in {"api_key", "api_secret", "client_secret"}:
             if field == "api_key" and not api_key:
                 return _fail("API Key is not configured.")
             if field in {"api_secret", "client_secret"} and not secret:
                 return _fail("Secret is not configured.")
-            if not endpoint:
-                return _fail("Endpoint URL is required to live-test this credential.")
-            headers = {"Accept": "application/json"}
-            if api_key:
-                if "zoho" in endpoint.lower() or provider == "zoho_books":
-                    headers["Authorization"] = f"Zoho-oauthtoken {api_key}"
-                else:
-                    headers["Authorization"] = f"Bearer {api_key}"
-            status, _payload, raw_err = self._http_json(endpoint, headers=headers)
+            url, err = self._credential_url(provider, cfg)
+            if err or not url:
+                return _fail(err or "No safe authenticated endpoint is available.")
+            if provider in {"google_drive", "google_calendar"}:
+                if field != "api_key":
+                    return _fail(
+                        "Google Drive/Calendar live check uses the API Key on Google's official API. "
+                        "API Secret is not sent."
+                    )
+                return self._google_api_key(api_key)
+            headers = self._auth_headers_for(provider, cfg, url)
+            status, _payload, raw_err = self._http_json(url, headers=headers)
+            actual = f"{provider} GET {urlparse(url).path or '/'} HTTP {status}"
+            if raw_err:
+                actual += f". {raw_err}"
             if status in {200, 201, 204}:
-                return _ok("Endpoint accepted the credential.")
-            if status in {401, 403}:
-                return _fail("Endpoint rejected the credential (HTTP %s)." % status)
-            if 200 <= status < 500:
-                return _ok(f"Endpoint is reachable (HTTP {status}). Check credential mapping if calls fail.")
-            return _fail(_safe_error(raw_err or f"Endpoint probe failed (HTTP {status})."))
+                return _ok(actual + " Credential was accepted.")
+            return _fail(actual)
         return _fail("This field cannot be live-tested.")
 
     # ------------------------------------------------------------------
@@ -1072,7 +1301,7 @@ class IntegrationFieldTestService:
         except Exception as exc:
             return _fail(_safe_error(f"STARTTLS failed on {host}:{port}: {exc}"))
 
-    def _probe_url(self, url: str, *, label: str) -> dict[str, Any]:
+    def _probe_url(self, url: str, *, label: str, allow_private: bool = False) -> dict[str, Any]:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}:
             return _fail(f"{label} URL must be http or https.")
@@ -1087,13 +1316,19 @@ class IntegrationFieldTestService:
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-                return _fail(f"{label}: refusing to probe a private/internal address.")
+                if not allow_private:
+                    return _fail(f"{label}: refusing to probe a private/internal address.")
         status, _payload, raw_err = self._http_json(url, method="GET", timeout=10)
+        actual = f"{label} HTTP {status}"
+        if raw_err:
+            actual += f". {raw_err}"
         if status == 0:
-            return _fail(_safe_error(raw_err or f"{label} is not reachable."))
-        if 200 <= status < 400 or status in {401, 403, 404, 405}:
-            return _ok(f"{label} is reachable (HTTP {status}).")
-        return _fail(_safe_error(raw_err or f"{label} returned HTTP {status}."))
+            return _fail(actual or f"{label} is not reachable.")
+        if status in {200, 201, 204, 304}:
+            return _ok(actual + " — host is reachable.")
+        if status in {401, 403, 404, 405}:
+            return _ok(actual + " — host is reachable (auth/method not required for URL test).")
+        return _fail(actual)
 
     def _http_json(
         self,
