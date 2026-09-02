@@ -23,10 +23,13 @@ class IntegrationSettingsController:
             wa_card = self.health.account_card()
         except Exception:
             wa_card = None
+        from app.modules.settings.field_test_service import testable_fields_map
+
         return {
             "providers": data["providers"],
             "catalog": self.service.providers_catalog(),
             "whatsapp_card": wa_card,
+            "testable_fields": testable_fields_map(),
         }
 
     def load_all(self) -> dict:
@@ -46,6 +49,11 @@ class IntegrationSettingsController:
 
     def test_smtp(self, payload: dict | None = None) -> dict:
         return self.service.test_smtp_connection(payload or {})
+
+    def test_field(self, provider: str, field: str, values: dict | None = None) -> dict:
+        from app.modules.settings.field_test_service import IntegrationFieldTestService
+
+        return IntegrationFieldTestService(self.service).test_field(provider, field, values or {})
 
     def status(self) -> dict:
         return self.service.status_summary()

@@ -79,6 +79,7 @@ def index():
         providers=ctx["providers"],
         catalog=ctx["catalog"],
         whatsapp_card=ctx.get("whatsapp_card"),
+        testable_fields=ctx.get("testable_fields") or {},
     )
 
 
@@ -131,6 +132,43 @@ def api_test_whatsapp_connection():
         )
     except Exception:
         return jsonify({"ok": False, "error": "Unable to run connection check."}), 500
+
+
+@bp.route("/api/settings/test-field", methods=["POST"])
+@login_required
+@admin_required
+def api_test_field():
+    """Live-test one Integration Settings field. Never returns secret values."""
+    payload = request.get_json(silent=True) or {}
+    provider = (payload.get("provider") or "").strip()
+    field = (payload.get("field") or payload.get("field_key") or "").strip()
+    values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+    if not provider or not field:
+        return jsonify({"ok": False, "error": "provider and field are required", "message": "provider and field are required"}), 400
+    try:
+        result = IntegrationSettingsController().test_field(provider, field, values)
+        return jsonify(
+            {
+                "ok": bool(result.get("ok")),
+                "message": str(result.get("message") or ""),
+                "error": str(result.get("error") or ""),
+                "provider": provider,
+                "field": field,
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc), "message": str(exc), "provider": provider, "field": field})
+    except Exception:
+        current_app.logger.exception("Integration field test failed")
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Unable to test this field.",
+                "message": "Unable to test this field.",
+                "provider": provider,
+                "field": field,
+            }
+        )
 
 
 @bp.route("/api/smtp/test-connection", methods=["POST"])

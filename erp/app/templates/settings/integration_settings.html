@@ -3,12 +3,24 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260829wa2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902ft1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
 {% block content %}
 {% set wa = whatsapp_card or {} %}
+{% set testable_fields = testable_fields or {} %}
+{% macro intset_field_test(provider, field) %}
+{% if field.key in (testable_fields.get(provider) or []) %}
+<div class="intset-field-test-row">
+  <button type="button" class="btn btn-outline-secondary intset-field-test"
+          data-intset-field-test="{{ provider }}"
+          data-field-key="{{ field.key }}"
+          title="Test {{ field.label }}">Test</button>
+  <span class="intset-field-test-result" data-field-test-result="{{ provider }}-{{ field.key }}" aria-live="polite"></span>
+</div>
+{% endif %}
+{% endmacro %}
 <div class="intset-page"
      id="intsetPage"
      data-csrf="{{ csrf_token() }}"
@@ -16,6 +28,7 @@
      data-api-generate-token="{{ url_for('integration_settings.api_generate_verify_token') }}"
      data-api-test-whatsapp="{{ url_for('integration_settings.api_test_whatsapp_connection') }}"
      data-api-test-smtp="{{ url_for('integration_settings.api_test_smtp_connection') }}"
+     data-api-test-field="{{ url_for('integration_settings.api_test_field') }}"
      data-api-smtp-audit="{{ url_for('integration_settings.api_smtp_audit') }}"
      data-api-connect="{{ url_for('integration_settings.api_whatsapp_connect') }}"
      data-api-pending-step="{{ url_for('integration_settings.api_whatsapp_pending_step') }}"
@@ -299,6 +312,7 @@
               <div class="intset-secret-hint">Must be a real email address, usually the same as Username.</div>
               {% endif %}
             {% endif %}
+            {{ intset_field_test(p.code, field) }}
           </div>
           {% endfor %}
         </div>
@@ -495,6 +509,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260829wa2"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902ft1"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

@@ -473,6 +473,7 @@
       generate: root.getAttribute("data-api-generate-token"),
       test: root.getAttribute("data-api-test-whatsapp"),
       testSmtp: root.getAttribute("data-api-test-smtp"),
+      testField: root.getAttribute("data-api-test-field"),
       smtpAudit: root.getAttribute("data-api-smtp-audit"),
       connect: root.getAttribute("data-api-connect"),
       pendingStep: root.getAttribute("data-api-pending-step"),
@@ -687,6 +688,60 @@
         }
       });
     }
+
+    function escapeFieldTest(text) {
+      return String(text == null ? "" : text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setFieldTestResult(el, ok, message) {
+      if (!el) return;
+      el.className = "intset-field-test-result " + (ok ? "is-ok" : "is-bad");
+      el.innerHTML =
+        "<span class='intset-field-test-mark'>" +
+        (ok ? "✓" : "✕") +
+        "</span> " +
+        escapeFieldTest(message || (ok ? "OK" : "Failed"));
+    }
+
+    root.querySelectorAll("[data-intset-field-test]").forEach(function (btn) {
+      btn.addEventListener("click", async function () {
+        if (!urls.testField) return;
+        var provider = btn.getAttribute("data-intset-field-test") || "";
+        var field = btn.getAttribute("data-field-key") || "";
+        var pane = root.querySelector('[data-provider-pane="' + provider + '"]');
+        var resultEl = root.querySelector(
+          '[data-field-test-result="' + provider + "-" + field + '"]'
+        );
+        btn.disabled = true;
+        if (resultEl) {
+          resultEl.className = "intset-field-test-result is-busy";
+          resultEl.textContent = "Testing…";
+        }
+        try {
+          var data = await api(
+            urls.testField,
+            {
+              method: "POST",
+              body: {
+                provider: provider,
+                field: field,
+                values: pane ? collectValues(pane) : {},
+              },
+            },
+            root
+          );
+          setFieldTestResult(resultEl, !!data.ok, data.message || data.error || "");
+        } catch (err) {
+          setFieldTestResult(resultEl, false, err.message || "Test failed");
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
 
     var testBtn = root.querySelector("[data-intset-test-whatsapp]");
     if (testBtn) {

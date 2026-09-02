@@ -306,3 +306,53 @@
   color: #dc2626;
   font-weight: 700;
 }
+
+.intset-field-test-row {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+  min-height: 1.15rem;
+}
+
+.intset-field-test {
+  --bs-btn-padding-y: 0.08rem;
+  --bs-btn-padding-x: 0.4rem;
+  --bs-btn-font-size: 0.68rem;
+  --bs-btn-line-height: 1.2;
+  min-width: auto;
+  min-height: 1.35rem !important;
+  height: 1.35rem;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  flex: 0 0 auto;
+}
+
+.intset-check .intset-field-test-row {
+  margin-top: 0.25rem;
+}
+
+.intset-field-test-result {
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: #64748b;
+  word-break: break-word;
+}
+
+.intset-field-test-result.is-ok {
+  color: #047857;
+}
+
+.intset-field-test-result.is-bad {
+  color: #b91c1c;
+}
+
+.intset-field-test-result.is-busy {
+  color: #64748b;
+}
+
+.intset-field-test-mark {
+  font-weight: 700;
+}
