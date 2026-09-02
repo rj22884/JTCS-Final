@@ -303,6 +303,11 @@ class WhatsAppTestService:
                 "detail": "WABA ID missing — cannot check subscribed_apps.",
             }
         try:
+            logger.info(
+                "WhatsApp Test Connection subscribed_apps check waba_id=%s version=%s",
+                waba_id,
+                getattr(client, "version", ""),
+            )
             apps = client.list_subscribed_apps(waba_id)
             if apps:
                 labels = []

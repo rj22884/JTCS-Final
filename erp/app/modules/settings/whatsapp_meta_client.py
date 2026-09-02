@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import logging
 import mimetypes
+import re
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import urllib.error
 import urllib.request
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -167,29 +169,139 @@ class WhatsAppMetaClient:
         return self._http_get_json(url, timeout=self.timeout)
 
     def subscribe_app_to_waba(self, waba_id: str) -> dict[str, Any]:
-        """POST /{waba-id}/subscribed_apps — app receives webhooks for this WABA."""
-        return self.post(f"/{waba_id}/subscribed_apps", {})
+        """POST /{WABA-ID}/subscribed_apps — Bearer token, no query-string secret."""
+        return self._subscribed_apps_http("POST", waba_id, body={})
 
     def unsubscribe_app_from_waba(self, waba_id: str) -> dict[str, Any]:
-        clean = f"/{waba_id}/subscribed_apps"
-        url = f"{GRAPH_BASE}/{self.version}{clean}?{urlencode(self._auth_params())}"
-        req = urllib.request.Request(url, method="DELETE", headers={"Accept": "application/json"})
+        return self._subscribed_apps_http("DELETE", waba_id)
+
+    def list_subscribed_apps(self, waba_id: str) -> list[dict[str, Any]]:
+        data = self._subscribed_apps_http("GET", waba_id)
+        rows = list(data.get("data") or [])
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            inner = row.get("whatsapp_business_api_data")
+            if isinstance(inner, dict):
+                merged = dict(inner)
+                for key, value in row.items():
+                    if key != "whatsapp_business_api_data" and key not in merged:
+                        merged[key] = value
+                normalized.append(merged)
+            else:
+                normalized.append(row)
+        return normalized
+
+    def _subscribed_apps_http(
+        self,
+        method: str,
+        waba_id: str,
+        *,
+        body: dict | None = None,
+    ) -> dict[str, Any]:
+        """Cloud API subscribed_apps: Bearer header, token never in the URL."""
+        method = (method or "GET").upper()
+        waba = (waba_id or "").strip()
+        if not waba:
+            raise MetaGraphError("WABA ID is required for subscribed_apps.")
+        if not self.access_token:
+            raise MetaGraphError("Access token is required for subscribed_apps.")
+        path = f"/{self.version}/{waba}/subscribed_apps"
+        url = f"{GRAPH_BASE}{path}"
+        # This WhatsApp edge is slower than node GETs used by other Test checks.
+        wait = max(30, int(self.timeout or 30))
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {self.access_token}",
+            "User-Agent": "JTCS-ERP-WhatsApp/1.0",
+        }
+        data = None
+        if method == "POST":
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(body if body is not None else {}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        req.add_unredirected_header("Authorization", f"Bearer {self.access_token}")
+        logger.info(
+            "WhatsApp subscribed_apps request method=%s url=%s version=%s waba_id=%s "
+            "timeout_s=%s token_present=%s auth=Bearer",
+            method,
+            url,
+            self.version,
+            waba,
+            wait,
+            True,
+        )
+        started = time.perf_counter()
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=wait) as resp:
                 raw = resp.read().decode("utf-8")
+                status = getattr(resp, "status", None) or resp.getcode()
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                logger.info(
+                    "WhatsApp subscribed_apps response method=%s status=%s elapsed_ms=%s body=%s",
+                    method,
+                    status,
+                    elapsed_ms,
+                    self._redact_log_text(raw)[:2000],
+                )
                 return json.loads(raw) if raw else {"success": True}
         except urllib.error.HTTPError as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             body_txt = exc.read().decode("utf-8", errors="replace")
             try:
                 payload = json.loads(body_txt) if body_txt else {}
             except json.JSONDecodeError:
                 payload = {"raw": body_txt}
-            err = (payload.get("error") or {})
-            raise MetaGraphError(err.get("message") or body_txt or str(exc), status=exc.code, payload=payload) from exc
+            err = payload.get("error") or {}
+            msg = err.get("message") or body_txt or str(exc)
+            logger.warning(
+                "WhatsApp subscribed_apps http_error method=%s url=%s status=%s elapsed_ms=%s body=%s",
+                method,
+                url,
+                exc.code,
+                elapsed_ms,
+                self._redact_log_text(body_txt)[:2000],
+            )
+            raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
+        except TimeoutError as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            logger.warning(
+                "WhatsApp subscribed_apps timeout method=%s url=%s timeout_s=%s elapsed_ms=%s reason=%s",
+                method,
+                url,
+                wait,
+                elapsed_ms,
+                exc,
+            )
+            raise MetaGraphError(
+                f"Meta Graph API timed out on {method} {path} after {wait}s."
+            ) from exc
+        except urllib.error.URLError as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            reason = exc.reason
+            timed_out = isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
+            logger.warning(
+                "WhatsApp subscribed_apps network_error method=%s url=%s elapsed_ms=%s timeout=%s reason=%s",
+                method,
+                url,
+                elapsed_ms,
+                timed_out,
+                self._redact_log_text(str(reason)),
+            )
+            if timed_out:
+                raise MetaGraphError(
+                    f"Meta Graph API timed out on {method} {path} after {wait}s."
+                ) from exc
+            raise MetaGraphError(f"Network error reaching Meta Graph API: {reason}") from exc
 
-    def list_subscribed_apps(self, waba_id: str) -> list[dict[str, Any]]:
-        data = self.get(f"/{waba_id}/subscribed_apps")
-        return list(data.get("data") or [])
+    @staticmethod
+    def _redact_log_text(text: str | None) -> str:
+        value = text or ""
+        value = re.sub(r"EAA[A-Za-z0-9]+", "EAA***", value)
+        value = re.sub(r"(access_token=)[^&\s]+", r"\1REDACTED", value, flags=re.I)
+        value = re.sub(r"(Bearer\s+)\S+", r"\1REDACTED", value, flags=re.I)
+        return value
 
     def debug_token(self, app_id: str, app_secret: str, input_token: str) -> dict[str, Any]:
         app_token = f"{app_id}|{app_secret}"
