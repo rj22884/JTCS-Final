@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902wa1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902wa7">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
@@ -171,16 +171,17 @@
     <div class="tab-content">
       {% for p in providers %}
       {% set fv = p['field_values'] %}
+      {% set secret_cfg = p.get('secret_configured') or {} %}
       <div class="tab-pane fade {% if loop.first %}show active{% endif %} intset-pane"
            id="pane-{{ p.code }}"
            data-provider-pane="{{ p.code }}"
            data-initial-status="{{ fv.get('connection_status') or 'Not Configured' }}"
            data-initial-status-code="{{ p.get('status_code') or 'not_configured' }}"
            data-initial-missing="{{ (p.get('missing_labels') or [])|join('|') }}"
+           {% if p.code == 'whatsapp_meta' %}data-wa-auto="{{ '1' if secret_cfg.get('access_token') or fv.get('waba_id') else '0' }}"{% endif %}
            role="tabpanel"
            aria-labelledby="tab-{{ p.code }}">
 
-        {% set secret_cfg = p.get('secret_configured') or {} %}
         <p class="intset-help">
           {% if p.code == 'smtp' %}
           Configure SMTP Email credentials. Passwords are encrypted at rest and
@@ -193,19 +194,16 @@
           Secrets are encrypted in the database and never displayed after save.
           {% endif %}
           {% if p.code == 'whatsapp_meta' %}
-          Pehle <strong>App ID</strong> aur <strong>App Secret</strong> fill karke <strong>Save</strong> karein,
-          phir <strong>Connect Facebook</strong> dabayein.
-          ERP aapko Facebook ke official login page par bhejega — <strong>password aur OTP wahan</strong> enter karein
-          (ERP kabhi Facebook password nahi maangta / store nahi karta).
-          Login ke baad Business → WABA → Phone select karke baaki fields auto-fill ho jayengi.
-          WhatsApp send ke liye <strong>*</strong> wale fields zaroori hain — baaki optional hain.
+          <strong>Step 1:</strong> Facebook App ID aur App Secret isi page par daalo, <strong>Save credentials</strong>,
+          phir <strong>Facebook Login</strong> — Facebook password / 2FA isi tab mein, koi naya tab nahi.
+          Wapas aate hi WABA, Phone, token aur URLs API se fields mein aa jayenge.
           {% endif %}
         </p>
 
         {% if p.code == 'whatsapp_meta' %}
         <div class="alert alert-info py-2 small mb-3" role="note">
-          <strong>Flow:</strong> App ID + App Secret → Save → Connect Facebook → password/OTP → Business/WABA/Phone choose →
-          Token encrypted save. Baaki IDs manually type karne ki zarurat nahi.
+          Facebook / Meta pages yahan se nahi kholte. Credentials isi form par, Facebook Login isi tab mein,
+          values Graph API se auto-fill. Test <code>+1 555</code> skip — real <code>+91</code> auto-select.
         </div>
         {% endif %}
         {% if p.code in ('whatsapp_meta', 'smtp') %}
@@ -215,8 +213,24 @@
         {% endif %}
 
         <div class="row g-3">
+          {% set wa_section = namespace(name='') %}
           {% for field in p.fields %}
-          <div class="col-12 col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}{% if field.input == 'checkbox' %}col-sm-6 col-md-3{% endif %}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret', 'phone_number_id', 'waba_id', 'access_token', 'webhook_verify_token'] %} intset-primary-cred{% endif %}">
+          {% if p.code == 'whatsapp_meta' and field.get('hidden') %}
+          {% else %}
+          {% if p.code == 'whatsapp_meta' and field.get('section') and field.section != wa_section.name %}
+          {% set wa_section.name = field.section %}
+          <div class="col-12" data-wa-section="{{ field.section }}">
+            <h3 class="intset-section-title">
+              {% if field.section == 'facebook_login' %}Step 1 — Facebook Login credentials
+              {% elif field.section == 'whatsapp_account' %}Step 2 — Auto from Facebook (WhatsApp IDs)
+              {% elif field.section == 'webhook' %}Webhook &amp; OAuth URLs (API se auto)
+              {% elif field.section == 'status' %}Status
+              {% else %}{{ field.section }}{% endif %}
+            </h3>
+          </div>
+          {% endif %}
+          <div class="col-12 col-md-6 {% if field.input == 'textarea' %}col-12{% endif %}{% if field.input == 'checkbox' %}col-sm-6 col-md-3{% endif %}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret', 'phone_number_id', 'waba_id', 'access_token', 'webhook_verify_token'] %} intset-primary-cred{% endif %}"
+               {% if p.code == 'whatsapp_meta' and field.get('section') %}data-wa-section="{{ field.section }}"{% endif %}>
             {% if field.input != 'checkbox' %}
             <label class="form-label" for="fld-{{ p.code }}-{{ field.key }}">
               {{ field.label }}{% if p.code == 'whatsapp_meta' and field.key in ['app_id', 'app_secret', 'phone_number_id', 'waba_id', 'access_token', 'webhook_verify_token'] %}<span class="intset-req" aria-hidden="true"> *</span>{% endif %}
@@ -228,7 +242,7 @@
               {% endif %}
             </label>
             {% endif %}
-            {% if field.input == 'readonly' %}
+            {% if field.input == 'readonly' and field.key == 'connection_status' %}
               <div>
                 <span class="intset-status"
                       data-connection-status
@@ -239,6 +253,14 @@
                        data-setting-key="{{ field.key }}"
                        value="{{ fv.get(field.key) or '' }}">
               </div>
+            {% elif field.input == 'readonly' %}
+              <input type="text"
+                     class="form-control form-control-sm"
+                     id="fld-{{ p.code }}-{{ field.key }}"
+                     data-setting-key="{{ field.key }}"
+                     value="{{ fv.get(field.key) or '' }}"
+                     readonly
+                     autocomplete="off">
             {% elif field.input == 'textarea' %}
               <textarea class="form-control form-control-sm"
                         id="fld-{{ p.code }}-{{ field.key }}"
@@ -312,18 +334,24 @@
               <div class="intset-secret-hint">Must be a real email address, usually the same as Username.</div>
               {% endif %}
             {% endif %}
+            {% if field.find_label %}
+            <div class="intset-field-help">{{ field.find_label }}</div>
+            {% elif field.help %}
+            <div class="intset-field-help">{{ field.help }}</div>
+            {% endif %}
             {{ intset_field_test(p.code, field) }}
           </div>
+          {% endif %}
           {% endfor %}
         </div>
 
         <div class="intset-actions">
           {% if p.code == 'whatsapp_meta' %}
           <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
-            <i class="bi bi-save"></i> Save
+            <i class="bi bi-save"></i> Save credentials
           </button>
           <button type="button" class="btn btn-success btn-sm" data-intset-connect-meta>
-            <i class="bi bi-meta"></i> Connect Facebook
+            <i class="bi bi-meta"></i> Facebook Login
           </button>
           {% else %}
           <button type="button" class="btn btn-primary btn-sm" data-intset-save="{{ p.code }}">
@@ -339,6 +367,7 @@
           </button>
           {% endif %}
           {% if p.code == 'whatsapp_meta' %}
+          <span data-wa-section="whatsapp_account" class="intset-wa-auto-actions">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-token-guide>
             <i class="bi bi-journal-text"></i> Generate Access Token Guide
           </button>
@@ -359,6 +388,7 @@
                    placeholder="Test mobile (E.164)"
                    autocomplete="off">
           </div>
+          </span>
           {% endif %}
         </div>
         {% if p.code == 'smtp' %}
@@ -369,17 +399,17 @@
         {% endif %}
 
         {% if p.code == 'whatsapp_meta' %}
-        <div class="mt-2 small text-muted" data-access-token-hint>
+        <div class="mt-2 small text-muted" data-access-token-hint data-wa-section="whatsapp_account">
           {% if p.get('access_token_display') %}
           Stored token: <code>{{ p.access_token_display }}</code>
           {% if p.get('token_expires_at') %} · expires {{ p.token_expires_at }} UTC{% endif %}
           {% endif %}
         </div>
         {% if p.get('localhost_warning') %}
-        <div class="alert alert-warning py-2 small mt-2 mb-0">{{ p.localhost_warning }}</div>
+        <div class="alert alert-warning py-2 small mt-2 mb-0" data-wa-section="whatsapp_account">{{ p.localhost_warning }}</div>
         {% endif %}
-        <div class="mt-3" data-whatsapp-test-result></div>
-        <div class="mt-3" data-test-checks-form></div>
+        <div class="mt-3" data-whatsapp-test-result data-wa-section="whatsapp_account"></div>
+        <div class="mt-3" data-test-checks-form data-wa-section="whatsapp_account"></div>
         {% endif %}
       </div>
       {% endfor %}
@@ -510,6 +540,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902wa1"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902wa7"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

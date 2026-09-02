@@ -613,8 +613,8 @@ class IntegrationSettingsService:
     @staticmethod
     def _missing_labels(keys: list[str]) -> list[str]:
         labels = {
-            "app_id": "App ID",
-            "app_secret": "App Secret",
+            "app_id": "Facebook App ID",
+            "app_secret": "Facebook App Secret",
             "access_token": "Access Token",
             "business_id": "Business ID",
             "waba_id": "WhatsApp Business Account ID",

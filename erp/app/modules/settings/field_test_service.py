@@ -45,25 +45,16 @@ _SECRET_QS_RE = re.compile(
 _TESTABLE: dict[str, frozenset[str]] = {
     "whatsapp_meta": frozenset(
         {
-            "business_name",
             "business_id",
             "app_id",
             "app_secret",
             "phone_number",
             "phone_number_id",
             "waba_id",
-            "display_name",
-            "quality_rating",
-            "messaging_limit",
-            "account_status",
-            "profile_photo_url",
             "access_token",
-            "token_expires_at",
-            "graph_api_version",
             "webhook_verify_token",
             "webhook_url",
             "oauth_redirect_uri",
-            "webhook_subscribed_fields",
         }
     ),
     "smtp": frozenset(

@@ -301,6 +301,17 @@ def api_whatsapp_connect():
 @login_required
 @admin_required
 def api_whatsapp_oauth_callback():
+    session.pop("wa_meta_oauth_popup", None)
+
+    def _back(*, connect: bool = False, error: bool = False):
+        parts = []
+        if connect:
+            parts.append("wa_connect=1")
+        if error:
+            parts.append("wa_oauth_error=1")
+        suffix = ("?" + "&".join(parts)) if parts else ""
+        return redirect(url_for("integration_settings.index") + suffix)
+
     try:
         result = WhatsAppOAuthService().handle_callback(
             code=request.args.get("code"),
@@ -308,15 +319,14 @@ def api_whatsapp_oauth_callback():
             error=request.args.get("error_description") or request.args.get("error"),
         )
         flash(result.get("message") or "Meta connected. Continue selection.", "success")
-        # Stash selection payload in session for the UI to pick up
         session["wa_meta_pending_step"] = result
-        return redirect(url_for("integration_settings.index") + "?wa_connect=1")
+        return _back(connect=True)
     except ValueError as exc:
         flash(str(exc), "danger")
-        return redirect(url_for("integration_settings.index"))
+        return _back(error=True)
     except Exception:
         flash("Meta OAuth callback failed.", "danger")
-        return redirect(url_for("integration_settings.index"))
+        return _back(error=True)
 
 
 @bp.route("/api/whatsapp/pending-step", methods=["GET"])

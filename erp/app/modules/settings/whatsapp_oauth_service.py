@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 from flask import current_app, session, url_for
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.modules.settings.crypto import encrypt_value
 from app.modules.settings.repositories import IntegrationSettingsRepository
@@ -26,9 +27,22 @@ PROVIDER = "whatsapp_meta"
 SESSION_OAUTH_STATE = "wa_meta_oauth_state"
 SESSION_OAUTH_TOKEN = "wa_meta_oauth_token"
 SESSION_OAUTH_VERSION = "wa_meta_oauth_version"
+SESSION_OAUTH_POPUP = "wa_meta_oauth_popup"
 
 # Meta Graph object IDs are numeric strings. Access tokens are long opaque strings (often EAA...).
 _META_OBJECT_ID_RE = re.compile(r"^\d{5,30}$")
+_OAUTH_STATE_SALT = "jtcs-wa-oauth-state"
+_OAUTH_STATE_MAX_AGE = 15 * 60
+
+
+def _is_test_waba_name(name: str | None) -> bool:
+    return "test" in (name or "").lower()
+
+
+def _is_test_phone_display(display: str | None) -> bool:
+    text = display or ""
+    digits = re.sub(r"\D", "", text)
+    return "555" in text or digits.startswith("1555")
 
 
 class WhatsAppOAuthService:
@@ -50,29 +64,60 @@ class WhatsAppOAuthService:
     def default_oauth_redirect_uri(self) -> str:
         return url_for("integration_settings.api_whatsapp_oauth_callback", _external=True)
 
-    def start_connect(self) -> dict[str, Any]:
+    @staticmethod
+    def _oauth_serializer() -> URLSafeTimedSerializer:
+        return URLSafeTimedSerializer(current_app.secret_key, salt=_OAUTH_STATE_SALT)
+
+    def _issue_oauth_state(self) -> str:
+        state = self._oauth_serializer().dumps(
+            {"uid": session.get("user_id"), "n": secrets.token_urlsafe(12)}
+        )
+        session[SESSION_OAUTH_STATE] = state
+        session.modified = True
+        return state
+
+    def _oauth_state_ok(self, state: str | None) -> bool:
+        incoming = (state or "").strip()
+        if not incoming:
+            return False
+        expected = (session.get(SESSION_OAUTH_STATE) or "").strip()
+        if expected and incoming == expected:
+            return True
+        try:
+            data = self._oauth_serializer().loads(incoming, max_age=_OAUTH_STATE_MAX_AGE)
+        except (BadSignature, SignatureExpired, TypeError, ValueError):
+            return False
+        return str(data.get("uid") or "") == str(session.get("user_id") or "")
+
+    def start_connect(self, *, popup: bool = False) -> dict[str, Any]:
         cfg = self._cfg()
         app_id = (cfg.get("app_id") or "").strip()
         app_secret = (cfg.get("app_secret") or "").strip()
         if not app_id or not app_secret:
-            raise ValueError("Save App ID and App Secret before clicking Connect Facebook.")
+            raise ValueError("Save Facebook App ID and App Secret before Facebook Login.")
 
         version = (cfg.get("graph_api_version") or DEFAULT_GRAPH_VERSION).strip() or DEFAULT_GRAPH_VERSION
         redirect_uri = (cfg.get("oauth_redirect_uri") or "").strip() or self.default_oauth_redirect_uri()
-        state = secrets.token_urlsafe(24)
-        session[SESSION_OAUTH_STATE] = state
+        state = self._issue_oauth_state()
         session[SESSION_OAUTH_VERSION] = version
+        session.pop(SESSION_OAUTH_POPUP, None)
 
         # Persist redirect URI + default graph version / webhook if empty (non-secrets only)
         self._upsert_plain("graph_api_version", version)
         self._upsert_plain("oauth_redirect_uri", redirect_uri)
         if not (cfg.get("webhook_url") or "").strip():
             self._upsert_plain("webhook_url", self.default_webhook_url())
+        if not (cfg.get("webhook_verify_token") or "").strip():
+            try:
+                self.settings.generate_whatsapp_verify_token()
+            except Exception:
+                logger.exception("Auto verify-token generation failed before Facebook Login")
 
         url = WhatsAppMetaClient.oauth_authorize_url(
             app_id=app_id,
             redirect_uri=redirect_uri,
             state=state,
+            display_popup=False,
         )
         return {"ok": True, "authorize_url": url, "redirect_uri": redirect_uri}
 
@@ -81,9 +126,11 @@ class WhatsAppOAuthService:
             raise ValueError(f"Meta OAuth error: {error}")
         if not code:
             raise ValueError("Missing OAuth authorization code.")
-        expected = session.get(SESSION_OAUTH_STATE)
-        if not expected or state != expected:
-            raise ValueError("Invalid OAuth state. Please try Connect Meta again.")
+        if not self._oauth_state_ok(state):
+            raise ValueError(
+                "Facebook Login session expire ho gayi. Facebook Login dubara dabayein "
+                "(15 minute ke andar isi tab mein complete karein)."
+            )
 
         cfg = self._cfg()
         app_id = (cfg.get("app_id") or "").strip()
@@ -174,16 +221,19 @@ class WhatsAppOAuthService:
                 "id": wid,
                 "name": (w.get("name") or "").strip(),
                 "account_status": (w.get("account_review_status") or "").strip(),
+                "is_test": _is_test_waba_name(w.get("name")),
             }
             for w in client.list_owned_wabas(resolved_business_id)
             if (wid := self._as_meta_object_id(w.get("id")))
         ]
         self._set_status("Partial Configuration")
+        snap = self._masked_snapshot()
         return {
             "ok": True,
             "step": "select_waba",
             "business": {"id": resolved_business_id, "name": business_name},
             "wabas": wabas,
+            **snap,
         }
 
     def list_wabas(self, business_id: str | None = None) -> dict[str, Any]:
@@ -196,6 +246,7 @@ class WhatsAppOAuthService:
                 "id": wid,
                 "name": (w.get("name") or "").strip(),
                 "account_status": (w.get("account_review_status") or "").strip(),
+                "is_test": _is_test_waba_name(w.get("name")),
             }
             for w in self._oauth_client().list_owned_wabas(bid)
             if (wid := self._as_meta_object_id(w.get("id")))
@@ -230,11 +281,13 @@ class WhatsAppOAuthService:
                 "display_name": (p.get("verified_name") or "").strip(),
                 "quality_rating": (p.get("quality_rating") or "").strip(),
                 "account_status": (p.get("code_verification_status") or "").strip(),
+                "is_test": _is_test_phone_display(p.get("display_phone_number")),
             }
             for p in client.list_phone_numbers(resolved_waba_id)
             if (pid := self._as_meta_object_id(p.get("id")))
         ]
         self._set_status("Partial Configuration")
+        snap = self._masked_snapshot()
         return {
             "ok": True,
             "step": "select_phone",
@@ -244,6 +297,7 @@ class WhatsAppOAuthService:
                 "account_status": account_status,
             },
             "phones": phones,
+            **snap,
         }
 
     def list_phones(self, waba_id: str | None = None) -> dict[str, Any]:
@@ -258,6 +312,7 @@ class WhatsAppOAuthService:
                 "display_name": (p.get("verified_name") or "").strip(),
                 "quality_rating": (p.get("quality_rating") or "").strip(),
                 "account_status": (p.get("code_verification_status") or "").strip(),
+                "is_test": _is_test_phone_display(p.get("display_phone_number")),
             }
             for p in self._oauth_client().list_phone_numbers(wid)
             if (pid := self._as_meta_object_id(p.get("id")))
@@ -348,12 +403,7 @@ class WhatsAppOAuthService:
         has_token = bool((self._cfg().get("access_token") or "").strip())
         self._set_status("Connected" if has_token else "Partial Configuration")
 
-        masked = self.settings.get_provider_settings_masked(PROVIDER)
-        fv = dict(masked.get("field_values") or {})
-        for id_key in ("business_id", "phone_number_id", "waba_id"):
-            if self._looks_like_access_token(fv.get(id_key)):
-                fv[id_key] = ""
-
+        snap = self._masked_snapshot()
         return {
             "ok": True,
             "step": "done",
@@ -363,11 +413,8 @@ class WhatsAppOAuthService:
                 + subscribe_note
                 + " Run Test Connection to verify."
             ),
-            "field_values": fv,
-            "missing": masked.get("missing") or [],
-            "missing_labels": masked.get("missing_labels") or [],
-            "status_code": masked.get("status_code"),
             "localhost_warning": self._localhost_warning(webhook),
+            **snap,
         }
 
     def _persist_long_lived_token(self, *, cfg: dict[str, str], version: str) -> str:
@@ -449,17 +496,53 @@ class WhatsAppOAuthService:
 
     def token_guide(self) -> dict[str, Any]:
         cfg = self._cfg()
+        app_id = (cfg.get("app_id") or "").strip()
+        oauth_uri = (cfg.get("oauth_redirect_uri") or "").strip() or self.default_oauth_redirect_uri()
+        webhook_url = (cfg.get("webhook_url") or "").strip() or self.default_webhook_url()
+        apps_home = (
+            f"https://developers.facebook.com/apps/{app_id}/"
+            if app_id
+            else "https://developers.facebook.com/apps/"
+        )
+        basic_url = (
+            f"https://developers.facebook.com/apps/{app_id}/settings/basic/"
+            if app_id
+            else "https://developers.facebook.com/apps/"
+        )
+        oauth_settings_url = (
+            f"https://developers.facebook.com/apps/{app_id}/fb-login/settings/"
+            if app_id
+            else "https://developers.facebook.com/apps/"
+        )
+        webhook_settings_url = (
+            f"https://developers.facebook.com/apps/{app_id}/whatsapp-business/wa-settings/"
+            if app_id
+            else "https://developers.facebook.com/apps/"
+        )
         return {
             "ok": True,
             "title": "Generate Permanent Access Token",
             "steps": [
-                "Open Meta Business Suite → Business Settings → Users → System Users.",
+                (
+                    "Open Meta Business Suite → Business Settings → Users → System Users: "
+                    "https://business.facebook.com/settings/system-users"
+                ),
                 "Create or select a System User, then click Generate New Token.",
                 "Select your WhatsApp app and grant whatsapp_business_management and whatsapp_business_messaging.",
                 "Copy the permanent token and paste it into Access Token on this page, then Save.",
-                "App Secret stays in Meta Developer → App Settings → Basic (never share publicly).",
-                f"Register OAuth Redirect URI in Meta App: {cfg.get('oauth_redirect_uri') or self.default_oauth_redirect_uri()}",
-                f"Optional Webhook URL: {cfg.get('webhook_url') or self.default_webhook_url()}",
+                (
+                    "App Secret stays in Meta Developer → App Settings → Basic "
+                    f"({basic_url}) — never share publicly."
+                ),
+                (
+                    "Register this OAuth Redirect URI in Meta App → Facebook Login → Settings "
+                    f"({oauth_settings_url}): {oauth_uri}"
+                ),
+                (
+                    "Optional Webhook URL — paste in WhatsApp → Configuration "
+                    f"({webhook_settings_url}): {webhook_url}"
+                ),
+                f"Open your Meta app dashboard: {apps_home}",
             ],
             "notes": [
                 "Connect Meta exchanges a long-lived Access Token and saves it encrypted.",
@@ -467,6 +550,20 @@ class WhatsAppOAuthService:
                 "App Secret stays manual and is never displayed in clear text.",
                 "Credentials are encrypted at rest and masked on screen.",
             ],
+        }
+
+    def _masked_snapshot(self) -> dict[str, Any]:
+        masked = self.settings.get_provider_settings_masked(PROVIDER)
+        fv = dict(masked.get("field_values") or {})
+        for id_key in ("business_id", "phone_number_id", "waba_id"):
+            if self._looks_like_access_token(fv.get(id_key)):
+                fv[id_key] = ""
+        return {
+            "field_values": fv,
+            "secret_configured": masked.get("secret_configured") or {},
+            "missing": masked.get("missing") or [],
+            "missing_labels": masked.get("missing_labels") or [],
+            "status_code": masked.get("status_code"),
         }
 
     @classmethod

@@ -361,6 +361,45 @@
     modal.show();
   }
 
+  function escapeGuideHtml(text) {
+    return String(text == null ? "" : text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function linkifyGuideText(text) {
+    return escapeGuideHtml(text).replace(/https?:\/\/[^\s<]+/g, function (url) {
+      var trimmed = url.replace(/[),.;]+$/, "");
+      var trailing = url.slice(trimmed.length);
+      return "<code>" + trimmed + "</code>" + trailing;
+    });
+  }
+
+  function isExternalHttpUrl(href) {
+    if (!href) return false;
+    var abs;
+    try {
+      abs = new URL(href, window.location.href);
+    } catch (_e) {
+      return false;
+    }
+    if (abs.protocol !== "http:" && abs.protocol !== "https:") return false;
+    return abs.origin !== window.location.origin;
+  }
+
+  function blockExternalNavigation(ev) {
+    var a = ev.target.closest("a[href]");
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (href.charAt(0) === "#" || href.toLowerCase().indexOf("javascript:") === 0) return;
+    if (isExternalHttpUrl(href)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  }
+
   function openGuideModal(data) {
     var modalEl = document.getElementById("intsetGuideModal");
     var body = document.getElementById("intsetGuideBody");
@@ -369,13 +408,13 @@
     title.textContent = data.title || "Permanent Access Token Guide";
     var html = "<ol>";
     (data.steps || []).forEach(function (s) {
-      html += "<li class='mb-2'>" + s + "</li>";
+      html += "<li class='mb-2'>" + linkifyGuideText(s) + "</li>";
     });
     html += "</ol>";
     if (data.notes && data.notes.length) {
       html += "<div class='small text-muted'><strong>Notes</strong><ul>";
       data.notes.forEach(function (n) {
-        html += "<li>" + n + "</li>";
+        html += "<li>" + linkifyGuideText(n) + "</li>";
       });
       html += "</ul></div>";
     }
@@ -386,7 +425,7 @@
   async function handlePendingStep(root, pane, alertEl, urls) {
     var data = await api(urls.pendingStep, {}, root);
     var pending = data.pending;
-    if (!pending) return;
+    if (!pending) return false;
     showAlert(alertEl, pending.message || "Continue WhatsApp setup.", "success");
     if (pending.step === "select_business") {
       if ((pending.businesses || []).length === 1) {
@@ -405,6 +444,66 @@
         );
       }
     }
+    return true;
+  }
+
+  function preferredMetaId(items, testKey) {
+    var list = items || [];
+    var real = list.filter(function (item) {
+      return !item[testKey];
+    });
+    if (real.length === 1) return real[0].id;
+    if (real.length > 1) return "";
+    if (list.length === 1) return list[0].id;
+    return "";
+  }
+
+  function preferredPhoneId(phones) {
+    var list = phones || [];
+    var plus91 = list.filter(function (p) {
+      var n = String(p.display_phone_number || "").replace(/\s/g, "");
+      return n.indexOf("+91") === 0 || n.indexOf("91") === 0;
+    });
+    if (plus91.length === 1) return plus91[0].id;
+    if (plus91.length > 1) return "";
+    return preferredMetaId(list, "is_test");
+  }
+
+  function whatsappCredentialsReady(pane) {
+    if (!pane) return false;
+    var idInput = pane.querySelector('[data-setting-key="app_id"]');
+    var secret = pane.querySelector('[data-setting-key="app_secret"]');
+    var hasId = !!(idInput && String(idInput.value || "").trim());
+    var secretVal = secret ? String(secret.value || "") : "";
+    var hasSecret = !!(
+      secret &&
+      (secret.getAttribute("data-has-secret") === "1" || (secretVal && !isSecretMask(secretVal)))
+    );
+    return hasId && hasSecret;
+  }
+
+  function syncWhatsAppWizard(pane, forceAuto) {
+    if (!pane) return;
+    var auto = !!forceAuto || pane.getAttribute("data-wa-auto") === "1";
+    pane.querySelectorAll("[data-wa-section]").forEach(function (el) {
+      var sec = el.getAttribute("data-wa-section");
+      if (!sec || sec === "facebook_login") return;
+      el.classList.toggle("d-none", !auto);
+    });
+    var loginBtn = pane.querySelector("[data-intset-connect-meta]");
+    var ready = whatsappCredentialsReady(pane);
+    if (loginBtn) {
+      loginBtn.disabled = !ready;
+      loginBtn.title = ready
+        ? "Facebook Login isi tab mein"
+        : "Pehle Facebook App ID aur App Secret Save karein";
+    }
+  }
+
+  function revealWhatsAppAuto(pane) {
+    if (!pane) return;
+    pane.setAttribute("data-wa-auto", "1");
+    syncWhatsAppWizard(pane, true);
   }
 
   async function pickBusiness(root, pane, alertEl, urls, businessId) {
@@ -416,9 +515,16 @@
       },
       root
     );
-    if (data.field_values) applyValues(pane, data.field_values, data);
+    applyValues(pane, data.field_values || {}, data);
+    if ((!data.field_values || !data.field_values.business_id) && data.business && data.business.id) {
+      applyValues(pane, { business_id: data.business.id }, data);
+    }
+    revealWhatsAppAuto(pane);
     var wabas = data.wabas || [];
-    if (wabas.length === 1) {
+    var autoWaba = preferredMetaId(wabas, "is_test");
+    if (autoWaba) {
+      await pickWaba(root, pane, alertEl, urls, autoWaba);
+    } else if (wabas.length === 1) {
       await pickWaba(root, pane, alertEl, urls, wabas[0].id);
     } else {
       openSelectModal(
@@ -437,9 +543,16 @@
 
   async function pickWaba(root, pane, alertEl, urls, wabaId) {
     var data = await api(urls.selectWaba, { method: "POST", body: { waba_id: wabaId } }, root);
-    if (data.field_values) applyValues(pane, data.field_values, data);
+    applyValues(pane, data.field_values || {}, data);
+    if ((!data.field_values || !data.field_values.waba_id) && data.waba && data.waba.id) {
+      applyValues(pane, { waba_id: data.waba.id }, data);
+    }
+    revealWhatsAppAuto(pane);
     var phones = data.phones || [];
-    if (phones.length === 1) {
+    var autoPhone = preferredPhoneId(phones);
+    if (autoPhone) {
+      await pickPhone(root, pane, alertEl, urls, autoPhone);
+    } else if (phones.length === 1) {
       await pickPhone(root, pane, alertEl, urls, phones[0].id);
     } else {
       openSelectModal(
@@ -474,6 +587,8 @@
     );
     applyValues(pane, data.field_values || {}, data);
     setMissing(pane, data.missing_labels || []);
+    if (data.secret_configured) clearSecretInputs(pane, data.secret_configured);
+    revealWhatsAppAuto(pane);
     var msg = data.message || "Phone selected and fields populated.";
     if (data.localhost_warning) msg += " " + data.localhost_warning;
     showAlert(alertEl, msg, data.localhost_warning ? "warning" : "success");
@@ -487,6 +602,24 @@
   function init() {
     var root = document.getElementById("intsetPage");
     if (!root) return;
+
+    var qs = new URLSearchParams(window.location.search);
+    if (window.location.hash === "#_=_") {
+      try {
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      } catch (_h) {}
+    }
+
+    var configPane = document.getElementById("intsetPrimaryPane-config");
+    if (configPane) {
+      configPane.addEventListener("click", blockExternalNavigation);
+      configPane.addEventListener("auxclick", blockExternalNavigation);
+    }
+    var guideModal = document.getElementById("intsetGuideModal");
+    if (guideModal) {
+      guideModal.addEventListener("click", blockExternalNavigation);
+      guideModal.addEventListener("auxclick", blockExternalNavigation);
+    }
 
     var urls = {
       settings: root.getAttribute("data-api-settings"),
@@ -564,6 +697,7 @@
         applyValues(pane, data.field_values || data.values || {}, data);
         setMissing(pane, data.missing_labels || []);
         clearSecretInputs(pane, data.secret_configured || null);
+        if (provider === "whatsapp_meta") syncWhatsAppWizard(pane);
 
         var msg = data.message || "Settings saved successfully";
         showToast(msg, "success");
@@ -927,6 +1061,14 @@
     if (connectBtn) {
       connectBtn.addEventListener("click", async function () {
         var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
+        if (!whatsappCredentialsReady(pane)) {
+          showAlert(
+            alertEl,
+            "Pehle Facebook App ID aur App Secret fill karke Save credentials dabayein.",
+            "warning"
+          );
+          return;
+        }
         connectBtn.disabled = true;
         try {
           if (pane) {
@@ -950,15 +1092,15 @@
           if (data.authorize_url) {
             showAlert(
               alertEl,
-              "Facebook login page open ho rahi hai — password/OTP wahan daalein…",
+              "Facebook Login isi tab mein continue hoga (naya tab nahi). Password / 2FA complete karein — wapas aate hi values fields mein aa jayengi.",
               "info"
             );
-            window.location.href = data.authorize_url;
+            window.location.assign(data.authorize_url);
             return;
           }
-          showAlert(alertEl, data.error || "Unable to start Connect Facebook.", "danger");
+          showAlert(alertEl, data.error || "Unable to start Facebook Login.", "danger");
         } catch (err) {
-          showAlert(alertEl, err.message || "Connect Facebook failed", "danger");
+          showAlert(alertEl, err.message || "Facebook Login failed", "danger");
         } finally {
           connectBtn.disabled = false;
         }
@@ -995,11 +1137,21 @@
       });
     });
 
-    if (new URLSearchParams(window.location.search).get("wa_connect") === "1") {
+    var waPaneInit = root.querySelector('[data-provider-pane="whatsapp_meta"]');
+    if (waPaneInit) syncWhatsAppWizard(waPaneInit);
+
+    if (qs.get("wa_connect") === "1") {
       var waPane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
-      handlePendingStep(root, waPane, alertEl, urls).catch(function (err) {
-        showAlert(alertEl, err.message || "Continue setup failed", "danger");
-      });
+      revealWhatsAppAuto(waPane);
+      handlePendingStep(root, waPane, alertEl, urls)
+        .catch(function (err) {
+          showAlert(alertEl, err.message || "Continue setup failed", "danger");
+        })
+        .finally(function () {
+          try {
+            history.replaceState(null, "", window.location.pathname);
+          } catch (_e) {}
+        });
     }
   }
 

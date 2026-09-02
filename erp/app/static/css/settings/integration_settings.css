@@ -260,8 +260,32 @@
   align-items: center;
 }
 
-.intset-test-extra .form-control {
-  max-width: 220px;
+.intset-section-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--intset-accent);
+  margin: 0.75rem 0 0.15rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--intset-border);
+}
+
+.intset-section-title:first-child,
+.row.g-3 > .col-12:first-child .intset-section-title {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.intset-field-help a {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.intset-wa-auto-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
 }
 
 [data-whatsapp-test-result] {

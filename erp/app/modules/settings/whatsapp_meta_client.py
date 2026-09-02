@@ -54,6 +54,7 @@ class WhatsAppMetaClient:
         redirect_uri: str,
         state: str,
         scopes: str | None = None,
+        display_popup: bool = False,
     ) -> str:
         scope = scopes or (
             "business_management,whatsapp_business_management,whatsapp_business_messaging"
@@ -65,6 +66,8 @@ class WhatsAppMetaClient:
             "scope": scope,
             "response_type": "code",
         }
+        if display_popup:
+            params["display"] = "popup"
         return f"{OAUTH_DIALOG}/{DEFAULT_GRAPH_VERSION}/dialog/oauth?{urlencode(params)}"
 
     @classmethod
