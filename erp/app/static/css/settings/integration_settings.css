@@ -264,6 +264,10 @@
   max-width: 220px;
 }
 
+[data-whatsapp-test-result] {
+  min-height: 0.5rem;
+}
+
 @media (prefers-color-scheme: dark) {
   .intset-page {
     --intset-border: #334155;

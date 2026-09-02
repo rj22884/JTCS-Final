@@ -31,12 +31,19 @@ class MetaGraphError(Exception):
 class WhatsAppMetaClient:
     """Lightweight urllib client — no CRM dependency."""
 
-    def __init__(self, *, access_token: str, graph_api_version: str | None = None):
+    def __init__(
+        self,
+        *,
+        access_token: str,
+        graph_api_version: str | None = None,
+        timeout: int = 30,
+    ):
         self.access_token = (access_token or "").strip()
         ver = (graph_api_version or DEFAULT_GRAPH_VERSION).strip()
         if not ver.startswith("v"):
             ver = f"v{ver}"
         self.version = ver
+        self.timeout = max(5, int(timeout or 30))
 
     @staticmethod
     def oauth_authorize_url(
@@ -89,12 +96,12 @@ class WhatsAppMetaClient:
     def get(self, path: str, params: dict | None = None) -> dict[str, Any]:
         clean = path if path.startswith("/") else f"/{path}"
         url = f"{GRAPH_BASE}/{self.version}{clean}?{urlencode(self._auth_params(params))}"
-        return self._http_get_json(url)
+        return self._http_get_json(url, timeout=self.timeout)
 
     def post(self, path: str, body: dict | None = None, params: dict | None = None) -> dict[str, Any]:
         clean = path if path.startswith("/") else f"/{path}"
         url = f"{GRAPH_BASE}/{self.version}{clean}?{urlencode(self._auth_params(params))}"
-        return self._http_post_json(url, body or {})
+        return self._http_post_json(url, body or {}, timeout=self.timeout)
 
     def list_businesses(self) -> list[dict[str, Any]]:
         data = self.get("/me/businesses", {"fields": "id,name"})
@@ -157,7 +164,7 @@ class WhatsAppMetaClient:
             "fb_exchange_token": short_lived_token,
         }
         url = f"{GRAPH_BASE}/{ver}/oauth/access_token?{urlencode(params)}"
-        return self._http_get_json(url)
+        return self._http_get_json(url, timeout=self.timeout)
 
     def subscribe_app_to_waba(self, waba_id: str) -> dict[str, Any]:
         """POST /{waba-id}/subscribed_apps — app receives webhooks for this WABA."""
@@ -168,7 +175,7 @@ class WhatsAppMetaClient:
         url = f"{GRAPH_BASE}/{self.version}{clean}?{urlencode(self._auth_params())}"
         req = urllib.request.Request(url, method="DELETE", headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw) if raw else {"success": True}
         except urllib.error.HTTPError as exc:
@@ -190,7 +197,7 @@ class WhatsAppMetaClient:
             f"{GRAPH_BASE}/{self.version}/debug_token?"
             + urlencode({"input_token": input_token, "access_token": app_token})
         )
-        return self._http_get_json(url)
+        return self._http_get_json(url, timeout=self.timeout)
 
     def send_test_text(self, phone_number_id: str, to_e164: str, body: str) -> dict[str, Any]:
         return self.send_text(phone_number_id, to_e164, body)
@@ -370,10 +377,11 @@ class WhatsAppMetaClient:
         return hmac.compare_digest(digest, expected)
 
     @staticmethod
-    def _http_get_json(url: str) -> dict[str, Any]:
+    def _http_get_json(url: str, timeout: int = 30) -> dict[str, Any]:
+        wait = max(5, int(timeout or 30))
         req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=wait) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -386,11 +394,14 @@ class WhatsAppMetaClient:
             msg = err.get("message") or body or str(exc)
             logger.warning("Meta Graph GET failed: %s", msg)
             raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
+        except TimeoutError as exc:
+            raise MetaGraphError("Meta Graph API timed out.") from exc
         except urllib.error.URLError as exc:
             raise MetaGraphError(f"Network error reaching Meta Graph API: {exc.reason}") from exc
 
     @staticmethod
-    def _http_post_json(url: str, body: dict) -> dict[str, Any]:
+    def _http_post_json(url: str, body: dict, timeout: int = 30) -> dict[str, Any]:
+        wait = max(5, int(timeout or 30))
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             url,
@@ -399,7 +410,7 @@ class WhatsAppMetaClient:
             headers={"Accept": "application/json", "Content-Type": "application/json"},
         )
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=wait) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
@@ -412,5 +423,7 @@ class WhatsAppMetaClient:
             msg = err.get("message") or body_txt or str(exc)
             logger.warning("Meta Graph POST failed: %s", msg)
             raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
+        except TimeoutError as exc:
+            raise MetaGraphError("Meta Graph API timed out.") from exc
         except urllib.error.URLError as exc:
             raise MetaGraphError(f"Network error reaching Meta Graph API: {exc.reason}") from exc

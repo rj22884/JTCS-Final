@@ -43,13 +43,35 @@ class WhatsAppTestService:
         send_test_message: bool = False,
         test_to_number: str | None = None,
     ) -> dict[str, Any]:
-        cfg = self.settings.get_provider_config_decrypted(PROVIDER)
         checks: list[dict[str, Any]] = []
+        try:
+            cfg = self.settings.get_provider_config_decrypted(PROVIDER)
+        except Exception:
+            logger.exception("WhatsApp Test Connection could not load settings")
+            return {
+                "ok": False,
+                "connection_status": "Not Configured",
+                "status_code": "not_configured",
+                "missing": [],
+                "missing_labels": [],
+                "checks": [
+                    {
+                        "name": "Configuration",
+                        "ok": False,
+                        "detail": "Unable to load saved WhatsApp settings.",
+                    }
+                ],
+                "message": "Unable to load saved WhatsApp settings.",
+                "field_values": {},
+            }
         missing = self._missing_fields(cfg)
 
         if missing:
             status = "Not Configured"
-            self._set_status(status)
+            try:
+                self._set_status(status)
+            except Exception:
+                logger.exception("WhatsApp Test Connection could not persist status")
             return {
                 "ok": False,
                 "connection_status": status,
@@ -69,45 +91,48 @@ class WhatsAppTestService:
         client = WhatsAppMetaClient(
             access_token=cfg["access_token"],
             graph_api_version=cfg.get("graph_api_version"),
+            timeout=12,
         )
 
-        # 1 Business ID
-        checks.append(self._check_business(client, cfg["business_id"]))
-        # 2 WABA
-        checks.append(self._check_waba(client, cfg["waba_id"]))
-        # 3 Phone Number
-        checks.append(self._check_phone(client, cfg["phone_number_id"]))
-        # 4 Graph reachability (reuse phone/waba success as reachability + explicit me)
-        checks.append(self._check_graph_reachability(client))
-        # 5 Webhook validation (local completeness + localhost warning)
-        checks.append(self._check_webhook(cfg))
-        # 6 Permission / token debug (+ persist expiry)
-        checks.append(
-            self._check_permissions(
-                client,
-                app_id=cfg["app_id"],
-                app_secret=cfg["app_secret"],
-                access_token=cfg["access_token"],
-            )
-        )
-        # 7 WABA subscribed apps (webhook delivery readiness)
-        checks.append(self._check_subscribed_apps(client, cfg.get("waba_id") or ""))
-        # 7 Optional test message
-        if send_test_message:
+        try:
+            checks.append(self._check_business(client, cfg["business_id"]))
+            checks.append(self._check_waba(client, cfg["waba_id"]))
+            checks.append(self._check_phone(client, cfg["phone_number_id"]))
+            checks.append(self._check_graph_reachability(client))
+            checks.append(self._check_webhook(cfg))
             checks.append(
-                self._check_send_message(
+                self._check_permissions(
                     client,
-                    phone_number_id=cfg["phone_number_id"],
-                    to_number=test_to_number,
+                    app_id=cfg["app_id"],
+                    app_secret=cfg["app_secret"],
+                    access_token=cfg["access_token"],
                 )
             )
-        else:
+            checks.append(self._check_subscribed_apps(client, cfg.get("waba_id") or ""))
+            if send_test_message:
+                checks.append(
+                    self._check_send_message(
+                        client,
+                        phone_number_id=cfg["phone_number_id"],
+                        to_number=test_to_number,
+                    )
+                )
+            else:
+                checks.append(
+                    {
+                        "name": "Optional test message",
+                        "ok": True,
+                        "skipped": True,
+                        "detail": "Skipped (enable send_test_message to send).",
+                    }
+                )
+        except Exception:
+            logger.exception("WhatsApp Test Connection stopped unexpectedly")
             checks.append(
                 {
-                    "name": "Optional test message",
-                    "ok": True,
-                    "skipped": True,
-                    "detail": "Skipped (enable send_test_message to send).",
+                    "name": "Connection test",
+                    "ok": False,
+                    "detail": "Unexpected error while talking to Meta. Check ERP logs.",
                 }
             )
 
@@ -129,7 +154,17 @@ class WhatsAppTestService:
             ok = False
             message = "Connection checks failed."
 
-        self._set_status(status)
+        try:
+            self._set_status(status)
+        except Exception:
+            logger.exception("WhatsApp Test Connection could not persist status")
+
+        field_values: dict[str, Any] = {}
+        try:
+            field_values = self.settings.get_provider_settings_masked(PROVIDER).get("field_values") or {}
+        except Exception:
+            logger.exception("WhatsApp Test Connection could not reload masked fields")
+
         return {
             "ok": ok,
             "connection_status": status,
@@ -138,7 +173,7 @@ class WhatsAppTestService:
             "missing_labels": [],
             "checks": checks,
             "message": message,
-            "field_values": self.settings.get_provider_settings_masked(PROVIDER)["field_values"],
+            "field_values": field_values,
         }
 
     def _missing_fields(self, cfg: dict[str, str]) -> list[str]:
@@ -163,6 +198,13 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Business ID validation", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: Business ID")
+            return {
+                "name": "Business ID validation",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _check_waba(self, client: WhatsAppMetaClient, waba_id: str) -> dict[str, Any]:
         try:
@@ -174,6 +216,9 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "WABA validation", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: WABA")
+            return {"name": "WABA validation", "ok": False, "detail": "Check failed. See ERP logs."}
 
     def _check_phone(self, client: WhatsAppMetaClient, phone_number_id: str) -> dict[str, Any]:
         try:
@@ -188,6 +233,13 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Phone Number validation", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: Phone Number")
+            return {
+                "name": "Phone Number validation",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _check_graph_reachability(self, client: WhatsAppMetaClient) -> dict[str, Any]:
         try:
@@ -199,6 +251,13 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Graph API reachability", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: Graph reachability")
+            return {
+                "name": "Graph API reachability",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _check_webhook(self, cfg: dict[str, str]) -> dict[str, Any]:
         url = (cfg.get("webhook_url") or "").strip()
@@ -269,6 +328,13 @@ class WhatsAppTestService:
                 "ok": False,
                 "detail": str(exc),
             }
+        except Exception:
+            logger.exception("WhatsApp check failed: subscribed apps")
+            return {
+                "name": "Webhook subscription",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _check_permissions(
         self,
@@ -312,6 +378,13 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Permission validation", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: permissions")
+            return {
+                "name": "Permission validation",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _set_plain(self, key: str, value: str) -> None:
         self.repository.upsert(
@@ -350,6 +423,13 @@ class WhatsAppTestService:
             }
         except MetaGraphError as exc:
             return {"name": "Optional test message", "ok": False, "detail": str(exc)}
+        except Exception:
+            logger.exception("WhatsApp check failed: test message")
+            return {
+                "name": "Optional test message",
+                "ok": False,
+                "detail": "Check failed. See ERP logs.",
+            }
 
     def _set_status(self, status: str) -> None:
         self.repository.upsert(

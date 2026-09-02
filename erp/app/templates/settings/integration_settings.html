@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902ft2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902wa1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
@@ -378,6 +378,7 @@
         {% if p.get('localhost_warning') %}
         <div class="alert alert-warning py-2 small mt-2 mb-0">{{ p.localhost_warning }}</div>
         {% endif %}
+        <div class="mt-3" data-whatsapp-test-result></div>
         <div class="mt-3" data-test-checks-form></div>
         {% endif %}
       </div>
@@ -509,6 +510,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902ft2"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902wa1"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

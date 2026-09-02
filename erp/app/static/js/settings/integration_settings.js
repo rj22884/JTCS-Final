@@ -16,6 +16,8 @@
 
   async function api(url, options, root) {
     var opts = Object.assign({ credentials: "same-origin" }, options || {});
+    var timeoutMs = Number(opts.timeoutMs) || 0;
+    delete opts.timeoutMs;
     var headers = new Headers(opts.headers || {});
     var method = (opts.method || "GET").toUpperCase();
     var token = csrfToken(root);
@@ -33,7 +35,25 @@
       opts.body = JSON.stringify(opts.body);
     }
     opts.headers = headers;
-    var resp = await fetch(url, opts);
+    var timer = null;
+    if (timeoutMs && typeof AbortController !== "undefined") {
+      var controller = new AbortController();
+      opts.signal = controller.signal;
+      timer = setTimeout(function () {
+        controller.abort();
+      }, timeoutMs);
+    }
+    var resp;
+    try {
+      resp = await fetch(url, opts);
+    } catch (err) {
+      if (err && (err.name === "AbortError" || err.name === "TimeoutError")) {
+        throw new Error("Request timed out. Meta Graph did not respond in time. Try again.");
+      }
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     var raw = await resp.text();
     var data = null;
     try {
@@ -252,7 +272,7 @@
     var html = "";
     if (!checks || !checks.length) {
       wraps.forEach(function (w) {
-        w.innerHTML = "";
+        w.innerHTML = "<div class='text-muted small'>No check details returned.</div>";
       });
       return;
     }
@@ -747,21 +767,40 @@
     if (testBtn) {
       testBtn.addEventListener("click", async function () {
         var pane = root.querySelector('[data-provider-pane="whatsapp_meta"]');
+        if (!pane) return;
+        if (!urls.test) {
+          showAlert(alertEl, "Test Connection URL missing. Refresh the page.", "danger");
+          return;
+        }
+        var resultBox = pane.querySelector("[data-whatsapp-test-result]");
+        var checksBox = pane.querySelector("[data-test-checks-form]");
+        var busyMsg = "Testing Meta WhatsApp connection… this can take up to a minute.";
+        var prevHtml = testBtn.innerHTML;
         testBtn.disabled = true;
+        testBtn.innerHTML =
+          '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Testing…';
+        if (resultBox) {
+          resultBox.innerHTML = '<div class="alert alert-info py-2 small mb-0">' + busyMsg + "</div>";
+          try {
+            resultBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          } catch (_e) {}
+        } else if (checksBox) {
+          checksBox.innerHTML = '<div class="text-muted small">' + busyMsg + "</div>";
+        }
+        showToast("Testing WhatsApp connection…", "info");
         try {
           var sendMsg = !!(
-            pane &&
             pane.querySelector("[data-send-test-message]") &&
             pane.querySelector("[data-send-test-message]").checked
           );
-          var toNumber =
-            pane && pane.querySelector("[data-test-to-number]")
-              ? pane.querySelector("[data-test-to-number]").value
-              : "";
+          var toNumber = pane.querySelector("[data-test-to-number]")
+            ? pane.querySelector("[data-test-to-number]").value
+            : "";
           var data = await api(
             urls.test,
             {
               method: "POST",
+              timeoutMs: 90000,
               body: { send_test_message: sendMsg, test_to_number: toNumber },
             },
             root
@@ -769,10 +808,36 @@
           applyValues(pane, data.field_values || {}, data);
           setMissing(pane, data.missing_labels || []);
           showChecks(pane, data.checks || []);
-          showAlert(alertEl, data.message || "Connection check finished.", data.ok ? "success" : "warning");
+          var ok = !!data.ok;
+          var msg = data.message || (ok ? "Connection check finished." : "Some checks failed.");
+          if (resultBox) {
+            resultBox.innerHTML =
+              '<div class="alert alert-' +
+              (ok ? "success" : "warning") +
+              ' py-2 small mb-0">' +
+              (ok ? "✔ " : "⚠ ") +
+              msg +
+              "</div>";
+            try {
+              resultBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            } catch (_e2) {}
+          }
+          showToast(msg, ok ? "success" : "warning");
+          showAlert(alertEl, msg, ok ? "success" : "warning");
         } catch (err) {
-          showAlert(alertEl, err.message || "Test failed", "danger");
+          var failMsg = err.message || "Test failed";
+          showChecks(pane, [{ name: "Connection test", ok: false, detail: failMsg }]);
+          if (resultBox) {
+            resultBox.innerHTML =
+              '<div class="alert alert-danger py-2 small mb-0">❌ ' + failMsg + "</div>";
+            try {
+              resultBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            } catch (_e3) {}
+          }
+          showToast(failMsg, "danger");
+          showAlert(alertEl, failMsg, "danger");
         } finally {
+          testBtn.innerHTML = prevHtml;
           testBtn.disabled = false;
         }
       });

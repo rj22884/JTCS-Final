@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from flask import (
     Blueprint,
     Flask,
@@ -122,16 +124,60 @@ def api_generate_verify_token():
 @login_required
 @admin_required
 def api_test_whatsapp_connection():
+    """Always HTTP 200 with ok/checks so the UI can show results next to the button."""
     payload = request.get_json(silent=True) or {}
     try:
-        return jsonify(
-            IntegrationSettingsController().test_whatsapp(
-                send_test_message=bool(payload.get("send_test_message")),
-                test_to_number=payload.get("test_to_number"),
+        result = IntegrationSettingsController().test_whatsapp(
+            send_test_message=bool(payload.get("send_test_message")),
+            test_to_number=payload.get("test_to_number"),
+        )
+        checks = []
+        token_re = re.compile(r"EAA[A-Za-z0-9]+")
+        for item in result.get("checks") or []:
+            if not isinstance(item, dict):
+                continue
+            checks.append(
+                {
+                    "name": str(item.get("name") or ""),
+                    "ok": bool(item.get("ok")),
+                    "skipped": bool(item.get("skipped")),
+                    "detail": token_re.sub("EAA***", str(item.get("detail") or "")),
+                }
             )
+        field_values = result.get("field_values") if isinstance(result.get("field_values"), dict) else {}
+        return jsonify(
+            {
+                "ok": bool(result.get("ok")),
+                "connection_status": str(result.get("connection_status") or ""),
+                "status_code": str(result.get("status_code") or ""),
+                "missing": result.get("missing") or [],
+                "missing_labels": result.get("missing_labels") or [],
+                "checks": checks,
+                "message": str(result.get("message") or ""),
+                "error": str(result.get("error") or result.get("message") or ""),
+                "field_values": field_values,
+            }
         )
     except Exception:
-        return jsonify({"ok": False, "error": "Unable to run connection check."}), 500
+        current_app.logger.exception("WhatsApp test connection failed")
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Unable to run connection check.",
+                "message": "Unable to run connection check. Check ERP logs.",
+                "checks": [
+                    {
+                        "name": "Connection test",
+                        "ok": False,
+                        "skipped": False,
+                        "detail": "Unable to run connection check. Check ERP logs.",
+                    }
+                ],
+                "missing": [],
+                "missing_labels": [],
+                "field_values": {},
+            }
+        )
 
 
 @bp.route("/api/settings/test-field", methods=["POST"])
