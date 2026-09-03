@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.modules.settings.audit_service import IntegrationSettingsAuditService
 from app.modules.settings.integration_health_service import IntegrationHealthService
 from app.modules.settings.services import IntegrationSettingsService
 from app.modules.settings.whatsapp_health_service import WhatsAppHealthService
 from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
+
+logger = logging.getLogger(__name__)
 
 
 class IntegrationSettingsController:
@@ -17,6 +21,10 @@ class IntegrationSettingsController:
         self.integration_health = IntegrationHealthService(self.service)
 
     def page_context(self) -> dict:
+        try:
+            self.oauth.ensure_jtcs_phone_config()
+        except Exception:
+            logger.exception("Could not apply JTCS WhatsApp phone configuration")
         data = self.service.get_all_masked()
         wa_card = None
         try:

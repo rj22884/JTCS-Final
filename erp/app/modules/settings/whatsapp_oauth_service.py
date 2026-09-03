@@ -13,6 +13,12 @@ from flask import current_app, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.modules.settings.crypto import encrypt_value
+from app.modules.settings.models import (
+    WHATSAPP_PREFERRED_BUSINESS_ID,
+    WHATSAPP_PREFERRED_PHONE_DIGITS,
+    WHATSAPP_PREFERRED_PHONE_NUMBER,
+    WHATSAPP_PREFERRED_WABA_ID,
+)
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.services import IntegrationSettingsService
 from app.modules.settings.whatsapp_meta_client import (
@@ -35,14 +41,31 @@ _OAUTH_STATE_SALT = "jtcs-wa-oauth-state"
 _OAUTH_STATE_MAX_AGE = 15 * 60
 
 
-def _is_test_waba_name(name: str | None) -> bool:
+# Previously auto-selected Meta Cloud API test assets — never persist these again.
+_STALE_TEST_WABA_ID = "1775646501775150"
+_STALE_TEST_PHONE_NUMBER_ID = "1156007560919202"
+
+
+def phone_digits(value: str | None) -> str:
+    return re.sub(r"\D", "", value or "")
+
+
+def is_test_waba_name(name: str | None) -> bool:
     return "test" in (name or "").lower()
 
 
-def _is_test_phone_display(display: str | None) -> bool:
+def is_test_phone_display(display: str | None) -> bool:
     text = display or ""
-    digits = re.sub(r"\D", "", text)
-    return "555" in text or digits.startswith("1555")
+    digits = phone_digits(text)
+    if digits.endswith(WHATSAPP_PREFERRED_PHONE_DIGITS):
+        return False
+    if "555-954" in text or digits.endswith("5559541324"):
+        return True
+    return digits.startswith("1555") or (text.startswith("+1") and "555" in text)
+
+
+def is_preferred_whatsapp_phone(display: str | None) -> bool:
+    return phone_digits(display).endswith(WHATSAPP_PREFERRED_PHONE_DIGITS)
 
 
 class WhatsAppOAuthService:
@@ -138,13 +161,16 @@ class WhatsAppOAuthService:
         redirect_uri = (cfg.get("oauth_redirect_uri") or "").strip() or self.default_oauth_redirect_uri()
         version = session.get(SESSION_OAUTH_VERSION) or cfg.get("graph_api_version") or DEFAULT_GRAPH_VERSION
 
-        token_payload = WhatsAppMetaClient.exchange_code(
-            app_id=app_id,
-            app_secret=app_secret,
-            redirect_uri=redirect_uri,
-            code=code,
-            graph_api_version=version,
-        )
+        try:
+            token_payload = WhatsAppMetaClient.exchange_code(
+                app_id=app_id,
+                app_secret=app_secret,
+                redirect_uri=redirect_uri,
+                code=code,
+                graph_api_version=version,
+            )
+        except MetaGraphError as exc:
+            raise ValueError(f"Facebook token exchange failed: {exc}") from exc
         access_token = (token_payload.get("access_token") or "").strip()
         if not access_token:
             raise ValueError("Meta did not return an access token.")
@@ -157,18 +183,319 @@ class WhatsAppOAuthService:
         session.pop(SESSION_OAUTH_STATE, None)
 
         client = WhatsAppMetaClient(access_token=access_token, graph_api_version=version)
-        businesses = [
-            {"id": bid, "name": (b.get("name") or "").strip()}
-            for b in client.list_businesses()
-            if (bid := self._as_meta_object_id(b.get("id")))
-        ]
+        try:
+            businesses = [
+                {"id": bid, "name": (b.get("name") or "").strip()}
+                for b in client.list_businesses()
+                if (bid := self._as_meta_object_id(b.get("id")))
+            ]
+        except MetaGraphError as exc:
+            raise ValueError(f"Facebook businesses list failed: {exc}") from exc
+        preferred_business = next(
+            (b for b in businesses if b["id"] == WHATSAPP_PREFERRED_BUSINESS_ID),
+            None,
+        )
+        if not preferred_business:
+            try:
+                biz = client.get_business(WHATSAPP_PREFERRED_BUSINESS_ID)
+                bid = self._as_meta_object_id(biz.get("id"))
+                if bid:
+                    preferred_business = {"id": bid, "name": (biz.get("name") or "").strip()}
+                    if bid not in {row["id"] for row in businesses}:
+                        businesses.insert(0, preferred_business)
+            except MetaGraphError as exc:
+                logger.info(
+                    "Preferred Business %s not readable after OAuth: %s",
+                    WHATSAPP_PREFERRED_BUSINESS_ID,
+                    exc,
+                )
+
+        if preferred_business:
+            try:
+                selected = self.select_business(preferred_business["id"])
+                if selected.get("step") == "done":
+                    return selected
+                selected.setdefault("businesses", businesses)
+                selected.setdefault("preferred_business_id", WHATSAPP_PREFERRED_BUSINESS_ID)
+                selected.setdefault("preferred_waba_id", WHATSAPP_PREFERRED_WABA_ID)
+                return selected
+            except ValueError as exc:
+                logger.warning("WhatsApp production auto-select after OAuth failed: %s", exc)
+
         self._set_status("Partial Configuration")
         return {
             "ok": True,
             "step": "select_business",
             "businesses": businesses,
+            "preferred_business_id": WHATSAPP_PREFERRED_BUSINESS_ID,
+            "preferred_waba_id": WHATSAPP_PREFERRED_WABA_ID,
             "message": "Meta authentication successful. Select a Business Account.",
         }
+
+    def apply_jtcs_phone_config(self) -> dict[str, Any]:
+        """Persist the production JTCS WhatsApp number (does not change App Secret / token)."""
+        self._upsert_plain("business_id", WHATSAPP_PREFERRED_BUSINESS_ID)
+        self._upsert_plain("waba_id", WHATSAPP_PREFERRED_WABA_ID)
+        self._upsert_plain("phone_number", WHATSAPP_PREFERRED_PHONE_NUMBER)
+
+        cfg = self._cfg()
+        stale_phone_id = (cfg.get("phone_number_id") or "").strip()
+        if stale_phone_id == _STALE_TEST_PHONE_NUMBER_ID or is_test_phone_display(cfg.get("phone_number")):
+            if stale_phone_id:
+                logger.info("Clearing non-production Phone Number ID before Graph resolve")
+                self._clear_plain("phone_number_id")
+
+        token = (cfg.get("access_token") or "").strip()
+        note = "JTCS production WhatsApp number saved. Phone Number ID comes from Meta Graph."
+        if token:
+            try:
+                client = WhatsAppMetaClient(
+                    access_token=token,
+                    graph_api_version=cfg.get("graph_api_version"),
+                )
+                match = self._discover_production_phone(client, WHATSAPP_PREFERRED_BUSINESS_ID)
+                if match:
+                    self._persist_discovered_ids(match)
+                    note = "JTCS phone configured from Meta Graph."
+                else:
+                    logger.warning(
+                        "Graph did not return production WhatsApp %s on WABA %s; not writing a test number",
+                        WHATSAPP_PREFERRED_PHONE_NUMBER,
+                        WHATSAPP_PREFERRED_WABA_ID,
+                    )
+                    note = (
+                        "JTCS WABA saved. Graph did not return +91 84770 05566 yet — "
+                        "Facebook Login se resolve hoga."
+                    )
+            except MetaGraphError as exc:
+                logger.warning("Graph resolve of JTCS phone skipped: %s", exc)
+                note = "JTCS WABA saved. Graph resolve skipped — Facebook Login / valid token se confirm hoga."
+
+        if not (cfg.get("webhook_url") or "").strip():
+            self._upsert_plain("webhook_url", self.default_webhook_url())
+        if not (cfg.get("oauth_redirect_uri") or "").strip():
+            try:
+                self._upsert_plain("oauth_redirect_uri", self.default_oauth_redirect_uri())
+            except Exception:
+                logger.debug("Default OAuth redirect skipped", exc_info=True)
+
+        self.settings.refresh_whatsapp_status_from_fields()
+        snap = self._masked_snapshot()
+        return {"ok": True, "message": note, **snap}
+
+    def ensure_jtcs_phone_config(self) -> dict[str, Any] | None:
+        """Repair test/stale WhatsApp IDs only. Do not overwrite a correct production selection."""
+        cfg = self._cfg()
+        if self._selection_is_production(cfg):
+            return None
+        if not self._selection_needs_repair(cfg):
+            return None
+        return self.apply_jtcs_phone_config()
+
+    def _selection_is_production(self, cfg: dict[str, str]) -> bool:
+        digits = phone_digits(cfg.get("phone_number"))
+        waba = (cfg.get("waba_id") or "").strip()
+        phone_id = (cfg.get("phone_number_id") or "").strip()
+        return (
+            waba == WHATSAPP_PREFERRED_WABA_ID
+            and digits.endswith(WHATSAPP_PREFERRED_PHONE_DIGITS)
+            and bool(self._as_meta_object_id(phone_id))
+            and phone_id != _STALE_TEST_PHONE_NUMBER_ID
+            and not is_test_phone_display(cfg.get("phone_number"))
+        )
+
+    def _selection_needs_repair(self, cfg: dict[str, str]) -> bool:
+        if is_test_phone_display(cfg.get("phone_number")):
+            return True
+        if (cfg.get("waba_id") or "").strip() == _STALE_TEST_WABA_ID:
+            return True
+        if (cfg.get("phone_number_id") or "").strip() == _STALE_TEST_PHONE_NUMBER_ID:
+            return True
+        return False
+
+    def _persist_discovered_ids(self, match: dict[str, str]) -> None:
+        self._upsert_plain("business_id", match["business_id"])
+        self._upsert_plain("waba_id", match["waba_id"])
+        self._upsert_plain("phone_number_id", match["phone_number_id"])
+        self._upsert_plain("phone_number", match["phone_number"])
+        logger.info(
+            "WhatsApp selected business_id=%s waba_id=%s phone_number=%s phone_number_id=%s",
+            match.get("business_id"),
+            match.get("waba_id"),
+            match.get("phone_number"),
+            match.get("phone_number_id"),
+        )
+
+    def _discover_production_phone(
+        self,
+        client: WhatsAppMetaClient,
+        business_id: str,
+    ) -> dict[str, str] | None:
+        """Find the WABA that owns +91 84770 05566. Never returns a test WABA/phone."""
+        waba_map: dict[str, dict[str, Any]] = {}
+
+        def _add(row: dict[str, Any]) -> None:
+            wid = self._as_meta_object_id(row.get("id"))
+            if wid:
+                waba_map[wid] = row
+
+        try:
+            _add(client.get_waba(WHATSAPP_PREFERRED_WABA_ID))
+            logger.info(
+                "WhatsApp discovery loaded preferred WABA id=%s",
+                WHATSAPP_PREFERRED_WABA_ID,
+            )
+        except MetaGraphError as exc:
+            logger.info(
+                "WhatsApp discovery preferred WABA %s not directly readable: %s",
+                WHATSAPP_PREFERRED_WABA_ID,
+                exc,
+            )
+
+        try:
+            for row in client.list_owned_wabas(business_id):
+                _add(row)
+        except MetaGraphError as exc:
+            logger.warning(
+                "WhatsApp discovery owned WABAs failed business_id=%s err=%s",
+                business_id,
+                exc,
+            )
+
+        try:
+            for row in client.list_client_wabas(business_id):
+                _add(row)
+        except MetaGraphError as exc:
+            logger.info(
+                "WhatsApp discovery client WABAs unavailable business_id=%s err=%s",
+                business_id,
+                exc,
+            )
+
+        logger.info(
+            "WhatsApp discovery business_id=%s waba_candidates=%s",
+            business_id,
+            ",".join(waba_map.keys()) or "(none)",
+        )
+
+        ordered_ids: list[str] = [WHATSAPP_PREFERRED_WABA_ID]
+        for wid, row in waba_map.items():
+            if wid == WHATSAPP_PREFERRED_WABA_ID:
+                continue
+            if is_test_waba_name(row.get("name")):
+                logger.info(
+                    "WhatsApp discovery skipping test WABA id=%s name=%s",
+                    wid,
+                    row.get("name"),
+                )
+                continue
+            ordered_ids.append(wid)
+
+        for wid in ordered_ids:
+            try:
+                raw_phones = client.list_phone_numbers(wid)
+            except MetaGraphError as exc:
+                logger.info("WhatsApp discovery phones failed waba_id=%s err=%s", wid, exc)
+                continue
+            displays = [(p.get("display_phone_number") or "").strip() for p in raw_phones]
+            logger.info(
+                "WhatsApp discovery phones waba_id=%s count=%s numbers=%s",
+                wid,
+                len(raw_phones),
+                ",".join(displays) or "(none)",
+            )
+            for phone in raw_phones:
+                display = (phone.get("display_phone_number") or "").strip()
+                pid = self._as_meta_object_id(phone.get("id"))
+                if not pid:
+                    continue
+                if is_test_phone_display(display):
+                    logger.info(
+                        "WhatsApp discovery skipping test phone waba_id=%s phone=%s phone_number_id=%s",
+                        wid,
+                        display,
+                        pid,
+                    )
+                    continue
+                if is_preferred_whatsapp_phone(display):
+                    return {
+                        "business_id": business_id,
+                        "waba_id": wid,
+                        "phone_number_id": pid,
+                        "phone_number": display or WHATSAPP_PREFERRED_PHONE_NUMBER,
+                    }
+        return None
+
+    def rediscover_production_selection(self) -> dict[str, str] | None:
+        """Used by Test Connection. Never persists a test WABA/phone."""
+        cfg = self._cfg()
+        if self._selection_is_production(cfg):
+            logger.info(
+                "WhatsApp selection already production business_id=%s waba_id=%s "
+                "phone_number=%s phone_number_id=%s",
+                cfg.get("business_id"),
+                cfg.get("waba_id"),
+                cfg.get("phone_number"),
+                cfg.get("phone_number_id"),
+            )
+            return None
+        token = (cfg.get("access_token") or session.get(SESSION_OAUTH_TOKEN) or "").strip()
+        if not token:
+            logger.info("WhatsApp rediscover skipped — no access token")
+            return None
+        client = WhatsAppMetaClient(
+            access_token=token,
+            graph_api_version=cfg.get("graph_api_version") or DEFAULT_GRAPH_VERSION,
+        )
+        business_id = (
+            self._as_meta_object_id(cfg.get("business_id")) or WHATSAPP_PREFERRED_BUSINESS_ID
+        )
+        match = self._discover_production_phone(client, business_id)
+        if not match:
+            logger.warning(
+                "WhatsApp rediscover did not find production number; leaving IDs unchanged"
+            )
+            return None
+        self._persist_discovered_ids(match)
+        return match
+
+    def _list_business_wabas(self, client: WhatsAppMetaClient, business_id: str) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for loader in (client.list_owned_wabas, client.list_client_wabas):
+            try:
+                batch = loader(business_id)
+            except MetaGraphError as exc:
+                logger.info(
+                    "WhatsApp WABA list %s failed business_id=%s err=%s",
+                    getattr(loader, "__name__", "list"),
+                    business_id,
+                    exc,
+                )
+                continue
+            for row in batch:
+                wid = self._as_meta_object_id(row.get("id"))
+                if not wid or wid in seen:
+                    continue
+                seen.add(wid)
+                rows.append(row)
+        return rows
+
+    def _serialize_wabas(self, raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        wabas: list[dict[str, Any]] = []
+        for row in raw:
+            wid = self._as_meta_object_id(row.get("id"))
+            if not wid:
+                continue
+            wabas.append(
+                {
+                    "id": wid,
+                    "name": (row.get("name") or "").strip(),
+                    "account_status": (row.get("account_review_status") or "").strip(),
+                    "is_test": is_test_waba_name(row.get("name")),
+                }
+            )
+        return wabas
 
     def _oauth_client(self) -> WhatsAppMetaClient:
         token = (session.get(SESSION_OAUTH_TOKEN) or "").strip()
@@ -216,16 +543,30 @@ class WhatsAppOAuthService:
         else:
             self._clear_plain("business_name")
 
-        wabas = [
-            {
-                "id": wid,
-                "name": (w.get("name") or "").strip(),
-                "account_status": (w.get("account_review_status") or "").strip(),
-                "is_test": _is_test_waba_name(w.get("name")),
-            }
-            for w in client.list_owned_wabas(resolved_business_id)
-            if (wid := self._as_meta_object_id(w.get("id")))
-        ]
+        wabas = self._serialize_wabas(self._list_business_wabas(client, resolved_business_id))
+        match = self._discover_production_phone(client, resolved_business_id)
+        if match:
+            logger.info(
+                "WhatsApp Graph resolved business_id=%s waba_id=%s phone_number=%s phone_number_id=%s",
+                match["business_id"],
+                match["waba_id"],
+                match["phone_number"],
+                match["phone_number_id"],
+            )
+            self.select_waba(match["waba_id"])
+            return self.select_phone(match["phone_number_id"], allow_test=False)
+
+        logger.warning(
+            "WhatsApp production number not in Graph results; not selecting test/first WABA. "
+            "business_id=%s waba_ids=%s",
+            resolved_business_id,
+            ",".join(w["id"] for w in wabas) or "(none)",
+        )
+        recommended = (
+            WHATSAPP_PREFERRED_WABA_ID
+            if any(w["id"] == WHATSAPP_PREFERRED_WABA_ID for w in wabas)
+            else ""
+        )
         self._set_status("Partial Configuration")
         snap = self._masked_snapshot()
         return {
@@ -233,6 +574,8 @@ class WhatsAppOAuthService:
             "step": "select_waba",
             "business": {"id": resolved_business_id, "name": business_name},
             "wabas": wabas,
+            "recommended_waba_id": recommended,
+            "preferred_waba_id": WHATSAPP_PREFERRED_WABA_ID,
             **snap,
         }
 
@@ -241,16 +584,7 @@ class WhatsAppOAuthService:
         bid = self._as_meta_object_id(business_id) or self._as_meta_object_id(cfg.get("business_id"))
         if not bid:
             raise ValueError("business_id must be a Meta Business ID (numeric Graph id).")
-        wabas = [
-            {
-                "id": wid,
-                "name": (w.get("name") or "").strip(),
-                "account_status": (w.get("account_review_status") or "").strip(),
-                "is_test": _is_test_waba_name(w.get("name")),
-            }
-            for w in self._oauth_client().list_owned_wabas(bid)
-            if (wid := self._as_meta_object_id(w.get("id")))
-        ]
+        wabas = self._serialize_wabas(self._list_business_wabas(self._oauth_client(), bid))
         return {"ok": True, "wabas": wabas}
 
     def select_waba(self, waba_id: str) -> dict[str, Any]:
@@ -262,9 +596,10 @@ class WhatsAppOAuthService:
         try:
             waba = client.get_waba(requested_id)
         except MetaGraphError as exc:
-            raise ValueError(f"Unable to load WABA from Meta: {exc}") from exc
+            logger.warning("get_waba failed for %s: %s — using requested WABA id", requested_id, exc)
+            waba = {"id": requested_id}
 
-        resolved_waba_id = self._as_meta_object_id(waba.get("id"))
+        resolved_waba_id = self._as_meta_object_id(waba.get("id")) or requested_id
         if not resolved_waba_id:
             self._clear_plain("waba_id")
             raise ValueError("Meta did not return a valid WhatsApp Business Account ID.")
@@ -281,11 +616,18 @@ class WhatsAppOAuthService:
                 "display_name": (p.get("verified_name") or "").strip(),
                 "quality_rating": (p.get("quality_rating") or "").strip(),
                 "account_status": (p.get("code_verification_status") or "").strip(),
-                "is_test": _is_test_phone_display(p.get("display_phone_number")),
+                "is_test": is_test_phone_display(p.get("display_phone_number")),
             }
             for p in client.list_phone_numbers(resolved_waba_id)
             if (pid := self._as_meta_object_id(p.get("id")))
         ]
+        recommended_phone = ""
+        for row in phones:
+            if row.get("is_test"):
+                continue
+            if is_preferred_whatsapp_phone(row.get("display_phone_number")):
+                recommended_phone = row["id"]
+                break
         self._set_status("Partial Configuration")
         snap = self._masked_snapshot()
         return {
@@ -297,6 +639,8 @@ class WhatsAppOAuthService:
                 "account_status": account_status,
             },
             "phones": phones,
+            "recommended_phone_id": recommended_phone,
+            "preferred_waba_id": WHATSAPP_PREFERRED_WABA_ID,
             **snap,
         }
 
@@ -312,14 +656,14 @@ class WhatsAppOAuthService:
                 "display_name": (p.get("verified_name") or "").strip(),
                 "quality_rating": (p.get("quality_rating") or "").strip(),
                 "account_status": (p.get("code_verification_status") or "").strip(),
-                "is_test": _is_test_phone_display(p.get("display_phone_number")),
+                "is_test": is_test_phone_display(p.get("display_phone_number")),
             }
             for p in self._oauth_client().list_phone_numbers(wid)
             if (pid := self._as_meta_object_id(p.get("id")))
         ]
         return {"ok": True, "phones": phones}
 
-    def select_phone(self, phone_number_id: str) -> dict[str, Any]:
+    def select_phone(self, phone_number_id: str, *, allow_test: bool = True) -> dict[str, Any]:
         requested_id = self._as_meta_object_id(phone_number_id)
         if not requested_id:
             raise ValueError("phone_number_id must be a Meta Phone Number ID (numeric Graph id).")
@@ -336,13 +680,19 @@ class WhatsAppOAuthService:
             self._clear_plain("phone_number_id")
             raise ValueError("Meta did not return a valid Phone Number ID.")
 
+        display_phone = (phone.get("display_phone_number") or "").strip()
+        if not allow_test and is_test_phone_display(display_phone):
+            raise ValueError(
+                "Refusing to save Meta test WhatsApp number. "
+                f"Expected {WHATSAPP_PREFERRED_PHONE_NUMBER}."
+            )
+
         cfg = self._cfg()
         version = (cfg.get("graph_api_version") or DEFAULT_GRAPH_VERSION).strip() or DEFAULT_GRAPH_VERSION
         webhook = (cfg.get("webhook_url") or "").strip() or self.default_webhook_url()
 
         self._upsert_plain("phone_number_id", resolved_phone_id)
 
-        display_phone = (phone.get("display_phone_number") or "").strip()
         display_name = (phone.get("verified_name") or "").strip()
         quality = (phone.get("quality_rating") or "").strip()
         phone_status = (phone.get("code_verification_status") or "").strip()
@@ -400,8 +750,16 @@ class WhatsAppOAuthService:
             except Exception:
                 logger.exception("Auto verify-token generation failed")
 
-        has_token = bool((self._cfg().get("access_token") or "").strip())
+        live = self._cfg()
+        has_token = bool((live.get("access_token") or "").strip())
         self._set_status("Connected" if has_token else "Partial Configuration")
+        logger.info(
+            "WhatsApp selected business_id=%s waba_id=%s phone_number=%s phone_number_id=%s",
+            live.get("business_id"),
+            live.get("waba_id"),
+            display_phone,
+            resolved_phone_id,
+        )
 
         snap = self._masked_snapshot()
         return {

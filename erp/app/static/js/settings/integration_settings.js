@@ -426,10 +426,37 @@
     var data = await api(urls.pendingStep, {}, root);
     var pending = data.pending;
     if (!pending) return false;
+    applyPreferredHints(pending);
     showAlert(alertEl, pending.message || "Continue WhatsApp setup.", "success");
+    if (pending.step === "done") {
+      applyCompletedSelection(root, pane, alertEl, urls, pending);
+      return true;
+    }
+    if (pending.step === "select_waba") {
+      applyValues(pane, pending.field_values || {}, pending);
+      var pendingWaba =
+        pending.recommended_waba_id || preferredId(pending.wabas || [], PREFERRED_WA.wabaId);
+      if (pendingWaba && !isTestItem(pending.wabas || [], pendingWaba)) {
+        await pickWaba(root, pane, alertEl, urls, pendingWaba);
+      } else {
+        openSelectModal(
+          "Select WhatsApp Business Account",
+          pending.wabas || [],
+          "id",
+          function (w) {
+            return (w.name || "WABA") + " (" + w.id + ")";
+          },
+          function (id) {
+            pickWaba(root, pane, alertEl, urls, id);
+          }
+        );
+      }
+      return true;
+    }
     if (pending.step === "select_business") {
-      if ((pending.businesses || []).length === 1) {
-        await pickBusiness(root, pane, alertEl, urls, pending.businesses[0].id);
+      var preferredBiz = preferredId(pending.businesses || [], PREFERRED_WA.businessId);
+      if (preferredBiz) {
+        await pickBusiness(root, pane, alertEl, urls, preferredBiz);
       } else {
         openSelectModal(
           "Select Business Account",
@@ -447,26 +474,56 @@
     return true;
   }
 
-  function preferredMetaId(items, testKey) {
-    var list = items || [];
-    var real = list.filter(function (item) {
-      return !item[testKey];
+  var PREFERRED_WA = {
+    businessId: "1050633393832558",
+    wabaId: "12967889023654318",
+    phoneDigits: "8477005566",
+  };
+
+  function applyPreferredHints(data) {
+    if (!data) return;
+    if (data.preferred_business_id) PREFERRED_WA.businessId = String(data.preferred_business_id);
+    if (data.preferred_waba_id) PREFERRED_WA.wabaId = String(data.preferred_waba_id);
+  }
+
+  function preferredId(items, preferred) {
+    var want = String(preferred || "");
+    if (!want) return "";
+    var hit = (items || []).filter(function (item) {
+      return String(item.id || "") === want;
     });
-    if (real.length === 1) return real[0].id;
-    if (real.length > 1) return "";
-    if (list.length === 1) return list[0].id;
-    return "";
+    return hit.length ? hit[0].id : "";
+  }
+
+  function isTestItem(items, id) {
+    var hit = (items || []).filter(function (item) {
+      return String(item.id || "") === String(id || "");
+    })[0];
+    return !!(hit && hit.is_test);
   }
 
   function preferredPhoneId(phones) {
     var list = phones || [];
-    var plus91 = list.filter(function (p) {
-      var n = String(p.display_phone_number || "").replace(/\s/g, "");
-      return n.indexOf("+91") === 0 || n.indexOf("91") === 0;
+    var match = list.filter(function (p) {
+      var digits = String(p.display_phone_number || "").replace(/\D/g, "");
+      return digits.slice(-10) === PREFERRED_WA.phoneDigits && !p.is_test;
     });
-    if (plus91.length === 1) return plus91[0].id;
-    if (plus91.length > 1) return "";
-    return preferredMetaId(list, "is_test");
+    return match.length ? match[0].id : "";
+  }
+
+  function applyCompletedSelection(root, pane, alertEl, urls, data) {
+    applyValues(pane, data.field_values || {}, data);
+    setMissing(pane, data.missing_labels || []);
+    if (data.secret_configured) clearSecretInputs(pane, data.secret_configured);
+    revealWhatsAppAuto(pane);
+    var msg = data.message || "WhatsApp account selected from Meta Graph.";
+    if (data.localhost_warning) msg += " " + data.localhost_warning;
+    showAlert(alertEl, msg, data.localhost_warning ? "warning" : "success");
+    if (urls.accountCard) {
+      api(urls.accountCard, {}, root)
+        .then(applyWaCard)
+        .catch(function () {});
+    }
   }
 
   function whatsappCredentialsReady(pane) {
@@ -484,11 +541,8 @@
 
   function syncWhatsAppWizard(pane, forceAuto) {
     if (!pane) return;
-    var auto = !!forceAuto || pane.getAttribute("data-wa-auto") === "1";
     pane.querySelectorAll("[data-wa-section]").forEach(function (el) {
-      var sec = el.getAttribute("data-wa-section");
-      if (!sec || sec === "facebook_login") return;
-      el.classList.toggle("d-none", !auto);
+      el.classList.remove("d-none");
     });
     var loginBtn = pane.querySelector("[data-intset-connect-meta]");
     var ready = whatsappCredentialsReady(pane);
@@ -515,17 +569,21 @@
       },
       root
     );
+    applyPreferredHints(data);
     applyValues(pane, data.field_values || {}, data);
     if ((!data.field_values || !data.field_values.business_id) && data.business && data.business.id) {
       applyValues(pane, { business_id: data.business.id }, data);
     }
     revealWhatsAppAuto(pane);
+    if (data.step === "done") {
+      applyCompletedSelection(root, pane, alertEl, urls, data);
+      return;
+    }
     var wabas = data.wabas || [];
-    var autoWaba = preferredMetaId(wabas, "is_test");
+    var autoWaba = data.recommended_waba_id || preferredId(wabas, PREFERRED_WA.wabaId);
+    if (autoWaba && isTestItem(wabas, autoWaba)) autoWaba = "";
     if (autoWaba) {
       await pickWaba(root, pane, alertEl, urls, autoWaba);
-    } else if (wabas.length === 1) {
-      await pickWaba(root, pane, alertEl, urls, wabas[0].id);
     } else {
       openSelectModal(
         "Select WhatsApp Business Account",
@@ -543,17 +601,21 @@
 
   async function pickWaba(root, pane, alertEl, urls, wabaId) {
     var data = await api(urls.selectWaba, { method: "POST", body: { waba_id: wabaId } }, root);
+    applyPreferredHints(data);
     applyValues(pane, data.field_values || {}, data);
     if ((!data.field_values || !data.field_values.waba_id) && data.waba && data.waba.id) {
       applyValues(pane, { waba_id: data.waba.id }, data);
     }
     revealWhatsAppAuto(pane);
+    if (data.step === "done") {
+      applyCompletedSelection(root, pane, alertEl, urls, data);
+      return;
+    }
     var phones = data.phones || [];
-    var autoPhone = preferredPhoneId(phones);
+    var autoPhone = data.recommended_phone_id || preferredPhoneId(phones);
+    if (autoPhone && isTestItem(phones, autoPhone)) autoPhone = "";
     if (autoPhone) {
       await pickPhone(root, pane, alertEl, urls, autoPhone);
-    } else if (phones.length === 1) {
-      await pickPhone(root, pane, alertEl, urls, phones[0].id);
     } else {
       openSelectModal(
         "Select Phone Number",

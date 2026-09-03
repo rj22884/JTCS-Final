@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 
 from flask import (
@@ -24,10 +25,12 @@ from app.extensions import csrf
 from app.modules.settings.controllers import IntegrationSettingsController
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
+from app.modules.settings.whatsapp_meta_client import MetaGraphError
 from app.services.menu_service import MenuService
 
 bp = Blueprint("integration_settings", __name__, url_prefix="/admin/integrations")
 MENU_PATH = "/admin/integrations"
+logger = logging.getLogger(__name__)
 
 
 def ensure_integration_settings_bootstrap() -> None:
@@ -322,10 +325,20 @@ def api_whatsapp_oauth_callback():
         session["wa_meta_pending_step"] = result
         return _back(connect=True)
     except ValueError as exc:
+        logger.warning("WhatsApp OAuth callback rejected: %s", exc)
+        flash(str(exc), "danger")
+        return _back(error=True)
+    except MetaGraphError as exc:
+        logger.warning("WhatsApp OAuth Graph error: %s", exc)
         flash(str(exc), "danger")
         return _back(error=True)
     except Exception:
-        flash("Meta OAuth callback failed.", "danger")
+        logger.exception("WhatsApp OAuth callback failed")
+        flash(
+            "Meta OAuth callback failed. Facebook Login dubara dabayein "
+            "(15 minute ke andar isi tab mein complete karein).",
+            "danger",
+        )
         return _back(error=True)
 
 

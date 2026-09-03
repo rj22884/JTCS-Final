@@ -384,3 +384,178 @@
 .intset-field-test-mark {
   font-weight: 700;
 }
+
+/* Compact WhatsApp Cloud API configuration — layout/columns unchanged */
+[data-provider-pane="whatsapp_meta"] {
+  --intset-input-h: 2.125rem; /* 34px */
+}
+
+[data-provider-pane="whatsapp_meta"].intset-pane {
+  padding: 0.6rem 0.8rem 0.7rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-help {
+  font-size: 0.78rem;
+  line-height: 1.3;
+  margin-bottom: 0.4rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-missing {
+  padding: 0.3rem 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.78rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .row.g-3 {
+  --bs-gutter-y: 0.4rem;
+  --bs-gutter-x: 0.75rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .form-label {
+  margin-bottom: 0.15rem;
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+
+[data-provider-pane="whatsapp_meta"] .form-control,
+[data-provider-pane="whatsapp_meta"] .form-control-sm,
+[data-provider-pane="whatsapp_meta"] .input-group-sm > .form-control {
+  min-height: var(--intset-input-h);
+  height: var(--intset-input-h);
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+}
+
+[data-provider-pane="whatsapp_meta"] textarea.form-control,
+[data-provider-pane="whatsapp_meta"] textarea.form-control-sm {
+  height: auto;
+  min-height: 3.25rem;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-secret-field .input-group .btn {
+  min-height: var(--intset-input-h);
+  height: var(--intset-input-h);
+  min-width: 2.1rem;
+  padding: 0 0.35rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-secret-hint {
+  margin-top: 0.12rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-field-help {
+  font-size: 0.72rem;
+  line-height: 1.25;
+  margin-top: 0.1rem;
+  color: #64748b;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-primary-cred {
+  padding: 0.32rem 0.45rem;
+  border-radius: 0.35rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-section-title {
+  font-size: 0.8rem;
+  margin: 0.3rem 0 0;
+  padding-top: 0.15rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-field-test-row {
+  margin-top: 0.12rem;
+  gap: 0.25rem;
+  min-height: 0;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-actions {
+  margin-top: 0.55rem;
+  padding-top: 0.45rem;
+  gap: 0.35rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .intset-actions .btn {
+  min-height: 1.9rem;
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+}
+
+[data-provider-pane="whatsapp_meta"] .badge {
+  font-size: 0.62rem;
+  padding: 0.15em 0.4em;
+  vertical-align: middle;
+}
+
+[data-provider-pane="whatsapp_meta"] .mt-2 {
+  margin-top: 0.35rem !important;
+}
+
+[data-provider-pane="whatsapp_meta"] .mt-3 {
+  margin-top: 0.45rem !important;
+}
+
+.intset-wa-panel.mb-3 {
+  margin-bottom: 0.55rem !important;
+}
+
+.intset-wa-panel .intset-glass-card {
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.5rem;
+}
+
+.intset-wa-panel .intset-avatar {
+  width: 2rem;
+  height: 2rem;
+  font-size: 1.05rem;
+  border-radius: 0.5rem;
+}
+
+.intset-wa-panel .intset-meta-dl {
+  gap: 0.2rem;
+}
+
+.intset-wa-panel .h6 {
+  margin-bottom: 0.35rem !important;
+  font-size: 0.85rem;
+}
+
+.intset-wa-panel .mt-2 {
+  margin-top: 0.3rem !important;
+}
+
+.intset-wa-panel .mt-3 {
+  margin-top: 0.4rem !important;
+}
+
+.intset-wa-panel .mb-2 {
+  margin-bottom: 0.3rem !important;
+}
+
+@media (max-width: 767.98px) {
+  [data-provider-pane="whatsapp_meta"] {
+    --intset-input-h: 2.25rem;
+  }
+
+  [data-provider-pane="whatsapp_meta"] .row.g-3 {
+    --bs-gutter-y: 0.55rem;
+  }
+
+  [data-provider-pane="whatsapp_meta"] .form-control,
+  [data-provider-pane="whatsapp_meta"] .form-control-sm,
+  [data-provider-pane="whatsapp_meta"] .input-group-sm > .form-control,
+  [data-provider-pane="whatsapp_meta"] .intset-secret-field .input-group .btn {
+    min-height: 2.25rem;
+    height: 2.25rem;
+  }
+
+  [data-provider-pane="whatsapp_meta"] textarea.form-control,
+  [data-provider-pane="whatsapp_meta"] textarea.form-control-sm {
+    height: auto;
+    min-height: 3.5rem;
+  }
+}

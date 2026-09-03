@@ -7,9 +7,15 @@ import re
 from typing import Any
 
 from app.modules.settings.crypto import encrypt_value
+from app.modules.settings.models import WHATSAPP_PREFERRED_PHONE_NUMBER, WHATSAPP_PREFERRED_WABA_ID
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.services import IntegrationSettingsService
 from app.modules.settings.whatsapp_meta_client import MetaGraphError, WhatsAppMetaClient
+from app.modules.settings.whatsapp_oauth_service import (
+    is_preferred_whatsapp_phone,
+    is_test_phone_display,
+    is_test_waba_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +70,23 @@ class WhatsAppTestService:
                 "message": "Unable to load saved WhatsApp settings.",
                 "field_values": {},
             }
+        try:
+            from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
+
+            repaired = WhatsAppOAuthService(self.settings, self.repository).rediscover_production_selection()
+            if repaired:
+                cfg = self.settings.get_provider_config_decrypted(PROVIDER)
+        except Exception:
+            logger.exception("WhatsApp Test Connection rediscover skipped")
+
+        logger.info(
+            "WhatsApp Test Connection using business_id=%s waba_id=%s phone_number=%s phone_number_id=%s",
+            cfg.get("business_id"),
+            cfg.get("waba_id"),
+            cfg.get("phone_number"),
+            cfg.get("phone_number_id"),
+        )
+
         missing = self._missing_fields(cfg)
 
         if missing:
@@ -209,10 +232,20 @@ class WhatsAppTestService:
     def _check_waba(self, client: WhatsAppMetaClient, waba_id: str) -> dict[str, Any]:
         try:
             waba = client.get_waba(waba_id)
+            name = (waba.get("name") or "").strip()
+            if is_test_waba_name(name) and str(waba_id) != WHATSAPP_PREFERRED_WABA_ID:
+                return {
+                    "name": "WABA validation",
+                    "ok": False,
+                    "detail": (
+                        f"Test WABA is selected ({name or waba_id}). "
+                        f"Production WABA is {WHATSAPP_PREFERRED_WABA_ID}."
+                    ),
+                }
             return {
                 "name": "WABA validation",
                 "ok": True,
-                "detail": f"WABA OK: {waba.get('name') or waba_id}",
+                "detail": f"WABA OK: {name or waba_id}",
             }
         except MetaGraphError as exc:
             return {"name": "WABA validation", "ok": False, "detail": str(exc)}
@@ -223,11 +256,29 @@ class WhatsAppTestService:
     def _check_phone(self, client: WhatsAppMetaClient, phone_number_id: str) -> dict[str, Any]:
         try:
             phone = client.get_phone(phone_number_id)
+            display = (phone.get("display_phone_number") or "").strip()
+            if is_test_phone_display(display):
+                return {
+                    "name": "Phone Number validation",
+                    "ok": False,
+                    "detail": (
+                        f"Phone Number ID maps to Meta test number {display}. "
+                        f"Production number is {WHATSAPP_PREFERRED_PHONE_NUMBER}."
+                    ),
+                }
+            if display and not is_preferred_whatsapp_phone(display):
+                return {
+                    "name": "Phone Number validation",
+                    "ok": False,
+                    "detail": (
+                        f"Phone OK on Graph as {display}, but expected {WHATSAPP_PREFERRED_PHONE_NUMBER}."
+                    ),
+                }
             return {
                 "name": "Phone Number validation",
                 "ok": True,
                 "detail": (
-                    f"Phone OK: {phone.get('display_phone_number') or phone_number_id}"
+                    f"Phone OK: {display or phone_number_id}"
                     f" ({phone.get('verified_name') or 'no display name'})"
                 ),
             }
@@ -392,6 +443,9 @@ class WhatsAppTestService:
             }
 
     def _set_plain(self, key: str, value: str) -> None:
+        if key in {"business_id", "waba_id", "phone_number_id", "phone_number"}:
+            logger.error("WhatsApp Test Connection refused to overwrite %s", key)
+            return
         self.repository.upsert(
             provider=PROVIDER,
             setting_key=key,

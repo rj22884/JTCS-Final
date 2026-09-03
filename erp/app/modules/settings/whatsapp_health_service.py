@@ -11,6 +11,7 @@ from app.modules.settings.crypto import encrypt_value, mask_access_token
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.services import IntegrationSettingsService
 from app.modules.settings.whatsapp_meta_client import MetaGraphError, WhatsAppMetaClient
+from app.modules.settings.whatsapp_oauth_service import is_test_phone_display
 
 logger = logging.getLogger(__name__)
 
@@ -190,20 +191,28 @@ class WhatsAppHealthService:
         if phone_id:
             try:
                 phone = client.get_phone(phone_id)
-                mapping = {
-                    "phone_number": (phone.get("display_phone_number") or "").strip(),
-                    "display_name": (phone.get("verified_name") or "").strip(),
-                    "quality_rating": (phone.get("quality_rating") or "").strip(),
-                    "messaging_limit": (
-                        (phone.get("messaging_limit_tier") or "").strip()
-                        or str((phone.get("throughput") or {}).get("level") or "").strip()
-                    ),
-                    "account_status": (phone.get("code_verification_status") or "").strip(),
-                }
-                for key, val in mapping.items():
-                    if val:
-                        self._upsert(key, val)
-                        updated[key] = val
+                remote_display = (phone.get("display_phone_number") or "").strip()
+                if is_test_phone_display(remote_display):
+                    logger.warning(
+                        "refresh_metadata refusing to persist test phone %s for phone_number_id=%s",
+                        remote_display,
+                        phone_id,
+                    )
+                else:
+                    mapping = {
+                        "phone_number": remote_display,
+                        "display_name": (phone.get("verified_name") or "").strip(),
+                        "quality_rating": (phone.get("quality_rating") or "").strip(),
+                        "messaging_limit": (
+                            (phone.get("messaging_limit_tier") or "").strip()
+                            or str((phone.get("throughput") or {}).get("level") or "").strip()
+                        ),
+                        "account_status": (phone.get("code_verification_status") or "").strip(),
+                    }
+                    for key, val in mapping.items():
+                        if val:
+                            self._upsert(key, val)
+                            updated[key] = val
             except MetaGraphError as exc:
                 logger.warning("refresh phone failed: %s", exc)
 

@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260902wa7">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_settings.css') }}?v=20260903wa2">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/settings/integration_health.css') }}?v=20260807ih">
 {% endblock %}
 
@@ -178,7 +178,7 @@
            data-initial-status="{{ fv.get('connection_status') or 'Not Configured' }}"
            data-initial-status-code="{{ p.get('status_code') or 'not_configured' }}"
            data-initial-missing="{{ (p.get('missing_labels') or [])|join('|') }}"
-           {% if p.code == 'whatsapp_meta' %}data-wa-auto="{{ '1' if secret_cfg.get('access_token') or fv.get('waba_id') else '0' }}"{% endif %}
+           {% if p.code == 'whatsapp_meta' %}data-wa-auto="1"{% endif %}
            role="tabpanel"
            aria-labelledby="tab-{{ p.code }}">
 
@@ -189,23 +189,14 @@
           <br><strong>From Email</strong> must be the mailbox address
           (e.g. <code>admin@jtcsxpert.com</code>) — not the company display name.
           Titan defaults: Host <code>smtpout.secureserver.net</code>, Port <code>465</code>, SSL on.
+          {% elif p.code == 'whatsapp_meta' %}
+          Mandatory fields only. Save credentials, then Facebook Login isi tab mein.
           {% else %}
           Configure {{ p.label }} credentials for future use.
           Secrets are encrypted in the database and never displayed after save.
           {% endif %}
-          {% if p.code == 'whatsapp_meta' %}
-          <strong>Step 1:</strong> Facebook App ID aur App Secret isi page par daalo, <strong>Save credentials</strong>,
-          phir <strong>Facebook Login</strong> — Facebook password / 2FA isi tab mein, koi naya tab nahi.
-          Wapas aate hi WABA, Phone, token aur URLs API se fields mein aa jayenge.
-          {% endif %}
         </p>
 
-        {% if p.code == 'whatsapp_meta' %}
-        <div class="alert alert-info py-2 small mb-3" role="note">
-          Facebook / Meta pages yahan se nahi kholte. Credentials isi form par, Facebook Login isi tab mein,
-          values Graph API se auto-fill. Test <code>+1 555</code> skip — real <code>+91</code> auto-select.
-        </div>
-        {% endif %}
         {% if p.code in ('whatsapp_meta', 'smtp') %}
         <div class="intset-missing {% if not p.get('missing_labels') %}d-none{% endif %}" data-missing-box>
           <strong>Missing:</strong> <span data-missing-list>{{ (p.get('missing_labels') or [])|join(', ') }}</span>
@@ -221,10 +212,9 @@
           {% set wa_section.name = field.section %}
           <div class="col-12" data-wa-section="{{ field.section }}">
             <h3 class="intset-section-title">
-              {% if field.section == 'facebook_login' %}Step 1 — Facebook Login credentials
-              {% elif field.section == 'whatsapp_account' %}Step 2 — Auto from Facebook (WhatsApp IDs)
-              {% elif field.section == 'webhook' %}Webhook &amp; OAuth URLs (API se auto)
-              {% elif field.section == 'status' %}Status
+              {% if field.section == 'facebook_login' %}Facebook
+              {% elif field.section == 'whatsapp_account' %}WhatsApp
+              {% elif field.section == 'webhook' %}Webhook
               {% else %}{{ field.section }}{% endif %}
             </h3>
           </div>
@@ -367,10 +357,7 @@
           </button>
           {% endif %}
           {% if p.code == 'whatsapp_meta' %}
-          <span data-wa-section="whatsapp_account" class="intset-wa-auto-actions">
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-token-guide>
-            <i class="bi bi-journal-text"></i> Generate Access Token Guide
-          </button>
+          <span class="intset-wa-auto-actions">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-intset-generate-token>
             <i class="bi bi-key"></i> Generate Verify Token
           </button>
@@ -399,17 +386,17 @@
         {% endif %}
 
         {% if p.code == 'whatsapp_meta' %}
-        <div class="mt-2 small text-muted" data-access-token-hint data-wa-section="whatsapp_account">
+        <div class="mt-2 small text-muted" data-access-token-hint>
           {% if p.get('access_token_display') %}
           Stored token: <code>{{ p.access_token_display }}</code>
           {% if p.get('token_expires_at') %} · expires {{ p.token_expires_at }} UTC{% endif %}
           {% endif %}
         </div>
         {% if p.get('localhost_warning') %}
-        <div class="alert alert-warning py-2 small mt-2 mb-0" data-wa-section="whatsapp_account">{{ p.localhost_warning }}</div>
+        <div class="alert alert-warning py-2 small mt-2 mb-0">{{ p.localhost_warning }}</div>
         {% endif %}
-        <div class="mt-3" data-whatsapp-test-result data-wa-section="whatsapp_account"></div>
-        <div class="mt-3" data-test-checks-form data-wa-section="whatsapp_account"></div>
+        <div class="mt-3" data-whatsapp-test-result></div>
+        <div class="mt-3" data-test-checks-form></div>
         {% endif %}
       </div>
       {% endfor %}
@@ -540,6 +527,6 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260902wa7"></script>
+<script src="{{ url_for('static', filename='js/settings/integration_settings.js') }}?v=20260903wa1"></script>
 <script src="{{ url_for('static', filename='js/settings/integration_health.js') }}?v=20260807ih"></script>
 {% endblock %}

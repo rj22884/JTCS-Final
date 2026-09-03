@@ -112,15 +112,43 @@ class WhatsAppMetaClient:
         data = self.get("/me/businesses", {"fields": "id,name"})
         return list(data.get("data") or [])
 
+    def _get_all_pages(
+        self,
+        path: str,
+        params: dict | None = None,
+        *,
+        max_pages: int = 10,
+    ) -> list[dict[str, Any]]:
+        extra = dict(params or {})
+        extra.setdefault("limit", "100")
+        rows: list[dict[str, Any]] = []
+        after = ""
+        for _ in range(max(1, int(max_pages))):
+            page_params = dict(extra)
+            if after:
+                page_params["after"] = after
+            data = self.get(path, page_params)
+            rows.extend(list(data.get("data") or []))
+            paging = data.get("paging") or {}
+            after = str(((paging.get("cursors") or {}) or {}).get("after") or "")
+            if not after or not paging.get("next"):
+                break
+        return rows
+
     def list_owned_wabas(self, business_id: str) -> list[dict[str, Any]]:
-        data = self.get(
+        return self._get_all_pages(
             f"/{business_id}/owned_whatsapp_business_accounts",
             {"fields": "id,name,currency,account_review_status"},
         )
-        return list(data.get("data") or [])
+
+    def list_client_wabas(self, business_id: str) -> list[dict[str, Any]]:
+        return self._get_all_pages(
+            f"/{business_id}/client_whatsapp_business_accounts",
+            {"fields": "id,name,currency,account_review_status"},
+        )
 
     def list_phone_numbers(self, waba_id: str) -> list[dict[str, Any]]:
-        data = self.get(
+        return self._get_all_pages(
             f"/{waba_id}/phone_numbers",
             {
                 "fields": (
@@ -129,7 +157,6 @@ class WhatsAppMetaClient:
                 )
             },
         )
-        return list(data.get("data") or [])
 
     def get_business(self, business_id: str) -> dict[str, Any]:
         return self.get(f"/{business_id}", {"fields": "id,name"})
@@ -145,7 +172,8 @@ class WhatsAppMetaClient:
                     "id,display_phone_number,verified_name,quality_rating,"
                     "code_verification_status,platform_type,throughput,"
                     "messaging_limit_tier,name_status,new_name_status,"
-                    "is_official_business_account,account_mode"
+                    "is_official_business_account,account_mode,"
+                    "whatsapp_business_account{id,name}"
                 )
             },
         )

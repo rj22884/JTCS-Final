@@ -19,6 +19,12 @@ WHATSAPP_SEND_REQUIRED_KEYS: tuple[str, ...] = (
     "webhook_verify_token",
 )
 
+# JTCS production WhatsApp Cloud number. Phone Number ID is resolved from Graph.
+WHATSAPP_PREFERRED_PHONE_NUMBER = "+91 84770 05566"
+WHATSAPP_PREFERRED_PHONE_DIGITS = "8477005566"
+WHATSAPP_PREFERRED_BUSINESS_ID = "1050633393832558"
+WHATSAPP_PREFERRED_WABA_ID = "12967889023654318"
+
 # Keys that must be encrypted at rest and masked on read.
 SECRET_KEYS: frozenset[str] = frozenset(
     {
@@ -42,89 +48,18 @@ SECRET_KEYS: frozenset[str] = frozenset(
 
 PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
     "whatsapp_meta": [
-        {
-            "key": "app_id",
-            "label": "Facebook App ID",
-            "input": "text",
-            "section": "facebook_login",
-            "find_label": "Isi page par daalo. Facebook Login ke baad baaki IDs API se aati hain.",
-        },
-        {
-            "key": "app_secret",
-            "label": "Facebook App Secret",
-            "input": "password",
-            "section": "facebook_login",
-            "find_label": "Isi page par daalo, Save credentials, phir Facebook Login. Secret Meta se copy — yahan page nahi khulega.",
-        },
-        {
-            "key": "phone_number",
-            "label": "WhatsApp Phone Number",
-            "input": "text",
-            "section": "whatsapp_account",
-            "find_label": "Facebook Login ke baad Graph API se auto (+91, test +1 555 nahi).",
-        },
-        {
-            "key": "phone_number_id",
-            "label": "Phone Number ID",
-            "input": "text",
-            "section": "whatsapp_account",
-            "find_label": "Facebook Login ke baad Graph API se auto (real number, test nahi).",
-        },
-        {
-            "key": "waba_id",
-            "label": "WhatsApp Business Account ID",
-            "input": "text",
-            "section": "whatsapp_account",
-            "find_label": "Facebook Login ke baad Graph API se auto (Test WABA skip).",
-        },
-        {
-            "key": "business_id",
-            "label": "Business ID",
-            "input": "text",
-            "section": "whatsapp_account",
-            "find_label": "Facebook Login ke baad Graph API se auto.",
-        },
-        {
-            "key": "access_token",
-            "label": "Access Token",
-            "input": "password",
-            "section": "whatsapp_account",
-            "find_label": "Facebook Login ke baad long-lived token encrypted save. Screen par kabhi nahi dikhta.",
-        },
-        {
-            "key": "webhook_verify_token",
-            "label": "Webhook Verify Token",
-            "input": "password",
-            "section": "webhook",
-            "find_label": "ERP Generate Verify Token / Facebook Login se auto. Meta Dashboard mein paste karna ho to yahin se copy.",
-        },
-        {
-            "key": "webhook_url",
-            "label": "Webhook URL",
-            "input": "readonly",
-            "section": "webhook",
-            "find_label": "ERP isi URL ko auto set karta hai. Meta Callback field mein paste karna ho to yahin se copy.",
-        },
-        {
-            "key": "oauth_redirect_uri",
-            "label": "OAuth Redirect URI",
-            "input": "readonly",
-            "section": "webhook",
-            "find_label": "ERP isi URI ko auto set karta hai. Meta Valid OAuth Redirect URIs mein paste karna ho to yahin se copy.",
-        },
-        {
-            "key": "token_expires_at",
-            "label": "Token Expires At (UTC)",
-            "input": "readonly",
-            "section": "status",
-            "help": "Facebook Login / token debug ke baad auto. Manual paste nahi.",
-        },
-        {
-            "key": "connection_status",
-            "label": "Connection Status",
-            "input": "readonly",
-            "section": "status",
-        },
+        {"key": "app_id", "label": "Facebook App ID", "input": "text", "section": "facebook_login"},
+        {"key": "app_secret", "label": "Facebook App Secret", "input": "password", "section": "facebook_login"},
+        {"key": "phone_number", "label": "WhatsApp Phone Number", "input": "text", "section": "whatsapp_account"},
+        {"key": "phone_number_id", "label": "Phone Number ID", "input": "text", "section": "whatsapp_account"},
+        {"key": "waba_id", "label": "WhatsApp Business Account ID", "input": "text", "section": "whatsapp_account"},
+        {"key": "access_token", "label": "Access Token", "input": "password", "section": "whatsapp_account"},
+        {"key": "webhook_verify_token", "label": "Webhook Verify Token", "input": "password", "section": "webhook"},
+        {"key": "business_id", "label": "Business ID", "input": "text", "hidden": "1"},
+        {"key": "webhook_url", "label": "Webhook URL", "input": "readonly", "hidden": "1"},
+        {"key": "oauth_redirect_uri", "label": "OAuth Redirect URI", "input": "readonly", "hidden": "1"},
+        {"key": "token_expires_at", "label": "Token Expires At (UTC)", "input": "readonly", "hidden": "1"},
+        {"key": "connection_status", "label": "Connection Status", "input": "readonly", "hidden": "1"},
         {"key": "business_name", "label": "Business Name", "input": "text", "hidden": "1"},
         {"key": "display_name", "label": "Display Name / Verified Name", "input": "text", "hidden": "1"},
         {"key": "quality_rating", "label": "Quality Rating", "input": "text", "hidden": "1"},
