@@ -572,11 +572,20 @@
     return String(item.bank_account_id || "");
   }
 
+  function isQrBillReceivedAccount(item) {
+    const flag = item && item.qr_bill_received;
+    return flag === true || flag === 1 || flag === "1";
+  }
+
+  function paymentReceivedAccounts() {
+    return (window.OIE_BANK_ACCOUNTS || []).filter(isQrBillReceivedAccount);
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select oie-payment-bank";
     select.required = true;
-    const accounts = window.OIE_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -591,6 +600,20 @@
       opt.textContent = paymentModeLabel(item);
       select.appendChild(opt);
     });
+    if (
+      selectedValue &&
+      !Array.from(select.options).some(function (opt) {
+        return opt.value === String(selectedValue);
+      })
+    ) {
+      const current = (window.OIE_BANK_ACCOUNTS || []).find(function (item) {
+        return paymentModeValue(item) === String(selectedValue);
+      });
+      const opt = document.createElement("option");
+      opt.value = String(selectedValue);
+      opt.textContent = current ? paymentModeLabel(current) : "Current account";
+      select.appendChild(opt);
+    }
     autoSelectPaymentBank(select, selectedValue);
     return select;
   }

@@ -1504,12 +1504,19 @@
     return String(item.bank_account_id || "");
   }
 
+  function paymentReceivedAccounts() {
+    return (window.STAMP_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select stamp-payment-bank";
     select.name = "PaymentBankAccountID[]";
     select.required = true;
-    const accounts = window.STAMP_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";

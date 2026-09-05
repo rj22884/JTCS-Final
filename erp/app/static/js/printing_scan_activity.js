@@ -97,11 +97,18 @@
     return String(item.bank_account_id || "");
   }
 
+  function paymentReceivedAccounts() {
+    return (window.PSCAN_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select pscan-payment-bank";
     select.required = true;
-    const accounts = window.PSCAN_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";

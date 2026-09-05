@@ -117,7 +117,10 @@
   // ITR default: entry date/time ascending (oldest first).
   let gridSortKey = isItrModule ? "created_date" : null;
   let gridSortDir = "asc";
-  const bankAccounts = window.FU_BANK_ACCOUNTS || [];
+  const bankAccounts = (window.FU_BANK_ACCOUNTS || []).filter(function (item) {
+    const flag = item && item.qr_bill_received;
+    return flag === true || flag === 1 || flag === "1";
+  });
   const KDK_USER_KEY = "jtcs_itr_kdk_userid";
   const KDK_PASS_KEY = "jtcs_itr_kdk_password";
   const KDK_SAVE_KEY = "jtcs_itr_kdk_save";
