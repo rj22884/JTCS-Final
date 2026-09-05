@@ -262,7 +262,7 @@
             </div>
             <div id="ecourtPaymentLines" class="ecourt-payment-lines"></div>
             {% if not payment_modes %}
-            <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+            <div class="small text-danger mt-1">No bank accounts marked Account Payment Received in Bank Master.</div>
             {% endif %}
           </div>
           <div class="col-12">
@@ -359,5 +359,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260729-manual-import"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260905apr1"></script>
 {% endblock %}

@@ -465,7 +465,7 @@
               </div>
               <div id="stampPaymentLines"></div>
               {% if not payment_modes %}
-              <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+              <div class="small text-danger mt-1">No bank accounts marked Account Payment Received in Bank Master.</div>
               {% endif %}
             </div>
           </div>
@@ -579,5 +579,5 @@
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260831rows25"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260905apr1"></script>
 {% endblock %}

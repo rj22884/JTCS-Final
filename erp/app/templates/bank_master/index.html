@@ -58,6 +58,7 @@
           <th class="text-end">Opening Bal.</th>
           <th class="text-end">Order</th>
           <th>QR/Bill Received</th>
+          <th>Account Payment Received</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
         </tr>
@@ -169,13 +170,23 @@
                 <label class="form-check-label" for="bankMasterActiveStatus">Active</label>
               </div>
             </div>
-            <div class="col-12">
+            <div class="col-md-6">
               <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="bankMasterQrBillReceived" name="QrBillReceived" value="1">
                 <label class="form-check-label" for="bankMasterQrBillReceived">QR/Bill Received</label>
               </div>
               <div class="form-text">
-                When ticked, this account appears in Payment Received / Make Payment account lists.
+                When Yes, this account appears as Payment Bank on sale invoices (QR / bill).
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="bankMasterAccountPaymentReceived" name="AccountPaymentReceived" value="1">
+                <label class="form-check-label" for="bankMasterAccountPaymentReceived">Account Payment Received</label>
+              </div>
+              <div class="form-text">
+                When Yes, this account appears in Payment Received options and tabs
+                (Follow-up, Stamp, e-Court, Printing, Income / Expense).
                 Money In-Out (Bank/Cash Transactions) always shows all accounts.
               </div>
             </div>
@@ -210,5 +221,5 @@
   window.BANK_MASTER_DEFAULT_CASH_GROUP_ID = {{ default_cash_group_id | tojson }};
 </script>
 {% include 'ledger_report/_embed.html' %}
-<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260831ob1"></script>
+<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260905apr1"></script>
 {% endblock %}

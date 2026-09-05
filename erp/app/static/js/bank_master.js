@@ -32,6 +32,7 @@
     description: document.getElementById("bankMasterDescription"),
     activeStatus: document.getElementById("bankMasterActiveStatus"),
     qrBillReceived: document.getElementById("bankMasterQrBillReceived"),
+    accountPaymentReceived: document.getElementById("bankMasterAccountPaymentReceived"),
   };
 
   function isCashAccount(bankName, accountNumber) {
@@ -171,6 +172,9 @@
         "<td>" + (row.qr_bill_received
           ? '<span class="badge text-bg-primary">Yes</span>'
           : '<span class="badge text-bg-light border">No</span>') + "</td>" +
+        "<td>" + (row.account_payment_received
+          ? '<span class="badge text-bg-primary">Yes</span>'
+          : '<span class="badge text-bg-light border">No</span>') + "</td>" +
         "<td>" + (row.active_status
           ? '<span class="badge text-bg-success">Active</span>'
           : '<span class="badge text-bg-secondary">Inactive</span>') + "</td>" +
@@ -256,6 +260,7 @@
     if (els.accountId) els.accountId.value = "";
     if (els.activeStatus) els.activeStatus.checked = true;
     if (els.qrBillReceived) els.qrBillReceived.checked = false;
+    if (els.accountPaymentReceived) els.accountPaymentReceived.checked = false;
     if (els.accountType) els.accountType.value = defaultAccountTypeCode();
     if (els.displayOrder) els.displayOrder.value = "100";
     if (els.upiId) els.upiId.value = "";
@@ -303,6 +308,9 @@
     if (els.description) els.description.value = record.description || "";
     if (els.activeStatus) els.activeStatus.checked = !!record.active_status;
     if (els.qrBillReceived) els.qrBillReceived.checked = !!record.qr_bill_received;
+    if (els.accountPaymentReceived) {
+      els.accountPaymentReceived.checked = !!record.account_payment_received;
+    }
     applyCashDisplayOrderLock(!!record.is_cash);
     // Keep saved under-group (do not overwrite with default after fill).
     if (els.underGroup && record.chart_group_id != null) {
@@ -426,6 +434,11 @@
       body.set("QrBillReceived", "1");
     } else {
       body.set("QrBillReceived", "0");
+    }
+    if (els.accountPaymentReceived?.checked) {
+      body.set("AccountPaymentReceived", "1");
+    } else {
+      body.set("AccountPaymentReceived", "0");
     }
     body.set("UpiId", (els.upiId?.value || "").trim());
     const url = accountId

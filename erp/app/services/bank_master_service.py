@@ -17,6 +17,7 @@ from app.utils.master_delete_guard import (
     raise_if_integrity_in_use,
 )
 from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.bank_account_flags import form_flag
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -110,6 +111,10 @@ class BankMasterService:
     def _is_cash_account(bank_name: str | None, account_number: str | None) -> bool:
         return (bank_name or "").strip().lower() == "cash" or (account_number or "").strip().lower() == "cash"
 
+    @staticmethod
+    def _flag_from_form(form: dict, *keys: str) -> bool:
+        return form_flag(form, *keys)
+
     def _parse_form(self, form: dict, *, existing=None) -> dict:
         self.account_types.repo.ensure_schema()
         allowed = self.list_account_types_for_form()
@@ -146,16 +151,16 @@ class BankMasterService:
             raise ValueError("Account Number is required.")
 
         if "ActiveStatus" in form or "active_status" in form:
-            active_raw = (form.get("ActiveStatus") or form.get("active_status") or "").strip().lower()
-            active = active_raw in {"1", "true", "on", "yes"}
+            active = BankMasterService._flag_from_form(form, "ActiveStatus", "active_status")
         else:
             active = False
 
-        if "QrBillReceived" in form or "qr_bill_received" in form:
-            qr_raw = (form.get("QrBillReceived") or form.get("qr_bill_received") or "").strip().lower()
-            qr_bill_received = qr_raw in {"1", "true", "on", "yes"}
-        else:
-            qr_bill_received = False
+        qr_bill_received = BankMasterService._flag_from_form(
+            form, "QrBillReceived", "qr_bill_received"
+        )
+        account_payment_received = BankMasterService._flag_from_form(
+            form, "AccountPaymentReceived", "account_payment_received"
+        )
 
         is_cash = self._is_cash_account(bank_name, account_number)
         if existing is not None and self._is_cash_account(existing.BankName, existing.AccountNumber):
@@ -200,6 +205,7 @@ class BankMasterService:
             "Description": self._clean(form.get("Description"), 500),
             "ActiveStatus": active,
             "QrBillReceived": qr_bill_received,
+            "AccountPaymentReceived": account_payment_received,
             "OpeningBalance": ob_fields["OpeningBalance"],
             "OpeningBalanceDate": ob_fields["OpeningBalanceDate"],
             "OpeningBalanceDrCr": ob_fields["OpeningBalanceDrCr"],
@@ -236,6 +242,7 @@ class BankMasterService:
             "description": row.Description or "",
             "active_status": bool(row.ActiveStatus),
             "qr_bill_received": bool(getattr(row, "QrBillReceived", False)),
+            "account_payment_received": bool(getattr(row, "AccountPaymentReceived", False)),
             "opening_balance": str(row.OpeningBalance) if row.OpeningBalance is not None else "",
             "opening_balance_date": row.OpeningBalanceDate.isoformat()
             if row.OpeningBalanceDate

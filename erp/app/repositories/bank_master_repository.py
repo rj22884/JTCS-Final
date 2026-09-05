@@ -39,6 +39,7 @@ class BankMasterRepository:
         if (
             self._schema_ready
             and self._column_exists("QrBillReceived")
+            and self._column_exists("AccountPaymentReceived")
             and self._column_exists("ChartGroupID")
             and self._column_exists("OpeningBalanceDrCr")
         ):
@@ -103,6 +104,31 @@ class BankMasterRepository:
                     )
                 )
                 self.session.commit()
+
+            if not self._column_exists("AccountPaymentReceived"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD AccountPaymentReceived BIT NOT NULL
+                            CONSTRAINT DF_JtcsBankAccountMaster_AccountPaymentReceived DEFAULT (0)
+                        """
+                    )
+                )
+                self.session.commit()
+                # First-time only: keep existing Payment Received dropdowns working.
+                if self._column_exists("QrBillReceived"):
+                    self.session.execute(
+                        text(
+                            """
+                            UPDATE dbo.JtcsBankAccountMaster
+                            SET AccountPaymentReceived = 1
+                            WHERE AccountPaymentReceived = 0
+                              AND QrBillReceived = 1
+                            """
+                        )
+                    )
+                    self.session.commit()
 
             if not self._column_exists("ChartGroupID"):
                 self.session.execute(
@@ -184,8 +210,10 @@ class BankMasterRepository:
                 )
                 self.session.commit()
 
-            self._schema_ready = self._column_exists("QrBillReceived") and self._column_exists(
-                "ChartGroupID"
+            self._schema_ready = (
+                self._column_exists("QrBillReceived")
+                and self._column_exists("AccountPaymentReceived")
+                and self._column_exists("ChartGroupID")
             )
             if not self._schema_ready:
                 raise RuntimeError(

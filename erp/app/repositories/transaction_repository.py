@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
+from app.utils.bank_account_flags import is_account_payment_received
 from app.models.transactions import (
     CustomerMaster,
     JTCSDailyTransaction,
@@ -215,20 +216,31 @@ class MasterRepository:
         digits = "".join(ch for ch in account_number if ch.isdigit())
         return account_number == primary_display or digits.endswith("0396")
 
-    def list_stamp_bank_payment_modes(self, *, qr_bill_received_only: bool = True) -> list[dict]:
-        """Payment / receive account options from JtcsBankAccountMaster.
+    def list_stamp_bank_payment_modes(
+        self,
+        *,
+        account_payment_received_only: bool = True,
+        qr_bill_received_only: bool | None = None,
+    ) -> list[dict]:
+        """Payment Received account options from JtcsBankAccountMaster.
 
-        By default only accounts with QR/Bill Received = true are listed
-        (used by Payment Received / Make Payment flows). Pass
-        qr_bill_received_only=False for unfiltered lists.
+        By default only accounts with Account Payment Received = Yes are listed
+        (Follow-up, Stamp, e-Court, Printing, Income/Expense). Pass
+        account_payment_received_only=False for an unfiltered list.
+        qr_bill_received_only is a deprecated alias for account_payment_received_only.
         Bank/Cash Transactions uses a separate account list and is not affected.
+        Sale invoice Payment Bank still uses QR/Bill Received.
         """
         from app.repositories.bank_master_repository import BankMasterRepository
+
+        if qr_bill_received_only is not None:
+            account_payment_received_only = qr_bill_received_only
 
         BankMasterRepository(self.session).ensure_schema()
         items: list[dict] = []
         for account in self.list_active_bank_accounts():
-            if qr_bill_received_only and not bool(getattr(account, "QrBillReceived", False)):
+            account_payment_received = is_account_payment_received(account)
+            if account_payment_received_only and not account_payment_received:
                 continue
             account_number = self._stamp_account_number(account)
             display = (
@@ -246,6 +258,7 @@ class MasterRepository:
                     "display_account_number": display,
                     "display_order": int(getattr(account, "DisplayOrder", 100) or 100),
                     "qr_bill_received": bool(getattr(account, "QrBillReceived", False)),
+                    "account_payment_received": account_payment_received,
                 }
             )
         items.sort(
