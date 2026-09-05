@@ -73,9 +73,14 @@ def _insecure_ssl_context() -> ssl.SSLContext:
 def mail_domain_hostname(username: str | None) -> str | None:
     """FQDN for SMTP EHLO/HELO — VPS hostnames like 'ubuntu' are often rejected by Titan."""
     value = (username or "").strip()
+    if not value:
+        return None
+    # Support "Display Name <user@domain>" senders.
+    if "<" in value and ">" in value:
+        value = value[value.rfind("<") + 1 : value.rfind(">")].strip()
     if "@" not in value:
         return None
-    domain = value.split("@", 1)[1].strip().lower()
+    domain = value.split("@", 1)[1].strip().lower().rstrip(">")
     if not domain or "." not in domain:
         return None
     return domain

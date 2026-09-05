@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from flask import current_app, has_request_context, request, url_for
 
@@ -36,8 +36,18 @@ def public_base_url() -> str:
 
 
 def external_url_for(endpoint: str, **values) -> str:
-    """Prefer public APP_BASE_URL / request host so VPS emails never point at localhost."""
+    """Prefer public APP_BASE_URL / request host so VPS emails never point at localhost.
+
+    Long auth tokens for password setup/reset are placed in the query string (not the
+    path) so email clients are less likely to wrap/break the link mid-token.
+    """
     base = public_base_url()
+    token = values.get("token")
     with current_app.test_request_context(base_url=f"{base}/"):
+        # Password reset / set-password: prefer ?token= query form.
+        if token is not None and endpoint == "auth.reset_password":
+            values = {k: v for k, v in values.items() if k != "token"}
+            path = url_for(endpoint, _external=False, **values)
+            return f"{base}{path}?{urlencode({'token': token})}"
         path = url_for(endpoint, _external=False, **values)
     return f"{base}{path}"
