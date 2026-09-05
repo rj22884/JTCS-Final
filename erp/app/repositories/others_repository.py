@@ -450,6 +450,15 @@ class OthersIncomeExpenseRepository:
         self.session.execute(
             text(
                 """
+                IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'PaymentReceived') IS NULL
+                    ALTER TABLE dbo.OthersIncomeExpenseMaster ADD PaymentReceived BIT NOT NULL
+                        CONSTRAINT DF_OIE_PaymentReceived DEFAULT (0);
+                """
+            )
+        )
+        self.session.execute(
+            text(
+                """
                 IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'TallyBillNo') IS NULL
                     ALTER TABLE dbo.OthersIncomeExpenseMaster ADD TallyBillNo NVARCHAR(50) NULL;
                 """

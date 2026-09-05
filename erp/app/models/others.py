@@ -59,6 +59,7 @@ class OthersIncomeExpenseMaster(db.Model):
     CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     WorkDone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     TallyBillGenerated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    PaymentReceived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
     TallyBillDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     TallyBillAmount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
