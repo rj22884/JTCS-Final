@@ -1,19 +1,24 @@
 {% extends 'layouts/auth_base.html' %}
 
 {% block title %}Set Password{% endblock %}
-{% block subtitle %}Check your inbox for the password setup link{% endblock %}
+{% block subtitle %}{% if email_sent %}Check your inbox for the password setup link{% else %}Password setup email was not sent{% endif %}{% endblock %}
 
 {% block content %}
 <div class="vstack gap-3">
+  {% if email_sent %}
   <p class="mb-0">We sent a password setup link to <strong>{{ email or 'your email address' }}</strong>.</p>
-  <p class="text-muted small mb-0">The link expires in 30 minutes. After you set a password, your account will await administrator approval.</p>
+  <p class="text-muted small mb-0">Check Inbox and Spam/Junk. The link expires in 30 minutes. After you set a password, your account will await administrator approval.</p>
+  {% else %}
+  <p class="mb-0 text-danger">Your account was saved, but the password setup email could not be delivered to <strong>{{ email or 'your email address' }}</strong>.</p>
+  <p class="text-muted small mb-0">Click Resend below. If it still fails, ask the administrator to verify SMTP settings (MAIL_PASSWORD / Integration Settings).</p>
+  {% endif %}
 
   {% if email %}
   <form method="post" class="vstack gap-2">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="email" value="{{ email }}">
     <input type="hidden" name="action" value="resend">
-    <button type="submit" class="btn btn-outline-primary">Resend password setup email</button>
+    <button type="submit" class="btn {% if email_sent %}btn-outline-primary{% else %}btn-primary{% endif %}">Resend password setup email</button>
   </form>
   {% endif %}
 

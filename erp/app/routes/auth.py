@@ -258,11 +258,18 @@ def register():
         if not success:
             flash(message, "danger")
         else:
+            email_sent = bool(data.get("email_sent", "saved, but" not in (message or "").lower()))
             flash(
                 message or "Registration submitted. Check your email for the password setup link.",
-                "success" if "saved, but" not in (message or "").lower() else "warning",
+                "success" if email_sent else "warning",
             )
-            return redirect(url_for("auth.verify_email", email=data.get("email", "")))
+            return redirect(
+                url_for(
+                    "auth.verify_email",
+                    email=data.get("email", ""),
+                    sent=1 if email_sent else 0,
+                )
+            )
 
     return render_template("auth/register.html")
 
@@ -271,12 +278,20 @@ def register():
 def verify_email():
     auth = AuthService()
     email = (request.args.get("email") or request.form.get("email") or "").strip().lower()
+    email_sent = request.args.get("sent", "1") != "0"
 
     if request.method == "POST" and request.form.get("action") == "resend":
         success, message, _ = auth.resend_verification_email(email)
+        email_sent = success and "sent" in (message or "").lower()
         flash(message, "danger" if not success else "info")
+        if success:
+            return redirect(url_for("auth.verify_email", email=email, sent=1))
 
-    return render_template("auth/verify_email.html", email=email)
+    return render_template(
+        "auth/verify_email.html",
+        email=email,
+        email_sent=email_sent,
+    )
 
 
 @bp.route("/verify/<token>")
@@ -319,13 +334,14 @@ def forgot_password():
 
 
 @bp.route("/reset-password", methods=["GET", "POST"])
-@bp.route("/reset-password/<token>", methods=["GET", "POST"])
+@bp.route("/reset-password/<path:token>", methods=["GET", "POST"])
 def reset_password(token: str | None = None):
     auth = AuthService()
-    token = token or request.args.get("token", "")
+    # Prefer query-string token from email links (avoids client URL wrapping issues).
+    token = (request.values.get("token") or token or "").strip()
 
     if request.method == "POST":
-        token = request.form.get("token", token)
+        token = (request.form.get("token") or token or "").strip()
         try:
             success, message, _ = auth.reset_password_with_token(
                 token,

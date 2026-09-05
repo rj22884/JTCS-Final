@@ -409,7 +409,7 @@ class AuthService:
                 exc_info=True,
             )
             return AuthResult.ok(
-                {"email": email, "user_id": user_id},
+                {"email": email, "user_id": user_id, "email_sent": False},
                 f"Registration saved, but {SMTP_USER_MESSAGE} "
                 "Open the next page and click Resend. "
                 "On VPS also confirm MAIL_PASSWORD and APP_BASE_URL in erp/.env.",
@@ -428,14 +428,14 @@ class AuthService:
                     "Set MAIL_USERNAME / MAIL_PASSWORD / APP_BASE_URL in erp/.env, then Resend."
                 )
             return AuthResult.ok(
-                {"email": email, "user_id": user_id},
+                {"email": email, "user_id": user_id, "email_sent": False},
                 f"Registration saved, but {detail}",
             ).as_tuple()
 
         logger.info("[REGISTER] Password setup email sent successfully to %s", email)
 
         return AuthResult.ok(
-            {"email": email, "user_id": user_id},
+            {"email": email, "user_id": user_id, "email_sent": True},
             "Registration submitted. Check your email (and Spam/Junk) for the password setup link.",
         ).as_tuple()
 
