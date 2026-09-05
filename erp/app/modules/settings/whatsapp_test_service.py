@@ -255,8 +255,26 @@ class WhatsAppTestService:
 
     def _check_phone(self, client: WhatsAppMetaClient, phone_number_id: str) -> dict[str, Any]:
         try:
+            logger.info(
+                "WhatsApp phone validation GET /%s/%s fields=id,display_phone_number,"
+                "verified_name,quality_rating,code_verification_status,platform_type,"
+                "throughput,messaging_limit_tier,name_status,new_name_status,"
+                "is_official_business_account,account_mode",
+                getattr(client, "version", ""),
+                phone_number_id,
+            )
             phone = client.get_phone(phone_number_id)
             display = (phone.get("display_phone_number") or "").strip()
+            returned_id = str(phone.get("id") or "").strip()
+            if returned_id and returned_id != str(phone_number_id or "").strip():
+                return {
+                    "name": "Phone Number validation",
+                    "ok": False,
+                    "detail": (
+                        f"Meta returned Phone Number ID {returned_id}, "
+                        f"not the configured {phone_number_id}."
+                    ),
+                }
             if is_test_phone_display(display):
                 return {
                     "name": "Phone Number validation",
@@ -379,6 +397,11 @@ class WhatsAppTestService:
                 "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
             }
         except MetaGraphError as exc:
+            logger.warning(
+                "WhatsApp subscribed_apps check failed waba_id=%s err=%s",
+                waba_id,
+                exc,
+            )
             return {
                 "name": "Webhook subscription",
                 "ok": False,

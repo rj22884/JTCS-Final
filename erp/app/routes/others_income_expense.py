@@ -42,7 +42,7 @@ def index():
         income_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_INCOME),
         expense_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_EXPENSE),
         misc_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_MISC),
-        payment_modes=master_repo.list_stamp_bank_payment_modes(qr_bill_received_only=False),
+        payment_modes=master_repo.list_stamp_bank_payment_modes(),
         customer_groups=service.list_customer_groups(),
         customer_types=CUSTOMER_TYPES,
         load_entry_id=request.args.get("load_entry", type=int),

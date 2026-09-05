@@ -546,6 +546,8 @@ class OthersIncomeExpenseService:
         account_map = self._account_labels_by_bill([item.get("bill_no") or "" for item in entries])
         for item in entries:
             item["account_label"] = account_map.get((item.get("bill_no") or "").strip().upper(), "—")
+            if not item.get("payment_received") and item.get("account_label") not in (None, "", "—"):
+                item["payment_received"] = True
         return entries
 
     def get_entry(self, entry_id: int) -> dict:
@@ -561,6 +563,8 @@ class OthersIncomeExpenseService:
         else:
             data["daily_transaction_id"] = None
             data["payments"] = []
+        if not data.get("payment_received") and data.get("payments"):
+            data["payment_received"] = True
         return data
 
     def _category_lines_from_row(self, row) -> list[dict]:
@@ -609,6 +613,7 @@ class OthersIncomeExpenseService:
             "customer_id": getattr(row, "CustomerID", None) or None,
             "work_done": bool(getattr(row, "WorkDone", False)),
             "tally_bill_generated": bool(getattr(row, "TallyBillGenerated", False)),
+            "payment_received": bool(getattr(row, "PaymentReceived", False)),
             "tally_bill_no": (getattr(row, "TallyBillNo", None) or "") or "",
             "tally_bill_date": (
                 row.TallyBillDate.isoformat()
@@ -755,11 +760,15 @@ class OthersIncomeExpenseService:
 
         work_done = self._bool_from_form(form, "WorkDone", "work_done")
         tally_bill = self._bool_from_form(form, "TallyBillGenerated", "tally_bill_generated")
+        payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received")
         if ledger_kind != self.LEDGER_MISC:
             work_done = False
             tally_bill = False
+            payment_received = False
         if tally_bill and not work_done:
             raise ValueError("Work Done must be checked before Tally Bill Generated.")
+        if payment_received and not tally_bill:
+            raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
         tally_bill_no = (form.get("TallyBillNo") or form.get("tally_bill_no") or "").strip() or None
         tally_bill_date = self._date(form.get("TallyBillDate") or form.get("tally_bill_date"))
@@ -780,17 +789,19 @@ class OthersIncomeExpenseService:
             tally_bill_date = None
             tally_bill_amount = None
 
-        if ledger_kind == self.LEDGER_MISC and not tally_bill:
+        if ledger_kind == self.LEDGER_MISC and not payment_received:
             payment_lines = []
         else:
             payment_lines = self._parse_payment_lines(
-                form, category_total, required=ledger_kind != self.LEDGER_MISC
+                form,
+                category_total,
+                required=ledger_kind != self.LEDGER_MISC or payment_received,
             )
-        if ledger_kind != self.LEDGER_MISC and not payment_lines:
+        if (ledger_kind != self.LEDGER_MISC or payment_received) and not payment_lines:
             raise ValueError("At least one payment mode is required.")
 
         received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
-        if ledger_kind != self.LEDGER_MISC:
+        if ledger_kind != self.LEDGER_MISC or payment_received:
             if received_total <= 0:
                 raise ValueError("Payment amount must be greater than zero.")
         amount = category_total
@@ -827,6 +838,7 @@ class OthersIncomeExpenseService:
                 "CustomerID": customer_id,
                 "WorkDone": work_done,
                 "TallyBillGenerated": tally_bill,
+                "PaymentReceived": payment_received,
                 "TallyBillNo": tally_bill_no,
                 "TallyBillDate": tally_bill_date,
                 "TallyBillAmount": tally_bill_amount,

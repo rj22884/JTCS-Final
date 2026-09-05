@@ -14,15 +14,50 @@ from app.config import BASE_DIR
 from app.services.backup_service import BackupService
 from app.utils.runtime_env import is_vps_runtime
 
-REPO_ROOT = BASE_DIR.parent
+def discover_git_root(start: Path | None = None) -> Path:
+    """Walk up from erp/ (or start) until a .git directory or worktree file is found."""
+    cur = (start or BASE_DIR).resolve()
+    for path in (cur, *cur.parents):
+        if (path / ".git").exists():
+            return path
+    return BASE_DIR.parent
+
+
+REPO_ROOT = discover_git_root()
 DEPLOY_TARGETS = ("app", "web", "both")
+
+_WINDOWS_GIT_CANDIDATES = (
+    Path(r"C:\Program Files\Git\cmd\git.exe"),
+    Path(r"C:\Program Files\Git\bin\git.exe"),
+    Path(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+)
+
+
+def resolve_git_executable() -> str:
+    found = shutil.which("git")
+    if found:
+        return found
+    if os.name == "nt":
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        extra = (
+            program_files / "Git" / "cmd" / "git.exe",
+            program_files / "Git" / "bin" / "git.exe",
+            program_files_x86 / "Git" / "cmd" / "git.exe",
+            *_WINDOWS_GIT_CANDIDATES,
+        )
+        for candidate in extra:
+            if candidate.is_file():
+                return str(candidate)
+    return "git"
 
 
 class UtilityService:
     def __init__(self) -> None:
-        self.repo_root = REPO_ROOT
+        self.repo_root = discover_git_root()
         self.vps = self._load_vps_env()
         self.web = self._load_web_env()
+        self._git_bin = resolve_git_executable()
 
     def _load_vps_env(self) -> dict[str, str]:
         defaults = {
@@ -89,6 +124,12 @@ class UtilityService:
 
     def app_info(self) -> dict:
         cfg = current_app.config
+        git_branch = ""
+        git_branch_error = ""
+        try:
+            git_branch = self._git_current_branch()
+        except Exception as exc:
+            git_branch_error = str(exc)
         return {
             "mode": "vps" if is_vps_runtime() else "local",
             "sync_label": "Download Local" if is_vps_runtime() else "Upload VPS",
@@ -98,6 +139,8 @@ class UtilityService:
             "db_name": cfg.get("DB_NAME_DISPLAY") or cfg.get("DB_NAME") or "",
             "erp_dir": str(BASE_DIR),
             "repo_root": str(self.repo_root),
+            "git_branch": git_branch,
+            "git_branch_error": git_branch_error,
             "vps_host": self.vps.get("VPS_HOST", ""),
             "vps_path": self.vps.get("VPS_PATH", ""),
             "vps_web_dir": self.web.get("VPS_WEB_DIR", "/var/www/jtcsxpert.com"),
@@ -226,6 +269,11 @@ class UtilityService:
             rc = 0
 
             if mode in {"app", "both"}:
+                yield {
+                    "type": "log",
+                    "level": "info",
+                    "line": f"App git repo: {self.repo_root}",
+                }
                 branch = self._git_current_branch()
                 yield {"type": "log", "level": "info", "line": f"App branch: {branch}"}
                 yield {"type": "log", "level": "info", "line": "--- App: Git commit / push ---"}
@@ -540,29 +588,41 @@ class UtilityService:
             return False
 
     def _run_git(self, *args: str, repo: Path | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(repo or self.repo_root), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
+        git = getattr(self, "_git_bin", None) or resolve_git_executable()
+        try:
+            return subprocess.run(
+                [git, "-C", str(repo or self.repo_root), *args],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Git was not found on this PC. Install Git for Windows and restart the app."
+            ) from exc
 
     def _iter_git(self, *args: str, repo: Path | None = None):
         """Run git and yield log events for stdout/stderr lines."""
+        git = getattr(self, "_git_bin", None) or resolve_git_executable()
         root = str(repo or self.repo_root)
-        cmd = ["git", "-C", root, *args]
+        cmd = [git, "-C", root, *args]
         yield {"type": "log", "level": "info", "line": "$ " + " ".join(args)}
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "Git was not found on this PC. Install Git for Windows and restart the app."
+            ) from exc
         assert proc.stdout is not None
         for line in proc.stdout:
             text = line.rstrip("\r\n")
@@ -571,15 +631,71 @@ class UtilityService:
         rc = proc.wait()
         yield {"type": "git_rc", "args": list(args), "returncode": rc}
 
+    @staticmethod
+    def _clean_branch_name(raw: str | None) -> str:
+        name = (raw or "").strip()
+        if name.startswith("origin/") and name != "origin/HEAD":
+            name = name.split("/", 1)[1]
+        if name.startswith("heads/"):
+            name = name.split("/", 1)[1]
+        if name in {"", "HEAD", "origin/HEAD"}:
+            return ""
+        return name
+
     def _git_current_branch(self) -> str:
-        proc = self._run_git("branch", "--show-current")
-        branch = (proc.stdout or "").strip()
-        if not branch:
-            proc = self._run_git("rev-parse", "--abbrev-ref", "HEAD")
-            branch = (proc.stdout or "").strip()
-        if not branch or branch == "HEAD":
-            raise RuntimeError("Cannot determine git branch. Checkout a branch first.")
-        return branch
+        env_branch = self._clean_branch_name(os.getenv("BRANCH") or os.getenv("GIT_BRANCH"))
+        if env_branch:
+            return env_branch
+
+        inside = self._run_git("rev-parse", "--is-inside-work-tree")
+        if inside.returncode != 0 or (inside.stdout or "").strip() != "true":
+            detail = (inside.stderr or inside.stdout or "").strip()
+            raise RuntimeError(
+                f"Git repository not found at {self.repo_root}."
+                + (f" {detail}" if detail else "")
+            )
+
+        for args in (
+            ("branch", "--show-current"),
+            ("symbolic-ref", "--quiet", "--short", "HEAD"),
+            ("rev-parse", "--abbrev-ref", "HEAD"),
+        ):
+            name = self._clean_branch_name((self._run_git(*args).stdout or ""))
+            if name:
+                return name
+
+        pointed = self._run_git(
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "--points-at",
+            "HEAD",
+            "refs/heads",
+        )
+        for line in (pointed.stdout or "").splitlines():
+            name = self._clean_branch_name(line)
+            if name:
+                return name
+
+        upstream = self._run_git(
+            "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"
+        )
+        name = self._clean_branch_name(upstream.stdout or "")
+        if name:
+            return name
+
+        origin_head = self._run_git(
+            "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"
+        )
+        name = self._clean_branch_name(origin_head.stdout or "")
+        if name:
+            return name
+
+        sha = (self._run_git("rev-parse", "--short", "HEAD").stdout or "").strip()
+        raise RuntimeError(
+            f"Cannot determine git branch at {self.repo_root}"
+            + (f" (HEAD {sha})" if sha else "")
+            + ". Checkout a branch first, e.g. git checkout main."
+        )
 
     def _iter_git_commit_push(self, *, commit_message: str):
         status = self._run_git("status", "--porcelain")

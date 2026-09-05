@@ -216,11 +216,10 @@ class MasterRepository:
         return account_number == primary_display or digits.endswith("0396")
 
     def list_stamp_bank_payment_modes(self, *, qr_bill_received_only: bool = True) -> list[dict]:
-        """Payment / receive account options from JtcsBankAccountMaster.
+        """Payment Received account options from Bank Master.
 
-        By default only accounts with QR/Bill Received = true are listed
-        (used by Payment Received / Make Payment flows). Pass
-        qr_bill_received_only=False for unfiltered lists.
+        Only accounts with QR/Bill Received ticked are listed, project-wide.
+        qr_bill_received_only is kept for callers but cannot bypass that rule.
         Bank/Cash Transactions uses a separate account list and is not affected.
         """
         from app.repositories.bank_master_repository import BankMasterRepository
@@ -228,7 +227,7 @@ class MasterRepository:
         BankMasterRepository(self.session).ensure_schema()
         items: list[dict] = []
         for account in self.list_active_bank_accounts():
-            if qr_bill_received_only and not bool(getattr(account, "QrBillReceived", False)):
+            if not bool(getattr(account, "QrBillReceived", False)):
                 continue
             account_number = self._stamp_account_number(account)
             display = (

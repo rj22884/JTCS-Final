@@ -507,7 +507,10 @@
     select.className = "form-select form-select-sm ecourt-payment-bank";
     select.name = "PaymentBankAccountID[]";
     select.required = true;
-    const accounts = window.ECOURT_BANK_ACCOUNTS || [];
+    const accounts = (window.ECOURT_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
