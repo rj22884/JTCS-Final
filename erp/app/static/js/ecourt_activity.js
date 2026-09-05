@@ -524,17 +524,6 @@
     });
     if (
       selectedValue &&
-      !Array.from(select.options).some(function (opt) {
-        return opt.value === String(selectedValue);
-      })
-    ) {
-      const opt = document.createElement("option");
-      opt.value = String(selectedValue);
-      opt.textContent = "Current account";
-      select.appendChild(opt);
-    }
-    if (
-      selectedValue &&
       Array.from(select.options).some(function (opt) {
         return opt.value === String(selectedValue);
       })

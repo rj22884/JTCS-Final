@@ -116,7 +116,7 @@
                 </div>
                 <div id="pscanPaymentLines" class="pscan-payment-lines"></div>
                 {% if not payment_modes %}
-                <div class="small text-danger mt-1">No bank accounts marked Account Payment Received in Bank Master.</div>
+                <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
                 {% endif %}
               </div>
             </div>
@@ -210,5 +210,5 @@
   window.PSCAN_CSRF = {{ csrf_token() | tojson }};
   window.PSCAN_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/printing_scan_activity.js') }}?v=20260905apr1"></script>
+<script src="{{ url_for('static', filename='js/printing_scan_activity.js') }}?v=20260823dmy1"></script>
 {% endblock %}

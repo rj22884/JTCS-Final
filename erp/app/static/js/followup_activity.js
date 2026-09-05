@@ -332,18 +332,6 @@
       if (String(selectedId) === opt.value) opt.selected = true;
       select.appendChild(opt);
     });
-    if (
-      selectedId &&
-      !Array.from(select.options).some(function (opt) {
-        return opt.value === String(selectedId);
-      })
-    ) {
-      const opt = document.createElement("option");
-      opt.value = String(selectedId);
-      opt.textContent = "Current account";
-      opt.selected = true;
-      select.appendChild(opt);
-    }
     select.addEventListener("change", updatePaymentSummary);
     return select;
   }

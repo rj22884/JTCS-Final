@@ -112,7 +112,6 @@ class JtcsBankAccountMaster(db.Model):
     Description: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     ActiveStatus: Mapped[bool] = mapped_column(nullable=False, default=True)
     QrBillReceived: Mapped[bool] = mapped_column(nullable=False, default=False)
-    AccountPaymentReceived: Mapped[bool] = mapped_column(nullable=False, default=False)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     OpeningBalance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
