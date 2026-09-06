@@ -8,12 +8,13 @@ from app.models.gst_billing import ItemMaster
 
 
 class ItemMasterRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if ItemMasterRepository._schema_ready:
             return
         self.session.execute(
             text(
@@ -52,6 +53,9 @@ class ItemMasterRepository:
             ("OpeningRate", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningRate DEFAULT (0)"),
             ("OpeningBalance", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningBalance DEFAULT (0)"),
             ("OpeningBalanceDate", "DATE NULL"),
+            ("PurchaseDate", "DATE NULL"),
+            ("DepreciationRate", "DECIMAL(9, 4) NOT NULL CONSTRAINT DF_ItemMaster_DepreciationRate DEFAULT (0)"),
+            ("AppreciationRate", "DECIMAL(9, 4) NOT NULL CONSTRAINT DF_ItemMaster_AppreciationRate DEFAULT (0)"),
             ("ChartGroupID", "INT NULL"),
         ):
             self.session.execute(
@@ -84,7 +88,7 @@ class ItemMasterRepository:
             )
         )
         self.session.commit()
-        self._schema_ready = True
+        ItemMasterRepository._schema_ready = True
 
     def list_all(self, *, search: str | None = None, active_only: bool = False) -> list[ItemMaster]:
         self.ensure_schema()

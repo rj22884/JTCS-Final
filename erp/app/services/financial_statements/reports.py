@@ -628,41 +628,50 @@ class FinancialStatementsService:
         return {"layout": "ratios", "ratios": ratios, "assets": assets, "liabilities": liabilities, "net_profit": net_profit}
 
     def _recompute_depreciation(self, as_of: date) -> None:
-        rows = db.session.execute(
-            text(
-                """
-                SELECT AssetID, PurchaseDate, PurchaseValue, DepreciationRate,
-                       OpeningAccumulatedDep, Method
-                FROM dbo.FixedAssetMaster WHERE IsActive = 1
-                """
-            )
-        ).mappings().all()
-        fy_start = self.engine.fy_start(as_of)
+        from app.services.depreciation_service import DepreciationService
+
+        svc = DepreciationService()
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT f.AssetID, f.PurchaseDate, f.PurchaseValue, f.DepreciationRate,
+                           f.OpeningAccumulatedDep, f.Method, i.OpeningBalanceDate
+                    FROM dbo.FixedAssetMaster f
+                    LEFT JOIN dbo.ItemMaster i ON i.ItemID = f.ItemID
+                    WHERE f.IsActive = 1
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT AssetID, PurchaseDate, PurchaseValue, DepreciationRate,
+                           OpeningAccumulatedDep, Method, NULL AS OpeningBalanceDate
+                    FROM dbo.FixedAssetMaster WHERE IsActive = 1
+                    """
+                )
+            ).mappings().all()
         for r in rows:
             purchase = r["PurchaseDate"]
             if isinstance(purchase, datetime):
                 purchase = purchase.date()
             rate = self.engine.money(r["DepreciationRate"])
             cost = self.engine.money(r["PurchaseValue"])
-            open_acc = self.engine.money(r["OpeningAccumulatedDep"])
             method = (r.get("Method") or "WDV").upper()
-            wdv_open = cost - open_acc
-            if wdv_open < ZERO:
-                wdv_open = ZERO
-            # Full year if purchased before FY; else proportionate months
-            if purchase and purchase > as_of:
-                cy = ZERO
-            else:
-                months = 12
-                if purchase and purchase > fy_start:
-                    months = max(1, (as_of.year - purchase.year) * 12 + as_of.month - purchase.month + 1)
-                    months = min(12, months)
-                if method == "SL":
-                    cy = (cost * rate / Decimal("100") * Decimal(months) / Decimal("12")).quantize(Decimal("0.01"))
-                else:
-                    cy = (wdv_open * rate / Decimal("100") * Decimal(months) / Decimal("12")).quantize(Decimal("0.01"))
-            acc = open_acc + cy
-            wdv = cost - acc
+            calc = svc.calculate(
+                cost=cost,
+                rate=rate,
+                purchase_date=purchase,
+                opening_date=r.get("OpeningBalanceDate"),
+                as_of=as_of,
+                method=method,
+            )
+            cy = self.engine.money(calc["current_year"])
+            wdv = self.engine.money(calc["wdv"])
+            acc = self.engine.money(calc.get("accumulated", cost - wdv))
             if wdv < ZERO:
                 wdv = ZERO
             db.session.execute(

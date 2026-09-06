@@ -19,6 +19,9 @@ class WorkMaster(db.Model):
     OpeningBalance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     OpeningBalanceDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     OpeningBalanceDrCr: Mapped[str | None] = mapped_column(Unicode(2), nullable=True)
+    PurchaseDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    DepreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
+    AppreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
     ActiveStatus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 

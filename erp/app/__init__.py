@@ -18,6 +18,7 @@ from app.routes.masters_account_type import bp as masters_account_type_bp
 from app.routes.masters_chart_account import bp as masters_chart_account_bp
 from app.routes.masters_chart_group import bp as masters_chart_group_bp
 from app.routes.masters_item import bp as masters_item_bp
+from app.routes.dynamic_master_fields import bp as dynamic_master_fields_bp
 from app.routes.accounting_invoice import bp as accounting_invoice_bp
 from app.routes.invoice_pay_public import bp as invoice_pay_public_bp
 from app.routes.masters_sub_work import bp as masters_sub_work_bp
@@ -139,6 +140,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(masters_chart_group_bp)
     app.register_blueprint(masters_chart_account_bp)
     app.register_blueprint(masters_item_bp)
+    app.register_blueprint(dynamic_master_fields_bp)
     app.register_blueprint(accounting_invoice_bp)
     app.register_blueprint(invoice_pay_public_bp)
     app.register_blueprint(masters_income_legacy_bp)
@@ -449,6 +451,16 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Customer Master / portal schema ensure skipped: %s", exc)
+
+        try:
+            from app.repositories.dynamic_master_fields_repository import (
+                DynamicMasterFieldsRepository,
+            )
+
+            DynamicMasterFieldsRepository().ensure_schema()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Dynamic master field schema ensure skipped: %s", exc)
 
         # After FS so e-Court / Stamp sit under Reports; Financial Statements stays last.
         try:

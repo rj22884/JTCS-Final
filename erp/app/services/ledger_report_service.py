@@ -156,6 +156,8 @@ class LedgerReportService:
         banks = export.list_bank_accounts(search=search or None)
         result = []
         for row in banks[:limit]:
+            if not bool(row.get("active", True)):
+                continue
             result.append(
                 {
                     "kind": "bank",
@@ -164,7 +166,7 @@ class LedgerReportService:
                     "subtitle": row.get("account_holder") or row.get("account_type") or "Bank Account",
                     "meta": row.get("masked_account") or "",
                     "txn_count": int(row.get("txn_count") or 0),
-                    "active": bool(row.get("active", True)),
+                    "active": True,
                 }
             )
         return result
@@ -174,6 +176,8 @@ class LedgerReportService:
         customers = export.list_customers(search=search or None, limit=limit)
         result = []
         for row in customers:
+            if (row.get("status") or "Active").strip().lower() != "active":
+                continue
             bits = [b for b in (row.get("mobile_number"), row.get("pan_number")) if b]
             result.append(
                 {
@@ -183,7 +187,7 @@ class LedgerReportService:
                     "subtitle": " · ".join(bits) if bits else "Customer",
                     "meta": row.get("status") or "",
                     "txn_count": int(row.get("txn_count") or 0),
-                    "active": (row.get("status") or "Active").strip().lower() == "active",
+                    "active": True,
                 }
             )
         return result
@@ -219,7 +223,7 @@ class LedgerReportService:
                           )
                     ) AS txn_count
                 FROM dbo.WorkMaster w
-                WHERE 1 = 1
+                WHERE ISNULL(w.ActiveStatus, 1) = 1
                   {search_sql}
                 ORDER BY
                     CASE WHEN ISNULL(w.ActiveStatus, 1) = 1 THEN 0 ELSE 1 END,
@@ -270,7 +274,7 @@ class LedgerReportService:
                         WHERE l.ItemID = i.ItemID
                     ) AS txn_count
                 FROM dbo.ItemMaster i
-                WHERE 1 = 1
+                WHERE ISNULL(i.IsActive, 1) = 1
                   {search_sql}
                 ORDER BY
                     CASE WHEN ISNULL(i.IsActive, 1) = 1 THEN 0 ELSE 1 END,
@@ -470,7 +474,14 @@ class LedgerReportService:
             has_ob = False
 
         openings: dict[int, Decimal] = {}
+        asset_meta: dict[int, dict[str, Any]] = {}
         if has_ob:
+            try:
+                from app.repositories.customer_repository import CustomerRepository
+
+                CustomerRepository().ensure_schema()
+            except Exception:
+                db.session.rollback()
             try:
                 for row in db.session.execute(
                     text(
@@ -479,7 +490,10 @@ class LedgerReportService:
                             c.CustomerID,
                             ISNULL(c.OpeningBalance, 0) AS OpeningBalance,
                             c.OpeningBalanceDate,
-                            c.OpeningBalanceDrCr
+                            c.OpeningBalanceDrCr,
+                            c.PurchaseDate,
+                            c.DepreciationRate,
+                            c.AppreciationRate
                         FROM dbo.CustomerMaster c
                         WHERE c.CustomerID IN ({id_sql})
                         """
@@ -496,6 +510,12 @@ class LedgerReportService:
                         openings[cid] = signed
                     else:
                         openings[cid] = Decimal("0.00")
+                    asset_meta[cid] = {
+                        "opening_date": ob_date,
+                        "purchase_date": row.get("PurchaseDate"),
+                        "depreciation_rate": self._money(row.get("DepreciationRate")),
+                        "appreciation_rate": self._money(row.get("AppreciationRate")),
+                    }
             except Exception:
                 db.session.rollback()
 
@@ -581,7 +601,193 @@ class LedgerReportService:
                 "amount": closing,
                 "dr_cr": self._dr_cr_side(closing),
             }
+        self._adjust_customer_asset_class_closings(result, asset_meta, date_to)
         return result
+
+    def _customer_asset_class_calc(
+        self,
+        group_ids: list[int],
+        meta: dict[str, Any],
+        book: Decimal,
+        date_to: date,
+        fa_ids: set[int],
+        inv_ids: set[int],
+        dep_svc,
+    ) -> dict[str, Any] | None:
+        if book <= Decimal("0.00") or not group_ids:
+            return None
+        gids = []
+        for raw in group_ids:
+            try:
+                gids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        is_fa = any(gid in fa_ids for gid in gids)
+        is_inv = (not is_fa) and any(gid in inv_ids for gid in gids)
+        if not is_fa and not is_inv:
+            return None
+        rate = self._money(
+            meta.get("depreciation_rate") if is_fa else meta.get("appreciation_rate")
+        )
+        if rate <= Decimal("0.00"):
+            return None
+        purchase = meta.get("purchase_date")
+        opening = meta.get("opening_date")
+        if purchase is None and opening is None:
+            return None
+        if is_fa:
+            calc = dep_svc.calculate(
+                cost=book,
+                rate=rate,
+                purchase_date=purchase,
+                opening_date=opening,
+                as_of=date_to,
+            )
+            cy = self._money(calc["current_year"])
+            if cy <= Decimal("0.00"):
+                return None
+            return {
+                "kind": "depreciation",
+                "rate": rate,
+                "current_year": cy,
+                "closing": self._money(book - cy),
+            }
+        calc = dep_svc.calculate_appreciation(
+            cost=book,
+            rate=rate,
+            purchase_date=purchase,
+            opening_date=opening,
+            as_of=date_to,
+        )
+        cy = self._money(calc["current_year"])
+        if cy <= Decimal("0.00"):
+            return None
+        return {
+            "kind": "appreciation",
+            "rate": rate,
+            "current_year": cy,
+            "closing": self._money(book + cy),
+        }
+
+    def _adjust_customer_asset_class_closings(
+        self,
+        result: dict[tuple[str, int], dict[str, Any]],
+        asset_meta: dict[int, dict[str, Any]],
+        date_to: date,
+    ) -> None:
+        if not result:
+            return
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+        except Exception:
+            db.session.rollback()
+            return
+        if not fa_ids and not inv_ids:
+            return
+        ids = [cid for (_kind, cid) in result.keys()]
+        mapping: dict[int, dict] = {}
+        try:
+            from app.services.chart_account_service import ChartAccountService
+
+            mapping = ChartAccountService().repo.map_customer_chart_groups(ids)
+        except Exception:
+            db.session.rollback()
+            mapping = {}
+        for key, row in result.items():
+            cid = key[1]
+            adj = self._customer_asset_class_calc(
+                (mapping.get(cid) or {}).get("chart_group_ids") or [],
+                asset_meta.get(cid) or {},
+                self._money(row.get("amount")),
+                date_to,
+                fa_ids,
+                inv_ids,
+                dep_svc,
+            )
+            if not adj:
+                continue
+            row["amount"] = adj["closing"]
+            row["dr_cr"] = self._dr_cr_side(adj["closing"])
+
+    def _append_customer_asset_class_line(
+        self, data: dict[str, Any], customer_id: int, date_to: date | None
+    ) -> dict[str, Any]:
+        as_of = date_to or date.today()
+        try:
+            from app.repositories.customer_repository import CustomerRepository
+
+            CustomerRepository().ensure_schema()
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+            from app.services.chart_account_service import ChartAccountService
+
+            linked = ChartAccountService().get_customer_record(int(customer_id))
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate,
+                        PurchaseDate,
+                        DepreciationRate,
+                        AppreciationRate
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID = :id
+                    """
+                ),
+                {"id": int(customer_id)},
+            ).mappings().first()
+        except Exception:
+            db.session.rollback()
+            return data
+        if not row:
+            return data
+        book = self._money(data.get("closing"))
+        adj = self._customer_asset_class_calc(
+            list(linked.get("group_ids") or []),
+            {
+                "opening_date": row.get("OpeningBalanceDate"),
+                "purchase_date": row.get("PurchaseDate"),
+                "depreciation_rate": self._money(row.get("DepreciationRate")),
+                "appreciation_rate": self._money(row.get("AppreciationRate")),
+            },
+            book,
+            as_of,
+            fa_ids,
+            inv_ids,
+            dep_svc,
+        )
+        if not adj:
+            return data
+        running = adj["closing"]
+        desc = (
+            f"Depreciation @ {adj['rate']}% WDV"
+            if adj["kind"] == "depreciation"
+            else f"Appreciation @ {adj['rate']}%"
+        )
+        debit = Decimal("0.00") if adj["kind"] == "depreciation" else adj["current_year"]
+        credit = adj["current_year"] if adj["kind"] == "depreciation" else Decimal("0.00")
+        data.setdefault("lines", []).append(
+            self._decorate_line(
+                {
+                    "date": as_of.strftime("%d/%m/%Y"),
+                    "description": desc,
+                    "debit": debit,
+                    "credit": credit,
+                    "balance": running,
+                    "kind": "txn",
+                }
+            )
+        )
+        data["closing"] = running
+        return data
 
     def _search_work_closings(
         self, ids: list[int], date_from: date, date_to: date
@@ -675,6 +881,12 @@ class LedgerReportService:
         if not id_sql:
             return {}
         try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        try:
             rows = db.session.execute(
                 text(
                     f"""
@@ -682,6 +894,10 @@ class LedgerReportService:
                         i.ItemID,
                         ISNULL(i.OpeningBalance, 0) AS OpeningBalance,
                         i.OpeningBalanceDate,
+                        i.PurchaseDate,
+                        i.DepreciationRate,
+                        i.AppreciationRate,
+                        i.ChartGroupID,
                         ISNULL((
                             SELECT SUM(ISNULL(l.TaxableValue, 0))
                             FROM dbo.GstInvoiceLine l
@@ -699,6 +915,18 @@ class LedgerReportService:
             db.session.rollback()
             return {}
         result: dict[tuple[str, int], dict[str, Any]] = {}
+        fa_ids: set[int] = set()
+        inv_ids: set[int] = set()
+        dep_svc = None
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+        except Exception:
+            db.session.rollback()
+            dep_svc = None
         for row in rows:
             ob_date = row["OpeningBalanceDate"]
             if hasattr(ob_date, "date"):
@@ -707,6 +935,34 @@ class LedgerReportService:
             if ob_date is None or ob_date <= date_from:
                 opening = self._money(row["OpeningBalance"])
             closing = self._money(opening - self._money(row["billed"]))
+            gid = row.get("ChartGroupID")
+            if dep_svc and gid and closing > 0:
+                try:
+                    gid_int = int(gid)
+                except (TypeError, ValueError):
+                    gid_int = 0
+                if gid_int in fa_ids:
+                    rate = self._money(row.get("DepreciationRate"))
+                    if rate > 0:
+                        calc = dep_svc.calculate(
+                            cost=closing,
+                            rate=rate,
+                            purchase_date=row.get("PurchaseDate"),
+                            opening_date=ob_date,
+                            as_of=date_to,
+                        )
+                        closing = self._money(calc["wdv"])
+                elif gid_int in inv_ids:
+                    rate = self._money(row.get("AppreciationRate"))
+                    if rate > 0:
+                        calc = dep_svc.calculate_appreciation(
+                            cost=closing,
+                            rate=rate,
+                            purchase_date=row.get("PurchaseDate"),
+                            opening_date=ob_date,
+                            as_of=date_to,
+                        )
+                        closing = self._money(calc["current_value"])
             result[("item", int(row["ItemID"]))] = {
                 "amount": closing,
                 "dr_cr": self._dr_cr_side(closing),
@@ -732,12 +988,13 @@ class LedgerReportService:
                 title="Bank Account Ledger",
             )
         if kind_key == "customer":
-            return self._simplify_export_ledger(
+            data = self._simplify_export_ledger(
                 LedgerExportService().customer_ledger_preview_data(
                     entity_id, date_from=date_from, date_to=date_to
                 ),
                 title="Customer Ledger",
             )
+            return self._append_customer_asset_class_line(data, entity_id, date_to)
         if kind_key == "work":
             return self._work_ledger_data(entity_id, date_from=date_from, date_to=date_to)
         return self._item_ledger_data(entity_id, date_from=date_from, date_to=date_to)
@@ -1037,6 +1294,12 @@ class LedgerReportService:
         date_from: date | None,
         date_to: date | None,
     ) -> dict[str, Any]:
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
         item = db.session.execute(
             text(
                 """
@@ -1044,6 +1307,10 @@ class LedgerReportService:
                     ItemID, ItemCode, ItemName, HsnSac, Unit,
                     ISNULL(OpeningBalance, 0) AS OpeningBalance,
                     OpeningBalanceDate,
+                    PurchaseDate,
+                    DepreciationRate,
+                    AppreciationRate,
+                    ChartGroupID,
                     ISNULL(IsActive, 1) AS IsActive
                 FROM dbo.ItemMaster
                 WHERE ItemID = :item_id
@@ -1157,6 +1424,63 @@ class LedgerReportService:
                     },
                 )
             )
+
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            if dep_svc.is_fixed_asset_group(item.get("ChartGroupID")):
+                rate = self._money(item.get("DepreciationRate"))
+                if rate > 0 and running > 0:
+                    calc = dep_svc.calculate(
+                        cost=running,
+                        rate=rate,
+                        purchase_date=item.get("PurchaseDate"),
+                        opening_date=ob_date,
+                        as_of=date_to,
+                    )
+                    cy = self._money(calc["current_year"])
+                    if cy > 0:
+                        running = self._money(running - cy)
+                        lines.append(
+                            self._decorate_line(
+                                {
+                                    "date": date_to.strftime("%d/%m/%Y"),
+                                    "description": f"Depreciation @ {rate}% WDV",
+                                    "debit": Decimal("0.00"),
+                                    "credit": cy,
+                                    "balance": running,
+                                    "kind": "txn",
+                                }
+                            )
+                        )
+            elif dep_svc.is_investment_group(item.get("ChartGroupID")):
+                rate = self._money(item.get("AppreciationRate"))
+                if rate > 0 and running > 0:
+                    calc = dep_svc.calculate_appreciation(
+                        cost=running,
+                        rate=rate,
+                        purchase_date=item.get("PurchaseDate"),
+                        opening_date=ob_date,
+                        as_of=date_to,
+                    )
+                    cy = self._money(calc["current_year"])
+                    if cy > 0:
+                        running = self._money(running + cy)
+                        lines.append(
+                            self._decorate_line(
+                                {
+                                    "date": date_to.strftime("%d/%m/%Y"),
+                                    "description": f"Appreciation @ {rate}%",
+                                    "debit": cy,
+                                    "credit": Decimal("0.00"),
+                                    "balance": running,
+                                    "kind": "txn",
+                                }
+                            )
+                        )
+        except Exception:
+            db.session.rollback()
 
         period = self._period_fields(date_from, date_to)
         return {

@@ -56,6 +56,10 @@ def index():
         "aadhaarEkycUnlock": url_for("masters_customer.aadhaar_ekyc_unlock"),
         "resetPortalPassword": url_for("masters_customer.reset_portal_password", customer_id=0),
         "dscDoc": url_for("masters_customer.dsc_document", customer_id=0, kind="KIND"),
+        "depRateSync": url_for("masters_customer.depreciation_rate_sync"),
+        "dynConfig": url_for("dynamic_master_fields.config"),
+        "indiaLocations": url_for("dynamic_master_fields.india_locations"),
+        "landValueSync": url_for("dynamic_master_fields.land_value_sync"),
     }
     is_admin = has_admin_role(session.get("role"))
     today = date.today()
@@ -63,6 +67,14 @@ def index():
         chart_of_groups = ChartGroupService().list_active_for_dropdown()
     except Exception:
         chart_of_groups = []
+    from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+    dyn = DynamicMasterFieldService()
+    try:
+        dyn.annotate_groups(chart_of_groups)
+        dyn_master_fields = dyn.client_config()
+    except Exception:
+        dyn_master_fields = {"fields": {}, "profiles": {}, "group_profiles": {}, "always_required": []}
     default_chart_group_id = None
     for g in chart_of_groups:
         if (g.get("group_name") or "").strip().casefold() == "individual client":
@@ -89,6 +101,7 @@ def index():
         customer_groups=ui["groups"],
         customer_group_filter=customer_group_filter,
         chart_of_groups=chart_of_groups,
+        dyn_master_fields=dyn_master_fields,
         default_chart_group_id=default_chart_group_id,
         income_expense_works=income_expense_works,
         customer_types=CUSTOMER_TYPES,
@@ -128,6 +141,34 @@ def get_record(customer_id: int):
         return jsonify({"ok": True, "record": record})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
+
+
+@bp.route("/api/depreciation-rate-sync", methods=["GET"], strict_slashes=False)
+@login_required
+def depreciation_rate_sync():
+    from app.services.depreciation_service import DepreciationService
+
+    purchase_raw = (
+        request.args.get("purchase_date")
+        or request.args.get("date")
+        or ""
+    ).strip()
+    purchase = None
+    if purchase_raw:
+        try:
+            purchase = date.fromisoformat(purchase_raw[:10])
+        except ValueError:
+            return jsonify({"ok": False, "error": "Purchase date is invalid."}), 400
+    try:
+        result = DepreciationService().lookup_public_rate(
+            purchase_date=purchase,
+            item_code=(request.args.get("item_code") or "").strip(),
+            item_name=(request.args.get("item_name") or "").strip(),
+            hsn_sac=(request.args.get("hsn") or request.args.get("hsn_sac") or "").strip(),
+        )
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @bp.route("/api/pincode-lookup", strict_slashes=False)

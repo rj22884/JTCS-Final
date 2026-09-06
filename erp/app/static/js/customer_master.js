@@ -453,6 +453,7 @@
         "<td>" + row.customer_id + "</td>" +
         "<td><strong>" + escapeHtml(row.customer_name) + "</strong></td>" +
         "<td>" + escapeHtml(row.customer_group || "—") + "</td>" +
+        "<td>" + escapeHtml(row.chart_group_names || "—") + "</td>" +
         "<td>" + escapeHtml(row.mobile_number || "—") + "</td>" +
         "<td>" + escapeHtml(row.pan_number || "—") + "</td>" +
         "<td>" + escapeHtml(row.email_id || "—") + "</td>" +
@@ -488,8 +489,102 @@
       });
   }
 
+  function chartGroupFieldFilter() {
+    const config = window.JTCS_DYN_MASTER_FIELDS || {};
+    const id = String((els.chartGroups && els.chartGroups.value) || "").trim();
+    const mapped = ((config.group_fields) || {})[id];
+    const keys = { customer_name: true, customer_group: true };
+    if (mapped && mapped.configured) {
+      (mapped.fields || []).forEach(function (field) {
+        if (field && field.key) keys[field.key] = true;
+      });
+      return { configured: true, keys: keys };
+    }
+    return { configured: false, keys: keys };
+  }
+
+  function tabHasVisibleField(tabKey, allowedKeys) {
+    if (tabKey === "basic") return true;
+    const panel = els.formPanels?.querySelector('.cm-tab-panel[data-tab="' + tabKey + '"]');
+    if (!panel) return false;
+    let found = false;
+    panel.querySelectorAll("[data-cm-field]").forEach(function (field) {
+      const key = field.dataset.cmField;
+      if (key && allowedKeys[key]) found = true;
+    });
+    return found;
+  }
+
+  function applyDynConfig(data) {
+    if (!data) return;
+    const target = window.JTCS_DYN_MASTER_FIELDS || (window.JTCS_DYN_MASTER_FIELDS = {});
+    ["fields", "profiles", "group_profiles", "group_fields", "always_required", "skip_keys"].forEach(
+      function (key) {
+        if (data[key] !== undefined) target[key] = data[key];
+      }
+    );
+  }
+
+  function refreshDynConfig() {
+    const url = window.CM_API && window.CM_API.dynConfig;
+    if (!url) return Promise.resolve();
+    return fetch(url, {
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    })
+      .then(function (res) {
+        return res.json();
+      })
+      .then(function (data) {
+        if (data && data.ok !== false) applyDynConfig(data);
+      })
+      .catch(function () {});
+  }
+
+  function syncChartGroupFieldVisibility() {
+    const filter = chartGroupFieldFilter();
+    els.form?.querySelectorAll("[data-cm-field]").forEach(function (field) {
+      const key = field.dataset.cmField;
+      if (!key || key === "customer_group" || key === "photo_path" || key === "aadhaar_reference_id") {
+        return;
+      }
+      const wrap = field.closest(".cm-field-wrap") || field.closest("[class*='col-']");
+      if (!wrap || wrap.id === "cmChartGroupBar") return;
+      const show = !filter.configured || !!filter.keys[key] || key === "customer_name";
+      wrap.classList.toggle("d-none", !show);
+      wrap.classList.toggle("cm-chart-hidden", !show);
+    });
+    const idWrap = document.getElementById("cm_display_customer_id")?.closest("[class*='col-']");
+    if (idWrap) idWrap.classList.remove("d-none");
+    const syncBar = document.getElementById("cmSyncBar");
+    if (syncBar) {
+      const showIt = !filter.configured || filter.keys.pan_number || filter.keys.income_tax_password;
+      const showAadhaar = !filter.configured || filter.keys.aadhaar_number;
+      const showGst = !filter.configured || filter.keys.gst_number;
+      const itBtn = document.getElementById("cmSyncIncomeTaxBtn");
+      const aadhaarBtn = document.getElementById("cmSyncAadhaarBtn");
+      const gstBtn = document.getElementById("cmSyncGstBtn");
+      if (itBtn) itBtn.classList.toggle("d-none", !showIt);
+      if (aadhaarBtn) aadhaarBtn.classList.toggle("d-none", !showAadhaar);
+      if (gstBtn) gstBtn.classList.toggle("d-none", !showGst);
+      syncBar.classList.toggle("d-none", !(showIt || showAadhaar || showGst));
+    }
+  }
+
+  function rebuildCustomerFormForChartGroup() {
+    const groupCode = els.customerGroup?.value || "";
+    if (els.tabNav) buildTabs(groupCode);
+    else syncChartGroupFieldVisibility();
+    if (cmDynFields) cmDynFields.sync();
+  }
+
   function buildTabs(groupCode) {
-    const tabs = groupTabs[groupCode] || [];
+    const allTabs = groupTabs[groupCode] || [];
+    const filter = chartGroupFieldFilter();
+    const tabs = filter.configured
+      ? allTabs.filter(function (tab) {
+          return tabHasVisibleField(tab, filter.keys);
+        })
+      : allTabs;
     if (!els.tabNav) return;
     els.tabNav.innerHTML = tabs.map(function (tab, idx) {
       return (
@@ -501,6 +596,8 @@
     }).join("");
     activeTab = tabs[0] || "basic";
     showTabPanel(activeTab, tabs);
+    syncChartGroupFieldVisibility();
+    if (cmDynFields) cmDynFields.sync();
   }
 
   function showTabPanel(tabKey, visibleTabs) {
@@ -1012,6 +1109,47 @@
     return v ? [v] : [];
   }
 
+  const cmDynFields = window.JTCSDynamicMasterFields
+    ? window.JTCSDynamicMasterFields.bind({
+        select: els.chartGroups,
+        mount: document.getElementById("cmDynFields"),
+        config: window.JTCS_DYN_MASTER_FIELDS,
+        includeCustomerFields: true,
+        builtinPrefix: "cm_",
+        getEntityName: function () {
+          return (document.getElementById("cm_customer_name")?.value || "").trim();
+        },
+        entityNameEl: document.getElementById("cm_customer_name"),
+        openingDateEl: document.getElementById("cm_opening_balance_date"),
+        openingBalanceEl: document.getElementById("cm_opening_balance"),
+        depRateSyncUrl: window.CM_API && window.CM_API.depRateSync,
+        pincodeLookupUrl: window.CM_API && window.CM_API.pincodeLookup,
+        indiaLocationUrl: window.CM_API && window.CM_API.indiaLocations,
+        landValueSyncUrl: window.CM_API && window.CM_API.landValueSync,
+        idPrefix: "cmDyn",
+        isBuiltinShown: function (key) {
+          const filter = chartGroupFieldFilter();
+          if (filter.configured && !filter.keys[key]) return false;
+          const el =
+            document.getElementById("cm_" + key) ||
+            document.querySelector('[data-cm-field="' + key + '"]');
+          if (!el) return false;
+          const wrap = el.closest(".cm-field-wrap") || el.closest("[class*='col-']");
+          if (wrap && wrap.classList.contains("cm-chart-hidden")) return false;
+          const panel = el.closest(".cm-tab-panel");
+          if (!panel) return true;
+          const allowed = groupTabs[els.customerGroup?.value] || [];
+          return allowed.indexOf(panel.dataset.tab) >= 0;
+        },
+        onError: function (err) {
+          if (els.formError) {
+            els.formError.textContent = err.message || String(err);
+            els.formError.classList.remove("d-none");
+          }
+        },
+      })
+    : null;
+
   function chartNatureForId(chartId) {
     if (chartId == null || chartId === "") return "";
     const fromMap = chartNatures[String(chartId)];
@@ -1228,6 +1366,7 @@
       applyDefaultDrCrFromChartGroups();
     }
     syncIeWorkBar();
+    if (cmDynFields) cmDynFields.sync();
   }
 
   function syncIeWorkBar() {
@@ -1270,6 +1409,7 @@
     setGroupComboWarning("");
     applyDefaultChartGroupsIfEmpty();
     syncChartGroupBar();
+    if (cmDynFields) cmDynFields.apply({});
     const statusField = document.getElementById("cm_customer_status");
     if (statusField) statusField.value = "Active";
     const countryField = document.getElementById("cm_country");
@@ -1339,6 +1479,7 @@
     } else {
       applyDefaultDrCrFromChartGroups();
     }
+    if (cmDynFields) cmDynFields.apply(record);
     if (record.pan_number && record.income_tax_password) {
       itCredentials = {
         userId: String(record.pan_number || "").toUpperCase(),
@@ -1364,6 +1505,10 @@
       setCustomerPhotoPreview("");
     }
     refreshDscDocs(record);
+    refreshDynConfig().then(function () {
+      rebuildCustomerFormForChartGroup();
+      if (cmDynFields) cmDynFields.apply(record);
+    });
   }
 
   function openNew() {
@@ -1373,6 +1518,9 @@
     syncMandatoryMarkers();
     if (cmPincodeBinder) cmPincodeBinder.resetCache();
     modal?.show();
+    refreshDynConfig().then(function () {
+      rebuildCustomerFormForChartGroup();
+    });
   }
 
   function openEdit(record) {
@@ -1413,6 +1561,17 @@
     const workIds = selectedIeWorkIds();
     payload.income_expense_work_ids = workIds;
     payload.work_ids = workIds;
+    const extras = cmDynFields
+      ? cmDynFields.collect()
+      : { purchase_date: "", depreciation_rate: "0", appreciation_rate: "0", values: {}, dyn_values: {} };
+    payload.purchase_date = extras.purchase_date;
+    payload.depreciation_rate = extras.depreciation_rate;
+    payload.appreciation_rate = extras.appreciation_rate;
+    Object.keys(extras.values || {}).forEach(function (key) {
+      if (key === "customer_name" || key === "customer_group") return;
+      payload[key] = extras.values[key];
+    });
+    payload.dyn_values = extras.dyn_values || {};
     return payload;
   }
 
@@ -1435,20 +1594,37 @@
       }
     });
     // Format checks only when optional fields are filled.
+    const visibleField = chartGroupFieldFilter();
+    function fieldOnForm(key) {
+      return !visibleField.configured || !!visibleField.keys[key];
+    }
     const pan = (payload.pan_number || "").trim().toUpperCase();
-    if (pan && pan.length !== 10) {
+    if (fieldOnForm("pan_number") && pan && pan.length !== 10) {
       errors.push("Valid 10-character PAN is required.");
     }
     const mobile = (payload.mobile_number || "").replace(/\D/g, "");
-    if (mobile && mobile.length !== 10) {
+    if (fieldOnForm("mobile_number") && mobile && mobile.length !== 10) {
       errors.push("Valid 10-digit mobile number is required.");
     }
     const aadhaar = (payload.aadhaar_number || "").replace(/\D/g, "");
-    if (aadhaar && aadhaar.length !== 12) {
+    if (fieldOnForm("aadhaar_number") && aadhaar && aadhaar.length !== 12) {
       errors.push("Valid 12-digit Aadhaar is required.");
     }
+    if (cmDynFields) {
+      (cmDynFields.validate() || []).forEach(function (msg) {
+        errors.push(msg);
+      });
+    }
+    const depRate = parseFloat(payload.depreciation_rate || "0") || 0;
+    const appRate = parseFloat(payload.appreciation_rate || "0") || 0;
+    if (depRate < 0 || depRate > 100) {
+      errors.push("Depreciation Rate must be between 0 and 100.");
+    }
+    if (appRate < 0 || appRate > 100) {
+      errors.push("Appreciation Rate must be between 0 and 100.");
+    }
     const email = (payload.email_id || "").trim();
-    if (email) {
+    if (fieldOnForm("email_id") && email) {
       const at = email.indexOf("@");
       const domain = at >= 0 ? email.slice(at + 1) : "";
       if (at < 1 || !domain || domain.indexOf(".") < 1) {
@@ -1680,18 +1856,17 @@
     }
     syncMandatoryMarkers();
     syncIeWorkBar();
+    if (cmDynFields) cmDynFields.sync();
   });
   els.chartGroups?.addEventListener("change", function () {
     els.chartGroups.classList.remove("cm-field-error");
     const previousGroup = (els.customerGroup?.value || "").trim();
     rebuildCustomerGroupOptions(previousGroup);
-    if (previousGroup && els.customerGroup && els.customerGroup.value !== previousGroup) {
-      buildTabs(els.customerGroup.value);
-    } else if (els.customerGroup) {
-      buildTabs(els.customerGroup.value);
-    }
     applyDefaultDrCrFromChartGroups();
     syncIeWorkBar();
+    refreshDynConfig().then(function () {
+      rebuildCustomerFormForChartGroup();
+    });
   });
   els.ieWorks?.addEventListener("change", function () {
     els.ieWorks.classList.remove("cm-field-error");
