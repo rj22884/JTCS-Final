@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260906grid2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260906sum1">
 {% endblock %}
 
 {% block content %}
@@ -52,38 +52,62 @@
     </button>
   </div>
 
-  <div class="table-responsive">
-    <table class="table table-sm table-hover align-middle mb-0 ledger-report-grid" id="ledgerReportGrid">
-      <thead>
-        <tr>
-          <th class="lr-col-fit">Type</th>
-          <th class="lr-col-ledger lr-sortable" data-sort-key="label" data-sort-type="text"
-              role="button" tabindex="0">
-            Ledger <i class="bi bi-arrow-down-up lr-sort-icon"></i>
-          </th>
-          <th class="lr-col-fit lr-sortable" data-sort-key="subtitle" data-sort-type="text"
-              role="button" tabindex="0">
-            Details <i class="bi bi-arrow-down-up lr-sort-icon"></i>
-          </th>
-          <th class="lr-col-fit text-end lr-sortable" data-sort-key="txn_count" data-sort-type="num"
-              role="button" tabindex="0">
-            Txns <i class="bi bi-arrow-down-up lr-sort-icon"></i>
-          </th>
-          <th class="lr-col-fit text-end lr-sortable" data-sort-key="closing" data-sort-type="num"
-              role="button" tabindex="0">
-            Closing Balance <i class="bi bi-arrow-down-up lr-sort-icon"></i>
-          </th>
-          <th class="lr-col-fit text-end">Action</th>
-        </tr>
-      </thead>
-      <tbody id="ledgerGridBody">
-        <tr>
-          <td colspan="6" class="text-center text-muted py-4">
-            Loading ledgers…
-          </td>
-        </tr>
-      </tbody>
-    </table>
+  <div class="ledger-report-main">
+    <div class="table-responsive ledger-report-grid-wrap">
+      <table class="table table-sm table-hover align-middle mb-0 ledger-report-grid" id="ledgerReportGrid">
+        <thead>
+          <tr>
+            <th class="lr-col-fit">Type</th>
+            <th class="lr-col-ledger lr-sortable" data-sort-key="label" data-sort-type="text"
+                role="button" tabindex="0">
+              Ledger <i class="bi bi-arrow-down-up lr-sort-icon"></i>
+            </th>
+            <th class="lr-col-fit lr-sortable" data-sort-key="subtitle" data-sort-type="text"
+                role="button" tabindex="0">
+              Details <i class="bi bi-arrow-down-up lr-sort-icon"></i>
+            </th>
+            <th class="lr-col-fit text-end lr-sortable" data-sort-key="txn_count" data-sort-type="num"
+                role="button" tabindex="0">
+              Txns <i class="bi bi-arrow-down-up lr-sort-icon"></i>
+            </th>
+            <th class="lr-col-fit text-end lr-sortable" data-sort-key="closing" data-sort-type="num"
+                role="button" tabindex="0">
+              Closing Balance <i class="bi bi-arrow-down-up lr-sort-icon"></i>
+            </th>
+            <th class="lr-col-fit text-end">Action</th>
+          </tr>
+        </thead>
+        <tbody id="ledgerGridBody">
+          <tr>
+            <td colspan="6" class="text-center text-muted py-4">
+              Loading ledgers…
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <aside class="ledger-report-summaries" aria-label="Financial summaries">
+      <section class="lr-summary-box lr-summary-bs" id="ledgerSummaryBs">
+        <header class="lr-summary-head">
+          <h4>Balance Sheet</h4>
+          <a class="lr-summary-link" id="ledgerSummaryBsLink" href="{{ url_for('financial_statements.index', report_key='balance-sheet') }}">Open</a>
+        </header>
+        <div class="lr-summary-period" id="ledgerSummaryBsPeriod"></div>
+        <div class="lr-summary-body" id="ledgerSummaryBsBody">
+          <div class="text-muted small px-3 py-3">Loading…</div>
+        </div>
+      </section>
+      <section class="lr-summary-box lr-summary-pl" id="ledgerSummaryPl">
+        <header class="lr-summary-head">
+          <h4>Profit and Loss Account</h4>
+          <a class="lr-summary-link" id="ledgerSummaryPlLink" href="{{ url_for('financial_statements.index', report_key='profit-loss') }}">Open</a>
+        </header>
+        <div class="lr-summary-period" id="ledgerSummaryPlPeriod"></div>
+        <div class="lr-summary-body" id="ledgerSummaryPlBody">
+          <div class="text-muted small px-3 py-3">Loading…</div>
+        </div>
+      </section>
+    </aside>
   </div>
 </div>
 
@@ -143,6 +167,7 @@
 <script>
   window.LEDGER_REPORT = {
     searchUrl: {{ url_for('ledger_report.search')|tojson }},
+    summaryUrl: {{ url_for('ledger_report.summaries')|tojson }},
     previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
     exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }},
     fyStart: {{ fy_start | tojson }},
@@ -164,5 +189,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260820group1"></script>
-<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260906grid4"></script>
+<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260906sum1"></script>
 {% endblock %}

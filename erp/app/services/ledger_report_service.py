@@ -310,6 +310,14 @@ class LedgerReportService:
             clean.append(n)
         return ", ".join(str(n) for n in clean)
 
+    @staticmethod
+    def _dr_cr_side(amount: Decimal, *, credit_normal: bool = False) -> str:
+        if abs(amount) < Decimal("0.01"):
+            return ""
+        if credit_normal:
+            return "Cr" if amount > 0 else "Dr"
+        return "Dr" if amount > 0 else "Cr"
+
     def _attach_search_closings(
         self, rows: list[dict[str, Any]], date_from: date, date_to: date
     ) -> None:
@@ -326,7 +334,7 @@ class LedgerReportService:
             except (TypeError, ValueError):
                 continue
 
-        closings: dict[tuple[str, int], Decimal] = {}
+        closings: dict[tuple[str, int], dict[str, Any]] = {}
         if by_kind["bank"]:
             closings.update(self._search_bank_closings(by_kind["bank"], date_from, date_to))
         if by_kind["customer"]:
@@ -342,12 +350,16 @@ class LedgerReportService:
                 key = (kind, int(row.get("id")))
             except (TypeError, ValueError):
                 continue
-            if key in closings:
-                row["closing"] = float(self._money(closings[key]))
+            info = closings.get(key)
+            if not info:
+                continue
+            amount = self._money(info.get("amount"))
+            row["closing"] = float(amount)
+            row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
 
     def _search_bank_closings(
         self, ids: list[int], date_from: date, date_to: date
-    ) -> dict[tuple[str, int], Decimal]:
+    ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
             return {}
@@ -423,7 +435,7 @@ class LedgerReportService:
         except Exception:
             db.session.rollback()
             return {}
-        result: dict[tuple[str, int], Decimal] = {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
             credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
             closing = apply_account_running(
@@ -432,12 +444,15 @@ class LedgerReportService:
                 self._money(row["credit_sum"]),
                 credit_normal=credit_normal,
             )
-            result[("bank", int(row["account_id"]))] = closing
+            result[("bank", int(row["account_id"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing, credit_normal=credit_normal),
+            }
         return result
 
     def _search_customer_closings(
         self, ids: list[int], date_from: date, date_to: date
-    ) -> dict[tuple[str, int], Decimal]:
+    ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
             return {}
@@ -550,7 +565,7 @@ class LedgerReportService:
         except Exception:
             db.session.rollback()
 
-        result: dict[tuple[str, int], Decimal] = {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
         for raw_id in ids:
             try:
                 cid = int(raw_id)
@@ -562,12 +577,15 @@ class LedgerReportService:
                 + followup.get(cid, Decimal("0.00"))
                 - received.get(cid, Decimal("0.00"))
             )
-            result[("customer", cid)] = closing
+            result[("customer", cid)] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
         return result
 
     def _search_work_closings(
         self, ids: list[int], date_from: date, date_to: date
-    ) -> dict[tuple[str, int], Decimal]:
+    ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
             return {}
@@ -631,7 +649,7 @@ class LedgerReportService:
         except Exception:
             db.session.rollback()
             return {}
-        result: dict[tuple[str, int], Decimal] = {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
             ledger_kind = (row["LedgerKind"] or "").strip().upper()
             if ledger_kind.startswith("E"):
@@ -644,12 +662,15 @@ class LedgerReportService:
                 closing = self._money(
                     prior + self._money(row["period_paid"]) - self._money(row["period_income"])
                 )
-            result[("work", int(row["WorkID"]))] = closing
+            result[("work", int(row["WorkID"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
         return result
 
     def _search_item_closings(
         self, ids: list[int], date_from: date, date_to: date
-    ) -> dict[tuple[str, int], Decimal]:
+    ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
             return {}
@@ -677,7 +698,7 @@ class LedgerReportService:
         except Exception:
             db.session.rollback()
             return {}
-        result: dict[tuple[str, int], Decimal] = {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
             ob_date = row["OpeningBalanceDate"]
             if hasattr(ob_date, "date"):
@@ -686,7 +707,10 @@ class LedgerReportService:
             if ob_date is None or ob_date <= date_from:
                 opening = self._money(row["OpeningBalance"])
             closing = self._money(opening - self._money(row["billed"]))
-            result[("item", int(row["ItemID"]))] = closing
+            result[("item", int(row["ItemID"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
         return result
 
     def preview_ledger(

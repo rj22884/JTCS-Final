@@ -183,6 +183,97 @@ class FinancialStatementsService:
             "net_profit": net,
         }
 
+    def compact_summaries(self, date_from: date, date_to: date) -> dict[str, Any]:
+        """Top-level Balance Sheet + P&L totals from one ledger pass."""
+        money = self.engine.money
+        ledgers = self.engine.compute_ledger_balances(date_from=date_from, date_to=date_to)
+        visible = [
+            led
+            for led in ledgers
+            if abs(money(led.get("closing"))) >= Decimal("0.01")
+        ]
+        liabilities = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(visible, natures={"Liability"}),
+            side="liability",
+        )
+        assets = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(visible, natures={"Asset"}),
+            side="asset",
+        )
+        pl_net = self._pl_net(ledgers)
+        if pl_net != ZERO:
+            liabilities.append(
+                {
+                    "GroupID": 0,
+                    "GroupName": "Profit & Loss A/c",
+                    "GroupNature": "Liability",
+                    "children": [],
+                    "ledgers": [],
+                    "closing": pl_net,
+                    "display_closing": abs(pl_net),
+                    "has_children": False,
+                    "is_pl_transfer": True,
+                }
+            )
+        liab_total = sum((money(n["closing"]) for n in liabilities), ZERO)
+        asset_total = sum((money(n["closing"]) for n in assets), ZERO)
+
+        incomes = [led for led in ledgers if led.get("nature") == "Income"]
+        expenses = [led for led in ledgers if led.get("nature") == "Expense"]
+        groups_by_id = {
+            int(g["GroupID"]): g for g in self.engine.load_groups(active_only=False)
+        }
+
+        def is_direct(led: dict) -> bool:
+            return self.engine.is_trading_group(led.get("group_id"), groups_by_id)
+
+        def section_total(items: list[dict], nature: str) -> Decimal:
+            nodes = self.engine.rollup_groups(items, natures={nature})
+            return sum((money(n["closing"]) for n in nodes), ZERO)
+
+        di = section_total([led for led in incomes if is_direct(led)], "Income")
+        de = section_total([led for led in expenses if is_direct(led)], "Expense")
+        ii = section_total([led for led in incomes if not is_direct(led)], "Income")
+        ie = section_total([led for led in expenses if not is_direct(led)], "Expense")
+        gross = di - de
+        net = gross + ii - ie
+
+        def bs_lines(nodes: list[dict]) -> list[dict[str, Any]]:
+            lines = []
+            for node in nodes:
+                display = node.get("display_closing")
+                if display is None:
+                    display = node.get("closing")
+                lines.append(
+                    {
+                        "name": node.get("GroupName") or "—",
+                        "amount": str(money(display)),
+                        "is_pl": bool(node.get("is_pl_transfer")),
+                    }
+                )
+            return lines
+
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "balance_sheet": {
+                "liabilities": bs_lines(liabilities),
+                "assets": bs_lines(assets),
+                "liabilities_total": str(money(liab_total)),
+                "assets_total": str(money(asset_total)),
+                "difference": str(money(asset_total - liab_total)),
+                "balanced": abs(asset_total - liab_total) < Decimal("0.01"),
+            },
+            "profit_loss": {
+                "direct_income": str(money(di)),
+                "direct_expenses": str(money(de)),
+                "gross_profit": str(money(gross)),
+                "indirect_income": str(money(ii)),
+                "indirect_expenses": str(money(ie)),
+                "net_profit": str(money(net)),
+            },
+        }
+
     def trial_balance(
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
