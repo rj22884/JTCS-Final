@@ -181,8 +181,15 @@ def index():
 def search():
     kind = (request.args.get("kind") or "all").strip().lower()
     search_q = (request.args.get("search") or "").strip() or None
+    date_from = _parse_date_arg("date_from")
+    date_to = _parse_date_arg("date_to")
     try:
-        rows = LedgerReportService().search_ledgers(kind=kind, search=search_q)
+        rows = LedgerReportService().search_ledgers(
+            kind=kind,
+            search=search_q,
+            date_from=date_from,
+            date_to=date_to,
+        )
         return jsonify({"ok": True, "rows": rows})
     except Exception as exc:
         db.session.rollback()

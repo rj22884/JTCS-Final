@@ -31,6 +31,11 @@
   let currentKind = "";
   let currentId = "";
   let isMaximized = false;
+  let currentRows = [];
+  let lastKind = "all";
+  let lastSearch = "";
+  let sortState = { key: "closing", dir: "desc" };
+  const GRID_COLSPAN = 6;
 
   const KIND_LABELS = {
     bank: "Bank",
@@ -103,50 +108,118 @@
   }
 
   function emptyMessage(kind, search) {
-    if (kind === "customer" && search.length < 2) {
-      return "Type at least 2 characters to search customers.";
-    }
-    if (!search && kind === "all") {
-      return "Select a ledger type or type a search term.";
-    }
     return "No ledgers found.";
+  }
+
+  function emptyRow(message, danger) {
+    return (
+      '<tr><td colspan="' +
+      GRID_COLSPAN +
+      '" class="text-center ' +
+      (danger ? "text-danger" : "text-muted") +
+      ' py-4">' +
+      message +
+      "</td></tr>"
+    );
+  }
+
+  function formatMoney(value) {
+    const num = parseFloat(value);
+    if (Number.isNaN(num)) return "₹ 0.00";
+    const abs = Math.abs(num).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (num < 0 ? "-₹ " : "₹ ") + abs;
+  }
+
+  function formatClosing(value) {
+    if (value == null || value === "") {
+      return '<span class="text-muted">—</span>';
+    }
+    const num = parseFloat(value);
+    if (Number.isNaN(num) || Math.abs(num) < 0.005) {
+      return '<span class="lr-no-overdue">No overdue</span>';
+    }
+    const cls = num < 0 ? "text-danger" : "";
+    return '<span class="' + cls + '">' + escapeHtml(formatMoney(num)) + "</span>";
+  }
+
+  function sortRows(rows) {
+    if (!sortState.key) return rows.slice();
+    const key = sortState.key;
+    const dir = sortState.dir === "asc" ? 1 : -1;
+    const numeric = key === "txn_count" || key === "closing";
+    return rows.slice().sort(function (a, b) {
+      let av = a[key];
+      let bv = b[key];
+      if (numeric) {
+        av = parseFloat(av);
+        bv = parseFloat(bv);
+        if (Number.isNaN(av)) av = 0;
+        if (Number.isNaN(bv)) bv = 0;
+        if (av === bv) return String(a.label || "").localeCompare(String(b.label || ""));
+        return (av - bv) * dir;
+      }
+      av = String(av == null ? "" : av).toLowerCase();
+      bv = String(bv == null ? "" : bv).toLowerCase();
+      if (av === bv) return String(a.label || "").localeCompare(String(b.label || ""));
+      return av < bv ? -1 * dir : 1 * dir;
+    });
+  }
+
+  function syncSortHeaders() {
+    document.querySelectorAll("#ledgerReportGrid th.lr-sortable").forEach(function (th) {
+      const key = th.getAttribute("data-sort-key") || "";
+      const active = key === sortState.key;
+      th.classList.toggle("is-sorted", active);
+      const icon = th.querySelector(".lr-sort-icon");
+      if (!icon) return;
+      icon.className =
+        "bi lr-sort-icon " +
+        (active ? (sortState.dir === "asc" ? "bi-sort-up" : "bi-sort-down") : "bi-arrow-down-up");
+    });
   }
 
   function renderRows(rows, kind, search) {
     if (!els.body) return;
-    if (!rows.length) {
-      els.body.innerHTML =
-        '<tr><td colspan="5" class="text-center text-muted py-4">' +
-        escapeHtml(emptyMessage(kind, search)) +
-        "</td></tr>";
+    lastKind = kind;
+    lastSearch = search;
+    currentRows = rows || [];
+    if (!currentRows.length) {
+      els.body.innerHTML = emptyRow(escapeHtml(emptyMessage(kind, search)));
       if (els.count) els.count.textContent = "0 ledgers";
+      syncSortHeaders();
       return;
     }
     if (els.count) {
-      els.count.textContent = rows.length + " ledger" + (rows.length === 1 ? "" : "s");
+      els.count.textContent = currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
     }
-    els.body.innerHTML = rows
+    els.body.innerHTML = sortRows(currentRows)
       .map(function (row) {
         const typeLabel = KIND_LABELS[row.kind] || row.kind || "—";
         return (
           "<tr>" +
-          "<td><span class=\"badge text-bg-light border ledger-kind-badge\">" +
+          '<td class="lr-col-fit"><span class="badge text-bg-light border ledger-kind-badge">' +
           escapeHtml(typeLabel) +
           "</span></td>" +
-          "<td><strong>" +
+          '<td class="lr-col-ledger"><strong>' +
           escapeHtml(row.label || "—") +
           "</strong>" +
           (row.active === false
             ? ' <span class="badge text-bg-secondary ms-1">Inactive</span>'
             : "") +
           "</td>" +
-          "<td>" +
+          '<td class="lr-col-fit">' +
           escapeHtml(row.subtitle || "—") +
           "</td>" +
-          '<td class="text-end">' +
+          '<td class="lr-col-fit text-end">' +
           escapeHtml(row.txn_count == null ? "—" : row.txn_count) +
           "</td>" +
-          '<td class="text-end">' +
+          '<td class="lr-col-fit text-end">' +
+          formatClosing(row.closing) +
+          "</td>" +
+          '<td class="lr-col-fit text-end">' +
           '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
           escapeHtml(row.kind) +
           '" data-id="' +
@@ -157,29 +230,20 @@
         );
       })
       .join("");
+    syncSortHeaders();
   }
 
   function loadLedgers() {
     const kind = (els.kind?.value || "all").trim().toLowerCase();
     const search = (els.search?.value || "").trim();
 
-    if (kind === "customer" && search.length < 2) {
-      renderRows([], kind, search);
-      return Promise.resolve();
-    }
-    if (kind === "all" && search.length < 2) {
-      if (els.body) {
-        els.body.innerHTML =
-          '<tr><td colspan="5" class="text-center text-muted py-4">' +
-          "Select a ledger type, or type at least 2 characters to search all.</td></tr>";
-      }
-      if (els.count) els.count.textContent = "Search to list ledgers";
-      return Promise.resolve();
-    }
-
     const params = new URLSearchParams();
     params.set("kind", kind);
     if (search) params.set("search", search);
+    const from = (els.dateFrom?.value || "").trim();
+    const to = (els.dateTo?.value || "").trim();
+    if (from) params.set("date_from", from);
+    if (to) params.set("date_to", to);
     const url = cfg.searchUrl + "?" + params.toString();
 
     if (els.count) els.count.textContent = "Searching…";
@@ -193,11 +257,12 @@
         });
       })
       .catch(function (err) {
+        currentRows = [];
         if (els.body) {
-          els.body.innerHTML =
-            '<tr><td colspan="5" class="text-center text-danger py-4">' +
-            escapeHtml(err.message || "Unable to search ledgers.") +
-            "</td></tr>";
+          els.body.innerHTML = emptyRow(
+            escapeHtml(err.message || "Unable to search ledgers."),
+            true
+          );
         }
         if (els.count) els.count.textContent = "Error";
       });
@@ -262,6 +327,21 @@
     window.location.href = url + dateQuery();
   }
 
+  function onSortHeader(event) {
+    const th = event.target.closest("th.lr-sortable");
+    if (!th) return;
+    event.preventDefault();
+    const key = th.getAttribute("data-sort-key") || "";
+    if (!key) return;
+    if (sortState.key === key) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState.key = key;
+      sortState.dir = key === "txn_count" || key === "closing" ? "desc" : "asc";
+    }
+    renderRows(currentRows, lastKind, lastSearch);
+  }
+
   function onGridClick(event) {
     const btn = event.target.closest(".ledger-preview-btn");
     if (!btn) return;
@@ -302,6 +382,22 @@
   els.kind?.addEventListener("change", function () {
     clearTimeout(searchTimer);
     loadLedgers();
+  });
+  els.dateFrom?.addEventListener("change", function () {
+    clearTimeout(searchTimer);
+    loadLedgers();
+  });
+  els.dateTo?.addEventListener("change", function () {
+    clearTimeout(searchTimer);
+    loadLedgers();
+  });
+  document.getElementById("ledgerReportGrid")?.addEventListener("click", onSortHeader);
+  document.getElementById("ledgerReportGrid")?.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const th = event.target.closest("th.lr-sortable");
+    if (!th) return;
+    event.preventDefault();
+    onSortHeader(event);
   });
   els.body?.addEventListener("click", onGridClick);
   els.maximizeBtn?.addEventListener("click", function () {

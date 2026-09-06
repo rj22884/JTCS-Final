@@ -169,7 +169,7 @@ class LedgerExportService:
         return result
 
     def list_customers(self, *, search: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"lim": max(1, min(int(limit or 200), 500))}
+        params: dict[str, Any] = {"lim": max(1, min(int(limit or 200), 10000))}
         search_sql = ""
         needle = (search or "").strip()
         if needle:
