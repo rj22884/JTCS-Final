@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260804-sold-saffron">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260907denom2">
 {% endblock %}
 
 {% block content %}
@@ -49,56 +49,89 @@
 
     <div id="ecourtSummaryBanner" class="ecourt-summary-banner mb-2 d-none"></div>
 
+    <div class="ecourt-records-layout">
+    <div class="ecourt-grid-panel">
     <div class="table-responsive ecourt-grid-wrap">
       <table class="table table-sm table-hover align-middle mb-0 ecourt-tree-table" id="ecourtGrid">
         <thead>
           <tr>
-            <th class="ecourt-col-select" style="width: 34px;"></th>
-            <th class="ecourt-col-toggle" style="width: 36px;"></th>
-            <th class="ecourt-sortable" data-sort-key="name" role="button" tabindex="0">
+            <th class="ecourt-col-select"></th>
+            <th class="ecourt-col-toggle"></th>
+            <th class="ecourt-sortable ecourt-col-name" data-sort-key="name" role="button" tabindex="0">
               Stationery / Receipt No. <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable" data-sort-key="date" role="button" tabindex="0">
+            <th class="ecourt-sortable ecourt-col-date" data-sort-key="date" role="button" tabindex="0">
               Date <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable" data-sort-key="sold_date" role="button" tabindex="0">
+            <th class="ecourt-sortable ecourt-col-date" data-sort-key="sold_date" role="button" tabindex="0">
               Sold Date <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable text-end" data-sort-key="buy" role="button" tabindex="0">
+            <th class="ecourt-sortable text-end ecourt-col-num" data-sort-key="buy" role="button" tabindex="0">
               Buy Value <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable text-end" data-sort-key="sell" role="button" tabindex="0">
+            <th class="ecourt-sortable text-end ecourt-col-num" data-sort-key="sell" role="button" tabindex="0">
               Sell Value <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable text-center" data-sort-key="sold_remaining" role="button" tabindex="0">
+            <th class="ecourt-sortable text-center ecourt-col-soldrem" data-sort-key="sold_remaining" role="button" tabindex="0">
               Sold / Remaining <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable" data-sort-key="account" role="button" tabindex="0">
+            <th class="ecourt-sortable ecourt-col-account" data-sort-key="account" role="button" tabindex="0">
               Account Number <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable" data-sort-key="sale_status" role="button" tabindex="0">
+            <th class="ecourt-sortable ecourt-col-status" data-sort-key="sale_status" role="button" tabindex="0">
               Sale Status <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-col-actions" style="width: 340px;">Actions</th>
+            <th class="ecourt-col-actions">Actions</th>
           </tr>
           <tr class="ecourt-filter-row">
-            <th></th>
-            <th></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="name" placeholder="Filter…" aria-label="Filter stationery / receipt"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="date" placeholder="Filter…" aria-label="Filter date"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_date" placeholder="Filter…" aria-label="Filter sold date"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="buy" placeholder="Filter…" aria-label="Filter buy value"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sell" placeholder="Filter…" aria-label="Filter sell value"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_remaining" placeholder="Filter…" aria-label="Filter sold remaining"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="account" placeholder="Filter…" aria-label="Filter account number"></th>
-            <th><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sale_status" placeholder="Filter…" aria-label="Filter sale status"></th>
-            <th></th>
+            <th class="ecourt-col-select"></th>
+            <th class="ecourt-col-toggle"></th>
+            <th class="ecourt-col-name"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="name" placeholder="Filter…" aria-label="Filter stationery / receipt"></th>
+            <th class="ecourt-col-date"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="date" placeholder="Filter…" aria-label="Filter date"></th>
+            <th class="ecourt-col-date"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_date" placeholder="Filter…" aria-label="Filter sold date"></th>
+            <th class="ecourt-col-num"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="buy" placeholder="Filter…" aria-label="Filter buy value"></th>
+            <th class="ecourt-col-num"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sell" placeholder="Filter…" aria-label="Filter sell value"></th>
+            <th class="ecourt-col-soldrem"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_remaining" placeholder="Filter…" aria-label="Filter sold remaining"></th>
+            <th class="ecourt-col-account"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="account" placeholder="Filter…" aria-label="Filter account number"></th>
+            <th class="ecourt-col-status"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sale_status" placeholder="Filter…" aria-label="Filter sale status"></th>
+            <th class="ecourt-col-actions"></th>
           </tr>
         </thead>
         <tbody id="ecourtGridBody"></tbody>
       </table>
     </div>
     <div id="ecourtGridEmpty" class="small text-muted py-3">Click Import PDF to upload receipts. Imported data will appear here.</div>
+    </div>
+    <aside class="ecourt-denom-card" aria-label="Denomination summary">
+      <div class="ecourt-denom-head">
+        <div class="ecourt-section-head mb-0">Denomination</div>
+        <span class="ecourt-denom-hint" id="ecourtDenomHint">All rows</span>
+      </div>
+      <div class="ecourt-denom-table-wrap">
+        <table class="table table-sm mb-0" id="ecourtDenomTable">
+          <thead>
+            <tr>
+              <th>Denomination</th>
+              <th class="text-end">tickets</th>
+              <th class="text-end">buy amt</th>
+              <th class="text-end">sale amt</th>
+            </tr>
+          </thead>
+          <tbody id="ecourtDenomBody">
+            <tr><td colspan="4" class="text-muted text-center py-3">No receipts</td></tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <th>Total</th>
+              <th class="text-end" id="ecourtDenomTotalTickets">0</th>
+              <th class="text-end" id="ecourtDenomTotalBuy">0</th>
+              <th class="text-end" id="ecourtDenomTotalSale">0</th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </aside>
+    </div>
   </div>
 </div>
 
@@ -359,5 +392,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260905qrbill1"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260907denom2"></script>
 {% endblock %}

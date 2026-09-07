@@ -285,6 +285,133 @@
   border-radius: 6px;
 }
 
+.ecourt-records-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 0.75rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.ecourt-grid-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ecourt-denom-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 180px;
+  padding: 0.65rem 0.7rem;
+  background: linear-gradient(180deg, #fff 0%, #faf6f0 100%);
+  border: 1px solid #e6d9c8;
+  border-radius: 6px;
+}
+
+.ecourt-denom-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ecourt-denom-hint {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b5a48;
+  white-space: nowrap;
+}
+
+.ecourt-denom-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(100vh - 280px);
+  overflow: auto;
+  border: 1px solid #e6d9c8;
+  border-radius: 6px;
+  background: #fff;
+}
+
+#ecourtDenomTable {
+  font-size: 12.5px;
+  width: 100%;
+}
+
+#ecourtDenomTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #8b4513;
+  color: #fff;
+  font-weight: 700;
+  padding: 0.35rem 0.45rem;
+  white-space: nowrap;
+}
+
+#ecourtDenomTable td,
+#ecourtDenomTable tfoot th {
+  padding: 0.32rem 0.45rem;
+  white-space: nowrap;
+}
+
+#ecourtDenomTable tbody tr:nth-child(even) {
+  background: #faf6f0;
+}
+
+#ecourtDenomTable tfoot th {
+  position: sticky;
+  bottom: 0;
+  background: #f3ebe0;
+  color: #4c1d12;
+  border-top: 2px solid #e0d0bc;
+}
+
+@media (max-width: 1100px) {
+  .ecourt-records-layout {
+    grid-template-columns: 1fr;
+  }
+  .ecourt-denom-table-wrap {
+    max-height: 280px;
+  }
+}
+
+/* Shrink each column to the widest header/value — do not stretch to page width. */
+#ecourtGrid.ecourt-tree-table {
+  table-layout: auto;
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+}
+
+#ecourtGrid th,
+#ecourtGrid td {
+  width: 1%;
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  padding: 0.28rem 0.45rem;
+  vertical-align: middle;
+}
+
+#ecourtGrid .ecourt-col-select,
+#ecourtGrid .ecourt-col-toggle {
+  width: 1%;
+  padding-left: 0.28rem;
+  padding-right: 0.28rem;
+  text-align: center;
+}
+
+#ecourtGrid .ecourt-col-actions,
+#ecourtGrid td.ecourt-actions-cell {
+  width: 1%;
+  white-space: nowrap;
+  padding-left: 0.35rem;
+  padding-right: 0.35rem;
+}
+
 .ecourt-tree-table thead th {
   position: sticky;
   top: 0;
@@ -327,8 +454,34 @@
 }
 
 .ecourt-col-filter {
-  min-width: 72px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   font-size: 0.75rem;
+  padding: 0.15rem 0.3rem;
+}
+
+#ecourtGrid .ecourt-col-date .ecourt-col-filter,
+#ecourtGrid .ecourt-col-num .ecourt-col-filter {
+  min-width: 4.25rem;
+  max-width: 5.5rem;
+}
+
+#ecourtGrid .ecourt-col-soldrem .ecourt-col-filter,
+#ecourtGrid .ecourt-col-status .ecourt-col-filter {
+  min-width: 4.5rem;
+  max-width: 6.25rem;
+}
+
+#ecourtGrid .ecourt-col-account .ecourt-col-filter {
+  min-width: 5rem;
+  max-width: 7.5rem;
+}
+
+#ecourtGrid .ecourt-col-name .ecourt-col-filter {
+  min-width: 7.5rem;
+  max-width: 14rem;
 }
 
 .ecourt-import-modal-header {

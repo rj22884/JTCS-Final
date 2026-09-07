@@ -31,6 +31,11 @@
     gridBody: document.getElementById("ecourtGridBody"),
     gridCount: document.getElementById("ecourtGridCount"),
     gridEmpty: document.getElementById("ecourtGridEmpty"),
+    denomBody: document.getElementById("ecourtDenomBody"),
+    denomTotalTickets: document.getElementById("ecourtDenomTotalTickets"),
+    denomTotalBuy: document.getElementById("ecourtDenomTotalBuy"),
+    denomTotalSale: document.getElementById("ecourtDenomTotalSale"),
+    denomHint: document.getElementById("ecourtDenomHint"),
     duplicateModalEl: document.getElementById("ecourtDuplicateModal"),
     duplicateSummary: document.getElementById("ecourtDuplicateSummary"),
     duplicateBody: document.getElementById("ecourtDuplicateBody"),
@@ -1017,6 +1022,89 @@
     return status === "manual entry" || status === "manual";
   }
 
+  function formatDenomValue(value) {
+    const num = Math.round((parseAmount(value) || 0) * 100) / 100;
+    if (Math.abs(num - Math.round(num)) < 0.005) return String(Math.round(num));
+    return num.toFixed(2);
+  }
+
+  function renderDenominationSummary(prepared) {
+    if (!els.denomBody) return;
+    const buckets = {};
+    (prepared || []).forEach(function (item) {
+      const group = item.group || {};
+      const receipts = item.receipts || [];
+      const all = group.receipts || [];
+      const allSold = all.filter(function (row) {
+        return row.sale_status === "Sold";
+      });
+      const visSold = receipts.filter(function (row) {
+        return row.sale_status === "Sold";
+      });
+      const allSoldBuy = allSold.reduce(function (sum, row) {
+        return sum + parseAmount(row.amount);
+      }, 0);
+      const visSoldBuy = visSold.reduce(function (sum, row) {
+        return sum + parseAmount(row.amount);
+      }, 0);
+      const groupSell = parseAmount(group.sold_sell_value || group.total_sell_value || 0);
+      const visibleSell =
+        visSoldBuy > 0 && allSoldBuy > 0 ? groupSell * (visSoldBuy / allSoldBuy) : 0;
+
+      receipts.forEach(function (row) {
+        const buy = parseAmount(row.amount);
+        const key = buy.toFixed(2);
+        if (!buckets[key]) buckets[key] = { denom: buy, tickets: 0, buy: 0, sale: 0 };
+        buckets[key].tickets += 1;
+        buckets[key].buy += buy;
+        if (row.sale_status === "Sold" && visSoldBuy > 0) {
+          buckets[key].sale += visibleSell * (buy / visSoldBuy);
+        }
+      });
+    });
+
+    const rows = Object.keys(buckets)
+      .map(function (key) {
+        return buckets[key];
+      })
+      .sort(function (a, b) {
+        return a.denom - b.denom;
+      });
+
+    let totalTickets = 0;
+    let totalBuy = 0;
+    let totalSale = 0;
+    if (!rows.length) {
+      els.denomBody.innerHTML =
+        '<tr><td colspan="4" class="text-muted text-center py-3">No receipts</td></tr>';
+    } else {
+      els.denomBody.innerHTML = rows
+        .map(function (row) {
+          totalTickets += row.tickets;
+          totalBuy += row.buy;
+          totalSale += row.sale;
+          return (
+            "<tr><td>" +
+            escapeHtml(formatDenomValue(row.denom)) +
+            '</td><td class="text-end">' +
+            escapeHtml(String(row.tickets)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatDenomValue(row.buy)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatDenomValue(row.sale)) +
+            "</td></tr>"
+          );
+        })
+        .join("");
+    }
+    if (els.denomTotalTickets) els.denomTotalTickets.textContent = String(totalTickets);
+    if (els.denomTotalBuy) els.denomTotalBuy.textContent = formatDenomValue(totalBuy);
+    if (els.denomTotalSale) els.denomTotalSale.textContent = formatDenomValue(totalSale);
+    if (els.denomHint) {
+      els.denomHint.textContent = hasActiveGridFilters() ? "Filtered rows" : "All rows";
+    }
+  }
+
   function renderImportTree(data, options) {
     options = options || {};
     lastTreeOptions = options;
@@ -1028,6 +1116,7 @@
       if (els.gridEmpty) els.gridEmpty.classList.remove("d-none");
       if (els.gridCount) els.gridCount.textContent = "0 records";
       updateGridSortHeaders();
+      renderDenominationSummary([]);
       return;
     }
 
@@ -1234,6 +1323,7 @@
     });
     updateSellSelectedButton();
     updateGridSortHeaders();
+    renderDenominationSummary(prepared);
     const focusTarget = options.focusAfterSale || pendingFocusAfterSale;
     if (focusTarget || options.restoreScroll || options.soldReceipts) {
       restoreGridAfterSale(Object.assign({}, options, { focusAfterSale: focusTarget }));
