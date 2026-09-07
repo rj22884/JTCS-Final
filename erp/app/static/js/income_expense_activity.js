@@ -173,7 +173,13 @@
     els.paymentLockedHint?.classList.toggle("d-none", paymentOn);
     if (els.paymentSectionNum) els.paymentSectionNum.textContent = misc ? "4" : "3";
     if (els.remarksSectionNum) els.remarksSectionNum.textContent = misc ? "5" : "4";
-    if (paymentOn) ensurePaymentLines();
+    if (paymentOn) {
+      ensurePaymentLines();
+      const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length === 1 && getPaymentTotal() <= 0) {
+        syncFirstPaymentFromCategories();
+      }
+    }
   }
 
   function isEditMode() {
@@ -684,6 +690,11 @@
     updatePaymentSummary();
   }
 
+  function remainingPaymentAmount() {
+    const rem = Math.round((getCategoryTotal() - getPaymentTotal()) * 100) / 100;
+    return rem > 0 ? rem : 0;
+  }
+
   function defaultPaymentDate() {
     return (
       els.workDate?.value ||
@@ -714,6 +725,7 @@
     bankLabel.className = "form-label";
     bankLabel.textContent = "Payment Mode *";
     const select = buildPaymentSelect(options.bank_account_id || options.bankAccountId);
+    select.name = "PaymentBankAccountID[]";
     bankWrap.appendChild(bankLabel);
     bankWrap.appendChild(select);
 
@@ -726,6 +738,7 @@
     dateInput.type = "date";
     dateInput.className = "form-control oie-payment-date";
     dateInput.required = true;
+    dateInput.name = "PaymentDate[]";
     dateInput.value = options.payment_date || defaultPaymentDate();
     dateInput.addEventListener("change", function () {
       dateInput.dataset.userEdited = "1";
@@ -744,6 +757,7 @@
     amount.min = "0";
     amount.className = "form-control oie-payment-amount";
     amount.required = true;
+    amount.name = "PaymentAmount[]";
     amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
     amount.addEventListener("input", updatePaymentSummary);
     amountWrap.appendChild(amountLabel);
@@ -786,9 +800,11 @@
 
   function validatePaymentLines() {
     if (!isPaymentActive()) return null;
-    const paymentTotal = getPaymentTotal();
-    if (isMiscKind() && paymentTotal <= 0) return null;
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+    const paymentTotal = getPaymentTotal();
+    const extraLines = lines.length > 1;
+    const mustValidate = !isMiscKind() || paymentTotal > 0 || extraLines;
+    if (!mustValidate) return null;
     if (!lines.length) return "At least one payment mode is required.";
     for (let i = 0; i < lines.length; i++) {
       const bank = lines[i].querySelector(".oie-payment-bank");
@@ -813,36 +829,63 @@
       el.remove();
     });
     if (!isPaymentActive()) return;
+    if (els.paymentFieldset) els.paymentFieldset.disabled = false;
     const lines = els.paymentLines.querySelectorAll(".oie-payment-line");
-    lines.forEach(function (line) {
+    lines.forEach(function (line, index) {
       const bank = line.querySelector(".oie-payment-bank");
       const amount = line.querySelector(".oie-payment-amount");
       const paymentDate = line.querySelector(".oie-payment-date");
       if (!bank || !amount) return;
 
+      bank.disabled = false;
+      amount.disabled = false;
+      if (paymentDate) paymentDate.disabled = false;
+      bank.removeAttribute("name");
+      amount.removeAttribute("name");
+      if (paymentDate) paymentDate.removeAttribute("name");
+
       const wrap = document.createElement("div");
       wrap.className = "oie-payment-sync d-none";
+      wrap.setAttribute("aria-hidden", "true");
 
       const bankHidden = document.createElement("input");
       bankHidden.type = "hidden";
       bankHidden.name = "PaymentBankAccountID[]";
       bankHidden.value = bank.value || "";
+      bankHidden.className = "oie-payment-sync";
 
       const amountHidden = document.createElement("input");
       amountHidden.type = "hidden";
       amountHidden.name = "PaymentAmount[]";
       amountHidden.value = amount.value || "0";
+      amountHidden.className = "oie-payment-sync";
 
       const dateHidden = document.createElement("input");
       dateHidden.type = "hidden";
       dateHidden.name = "PaymentDate[]";
       dateHidden.value = paymentDate?.value || defaultPaymentDate();
+      dateHidden.className = "oie-payment-sync";
+
+      const indexHidden = document.createElement("input");
+      indexHidden.type = "hidden";
+      indexHidden.name = "PaymentLineIndex[]";
+      indexHidden.value = String(index);
+      indexHidden.className = "oie-payment-sync";
 
       wrap.appendChild(bankHidden);
       wrap.appendChild(amountHidden);
       wrap.appendChild(dateHidden);
+      wrap.appendChild(indexHidden);
       form.appendChild(wrap);
     });
+    if (getPaymentTotal() > 0) {
+      const flag = document.createElement("input");
+      flag.type = "hidden";
+      flag.name = "PaymentReceived";
+      flag.value = "1";
+      flag.className = "oie-payment-sync";
+      form.appendChild(flag);
+    }
   }
 
   function fetchNextBillNo() {
@@ -1852,7 +1895,8 @@
   }
   if (els.addPaymentBtn) {
     els.addPaymentBtn.addEventListener("click", function () {
-      addPaymentLine({});
+      const rem = remainingPaymentAmount();
+      addPaymentLine({ amount: rem > 0 ? rem.toFixed(2) : "" });
     });
   }
   if (els.addCategoryBtn) {
