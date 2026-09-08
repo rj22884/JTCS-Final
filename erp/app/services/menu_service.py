@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from app.models.menu_master import MenuMaster
 from app.repositories.menu_repository import MenuRepository
-from app.utils.roles import has_admin_role, join_roles, roles_intersect
+from app.utils.roles import has_admin_role, has_data_backup_role, join_roles, roles_intersect
 
 
 @dataclass
@@ -73,10 +73,25 @@ class MenuService:
             return None
         return cleaned
 
+    @classmethod
+    def _is_admin_role_root(cls, menu) -> bool:
+        name = (getattr(menu, "MenuName", None) or "").strip().lower()
+        return name == cls.ADMIN_ROLE_MENU_NAME and not getattr(menu, "ParentMenuID", None)
+
+    @classmethod
+    def _is_data_backup_menu(cls, menu) -> bool:
+        name = (getattr(menu, "MenuName", None) or "").strip().lower()
+        url = (cls.normalize_menu_url(getattr(menu, "MenuURL", None)) or "").rstrip("/").lower()
+        return name == cls.DATA_BACKUP_MENU_NAME or url in cls.DATA_BACKUP_URLS
+
     def can_access_menu(self, menu: MenuMaster, role: str | None) -> bool:
         if not menu.IsActive:
             return False
         if has_admin_role(role):
+            return True
+        if has_data_backup_role(role) and (
+            self._is_admin_role_root(menu) or self._is_data_backup_menu(menu)
+        ):
             return True
         return roles_intersect(role, menu.RoleName)
 
@@ -143,6 +158,9 @@ class MenuService:
 
     # Protected from delete/remove in Menu Customization.
     PROTECTED_MAIN_MENUS = frozenset({"admin role", "dashboard"})
+    ADMIN_ROLE_MENU_NAME = "admin role"
+    DATA_BACKUP_MENU_NAME = "data backup"
+    DATA_BACKUP_URLS = frozenset({"/admin/backup/data"})
 
     # Old Menu Management page — keep out of ribbon (new page is Menu Customization).
     HIDDEN_MENU_NAMES = frozenset(
@@ -170,7 +188,7 @@ class MenuService:
             from app.extensions import db
 
             db.session.rollback()
-        menus = self.repository.get_active_for_role(role)
+        menus = [m for m in self.repository.get_all() if self.can_access_menu(m, role)]
         # Hidden from app nav (CRM / Exceptional / Settings / non-core modules).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
         # Drop children of ITR/GST/Payroll/… so _include_parent_chain cannot
@@ -183,7 +201,36 @@ class MenuService:
         else:
             menus = self._menus_with_accessible_ancestors(menus, role)
             menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
+            if has_data_backup_role(role):
+                menus = self._restrict_admin_role_to_data_backup(menus)
         return self.build_tree(menus, None)
+
+    def _is_under_admin_role(self, menu: MenuMaster) -> bool:
+        current: MenuMaster | None = menu
+        seen: set[int] = set()
+        while current is not None:
+            if current.MenuID in seen:
+                return False
+            seen.add(current.MenuID)
+            if self._is_admin_role_root(current):
+                return True
+            if not current.ParentMenuID:
+                return False
+            current = self.repository.get_by_id(current.ParentMenuID)
+        return False
+
+    def _restrict_admin_role_to_data_backup(self, menus: list[MenuMaster]) -> list[MenuMaster]:
+        """Manager / Operator / Viewer: Admin Role contains Data Backup only."""
+        kept: list[MenuMaster] = []
+        for menu in menus:
+            if not self._is_under_admin_role(menu):
+                kept.append(menu)
+                continue
+            if self._is_admin_role_root(menu) or self._is_data_backup_menu(menu):
+                kept.append(menu)
+        if not any(self._is_data_backup_menu(menu) for menu in kept):
+            kept = [menu for menu in kept if not self._is_admin_role_root(menu)]
+        return kept
 
     def _top_level_ancestor(self, menu: MenuMaster) -> MenuMaster | None:
         current: MenuMaster | None = menu

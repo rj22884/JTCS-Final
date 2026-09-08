@@ -12,7 +12,13 @@ from flask import (
 from sqlalchemy import text
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from app.decorators import admin_required, login_required, require_delete_reauth
+from app.decorators import (
+    admin_required,
+    backup_kind_required,
+    data_backup_required,
+    login_required,
+    require_delete_reauth,
+)
 from app.extensions import csrf, db
 from app.services.backup_service import BackupService
 from app.services.menu_service import MenuService
@@ -103,6 +109,7 @@ def _ensure_backup_menus() -> None:
             """
             DECLARE @ParentID INT;
             DECLARE @AdminRoles NVARCHAR(50) = N'Administrator,Admin';
+            DECLARE @DataBackupRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Operator,Viewer';
 
             SELECT TOP 1 @ParentID = MenuID
             FROM dbo.MenuMaster
@@ -124,7 +131,7 @@ def _ensure_backup_menus() -> None:
                     1,
                     N'Administrator tools — backups and system maintenance',
                     1,
-                    @AdminRoles
+                    @DataBackupRoles
                 );
                 SET @ParentID = SCOPE_IDENTITY();
             END
@@ -138,7 +145,7 @@ def _ensure_backup_menus() -> None:
                         N'Administrator tools — backups and system maintenance'
                     ),
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE MenuID = @ParentID;
             END;
 
@@ -204,7 +211,7 @@ def _ensure_backup_menus() -> None:
                     DisplayOrder = 2,
                     Description = N'SQL Server database backup (.bak)',
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE ParentMenuID = @ParentID
                   AND MenuName = N'Data Backup';
             END
@@ -224,7 +231,7 @@ def _ensure_backup_menus() -> None:
                     2,
                     N'SQL Server database backup (.bak)',
                     1,
-                    @AdminRoles
+                    @DataBackupRoles
                 );
             END
             ELSE
@@ -236,7 +243,7 @@ def _ensure_backup_menus() -> None:
                     DisplayOrder = 2,
                     Description = N'SQL Server database backup (.bak)',
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE MenuURL = N'/admin/backup/data';
             END;
 
@@ -291,7 +298,9 @@ def _ensure_backup_menus() -> None:
 
             UPDATE dbo.MenuMaster
             SET RoleName = @AdminRoles
-            WHERE ParentMenuID = @ParentID;
+            WHERE ParentMenuID = @ParentID
+              AND MenuName <> N'Data Backup'
+              AND (RoleName IS NULL OR LTRIM(RTRIM(RoleName)) = N'');
             """
         )
     )
@@ -303,13 +312,56 @@ def ensure_backup_menus() -> None:
     _ensure_backup_menus()
 
 
+def ensure_data_backup_staff_roles() -> None:
+    """Keep Admin Role + Data Backup visible to Manager / Operator / Viewer.
+
+    Other Admin Role menu-ensure routines may reset the parent RoleName to
+    Administrator,Admin; run this last so those three roles still see the dropdown.
+    """
+    db.session.execute(
+        text(
+            """
+            DECLARE @ParentID INT;
+            DECLARE @DataBackupRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Operator,Viewer';
+
+            SELECT TOP 1 @ParentID = MenuID
+            FROM dbo.MenuMaster
+            WHERE MenuName = N'Admin Role'
+              AND ParentMenuID IS NULL
+            ORDER BY MenuID;
+
+            IF @ParentID IS NOT NULL
+            BEGIN
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1
+                WHERE MenuID = @ParentID;
+
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1,
+                    MenuURL = COALESCE(NULLIF(MenuURL, N''), N'/admin/backup/data')
+                WHERE ParentMenuID = @ParentID
+                  AND MenuName = N'Data Backup';
+
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1
+                WHERE MenuURL = N'/admin/backup/data';
+            END
+            """
+        )
+    )
+    db.session.commit()
+
+
 def _actor() -> str:
     return (session.get("user_name") or session.get("full_name") or "System").strip() or "System"
 
 
 @bp.route("/data", strict_slashes=False)
 @login_required
-@admin_required
+@data_backup_required
 def data_backup_page():
     service = BackupService()
     menu_service = MenuService()
@@ -355,7 +407,7 @@ def restore_backup_page():
 
 @bp.route("/api/database/list")
 @login_required
-@admin_required
+@data_backup_required
 def list_database_backups():
     rows = BackupService().list_database_backups()
     return jsonify({"ok": True, "rows": rows, "count": len(rows)})
@@ -371,7 +423,7 @@ def list_full_backups():
 
 @bp.route("/api/database/create", methods=["POST"])
 @login_required
-@admin_required
+@data_backup_required
 def create_database_backup():
     try:
         info = BackupService().create_database_backup(created_by=_actor())
@@ -399,7 +451,7 @@ def create_full_backup():
 
 @bp.route("/api/<kind>/download/<path:file_name>")
 @login_required
-@admin_required
+@backup_kind_required
 def download_backup(kind: str, file_name: str):
     try:
         path = BackupService().resolve_download(kind, file_name)
@@ -415,7 +467,7 @@ def download_backup(kind: str, file_name: str):
 
 @bp.route("/api/<kind>/delete", methods=["POST"])
 @login_required
-@admin_required
+@backup_kind_required
 @require_delete_reauth
 def delete_backup(kind: str):
     payload = request.get_json(silent=True) or {}

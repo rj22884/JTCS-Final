@@ -3,7 +3,7 @@ from functools import wraps
 from flask import flash, jsonify, redirect, request, session, url_for
 
 from app.utils.delete_auth import verify_delete_credentials
-from app.utils.roles import ADMIN_ROLES, has_admin_role
+from app.utils.roles import has_admin_role, has_data_backup_role
 
 
 def server_auth_exempt(view):
@@ -56,6 +56,39 @@ def admin_required(view):
             flash("Administrator access required.", "danger")
             return redirect(url_for("dashboard.index"))
         return view(*args, **kwargs)
+
+    return wrapped
+
+
+def _deny_role(message: str):
+    if _wants_json():
+        return jsonify({"ok": False, "error": message}), 403
+    flash(message, "danger")
+    return redirect(url_for("dashboard.index"))
+
+
+def data_backup_required(view):
+    """Allow Admin plus Manager / Operator / Viewer to use Data Backup."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not has_data_backup_role(session.get("role")):
+            return _deny_role("Data Backup access required.")
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def backup_kind_required(view):
+    """Full/restore stay admin-only; database (.bak) Data Backup is staff-allowed."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        kind = str(kwargs.get("kind") or (args[0] if args else "") or "").strip().lower()
+        role = session.get("role")
+        if has_admin_role(role) or (kind == "database" and has_data_backup_role(role)):
+            return view(*args, **kwargs)
+        return _deny_role("Administrator access required.")
 
     return wrapped
 

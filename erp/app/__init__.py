@@ -471,6 +471,14 @@ def create_app(config_class: type = Config) -> Flask:
             db.session.rollback()
             app.logger.warning("Exception report menus ensure skipped: %s", exc)
 
+        try:
+            from app.routes.backup import ensure_data_backup_staff_roles
+
+            ensure_data_backup_staff_roles()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Data Backup staff menu roles ensure skipped: %s", exc)
+
     @app.before_request
     def enforce_initial_setup():
         if request.endpoint in (None, "static"):
