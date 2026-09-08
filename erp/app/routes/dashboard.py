@@ -92,8 +92,16 @@ def index():
     bank_closing_hover = dashboard_service.get_bank_closing_hover(as_of=date_to)
     bank_account_closings = bank_closing_hover["accounts"]
     bank_closing_manual = bank_closing_hover["manual"]
-    bank_asset_closings = [row for row in bank_account_closings if not row.credit_normal]
-    bank_liability_closings = [row for row in bank_account_closings if row.credit_normal]
+    bank_asset_closings = [
+        row
+        for row in bank_account_closings
+        if not row.credit_normal and row.closing_balance != 0
+    ]
+    bank_liability_closings = [
+        row
+        for row in bank_account_closings
+        if row.credit_normal and row.closing_balance != 0
+    ]
     bank_asset_closing_total = sum(
         (row.closing_balance for row in bank_asset_closings), Decimal("0")
     )
