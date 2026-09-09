@@ -338,7 +338,6 @@
         (loc ? ' data-india-loc="' + escapeHtml(loc) + '"' : "");
       const type = field.type || "text";
       if (type === "percent") {
-        const sync = (field.features || []).indexOf("depreciation_sync") >= 0;
         return (
           '<div class="input-group input-group-sm">' +
           '<input type="number" class="form-control form-control-sm" id="' +
@@ -351,12 +350,6 @@
           disabled +
           ">" +
           '<span class="input-group-text">%</span>' +
-          (sync
-            ? '<button type="button" class="btn btn-outline-primary jtcs-dyn-dep-sync"' +
-              disabled +
-              ' title="Fill from the public Income-tax depreciation chart">' +
-              '<i class="bi bi-arrow-repeat"></i> Sync</button>'
-            : "") +
           "</div>"
         );
       }
@@ -465,15 +458,6 @@
         values.purchase_date = purchaseEl.value;
       }
 
-      const syncBtn = mount.querySelector(".jtcs-dyn-dep-sync");
-      if (syncBtn) {
-        syncBtn.addEventListener("click", function () {
-          syncDepreciationRate().catch(function (err) {
-            if (typeof opts.onError === "function") opts.onError(err);
-            else if (global.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(err.message || String(err), "error");
-          });
-        });
-      }
       const landBtn = mount.querySelector(".jtcs-dyn-land-sync");
       if (landBtn) {
         landBtn.addEventListener("click", function () {
@@ -791,56 +775,6 @@
         })
         .finally(function () {
           landSyncBusy = false;
-          if (btn) {
-            btn.disabled = readonly;
-            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync';
-          }
-        });
-    }
-
-    function syncDepreciationRate() {
-      const urlBase = opts.depRateSyncUrl;
-      if (!urlBase) throw new Error("Depreciation sync is not available.");
-      const purchaseEl = document.getElementById(inputId("purchase_date"));
-      if (purchaseEl && !purchaseEl.value && openingDateValue()) {
-        purchaseEl.value = openingDateValue();
-      }
-      if (!purchaseEl || !purchaseEl.value) {
-        throw new Error("Enter " + (entityName() || "item") + " Purchase Date first.");
-      }
-      const url = new URL(urlBase, global.location.origin);
-      url.searchParams.set("purchase_date", purchaseEl.value);
-      url.searchParams.set("item_name", entityName());
-      if (typeof opts.getSyncParams === "function") {
-        const extra = opts.getSyncParams() || {};
-        Object.keys(extra).forEach(function (key) {
-          if (extra[key] != null && extra[key] !== "") {
-            url.searchParams.set(key, extra[key]);
-          }
-        });
-      }
-      const btn = mount.querySelector(".jtcs-dyn-dep-sync");
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-      }
-      return fetch(url.toString(), { credentials: "same-origin" })
-        .then(function (res) {
-          return res.json().then(function (data) {
-            if (!res.ok || data.ok === false) throw new Error(data.error || "Request failed.");
-            return data;
-          });
-        })
-        .then(function (data) {
-          const rateEl = document.getElementById(inputId("depreciation_rate"));
-          if (rateEl) rateEl.value = data.rate || "0";
-          values.depreciation_rate = data.rate || "0";
-          const msg = mount.querySelector(".jtcs-dyn-sync-msg");
-          if (msg) {
-            msg.textContent = "Filled " + (data.rate || "0") + "%" + (data.block ? " — " + data.block : "");
-          }
-        })
-        .finally(function () {
           if (btn) {
             btn.disabled = readonly;
             btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync';

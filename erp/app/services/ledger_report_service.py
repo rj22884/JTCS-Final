@@ -104,6 +104,88 @@ class LedgerReportService:
             "date_to_iso": _iso(date_to),
         }
 
+    @staticmethod
+    def _meta_label(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("label") or "")
+        if isinstance(item, (list, tuple)) and item:
+            return str(item[0] or "")
+        return ""
+
+    def _period_txn_totals(self, lines: list[dict[str, Any]]) -> tuple[Decimal, Decimal]:
+        debit = Decimal("0.00")
+        credit = Decimal("0.00")
+        for line in lines or []:
+            if (line.get("kind") or "txn") != "txn":
+                continue
+            debit += self._money(line.get("debit"))
+            credit += self._money(line.get("credit"))
+        return self._money(debit), self._money(credit)
+
+    @staticmethod
+    def _as_of_display(date_to: Any) -> str:
+        if date_to is None or date_to == "":
+            return ""
+        if hasattr(date_to, "strftime"):
+            return date_to.strftime("%d/%m/%Y")
+        raw = str(date_to).strip()
+        if len(raw) >= 10 and raw[4] == "-":
+            try:
+                return datetime.strptime(raw[:10], "%Y-%m-%d").date().strftime("%d/%m/%Y")
+            except ValueError:
+                return raw
+        return raw
+
+    @staticmethod
+    def _is_closing_meta_label(label: str) -> bool:
+        text = (label or "").strip()
+        return text in {"Ledger Balance", "Closing Balance"} or text.startswith(
+            "Closing Balance as of"
+        )
+
+    def _meta_with_period_totals(
+        self,
+        meta: list,
+        lines: list[dict[str, Any]],
+        *,
+        closing: Any = None,
+        date_to: Any = None,
+    ) -> list:
+        """Refresh period totals and closing-as-of-To-Date without dropping Closing Balance."""
+        total_debit, total_credit = self._period_txn_totals(lines)
+        totals = {
+            "Total Credit": f"{total_credit:,.2f}",
+            "Total Debit": f"{total_debit:,.2f}",
+        }
+        as_of = self._as_of_display(date_to)
+        closing_label = f"Closing Balance as of {as_of}" if as_of else "Closing Balance"
+        closing_value = None if closing is None else f"{self._money(closing):,.2f}"
+        out: list = []
+        closing_written = False
+        for item in meta or []:
+            label = self._meta_label(item)
+            if self._is_closing_meta_label(label):
+                if closing_value is not None and not closing_written:
+                    out.append((closing_label, closing_value))
+                    closing_written = True
+                continue
+            if label in totals:
+                out.append((label, totals[label]))
+                continue
+            out.append(item)
+        if closing_value is not None and not closing_written:
+            inserted = False
+            with_closing: list = []
+            for item in out:
+                if not inserted and self._meta_label(item) == "Period":
+                    with_closing.append((closing_label, closing_value))
+                    inserted = True
+                with_closing.append(item)
+            if not inserted:
+                with_closing.append((closing_label, closing_value))
+            return with_closing
+        return out
+
     def _dash(self):
         from app.services.dashboard_service import DashboardService
 
@@ -787,6 +869,12 @@ class LedgerReportService:
             )
         )
         data["closing"] = running
+        data["meta"] = self._meta_with_period_totals(
+            data.get("meta") or [],
+            data.get("lines") or [],
+            closing=running,
+            date_to=data.get("date_to"),
+        )
         return data
 
     def _search_work_closings(
@@ -1112,7 +1200,12 @@ class LedgerReportService:
             "title": title,
             "entity_name": data.get("entity_name") or "",
             "entity_id": data.get("entity_id"),
-            "meta": data.get("meta") or [],
+            "meta": self._meta_with_period_totals(
+                data.get("meta") or [],
+                lines,
+                closing=data.get("closing"),
+                date_to=data.get("date_to"),
+            ),
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,
             "closing": data.get("closing") or Decimal("0.00"),

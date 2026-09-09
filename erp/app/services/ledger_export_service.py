@@ -59,6 +59,23 @@ class LedgerExportService:
     def _money(value) -> Decimal:
         return Decimal(str(value or 0)).quantize(Decimal("0.01"))
 
+    def _sum_debit_credit(
+        self,
+        rows: list[Any],
+        debit_key: str = "debit",
+        credit_key: str = "credit",
+        *,
+        txn_only: bool = False,
+    ) -> tuple[Decimal, Decimal]:
+        debit = Decimal("0.00")
+        credit = Decimal("0.00")
+        for row in rows or []:
+            if txn_only and (row.get("kind") or "txn") != "txn":
+                continue
+            debit += self._money(row.get(debit_key))
+            credit += self._money(row.get(credit_key))
+        return self._money(debit), self._money(credit)
+
     @staticmethod
     def _parse_date(raw: str | None, fallback: date) -> date:
         value = (raw or "").strip()
@@ -1036,6 +1053,10 @@ class LedgerExportService:
             credit_normal=credit_normal,
         )
         pivot = self._bank_pivot_matrix(txn_rows)
+        total_debit, total_credit = self._sum_debit_credit(
+            txn_rows, "DebitValue", "CreditValue"
+        )
+        as_of = date_to.strftime("%d/%m/%Y")
 
         return {
             "kind": "bank",
@@ -1047,8 +1068,10 @@ class LedgerExportService:
                 ("Account", label),
                 ("Account Holder", (account["AccountHolderName"] or "").strip() or "—"),
                 ("Chart of Account Group", (account.get("GroupName") or "").strip() or "—"),
-                ("Ledger Balance", f"{running:,.2f}"),
+                ("Closing Balance as of " + as_of, f"{running:,.2f}"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),
+                ("Total Credit", f"{total_credit:,.2f}"),
+                ("Total Debit", f"{total_debit:,.2f}"),
             ],
             "headers": [
                 "Date",
@@ -1729,6 +1752,9 @@ class LedgerExportService:
                     desc = raw_desc or (f"Payment Received — {ref}" if ref else "Payment Received")
                 lines.append({**base, "description": desc, "debit": Decimal("0.00"), "credit": receipt, "balance": running})
 
+        total_debit, total_credit = self._sum_debit_credit(lines, txn_only=True)
+        as_of = date_to.strftime("%d/%m/%Y")
+
         return {
             "kind": "customer",
             "title": "Customer Ledger",
@@ -1740,7 +1766,9 @@ class LedgerExportService:
                 ("Customer ID", str(customer_id)),
                 ("Chart of Account Group", chart_group_name or "—"),
                 ("Customer Group", customer_group or "—"),
-                ("Ledger Balance", f"{running:,.2f}"),
+                ("Closing Balance as of " + as_of, f"{running:,.2f}"),
+                ("Total Credit", f"{total_credit:,.2f}"),
+                ("Total Debit", f"{total_debit:,.2f}"),
                 ("Mobile", (customer["MobileNumber"] or "").strip() or "—"),
                 ("PAN", (customer["PANNumber"] or "").strip() or "—"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),

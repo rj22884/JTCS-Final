@@ -43,9 +43,9 @@ FIELD_CATALOG: dict[str, dict[str, Any]] = {
         "type": "percent",
         "tier": "advanced",
         "required": False,
-        "features": ["depreciation_sync"],
+        "features": [],
         "hint": (
-            "From the public Income-tax depreciation chart for the purchase date. "
+            "Enter the depreciation rate (%) manually. "
             "Charge applies only when purchase date, rate, and opening value are set."
         ),
     },

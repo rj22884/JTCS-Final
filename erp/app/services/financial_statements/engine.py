@@ -167,6 +167,8 @@ class FinancialReportEngine:
     """
 
     _schema_ready = False
+    _customer_ob_cols: bool | None = None
+    _obc_keys_ready: bool | None = None
     FA_GROUP_NAMES = {
         "fixed assets",
         "computers printers & electric items",
@@ -187,6 +189,16 @@ class FinancialReportEngine:
     @staticmethod
     def money(value) -> Decimal:
         return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+    @staticmethod
+    def as_date(value) -> date | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return None
 
     @staticmethod
     def fy_start(as_of: date | None = None) -> date:
@@ -877,8 +889,11 @@ class FinancialReportEngine:
         )
 
     def _customer_has_opening_cols(self) -> bool:
+        cached = FinancialReportEngine._customer_ob_cols
+        if cached is not None:
+            return cached
         try:
-            return bool(
+            found = bool(
                 db.session.execute(
                     text(
                         "SELECT CASE WHEN COL_LENGTH(N'dbo.CustomerMaster', N'OpeningBalance') "
@@ -888,7 +903,9 @@ class FinancialReportEngine:
             )
         except Exception:
             db.session.rollback()
-            return False
+            found = False
+        FinancialReportEngine._customer_ob_cols = found
+        return found
 
     def _customer_opening_as_of(self, customer_id: int, date_from: date) -> Decimal:
         """
@@ -1041,16 +1058,23 @@ class FinancialReportEngine:
             text(
                 f"""
                 SELECT
-                    d.CustomerID,
-                    ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS Billed,
-                    {sql_customer_receipt_expr("d", "b")} AS ReceiptAmount
-                FROM dbo.JTCSDailyTransaction d
-                LEFT JOIN dbo.JtcsBankTransaction b
-                    ON b.JtcsBankTransactionID = d.BankTransactionID
-                WHERE d.CustomerID IS NOT NULL
-                  AND d.Status = N'Posted'
-                  AND d.TransactionDate >= :d1
-                  AND d.TransactionDate <= :d2
+                    x.CustomerID,
+                    ISNULL(SUM(x.Billed), 0) AS Billed,
+                    ISNULL(SUM(x.ReceiptAmount), 0) AS ReceiptAmount
+                FROM (
+                    SELECT
+                        d.CustomerID,
+                        ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS Billed,
+                        {sql_customer_receipt_expr("d", "b")} AS ReceiptAmount
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.CustomerID IS NOT NULL
+                      AND d.Status = N'Posted'
+                      AND d.TransactionDate >= :d1
+                      AND d.TransactionDate <= :d2
+                ) x
+                GROUP BY x.CustomerID
                 """
             ),
             {"d1": date_from, "d2": date_to},
@@ -1061,17 +1085,15 @@ class FinancialReportEngine:
             if not aid:
                 continue
             key = f"coa-{aid}"
-            billed = self.money(r["Billed"])
-            receipt = self.money(r["ReceiptAmount"])
-            moves[key]["debit"] += billed
-            moves[key]["credit"] += receipt
+            moves[key]["debit"] += self.money(r["Billed"])
+            moves[key]["credit"] += self.money(r["ReceiptAmount"])
 
         # Unpaid Followup Tally bills → customer CoA debit (receivable)
         try:
             fu_rows = db.session.execute(
                 text(
                     f"""
-                    SELECT f.CustomerID, ISNULL(f.BillAmount, 0) AS BillAmount
+                    SELECT f.CustomerID, SUM(ISNULL(f.BillAmount, 0)) AS BillAmount
                     FROM dbo.FollowupEntryMaster f
                     WHERE f.CustomerID IS NOT NULL
                       AND ISNULL(f.IsActive, 1) = 1
@@ -1081,6 +1103,7 @@ class FinancialReportEngine:
                       AND ISNULL(f.BillDate, f.WorkDate) >= :d1
                       AND ISNULL(f.BillDate, f.WorkDate) <= :d2
                       {sql_unpaid_followup_exclusion()}
+                    GROUP BY f.CustomerID
                     """
                 ),
                 {"d1": date_from, "d2": date_to},
@@ -1172,12 +1195,16 @@ class FinancialReportEngine:
             moves[f"item-{int(r['ItemID'])}"]["credit"] += self.money(r["CreditAmt"])
 
     def _obc_ledger_keys_ready(self) -> bool:
+        cached = FinancialReportEngine._obc_keys_ready
+        if cached is not None:
+            return cached
         try:
             if not db.session.execute(
                 text("SELECT OBJECT_ID(N'dbo.OthersBankCashTransaction', N'U')")
             ).scalar():
+                FinancialReportEngine._obc_keys_ready = False
                 return False
-            return bool(
+            found = bool(
                 db.session.execute(
                     text(
                         "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
@@ -1187,7 +1214,9 @@ class FinancialReportEngine:
             )
         except Exception:
             db.session.rollback()
-            return False
+            found = False
+        FinancialReportEngine._obc_keys_ready = found
+        return found
 
     def _merge_obc_coa_movements(
         self,
@@ -1205,11 +1234,12 @@ class FinancialReportEngine:
             rows = db.session.execute(
                 text(
                     """
-                    SELECT DebitLedgerKey, CreditLedgerKey, Amount
+                    SELECT DebitLedgerKey, CreditLedgerKey, SUM(ISNULL(Amount, 0)) AS Amt
                     FROM dbo.OthersBankCashTransaction
                     WHERE ISNULL(IsActive, 1) = 1
                       AND WorkDate >= :d1
                       AND WorkDate <= :d2
+                    GROUP BY DebitLedgerKey, CreditLedgerKey
                     """
                 ),
                 {"d1": date_from, "d2": date_to},
@@ -1218,7 +1248,7 @@ class FinancialReportEngine:
             db.session.rollback()
             return
         for r in rows:
-            amt = self.money(r.get("Amount"))
+            amt = self.money(r.get("Amt"))
             if amt == ZERO:
                 continue
             debit_key = (r.get("DebitLedgerKey") or "").strip()
@@ -1277,6 +1307,251 @@ class FinancialReportEngine:
             return ob_date.date()
         return ob_date if isinstance(ob_date, date) else None
 
+    def _bank_openings_map(self, date_from: date) -> dict[int, Decimal]:
+        """Master OB + prior bank movements for every account (one pass)."""
+        masters = db.session.execute(
+            text(
+                """
+                SELECT
+                    b.JtcsBankAccountID,
+                    b.OpeningBalance,
+                    b.OpeningBalanceDate,
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+                FROM dbo.JtcsBankAccountMaster b
+                LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = b.ChartGroupID
+                """
+            )
+        ).mappings().all()
+        priors = {
+            int(r["JtcsBankAccountID"]): r
+            for r in db.session.execute(
+                text(
+                    """
+                    SELECT
+                        t.JtcsBankAccountID,
+                        SUM(ISNULL(t.Debit, 0)) AS prior_debit,
+                        SUM(ISNULL(t.Credit, 0)) AS prior_credit
+                    FROM dbo.JtcsBankTransaction t
+                    INNER JOIN dbo.JtcsBankAccountMaster a
+                        ON a.JtcsBankAccountID = t.JtcsBankAccountID
+                    WHERE t.TransactionDate < :d1
+                      AND (a.OpeningBalanceDate IS NULL
+                           OR t.TransactionDate >= a.OpeningBalanceDate)
+                    GROUP BY t.JtcsBankAccountID
+                    """
+                ),
+                {"d1": date_from},
+            ).mappings().all()
+            if r.get("JtcsBankAccountID")
+        }
+        out: dict[int, Decimal] = {}
+        for row in masters:
+            bid = int(row["JtcsBankAccountID"])
+            opening = ZERO
+            ob_date = self.as_date(row.get("OpeningBalanceDate"))
+            if ob_date is None or ob_date <= date_from:
+                opening = self.money(row.get("OpeningBalance"))
+            prior = priors.get(bid)
+            out[bid] = apply_account_running(
+                opening,
+                self.money(prior["prior_debit"] if prior else 0),
+                self.money(prior["prior_credit"] if prior else 0),
+                credit_normal=is_credit_normal_nature(
+                    row.get("GroupNature"), row.get("UnderType")
+                ),
+            )
+        return out
+
+    def _customer_opening_maps(
+        self, date_from: date
+    ) -> tuple[dict[int, Decimal], dict[int, date | None]]:
+        """CustomerMaster OB + prior billed/received/followup, plus OB dates."""
+        openings: dict[int, Decimal] = {}
+        ob_dates: dict[int, date | None] = {}
+        has_cols = self._customer_has_opening_cols()
+        if has_cols:
+            for row in db.session.execute(
+                text(
+                    """
+                    SELECT CustomerID,
+                           ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                           OpeningBalanceDate,
+                           OpeningBalanceDrCr
+                    FROM dbo.CustomerMaster
+                    """
+                )
+            ).mappings().all():
+                cid = int(row["CustomerID"])
+                ob_date = self.as_date(row.get("OpeningBalanceDate"))
+                ob_dates[cid] = ob_date
+                ob_amount = self.money(row.get("OpeningBalance"))
+                ob_type = (row.get("OpeningBalanceDrCr") or "Dr").strip()
+                signed_ob = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+                if ob_amount != ZERO and (ob_date is None or ob_date <= date_from):
+                    openings[cid] = signed_ob
+
+        join_cust = (
+            "LEFT JOIN dbo.CustomerMaster c ON c.CustomerID = d.CustomerID"
+            if has_cols
+            else ""
+        )
+        ob_filter = (
+            "AND (c.OpeningBalanceDate IS NULL OR d.TransactionDate > c.OpeningBalanceDate)"
+            if has_cols
+            else ""
+        )
+        prior = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    x.CustomerID,
+                    ISNULL(SUM(x.billed), 0) AS billed,
+                    ISNULL(SUM(x.received), 0) AS received
+                FROM (
+                    SELECT
+                        d.CustomerID,
+                        ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS billed,
+                        {sql_customer_receipt_expr("d", "b")} AS received
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction b
+                        ON b.JtcsBankTransactionID = d.BankTransactionID
+                    {join_cust}
+                    WHERE d.CustomerID IS NOT NULL
+                      AND d.Status = N'Posted'
+                      AND d.TransactionDate < :date_from
+                      {ob_filter}
+                ) x
+                GROUP BY x.CustomerID
+                """
+            ),
+            {"date_from": date_from},
+        ).mappings().all()
+        for row in prior:
+            cid = int(row["CustomerID"])
+            openings[cid] = self.money(
+                openings.get(cid, ZERO)
+                + self.money(row["billed"])
+                - self.money(row["received"])
+            )
+
+        try:
+            fu_join = (
+                "LEFT JOIN dbo.CustomerMaster c ON c.CustomerID = f.CustomerID"
+                if has_cols
+                else ""
+            )
+            fu_ob = (
+                "AND (c.OpeningBalanceDate IS NULL "
+                "OR ISNULL(f.BillDate, f.WorkDate) > c.OpeningBalanceDate)"
+                if has_cols
+                else ""
+            )
+            fu_rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT f.CustomerID, SUM(ISNULL(f.BillAmount, 0)) AS billed
+                    FROM dbo.FollowupEntryMaster f
+                    {fu_join}
+                    WHERE f.CustomerID IS NOT NULL
+                      AND ISNULL(f.IsActive, 1) = 1
+                      AND f.BillNo IS NOT NULL
+                      AND LTRIM(RTRIM(f.BillNo)) <> N''
+                      AND ISNULL(f.BillAmount, 0) > 0
+                      AND ISNULL(f.BillDate, f.WorkDate) < :date_from
+                      {fu_ob}
+                      {sql_unpaid_followup_exclusion()}
+                    GROUP BY f.CustomerID
+                    """
+                ),
+                {"date_from": date_from},
+            ).mappings().all()
+            for row in fu_rows:
+                cid = int(row["CustomerID"])
+                openings[cid] = self.money(
+                    openings.get(cid, ZERO) + self.money(row["billed"])
+                )
+        except Exception:
+            db.session.rollback()
+        return openings, ob_dates
+
+    def _obc_prior_by_key(
+        self, date_from: date
+    ) -> dict[str, list[tuple[Any, Decimal]]]:
+        """CoA Other Bank/Cash nets before date_from, keyed by ledger, with WorkDate."""
+        if not self._obc_ledger_keys_ready():
+            return {}
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT DebitLedgerKey, CreditLedgerKey, WorkDate,
+                           SUM(ISNULL(Amount, 0)) AS Amt
+                    FROM dbo.OthersBankCashTransaction
+                    WHERE ISNULL(IsActive, 1) = 1
+                      AND WorkDate < :before
+                      AND (
+                            DebitLedgerKey LIKE N'coa-%'
+                         OR CreditLedgerKey LIKE N'coa-%'
+                      )
+                    GROUP BY DebitLedgerKey, CreditLedgerKey, WorkDate
+                    """
+                ),
+                {"before": date_from},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        by_key: dict[str, list[tuple[Any, Decimal]]] = defaultdict(list)
+        for row in rows:
+            amt = self.money(row.get("Amt"))
+            if amt == ZERO:
+                continue
+            wdate = row.get("WorkDate")
+            if wdate is None:
+                continue
+            debit_key = (row.get("DebitLedgerKey") or "").strip()
+            credit_key = (row.get("CreditLedgerKey") or "").strip()
+            if debit_key.startswith("coa-"):
+                by_key[debit_key].append((wdate, amt))
+            if credit_key.startswith("coa-"):
+                by_key[credit_key].append((wdate, -amt))
+        return by_key
+
+    @staticmethod
+    def _obc_after_ok(wdate: Any, after: date | None) -> bool:
+        """Match SQL `WorkDate > :after` (after is a date)."""
+        if after is None or wdate is None:
+            return after is None
+        if isinstance(wdate, datetime) and not isinstance(after, datetime):
+            return wdate > datetime.combine(after, datetime.min.time())
+        if isinstance(after, datetime) and not isinstance(wdate, datetime):
+            if isinstance(wdate, date):
+                wdate = datetime.combine(wdate, datetime.min.time())
+            return wdate > after
+        return wdate > after
+
+    @staticmethod
+    def _obc_net_from_prior(
+        prior: dict[str, list[tuple[Any, Decimal]]],
+        account_id: int,
+        *,
+        after: date | None,
+    ) -> Decimal:
+        total = ZERO
+        for wdate, signed in prior.get(f"coa-{int(account_id)}", ()):
+            if not FinancialReportEngine._obc_after_ok(wdate, after):
+                continue
+            total += signed
+        return Decimal(str(total or 0)).quantize(Decimal("0.01"))
+
     def compute_ledger_balances(
         self,
         *,
@@ -1295,6 +1570,9 @@ class FinancialReportEngine:
             if led.get("source") == "item" and led.get("item_id")
         ]
         item_prior = self._item_prior_credits(item_ids, date_from) if item_ids else {}
+        bank_openings = self._bank_openings_map(date_from)
+        customer_openings, customer_ob_dates = self._customer_opening_maps(date_from)
+        obc_prior = self._obc_prior_by_key(date_from)
         needle = (search or "").strip().lower()
         result = []
         for led in ledgers:
@@ -1307,46 +1585,31 @@ class FinancialReportEngine:
                     opening - item_prior.get(int(led["item_id"]), ZERO)
                 )
             elif led.get("source") == "bank" and led.get("bank_account_id"):
-                # Align Balance Sheet bank totals with Ledger Export
-                # (master OB + prior Dr−Cr, then period Dr−Cr).
-                opening = self._bank_opening_as_of(int(led["bank_account_id"]), date_from)
+                opening = bank_openings.get(int(led["bank_account_id"]), ZERO)
             elif led.get("customer_id") and self._group_is_receivable(
                 led.get("group_id"), groups_by_id
             ):
-                # Sundry debtors / Individual Client — Customer Ledger closing.
-                opening = self._customer_opening_as_of(int(led["customer_id"]), date_from)
+                opening = customer_openings.get(int(led["customer_id"]), ZERO)
             else:
                 opening = self._signed_opening(
                     led.get("opening_raw"), led.get("opening_dr_cr"), nature
                 )
-                ob_date = led.get("opening_date")
-                if ob_date and isinstance(ob_date, datetime):
-                    ob_date = ob_date.date()
+                ob_date = self.as_date(led.get("opening_date"))
                 if ob_date and ob_date > date_to:
                     opening = ZERO
-                if (
-                    led.get("customer_id")
-                    and abs(opening) < Decimal("0.01")
-                ):
-                    cust_open = self._customer_opening_as_of(
-                        int(led["customer_id"]), date_from
-                    )
+                if led.get("customer_id") and abs(opening) < Decimal("0.01"):
+                    cust_open = customer_openings.get(int(led["customer_id"]), ZERO)
                     if abs(cust_open) >= Decimal("0.01"):
                         opening = cust_open
             if led.get("source") == "coa" and led.get("account_id"):
-                ob_cut = None
                 if led.get("customer_id"):
-                    ob_cut = self._customer_ob_date(int(led["customer_id"]))
+                    ob_cut = customer_ob_dates.get(int(led["customer_id"]))
                 else:
-                    ob_cut = led.get("opening_date")
-                    if isinstance(ob_cut, datetime):
-                        ob_cut = ob_cut.date()
+                    ob_cut = self.as_date(led.get("opening_date"))
                 opening = self.money(
                     opening
-                    + self._obc_coa_net(
-                        int(led["account_id"]),
-                        before=date_from,
-                        after=ob_cut,
+                    + self._obc_net_from_prior(
+                        obc_prior, int(led["account_id"]), after=ob_cut
                     )
                 )
             mv = moves.get(led["ledger_key"], {"debit": ZERO, "credit": ZERO})
@@ -2021,6 +2284,8 @@ class FinancialReportEngine:
                         db.session.rollback()
 
         running = opening
+        total_debit = ZERO
+        total_credit = ZERO
         lines = [
             {
                 "kind": "opening",
@@ -2041,6 +2306,8 @@ class FinancialReportEngine:
         for r in rows:
             debit = self.money(r.get("debit"))
             credit = self.money(r.get("credit"))
+            total_debit = self.money(total_debit + debit)
+            total_credit = self.money(total_credit + credit)
             running = self.money(running + debit - credit)
             vdate = r.get("voucher_date")
             if hasattr(vdate, "strftime"):
@@ -2088,11 +2355,16 @@ class FinancialReportEngine:
                 {"label": "Account", "value": name},
                 {"label": "Chart of Account Group", "value": chart_group_name or "—"},
                 {"label": "Customer Group", "value": customer_group_name or "—"},
-                {"label": "Ledger Balance", "value": str(self.money(running))},
+                {
+                    "label": "Closing Balance as of " + date_to.strftime("%d/%m/%Y"),
+                    "value": f"{self.money(running):,.2f}",
+                },
+                {"label": "Total Credit", "value": f"{self.money(total_credit):,.2f}"},
                 {
                     "label": "Period",
                     "value": f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}",
                 },
+                {"label": "Total Debit", "value": f"{self.money(total_debit):,.2f}"},
             ],
             "opening": opening,
             "closing": running,

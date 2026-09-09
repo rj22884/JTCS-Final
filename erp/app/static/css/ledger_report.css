@@ -304,6 +304,23 @@
   border-radius: 4px;
 }
 
+.ledger-html-meta-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-html-meta-total.is-credit {
+  color: #196f3d;
+}
+
+.ledger-html-meta-total.is-debit {
+  color: #922b21;
+}
+
+.ledger-html-meta-total.is-closing {
+  color: #1a5276;
+  font-weight: 600;
+}
+
 .ledger-preview-toolbar {
   display: flex;
   flex-wrap: wrap;
