@@ -84,10 +84,18 @@ class MenuService:
         url = (cls.normalize_menu_url(getattr(menu, "MenuURL", None)) or "").rstrip("/").lower()
         return name == cls.DATA_BACKUP_MENU_NAME or url in cls.DATA_BACKUP_URLS
 
+    @classmethod
+    def _is_help_menu(cls, menu) -> bool:
+        name = (getattr(menu, "MenuName", None) or "").strip().lower()
+        url = (cls.normalize_menu_url(getattr(menu, "MenuURL", None)) or "").rstrip("/").lower()
+        return name == cls.HELP_MENU_NAME or url in cls.HELP_URLS or url.startswith("/help/")
+
     def can_access_menu(self, menu: MenuMaster, role: str | None) -> bool:
         if not menu.IsActive:
             return False
         if has_admin_role(role):
+            return True
+        if self._is_help_menu(menu):
             return True
         if has_data_backup_role(role) and (
             self._is_admin_role_root(menu) or self._is_data_backup_menu(menu)
@@ -161,6 +169,8 @@ class MenuService:
     ADMIN_ROLE_MENU_NAME = "admin role"
     DATA_BACKUP_MENU_NAME = "data backup"
     DATA_BACKUP_URLS = frozenset({"/admin/backup/data"})
+    HELP_MENU_NAME = "help"
+    HELP_URLS = frozenset({"/help"})
 
     # Old Menu Management page — keep out of ribbon (new page is Menu Customization).
     HIDDEN_MENU_NAMES = frozenset(
@@ -184,6 +194,14 @@ class MenuService:
             from app.routes.admin_import_export import ensure_import_export_menus
 
             ensure_import_export_menus()
+        except Exception:
+            from app.extensions import db
+
+            db.session.rollback()
+        try:
+            from app.routes.help import ensure_help_menus
+
+            ensure_help_menus()
         except Exception:
             from app.extensions import db
 
@@ -220,15 +238,21 @@ class MenuService:
         return False
 
     def _restrict_admin_role_to_data_backup(self, menus: list[MenuMaster]) -> list[MenuMaster]:
-        """Manager / Operator / Viewer: Admin Role contains Data Backup only."""
+        """Manager / Operator / Viewer: Admin Role shows Data Backup and Help only."""
         kept: list[MenuMaster] = []
         for menu in menus:
             if not self._is_under_admin_role(menu):
                 kept.append(menu)
                 continue
-            if self._is_admin_role_root(menu) or self._is_data_backup_menu(menu):
+            if (
+                self._is_admin_role_root(menu)
+                or self._is_data_backup_menu(menu)
+                or self._is_help_menu(menu)
+            ):
                 kept.append(menu)
-        if not any(self._is_data_backup_menu(menu) for menu in kept):
+        if not any(
+            self._is_data_backup_menu(menu) or self._is_help_menu(menu) for menu in kept
+        ):
             kept = [menu for menu in kept if not self._is_admin_role_root(menu)]
         return kept
 
@@ -288,6 +312,9 @@ class MenuService:
 
     def _ancestors_accessible(self, menu: MenuMaster, role: str | None) -> bool:
         """True only if this menu and every parent allow the user's role."""
+        if self._is_help_menu(menu):
+            # Help sits under Admin Role (admin-only parent) but is granted to every user.
+            return True
         current: MenuMaster | None = menu
         seen: set[int] = set()
         while current is not None:
@@ -310,6 +337,7 @@ class MenuService:
 
         Prevents Admin Role from appearing for Operators when a child row has
         RoleName NULL (legacy "all roles") under an admin-only parent.
+        Help is the exception: it is granted to every signed-in user.
         """
         by_id: dict[int, MenuMaster] = {}
         kept_ids: set[int] = set()

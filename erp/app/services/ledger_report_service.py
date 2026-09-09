@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from xml.dom import minidom
+
+_log = logging.getLogger(__name__)
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -228,9 +231,8 @@ class LedgerReportService:
 
         if not listing_all:
             rows = rows[:lim]
-        if date_from is not None or date_to is not None:
-            period_from, period_to = self._resolve_period(date_from, date_to)
-            self._attach_search_closings(rows, period_from, period_to)
+        period_from, period_to = self._resolve_period(date_from, date_to)
+        self._attach_search_closings(rows, period_from, period_to)
         return rows
 
     def _search_banks(self, search: str, limit: int) -> list[dict[str, Any]]:
@@ -397,6 +399,21 @@ class LedgerReportService:
         return ", ".join(str(n) for n in clean)
 
     @staticmethod
+    def _customer_preview_aligned_date_sql(date_expr: str, has_ob: bool) -> str:
+        """Match preview: period (>= From Date) plus prior rows after opening date.
+
+        Preview prior uses ``date > OpeningBalanceDate``; the period still includes
+        From–To, so same-day opening-date bills in the selected range are counted.
+        """
+        if not has_ob:
+            return ""
+        return (
+            f"AND ({date_expr} >= :date_from "
+            f"OR c.OpeningBalanceDate IS NULL "
+            f"OR {date_expr} > c.OpeningBalanceDate)"
+        )
+
+    @staticmethod
     def _dr_cr_side(amount: Decimal, *, credit_normal: bool = False) -> str:
         if abs(amount) < Decimal("0.01"):
             return ""
@@ -539,6 +556,28 @@ class LedgerReportService:
     def _search_customer_closings(
         self, ids: list[int], date_from: date, date_to: date
     ) -> dict[tuple[str, int], dict[str, Any]]:
+        unique_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for raw in ids:
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or n in seen_ids:
+                continue
+            seen_ids.add(n)
+            unique_ids.append(n)
+        chunk_size = 300
+        if len(unique_ids) > chunk_size:
+            merged: dict[tuple[str, int], dict[str, Any]] = {}
+            for start in range(0, len(unique_ids), chunk_size):
+                merged.update(
+                    self._search_customer_closings(
+                        unique_ids[start : start + chunk_size], date_from, date_to
+                    )
+                )
+            return merged
+        ids = unique_ids
         id_sql = self._sql_id_list(ids)
         if not id_sql:
             return {}
@@ -600,46 +639,52 @@ class LedgerReportService:
                     }
             except Exception:
                 db.session.rollback()
+                _log.exception("Ledger search customer openings failed")
 
-        ob_date_sql = ""
-        if has_ob:
-            ob_date_sql = "AND (c.OpeningBalanceDate IS NULL OR d.TransactionDate > c.OpeningBalanceDate)"
+        ob_date_sql = self._customer_preview_aligned_date_sql("d.TransactionDate", has_ob)
         billed: dict[int, Decimal] = {}
         received: dict[int, Decimal] = {}
+        date_params = {"date_from": date_from, "date_to": date_to}
         try:
+            # Receipt expression contains scalar subqueries — wrap first, then SUM
+            # (SQL Server cannot SUM() an aggregate/subquery expression directly).
             for row in db.session.execute(
                 text(
                     f"""
                     SELECT
-                        d.CustomerID,
-                        ISNULL(SUM(ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)), 0) AS billed,
-                        ISNULL(SUM({sql_customer_receipt_expr("d", "b")}), 0) AS received
-                    FROM dbo.JTCSDailyTransaction d
-                    LEFT JOIN dbo.JtcsBankTransaction b
-                        ON b.JtcsBankTransactionID = d.BankTransactionID
-                    INNER JOIN dbo.CustomerMaster c ON c.CustomerID = d.CustomerID
-                    WHERE d.CustomerID IN ({id_sql})
-                      AND d.Status = N'Posted'
-                      AND d.TransactionDate <= :date_to
-                      {ob_date_sql}
-                    GROUP BY d.CustomerID
+                        x.CustomerID,
+                        ISNULL(SUM(x.billed), 0) AS billed,
+                        ISNULL(SUM(x.received), 0) AS received
+                    FROM (
+                        SELECT
+                            d.CustomerID,
+                            ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS billed,
+                            {sql_customer_receipt_expr("d", "b")} AS received
+                        FROM dbo.JTCSDailyTransaction d
+                        LEFT JOIN dbo.JtcsBankTransaction b
+                            ON b.JtcsBankTransactionID = d.BankTransactionID
+                        INNER JOIN dbo.CustomerMaster c ON c.CustomerID = d.CustomerID
+                        WHERE d.CustomerID IN ({id_sql})
+                          AND d.Status = N'Posted'
+                          AND d.TransactionDate <= :date_to
+                          {ob_date_sql}
+                    ) x
+                    GROUP BY x.CustomerID
                     """
                 ),
-                {"date_to": date_to},
+                date_params,
             ).mappings().all():
                 cid = int(row["CustomerID"])
                 billed[cid] = self._money(row["billed"])
                 received[cid] = self._money(row["received"])
         except Exception:
             db.session.rollback()
+            _log.exception("Ledger search customer billed/received failed")
 
         followup: dict[int, Decimal] = {}
-        fu_date_sql = ""
-        if has_ob:
-            fu_date_sql = (
-                "AND (c.OpeningBalanceDate IS NULL "
-                "OR ISNULL(f.BillDate, f.WorkDate) > c.OpeningBalanceDate)"
-            )
+        fu_date_sql = self._customer_preview_aligned_date_sql(
+            "ISNULL(f.BillDate, f.WorkDate)", has_ob
+        )
         try:
             if db.session.execute(text("SELECT OBJECT_ID(N'dbo.FollowupEntryMaster', N'U')")).scalar():
                 for row in db.session.execute(
@@ -661,11 +706,72 @@ class LedgerReportService:
                         GROUP BY f.CustomerID
                         """
                     ),
-                    {"date_to": date_to},
+                    date_params,
                 ).mappings().all():
                     followup[int(row["CustomerID"])] = self._money(row["billed"])
         except Exception:
             db.session.rollback()
+            _log.exception("Ledger search customer followup billed failed")
+
+        obc_billed: dict[int, Decimal] = {}
+        obc_received: dict[int, Decimal] = {}
+        try:
+            has_obc = bool(
+                db.session.execute(
+                    text("SELECT OBJECT_ID(N'dbo.OthersBankCashTransaction', N'U')")
+                ).scalar()
+            )
+            has_keys = bool(
+                has_obc
+                and db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
+                        "N'CreditLedgerKey') IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_obc = False
+            has_keys = False
+        if has_keys:
+            obc_date_sql = self._customer_preview_aligned_date_sql("e.WorkDate", has_ob)
+            try:
+                for row in db.session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            a.CustomerID,
+                            ISNULL(SUM(CASE
+                                WHEN e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                                THEN e.Amount ELSE 0 END), 0) AS billed,
+                            ISNULL(SUM(CASE
+                                WHEN e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                                THEN e.Amount ELSE 0 END), 0) AS received
+                        FROM dbo.ChartOfAccountMaster a
+                        INNER JOIN dbo.CustomerMaster c ON c.CustomerID = a.CustomerID
+                        INNER JOIN dbo.OthersBankCashTransaction e
+                            ON ISNULL(e.IsActive, 1) = 1
+                           AND (
+                                e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                             OR e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                           )
+                        WHERE a.CustomerID IN ({id_sql})
+                          AND ISNULL(a.IsActive, 1) = 1
+                          AND a.CustomerID IS NOT NULL
+                          AND e.WorkDate <= :date_to
+                          {obc_date_sql}
+                        GROUP BY a.CustomerID
+                        """
+                    ),
+                    date_params,
+                ).mappings().all():
+                    cid = int(row["CustomerID"])
+                    obc_billed[cid] = self._money(row["billed"])
+                    obc_received[cid] = self._money(row["received"])
+            except Exception:
+                db.session.rollback()
+                _log.exception("Ledger search customer other-bank/cash failed")
 
         result: dict[tuple[str, int], dict[str, Any]] = {}
         for raw_id in ids:
@@ -677,7 +783,9 @@ class LedgerReportService:
                 openings.get(cid, Decimal("0.00"))
                 + billed.get(cid, Decimal("0.00"))
                 + followup.get(cid, Decimal("0.00"))
+                + obc_billed.get(cid, Decimal("0.00"))
                 - received.get(cid, Decimal("0.00"))
+                - obc_received.get(cid, Decimal("0.00"))
             )
             result[("customer", cid)] = {
                 "amount": closing,

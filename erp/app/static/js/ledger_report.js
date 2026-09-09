@@ -143,10 +143,29 @@
       return '<span class="text-muted">—</span>';
     }
     const num = parseFloat(value);
-    if (Number.isNaN(num) || Math.abs(num) < 0.005) {
-      return '<span class="lr-no-overdue">No overdue</span>';
+    if (Number.isNaN(num)) {
+      return '<span class="text-muted">—</span>';
     }
+    const kind = String((row && row.kind) || "").toLowerCase();
     const side = String((row && row.closing_dr_cr) || "").trim().toUpperCase();
+    if (kind === "customer") {
+      if (Math.abs(num) < 0.005) {
+        return '<span class="lr-no-overdue">No overdue</span>';
+      }
+      const isCr = side === "CR" || (!side && num < 0);
+      const cls = isCr ? "lr-cr-balance" : "lr-dr-balance";
+      const suffix = isCr ? " Cr" : " Dr";
+      return (
+        '<span class="' +
+        cls +
+        '">' +
+        escapeHtml(formatMoney(Math.abs(num)) + suffix) +
+        "</span>"
+      );
+    }
+    if (Math.abs(num) < 0.005) {
+      return '<span class="text-muted">' + escapeHtml(formatMoney(0)) + "</span>";
+    }
     const cls = side === "DR" ? "lr-dr-balance" : side === "CR" ? "lr-cr-balance" : "";
     const suffix = side === "DR" ? " Dr" : side === "CR" ? " Cr" : "";
     return (

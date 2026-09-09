@@ -52,6 +52,7 @@ from app.routes.menu_customization import bp as menu_customization_bp
 from app.routes.ledger_report import bp as ledger_report_bp
 from app.routes.financial_statements import bp as financial_statements_bp
 from app.routes.software_update import bp as software_update_bp
+from app.routes.help import bp as help_bp
 from app.routes.utility import bp as utility_bp
 from app.routes.seo_keywords import bp as seo_keywords_bp
 from app.routes.seo_api import bp as seo_api_bp
@@ -168,6 +169,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(ledger_report_bp)
     app.register_blueprint(financial_statements_bp)
     app.register_blueprint(software_update_bp)
+    app.register_blueprint(help_bp)
     app.register_blueprint(utility_bp)
     app.register_blueprint(seo_keywords_bp)
     app.register_blueprint(seo_api_bp)
@@ -283,6 +285,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Backup menu ensure skipped: %s", exc)
+
+        try:
+            from app.routes.help import ensure_help_menus
+
+            ensure_help_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Help menu ensure skipped: %s", exc)
 
         try:
             from app.routes.utility import ensure_utility_menus

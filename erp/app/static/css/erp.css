@@ -799,6 +799,66 @@ body.jtcs-body .modal .modal-footer {
   padding: 0.5rem 0.9rem;
 }
 
+.modal-header.jtcs-win-drag {
+  cursor: move;
+  user-select: none;
+}
+
+.jtcs-dialog-header.jtcs-win-drag {
+  cursor: move;
+  user-select: none;
+}
+
+.modal-dialog.jtcs-win-dragged {
+  position: fixed;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+.jtcs-dialog.jtcs-win-dragged {
+  position: fixed;
+  margin: 0 !important;
+}
+
+.modal.jtcs-win-maximized .modal-dialog,
+.modal-dialog.jtcs-win-maximized {
+  position: fixed !important;
+  inset: 0.35rem !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+.modal.jtcs-win-maximized .modal-content,
+.modal-dialog.jtcs-win-maximized > .modal-content {
+  height: 100%;
+  max-height: none !important;
+  border-radius: 8px;
+}
+
+.modal.jtcs-win-maximized .modal-body,
+.modal-dialog.jtcs-win-maximized .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.jtcs-dialog.jtcs-win-maximized,
+.jtcs-dialog-overlay.jtcs-win-maximized .jtcs-dialog {
+  position: fixed !important;
+  inset: 0.75rem !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+}
+
+.jtcs-win-max-btn {
+  flex-shrink: 0;
+}
+
 body.jtcs-body .modal .modal-body {
   padding: 0.7rem 0.9rem;
 }
