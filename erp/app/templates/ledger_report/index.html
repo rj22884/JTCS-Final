@@ -10,7 +10,8 @@
     <h3 class="h5 mb-1">Ledger Report</h3>
     <p class="text-muted small mb-0">
       Search a ledger from Bank Master, Customer Master, Work / Category Master, or Item Master.
-      Leave dates blank to see opening balance only. Enter From and To dates to load period transactions.
+      The grid closing balance is always as of today. Enter From and To dates to preview period
+      transactions and load the summaries.
     </p>
   </div>
 
@@ -189,5 +190,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
-<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260909ob1"></script>
+<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260910cb1"></script>
 {% endblock %}

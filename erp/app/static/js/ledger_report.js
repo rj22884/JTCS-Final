@@ -39,7 +39,8 @@
   let lastKind = "all";
   let lastSearch = "";
   let sortState = { key: "closing", dir: "desc" };
-  let openingOnly = true;
+  let openingOnly = false;
+  let closingAsOf = "";
   const GRID_COLSPAN = 6;
 
   const KIND_LABELS = {
@@ -340,8 +341,11 @@
     if (els.count) {
       let label =
         currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
+      if (closingAsOf) {
+        label += " · Closing as of " + formatDisplayDate(closingAsOf);
+      }
       if (openingOnly) {
-        label += " · Opening balance only — enter From and To dates to load period transactions";
+        label += " · Enter From and To dates to load period transactions in Preview";
       }
       els.count.textContent = label;
     }
@@ -403,7 +407,8 @@
       .then(function (res) {
         return res.json().then(function (data) {
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to search ledgers.");
-          openingOnly = !!data.opening_only;
+          openingOnly = !!data.preview_needs_dates;
+          closingAsOf = data.closing_as_of || cfg.today || "";
           renderRows(data.rows || [], kind, search);
         });
       })
@@ -538,13 +543,13 @@
     loadLedgers();
   });
   els.dateFrom?.addEventListener("change", function () {
-    clearTimeout(searchTimer);
-    loadLedgers();
+    openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    renderRows(currentRows, lastKind, lastSearch);
     loadSummaries();
   });
   els.dateTo?.addEventListener("change", function () {
-    clearTimeout(searchTimer);
-    loadLedgers();
+    openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    renderRows(currentRows, lastKind, lastSearch);
     loadSummaries();
   });
   document.getElementById("ledgerReportGrid")?.addEventListener("click", onSortHeader);

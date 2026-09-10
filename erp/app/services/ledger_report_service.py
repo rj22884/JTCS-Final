@@ -231,10 +231,11 @@ class LedgerReportService:
 
         if not listing_all:
             rows = rows[:lim]
-        if date_from is not None and date_to is not None:
-            self._attach_search_closings(rows, date_from, date_to)
-        else:
-            self._attach_search_openings(rows)
+        # Grid closing is always as of the current system date. Preview / summaries
+        # still use the page From–To dates; those args are ignored here.
+        _ = (date_from, date_to)
+        as_of = date.today()
+        self._attach_search_closings(rows, as_of)
         return rows
 
     def _search_banks(self, search: str, limit: int) -> list[dict[str, Any]]:
@@ -414,6 +415,13 @@ class LedgerReportService:
             f"OR c.OpeningBalanceDate IS NULL "
             f"OR {date_expr} > c.OpeningBalanceDate)"
         )
+
+    @staticmethod
+    def _customer_as_of_date_sql(date_expr: str, has_ob: bool) -> str:
+        """Movements on/after opening date for as-of-today grid closing."""
+        if not has_ob:
+            return ""
+        return f"AND (c.OpeningBalanceDate IS NULL OR {date_expr} >= c.OpeningBalanceDate)"
 
     @staticmethod
     def _dr_cr_side(amount: Decimal, *, credit_normal: bool = False) -> str:
@@ -612,10 +620,8 @@ class LedgerReportService:
             }
         return result
 
-    def _attach_search_closings(
-        self, rows: list[dict[str, Any]], date_from: date, date_to: date
-    ) -> None:
-        """Add period closing (as of To Date) for the search grid."""
+    def _attach_search_closings(self, rows: list[dict[str, Any]], as_of: date) -> None:
+        """Add closing as of the current system date for the search grid."""
         for row in rows:
             row.setdefault("closing", None)
         by_kind: dict[str, list[int]] = {"bank": [], "customer": [], "work": [], "item": []}
@@ -630,13 +636,13 @@ class LedgerReportService:
 
         closings: dict[tuple[str, int], dict[str, Any]] = {}
         if by_kind["bank"]:
-            closings.update(self._search_bank_closings(by_kind["bank"], date_from, date_to))
+            closings.update(self._search_bank_closings(by_kind["bank"], as_of))
         if by_kind["customer"]:
-            closings.update(self._search_customer_closings(by_kind["customer"], date_from, date_to))
+            closings.update(self._search_customer_closings(by_kind["customer"], as_of))
         if by_kind["work"]:
-            closings.update(self._search_work_closings(by_kind["work"], date_from, date_to))
+            closings.update(self._search_work_closings(by_kind["work"], as_of))
         if by_kind["item"]:
-            closings.update(self._search_item_closings(by_kind["item"], date_from, date_to))
+            closings.update(self._search_item_closings(by_kind["item"], as_of))
 
         for row in rows:
             kind = (row.get("kind") or "").strip().lower()
@@ -652,7 +658,7 @@ class LedgerReportService:
             row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
 
     def _search_bank_closings(
-        self, ids: list[int], date_from: date, date_to: date
+        self, ids: list[int], as_of: date
     ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
@@ -692,7 +698,7 @@ class LedgerReportService:
                     ) AS GroupNature
             """
             group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
-        date_to_next = date_to + timedelta(days=1)
+        date_to_next = as_of + timedelta(days=1)
         try:
             rows = db.session.execute(
                 text(
@@ -700,7 +706,7 @@ class LedgerReportService:
                     SELECT
                         a.JtcsBankAccountID AS account_id,
                         CASE
-                            WHEN a.OpeningBalanceDate IS NULL OR a.OpeningBalanceDate <= :date_from
+                            WHEN a.OpeningBalanceDate IS NULL OR a.OpeningBalanceDate <= :as_of
                             THEN ISNULL(a.OpeningBalance, 0)
                             ELSE 0
                         END AS opening_balance,
@@ -724,7 +730,7 @@ class LedgerReportService:
                     WHERE a.JtcsBankAccountID IN ({id_sql})
                     """
                 ),
-                {"date_from": date_from, "date_to_next": date_to_next},
+                {"as_of": as_of, "date_to_next": date_to_next},
             ).mappings().all()
         except Exception:
             db.session.rollback()
@@ -745,7 +751,7 @@ class LedgerReportService:
         return result
 
     def _search_customer_closings(
-        self, ids: list[int], date_from: date, date_to: date
+        self, ids: list[int], as_of: date
     ) -> dict[tuple[str, int], dict[str, Any]]:
         unique_ids: list[int] = []
         seen_ids: set[int] = set()
@@ -764,7 +770,7 @@ class LedgerReportService:
             for start in range(0, len(unique_ids), chunk_size):
                 merged.update(
                     self._search_customer_closings(
-                        unique_ids[start : start + chunk_size], date_from, date_to
+                        unique_ids[start : start + chunk_size], as_of
                     )
                 )
             return merged
@@ -818,7 +824,7 @@ class LedgerReportService:
                     ob_amount = self._money(row["OpeningBalance"])
                     ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
                     signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
-                    if ob_amount != 0 and (ob_date is None or ob_date <= date_from):
+                    if ob_amount != 0 and (ob_date is None or ob_date <= as_of):
                         openings[cid] = signed
                     else:
                         openings[cid] = Decimal("0.00")
@@ -832,10 +838,10 @@ class LedgerReportService:
                 db.session.rollback()
                 _log.exception("Ledger search customer openings failed")
 
-        ob_date_sql = self._customer_preview_aligned_date_sql("d.TransactionDate", has_ob)
+        ob_date_sql = self._customer_as_of_date_sql("d.TransactionDate", has_ob)
         billed: dict[int, Decimal] = {}
         received: dict[int, Decimal] = {}
-        date_params = {"date_from": date_from, "date_to": date_to}
+        date_params = {"date_to": as_of}
         try:
             # Receipt expression contains scalar subqueries — wrap first, then SUM
             # (SQL Server cannot SUM() an aggregate/subquery expression directly).
@@ -873,7 +879,7 @@ class LedgerReportService:
             _log.exception("Ledger search customer billed/received failed")
 
         followup: dict[int, Decimal] = {}
-        fu_date_sql = self._customer_preview_aligned_date_sql(
+        fu_date_sql = self._customer_as_of_date_sql(
             "ISNULL(f.BillDate, f.WorkDate)", has_ob
         )
         try:
@@ -926,7 +932,7 @@ class LedgerReportService:
             has_obc = False
             has_keys = False
         if has_keys:
-            obc_date_sql = self._customer_preview_aligned_date_sql("e.WorkDate", has_ob)
+            obc_date_sql = self._customer_as_of_date_sql("e.WorkDate", has_ob)
             try:
                 for row in db.session.execute(
                     text(
@@ -982,7 +988,7 @@ class LedgerReportService:
                 "amount": closing,
                 "dr_cr": self._dr_cr_side(closing),
             }
-        self._adjust_customer_asset_class_closings(result, asset_meta, date_to)
+        self._adjust_customer_asset_class_closings(result, asset_meta, as_of)
         return result
 
     def _customer_asset_class_calc(
@@ -1177,7 +1183,7 @@ class LedgerReportService:
         return data
 
     def _search_work_closings(
-        self, ids: list[int], date_from: date, date_to: date
+        self, ids: list[int], as_of: date
     ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
@@ -1237,7 +1243,7 @@ class LedgerReportService:
                     GROUP BY w.WorkID, w.LedgerKind
                     """
                 ),
-                {"date_from": date_from, "date_to": date_to},
+                {"date_from": date(2000, 1, 1), "date_to": as_of},
             ).mappings().all()
         except Exception:
             db.session.rollback()
@@ -1262,7 +1268,7 @@ class LedgerReportService:
         return result
 
     def _search_item_closings(
-        self, ids: list[int], date_from: date, date_to: date
+        self, ids: list[int], as_of: date
     ) -> dict[tuple[str, int], dict[str, Any]]:
         id_sql = self._sql_id_list(ids)
         if not id_sql:
@@ -1296,7 +1302,7 @@ class LedgerReportService:
                     WHERE i.ItemID IN ({id_sql})
                     """
                 ),
-                {"date_to": date_to},
+                {"date_to": as_of},
             ).mappings().all()
         except Exception:
             db.session.rollback()
@@ -1319,7 +1325,7 @@ class LedgerReportService:
             if hasattr(ob_date, "date"):
                 ob_date = ob_date.date()
             opening = Decimal("0.00")
-            if ob_date is None or ob_date <= date_from:
+            if ob_date is None or ob_date <= as_of:
                 opening = self._money(row["OpeningBalance"])
             closing = self._money(opening - self._money(row["billed"]))
             gid = row.get("ChartGroupID")
@@ -1336,7 +1342,7 @@ class LedgerReportService:
                             rate=rate,
                             purchase_date=row.get("PurchaseDate"),
                             opening_date=ob_date,
-                            as_of=date_to,
+                            as_of=as_of,
                         )
                         closing = self._money(calc["wdv"])
                 elif gid_int in inv_ids:
@@ -1347,7 +1353,7 @@ class LedgerReportService:
                             rate=rate,
                             purchase_date=row.get("PurchaseDate"),
                             opening_date=ob_date,
-                            as_of=date_to,
+                            as_of=as_of,
                         )
                         closing = self._money(calc["current_value"])
             result[("item", int(row["ItemID"]))] = {
