@@ -231,8 +231,10 @@ class LedgerReportService:
 
         if not listing_all:
             rows = rows[:lim]
-        period_from, period_to = self._resolve_period(date_from, date_to)
-        self._attach_search_closings(rows, period_from, period_to)
+        if date_from is not None and date_to is not None:
+            self._attach_search_closings(rows, date_from, date_to)
+        else:
+            self._attach_search_openings(rows)
         return rows
 
     def _search_banks(self, search: str, limit: int) -> list[dict[str, Any]]:
@@ -420,6 +422,195 @@ class LedgerReportService:
         if credit_normal:
             return "Cr" if amount > 0 else "Dr"
         return "Dr" if amount > 0 else "Cr"
+
+    def _attach_search_openings(self, rows: list[dict[str, Any]]) -> None:
+        """Master opening only — skip period movements until From/To dates are set."""
+        for row in rows:
+            row.setdefault("closing", None)
+            row["opening_only"] = True
+        by_kind: dict[str, list[int]] = {"bank": [], "customer": [], "work": [], "item": []}
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            if kind not in by_kind:
+                continue
+            try:
+                by_kind[kind].append(int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+        closings: dict[tuple[str, int], dict[str, Any]] = {}
+        if by_kind["bank"]:
+            closings.update(self._search_bank_openings(by_kind["bank"]))
+        if by_kind["customer"]:
+            closings.update(self._search_customer_openings(by_kind["customer"]))
+        if by_kind["item"]:
+            closings.update(self._search_item_openings(by_kind["item"]))
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            try:
+                key = (kind, int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+            if kind == "work":
+                row["closing"] = 0.0
+                row["closing_dr_cr"] = ""
+                continue
+            info = closings.get(key)
+            if not info:
+                row["closing"] = 0.0
+                row["closing_dr_cr"] = ""
+                continue
+            amount = self._money(info.get("amount"))
+            row["closing"] = float(amount)
+            row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
+
+    def _search_bank_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        group_select = """
+                    CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                    CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+        """
+        group_join = ""
+        try:
+            has_group = bool(
+                db.session.execute(
+                    text(
+                        """
+                        SELECT CASE
+                            WHEN COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'ChartGroupID') IS NULL THEN 0
+                            WHEN OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NULL THEN 0
+                            ELSE 1
+                        END
+                        """
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_group = False
+        if has_group:
+            group_select = """
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+            """
+            group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        a.JtcsBankAccountID AS account_id,
+                        ISNULL(a.OpeningBalance, 0) AS opening_balance,
+                        {group_select}
+                    FROM dbo.JtcsBankAccountMaster a
+                    {group_join}
+                    WHERE a.JtcsBankAccountID IN ({id_sql})
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
+            opening = self._money(row["opening_balance"])
+            result[("bank", int(row["account_id"]))] = {
+                "amount": opening,
+                "dr_cr": self._dr_cr_side(opening, credit_normal=credit_normal),
+            }
+        return result
+
+    def _search_customer_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            has_ob = bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.CustomerMaster', N'OpeningBalance') "
+                        "IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_ob = False
+        if not has_ob:
+            return {("customer", int(cid)): {"amount": Decimal("0.00"), "dr_cr": ""} for cid in ids if cid}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        try:
+            for row in db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        c.CustomerID,
+                        ISNULL(c.OpeningBalance, 0) AS OpeningBalance,
+                        c.OpeningBalanceDrCr
+                    FROM dbo.CustomerMaster c
+                    WHERE c.CustomerID IN ({id_sql})
+                    """
+                )
+            ).mappings().all():
+                cid = int(row["CustomerID"])
+                ob_amount = self._money(row["OpeningBalance"])
+                ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
+                signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+                result[("customer", cid)] = {
+                    "amount": signed,
+                    "dr_cr": self._dr_cr_side(signed),
+                }
+        except Exception:
+            db.session.rollback()
+            return {}
+        return result
+
+    def _search_item_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT ItemID, ISNULL(OpeningBalance, 0) AS OpeningBalance
+                    FROM dbo.ItemMaster
+                    WHERE ItemID IN ({id_sql})
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            opening = self._money(row["OpeningBalance"])
+            result[("item", int(row["ItemID"]))] = {
+                "amount": opening,
+                "dr_cr": self._dr_cr_side(opening),
+            }
+        return result
 
     def _attach_search_closings(
         self, rows: list[dict[str, Any]], date_from: date, date_to: date
@@ -1165,6 +1356,178 @@ class LedgerReportService:
             }
         return result
 
+    def _opening_preview_payload(
+        self,
+        *,
+        kind: str,
+        title: str,
+        entity_name: str,
+        entity_id: int,
+        meta: list[tuple[str, str]],
+        opening: Decimal,
+        opening_date: date | None,
+    ) -> dict[str, Any]:
+        running = self._money(opening)
+        ob = opening_date
+        if ob is not None and hasattr(ob, "date") and not isinstance(ob, date):
+            ob = ob.date()
+        date_str = ob.strftime("%d/%m/%Y") if ob else ""
+        line = self._decorate_line(
+            {
+                "date": date_str,
+                "description": "Opening Balance",
+                "debit": Decimal("0.00"),
+                "credit": Decimal("0.00"),
+                "balance": running,
+                "kind": "opening",
+            }
+        )
+        period = self._period_fields(None, None)
+        return {
+            "kind": kind,
+            "title": title,
+            "entity_name": entity_name,
+            "entity_id": entity_id,
+            "meta": meta
+            + [
+                ("Opening Balance", f"{running:,.2f}"),
+                ("Period", "Opening balance only — enter From and To dates to load transactions"),
+            ],
+            "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
+            "lines": [line],
+            "closing": running,
+            "opening_only": True,
+            **period,
+        }
+
+    def _preview_opening_only(self, kind_key: str, entity_id: int) -> dict[str, Any]:
+        """Fast preview: master opening line, no period movements."""
+        if kind_key == "bank":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        JtcsBankAccountID,
+                        ISNULL(AccountHolderName, N'') AS AccountHolderName,
+                        ISNULL(AccountType, N'') AS AccountType,
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate
+                    FROM dbo.JtcsBankAccountMaster
+                    WHERE JtcsBankAccountID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Bank account not found.")
+            name = (row["AccountHolderName"] or row["AccountType"] or f"Bank {entity_id}").strip()
+            return self._opening_preview_payload(
+                kind="bank",
+                title="Bank Account Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Bank Account", name),
+                    ("Account Type", (row["AccountType"] or "").strip() or "—"),
+                ],
+                opening=self._money(row["OpeningBalance"]),
+                opening_date=row["OpeningBalanceDate"],
+            )
+        if kind_key == "customer":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        CustomerID, CustomerName, MobileNumber, PANNumber,
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate,
+                        ISNULL(OpeningBalanceDrCr, N'Dr') AS OpeningBalanceDrCr
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Customer not found.")
+            name = (row["CustomerName"] or f"Customer {entity_id}").strip()
+            ob_amount = self._money(row["OpeningBalance"])
+            ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
+            signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+            return self._opening_preview_payload(
+                kind="customer",
+                title="Customer Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Customer", name),
+                    ("Customer ID", str(entity_id)),
+                    ("Mobile", (row["MobileNumber"] or "").strip() or "—"),
+                    ("PAN", (row["PANNumber"] or "").strip() or "—"),
+                ],
+                opening=signed,
+                opening_date=row["OpeningBalanceDate"],
+            )
+        if kind_key == "work":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT WorkID, WorkName, LedgerKind
+                    FROM dbo.WorkMaster
+                    WHERE WorkID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Work / Category not found.")
+            name = (row["WorkName"] or f"Work {entity_id}").strip()
+            return self._opening_preview_payload(
+                kind="work",
+                title="Work / Category Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Work / Category", name),
+                    ("Ledger Kind", (row["LedgerKind"] or "").strip() or "—"),
+                ],
+                opening=Decimal("0.00"),
+                opening_date=None,
+            )
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        row = db.session.execute(
+            text(
+                """
+                SELECT ItemID, ItemCode, ItemName,
+                       ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                       OpeningBalanceDate
+                FROM dbo.ItemMaster
+                WHERE ItemID = :id
+                """
+            ),
+            {"id": entity_id},
+        ).mappings().first()
+        if row is None:
+            raise ValueError("Item not found.")
+        name = (row["ItemName"] or f"Item {entity_id}").strip()
+        return self._opening_preview_payload(
+            kind="item",
+            title="Item Ledger",
+            entity_name=name,
+            entity_id=entity_id,
+            meta=[
+                ("Item", name),
+                ("Item Code", (row["ItemCode"] or "").strip() or "—"),
+            ],
+            opening=self._money(row["OpeningBalance"]),
+            opening_date=row["OpeningBalanceDate"],
+        )
+
     def preview_ledger(
         self,
         kind: str,
@@ -1176,6 +1539,8 @@ class LedgerReportService:
         kind_key = (kind or "").strip().lower()
         if kind_key not in self.KINDS:
             raise ValueError("Invalid ledger type.")
+        if date_from is None or date_to is None:
+            return self._preview_opening_only(kind_key, entity_id)
         if kind_key == "bank":
             return self._simplify_export_ledger(
                 LedgerExportService().bank_ledger_preview_data(

@@ -190,7 +190,13 @@ def search():
             date_from=date_from,
             date_to=date_to,
         )
-        return jsonify({"ok": True, "rows": rows})
+        return jsonify(
+            {
+                "ok": True,
+                "rows": rows,
+                "opening_only": date_from is None or date_to is None,
+            }
+        )
     except Exception as exc:
         db.session.rollback()
         return jsonify({"ok": False, "error": map_db_exception(exc) or str(exc)}), 500
@@ -201,6 +207,8 @@ def search():
 def summaries():
     date_from = _parse_date_arg("date_from")
     date_to = _parse_date_arg("date_to")
+    if date_from is None or date_to is None:
+        return jsonify({"ok": True, "summaries": None, "opening_only": True})
     try:
         from app.services.financial_statements.reports import FinancialStatementsService
 

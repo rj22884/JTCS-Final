@@ -44,19 +44,20 @@
     const fsTo = document.getElementById("fsDateTo");
     const dashFrom = document.getElementById("dashDateFrom");
     const dashTo = document.getElementById("dashDateTo");
+    const onLedgerReport = !!pageFrom;
     const from =
       (els.from && els.from.value) ||
       (pageFrom && pageFrom.value) ||
       (fsFrom && fsFrom.value) ||
       (dashFrom && dashFrom.value) ||
-      cfg.fyStart ||
+      (onLedgerReport ? "" : cfg.fyStart || "") ||
       "";
     const to =
       (els.to && els.to.value) ||
       (pageTo && pageTo.value) ||
       (fsTo && fsTo.value) ||
       (dashTo && dashTo.value) ||
-      cfg.today ||
+      (onLedgerReport ? "" : cfg.today || "") ||
       "";
     const params = new URLSearchParams();
     if (from) params.set("date_from", from);

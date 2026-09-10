@@ -39,6 +39,7 @@
   let lastKind = "all";
   let lastSearch = "";
   let sortState = { key: "closing", dir: "desc" };
+  let openingOnly = true;
   const GRID_COLSPAN = 6;
 
   const KIND_LABELS = {
@@ -250,13 +251,24 @@
     if (els.summaryPlBody) els.summaryPlBody.innerHTML = plHtml;
   }
 
+  function summaryPlaceholder() {
+    return '<div class="text-muted small px-3 py-3">Enter From and To dates to load this summary.</div>';
+  }
+
   function loadSummaries() {
     if (!cfg.summaryUrl || !els.summaryBsBody) return;
-    const params = new URLSearchParams();
     const from = (els.dateFrom?.value || "").trim();
     const to = (els.dateTo?.value || "").trim();
-    if (from) params.set("date_from", from);
-    if (to) params.set("date_to", to);
+    if (!from || !to) {
+      if (els.summaryBsPeriod) els.summaryBsPeriod.textContent = "";
+      if (els.summaryPlPeriod) els.summaryPlPeriod.textContent = "";
+      if (els.summaryBsBody) els.summaryBsBody.innerHTML = summaryPlaceholder();
+      if (els.summaryPlBody) els.summaryPlBody.innerHTML = summaryPlaceholder();
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("date_from", from);
+    params.set("date_to", to);
     const empty = '<div class="lr-summary-empty text-muted">Unable to load summary.</div>';
     return fetch(cfg.summaryUrl + "?" + params.toString(), {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
@@ -264,6 +276,11 @@
       .then(function (res) {
         return res.json().then(function (data) {
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load summaries.");
+          if (!data.summaries) {
+            if (els.summaryBsBody) els.summaryBsBody.innerHTML = summaryPlaceholder();
+            if (els.summaryPlBody) els.summaryPlBody.innerHTML = summaryPlaceholder();
+            return;
+          }
           renderSummaries(data.summaries || {});
         });
       })
@@ -321,7 +338,12 @@
       return;
     }
     if (els.count) {
-      els.count.textContent = currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
+      let label =
+        currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
+      if (openingOnly) {
+        label += " · Opening balance only — enter From and To dates to load period transactions";
+      }
+      els.count.textContent = label;
     }
     els.body.innerHTML = sortRows(currentRows)
       .map(function (row) {
@@ -381,6 +403,7 @@
       .then(function (res) {
         return res.json().then(function (data) {
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to search ledgers.");
+          openingOnly = !!data.opening_only;
           renderRows(data.rows || [], kind, search);
         });
       })

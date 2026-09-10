@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260823cash2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260909emo1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -60,13 +60,26 @@
             <div class="small text-muted">Cash</div>
             <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
           </button>
+          <div class="dash-today-metric-stack">
           <button type="button" class="dash-today-metric dash-metric-btn dash-today-closing"
                   data-metric="cash_closing_balance" data-label="Cash Closing Balance"
                   title="View Cash Closing Balance">
             <div class="small text-muted">Cash Closing Balance</div>
-            <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
-                    data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+            <div class="dash-today-amt-row">
+              <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
+                      data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+              <span class="dash-notes-match-emoji" id="dashCashCloseEmoji" aria-hidden="true"></span>
+            </div>
           </button>
+          <button type="button" class="dash-today-metric dash-notes-sub" id="dashCurrencyNotesBtn"
+                  title="Enter currency notes closing">
+            <div class="small text-muted">Currency Notes Closing</div>
+            <div class="dash-today-amt-row">
+              <strong id="dashCurrencyNotesTotal">₹ {{ '%.2f'|format(currency_notes.total_amount or 0) }}</strong>
+              <span class="dash-notes-match-emoji" id="dashNotesCloseEmoji" aria-hidden="true"></span>
+            </div>
+          </button>
+          </div>
           {% if today_activity.bank_lines %}
             {% for bank in today_activity.bank_lines %}
             <button type="button" class="dash-today-metric dash-today-metric-btn"
@@ -657,6 +670,52 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="dashCurrencyNotesModal" tabindex="-1" aria-labelledby="dashCurrencyNotesTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="dashCurrencyNotesTitle">Currency Notes Closing</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">
+          Daily physical-note count. This does not change Cash Closing Balance.
+        </p>
+        <div class="mb-3">
+          <label class="form-label" for="dashNotesDate">Date</label>
+          <input type="date" class="form-control form-control-sm" id="dashNotesDate"
+                 value="{{ system_date.isoformat() }}">
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" id="dashNotesGrid">
+            <thead>
+              <tr>
+                <th>Currency notes</th>
+                <th class="text-end">Total Notes</th>
+                <th class="text-end">Total Amount</th>
+              </tr>
+            </thead>
+            <tbody id="dashNotesBody"></tbody>
+            <tfoot>
+              <tr class="fw-semibold">
+                <td>Total</td>
+                <td class="text-end" id="dashNotesTotalCount">0</td>
+                <td class="text-end" id="dashNotesTotalAmount">₹ 0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary btn-sm" id="dashNotesSaveBtn">
+          <i class="bi bi-check2"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -671,6 +730,8 @@
     detailsUrl: {{ url_for('dashboard.metric_details') | tojson }},
     analyticsUrl: {{ url_for('dashboard.analytics') | tojson }},
     todayDetailsUrl: {{ url_for('dashboard.today_activity_details') | tojson }},
+    notesUrl: {{ url_for('dashboard.currency_notes_get') | tojson }},
+    notesSaveUrl: {{ url_for('dashboard.currency_notes_save') | tojson }},
     createUrl: {{ url_for('dashboard.manual_entry_create') | tojson }},
     updateUrlTemplate: {{ url_for('dashboard.manual_entry_update', entry_id=0) | tojson }},
     deleteUrlTemplate: {{ url_for('dashboard.manual_entry_delete', entry_id=0) | tojson }},
@@ -723,8 +784,9 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260823dmy1"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260909emo1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260820group1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>
+<script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20260909emo1"></script>
 {% endblock %}
