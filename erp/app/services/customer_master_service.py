@@ -9,7 +9,6 @@ from urllib.request import Request, urlopen
 from sqlalchemy.exc import IntegrityError
 
 from app.customer_master.constants import (
-    GROUP_TABS,
     MASTER_MANDATORY_FIELDS,
     OTHER_CUSTOMER_TYPE,
     OTHER_TYPE_MANDATORY_FIELDS,
@@ -326,10 +325,6 @@ class CustomerMasterService:
             chart_ids = self._parse_id_list([single] if single not in (None, "") else [])
         if not chart_ids:
             raise ValueError("Select Chart of Account Group.")
-        if not self.group_service.is_group_valid_for_chart(group, chart_ids[0]):
-            raise ValueError(
-                "Selected Customer Group is not valid for the selected Chart of Account Group."
-            )
         self._apply_asset_class_payload(payload, chart_ids)
 
         gst_number = (payload.get("gst_number") or "").strip()
@@ -521,7 +516,6 @@ class CustomerMasterService:
             db.session.rollback()
         return {
             "groups": self.group_service.list_active_groups(),
-            "group_tabs": self.group_service.build_group_tabs_map(),
             "tab_labels": TAB_LABELS,
             "mandatory_fields": sorted(MASTER_MANDATORY_FIELDS),
             "other_type_mandatory_fields": sorted(OTHER_TYPE_MANDATORY_FIELDS),

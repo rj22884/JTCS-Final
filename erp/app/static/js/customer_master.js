@@ -96,7 +96,6 @@
   let aadhaarPollTimer = null;
   let aadhaarParsedData = null;
   let aadhaarPhotoUrl = "";
-  const groupTabs = window.CM_GROUP_TABS || {};
   const tabLabels = window.CM_TAB_LABELS || {};
   const mandatoryFields = new Set(window.CM_MANDATORY || []);
   const otherMandatoryFields = new Set(window.CM_OTHER_MANDATORY || ["customer_name"]);
@@ -571,14 +570,23 @@
   }
 
   function rebuildCustomerFormForChartGroup() {
-    const groupCode = els.customerGroup?.value || "";
-    if (els.tabNav) buildTabs(groupCode);
+    if (els.tabNav) buildTabs();
     else syncChartGroupFieldVisibility();
     if (cmDynFields) cmDynFields.sync();
   }
 
-  function buildTabs(groupCode) {
-    const allTabs = groupTabs[groupCode] || [];
+  function allFormTabKeys() {
+    const keys = [];
+    els.formPanels?.querySelectorAll(".cm-tab-panel").forEach(function (panel) {
+      const key = panel.dataset.tab;
+      if (key && keys.indexOf(key) < 0) keys.push(key);
+    });
+    if (keys.length) return keys;
+    return Object.keys(tabLabels);
+  }
+
+  function buildTabs() {
+    const allTabs = allFormTabKeys();
     const filter = chartGroupFieldFilter();
     const tabs = filter.configured
       ? allTabs.filter(function (tab) {
@@ -601,7 +609,7 @@
   }
 
   function showTabPanel(tabKey, visibleTabs) {
-    const allowed = visibleTabs || groupTabs[els.customerGroup?.value] || [];
+    const allowed = visibleTabs || allFormTabKeys();
     els.formPanels?.querySelectorAll(".cm-tab-panel").forEach(function (panel) {
       const key = panel.dataset.tab;
       const show = allowed.includes(key) && key === tabKey;
@@ -1097,11 +1105,6 @@
   const allCustomerGroups = (window.CM_CUSTOMER_GROUPS || []).map(function (g) {
     return { code: String((g && g.code) || "").trim(), label: (g && g.label) || "" };
   }).filter(function (g) { return g.code; });
-  const groupChartFilter = window.CM_GROUP_CHART_FILTER || {};
-  const customerGroupUsage = groupChartFilter.usage || {};
-  const chartNatures = groupChartFilter.chart_natures || {};
-  const INVALID_COMBO_MSG =
-    "Selected Customer Group is not valid for the selected Chart of Account Group.";
 
   function selectedChartGroupIds() {
     if (!els.chartGroups) return [];
@@ -1136,10 +1139,7 @@
           if (!el) return false;
           const wrap = el.closest(".cm-field-wrap") || el.closest("[class*='col-']");
           if (wrap && wrap.classList.contains("cm-chart-hidden")) return false;
-          const panel = el.closest(".cm-tab-panel");
-          if (!panel) return true;
-          const allowed = groupTabs[els.customerGroup?.value] || [];
-          return allowed.indexOf(panel.dataset.tab) >= 0;
+          return true;
         },
         onError: function (err) {
           if (els.formError) {
@@ -1149,70 +1149,6 @@
         },
       })
     : null;
-
-  function chartNatureForId(chartId) {
-    if (chartId == null || chartId === "") return "";
-    const fromMap = chartNatures[String(chartId)];
-    if (fromMap) return String(fromMap).trim();
-    const g = chartGroupMeta[String(chartId)] || {};
-    return String(g.group_nature || "").trim();
-  }
-
-  function isUniversalCustomerGroup(code, label) {
-    const name = String(label || "").trim().toLowerCase();
-    if (name.indexOf("none above") >= 0) return true;
-    const key = String(code || "").trim().toUpperCase().replace(/[\s_-]/g, "");
-    return key === "NONE" || key === "NONEABOVE" || key === "NA";
-  }
-
-  function allowedCustomerGroupCodes(chartId, includeCode) {
-    if (!chartId) return [];
-    const selectedNature = chartNatureForId(chartId);
-    const include = String(includeCode || "").trim().toUpperCase();
-    const gid = parseInt(chartId, 10);
-    const allowed = [];
-    allCustomerGroups.forEach(function (g) {
-      const code = g.code;
-      const key = String(code).toUpperCase();
-      if (include && key === include) {
-        if (allowed.indexOf(code) < 0) allowed.push(code);
-        return;
-      }
-      if (isUniversalCustomerGroup(code, g.label)) {
-        if (allowed.indexOf(code) < 0) allowed.push(code);
-        return;
-      }
-      const used = customerGroupUsage[key] || customerGroupUsage[code] || [];
-      const usedIds = (Array.isArray(used) ? used : []).map(function (id) {
-        return parseInt(id, 10);
-      }).filter(function (id) { return id > 0; });
-      if (!usedIds.length) {
-        allowed.push(code);
-        return;
-      }
-      if (usedIds.indexOf(gid) >= 0) {
-        allowed.push(code);
-        return;
-      }
-      const usedNatures = {};
-      usedIds.forEach(function (id) {
-        const n = chartNatureForId(id);
-        if (n) usedNatures[n] = true;
-      });
-      if (selectedNature && usedNatures[selectedNature]) {
-        allowed.push(code);
-      }
-    });
-    return allowed;
-  }
-
-  function isCustomerGroupValidForChart(code, chartId) {
-    const group = String(code || "").trim().toUpperCase();
-    if (!group || !chartId) return false;
-    return allowedCustomerGroupCodes(chartId, null).some(function (c) {
-      return String(c).toUpperCase() === group;
-    });
-  }
 
   function setGroupComboWarning(message) {
     if (!els.groupComboWarn) return;
@@ -1225,20 +1161,29 @@
     els.groupComboWarn.classList.remove("d-none");
   }
 
-  function rebuildCustomerGroupOptions(preferredCode, opts) {
+  function rebuildCustomerGroupOptions(preferredCode) {
     if (!els.customerGroup) return;
-    opts = opts || {};
     const chartId = selectedChartGroupIds()[0] || "";
     const preferred = String(preferredCode || "").trim();
-    const keep = opts.keepInvalid ? preferred : "";
-    const allowed = chartId ? allowedCustomerGroupCodes(chartId, keep) : [];
     const labels = {};
-    allCustomerGroups.forEach(function (g) { labels[String(g.code).toUpperCase()] = g.label || g.code; });
+    allCustomerGroups.forEach(function (g) {
+      labels[String(g.code).toUpperCase()] = g.label || g.code;
+    });
     Array.prototype.slice.call(els.customerGroup.options || []).forEach(function (opt) {
       if (opt.value) labels[String(opt.value).toUpperCase()] = opt.textContent;
     });
+    const listed = [];
+    if (chartId) {
+      allCustomerGroups.forEach(function (g) {
+        listed.push(g.code);
+      });
+      const prefKey = preferred.toUpperCase();
+      if (preferred && !listed.some(function (c) { return String(c).toUpperCase() === prefKey; })) {
+        listed.push(preferred);
+      }
+    }
     let html = '<option value="">-- Select Group --</option>';
-    allowed.forEach(function (code) {
+    listed.forEach(function (code) {
       html +=
         '<option value="' +
         escapeHtml(code) +
@@ -1249,14 +1194,9 @@
     els.customerGroup.innerHTML = html;
     els.customerGroup.disabled = !chartId;
     const prefKey = preferred.toUpperCase();
-    const match = allowed.find(function (c) { return String(c).toUpperCase() === prefKey; });
+    const match = listed.find(function (c) { return String(c).toUpperCase() === prefKey; });
     els.customerGroup.value = match || "";
-    const current = (els.customerGroup.value || "").trim().toUpperCase();
-    if (current && chartId && !isCustomerGroupValidForChart(current, chartId)) {
-      setGroupComboWarning(INVALID_COMBO_MSG);
-    } else {
-      setGroupComboWarning("");
-    }
+    setGroupComboWarning("");
   }
 
   function selectedIeWorkIds() {
@@ -1447,13 +1387,9 @@
       applyDefaultChartGroupsIfEmpty();
     }
     const existingGroup = String(record.customer_group || "").trim().toUpperCase();
-    rebuildCustomerGroupOptions(existingGroup, { keepInvalid: true });
+    rebuildCustomerGroupOptions(existingGroup);
     if (els.customerGroup) {
-      buildTabs(els.customerGroup.value);
-    }
-    const chartId = selectedChartGroupIds()[0] || "";
-    if (existingGroup && chartId && !isCustomerGroupValidForChart(existingGroup, chartId)) {
-      setGroupComboWarning(INVALID_COMBO_MSG);
+      buildTabs();
     }
     syncIeWorkBar();
     setIeWorkSelection(record.income_expense_work_ids || record.work_ids || []);
@@ -1540,11 +1476,12 @@
 
   function collectPayload() {
     const payload = {};
-    const group = (els.customerGroup?.value || "").trim();
-    const allowedTabs = groupTabs[group] || [];
     els.form?.querySelectorAll(".cm-tab-panel").forEach(function (panel) {
-      if (!allowedTabs.includes(panel.dataset.tab)) return;
       panel.querySelectorAll("[data-cm-field]").forEach(function (field) {
+        const wrap = field.closest(".cm-field-wrap") || field.closest("[class*='col-']");
+        if (wrap && (wrap.classList.contains("cm-chart-hidden") || wrap.classList.contains("d-none"))) {
+          return;
+        }
         if (field.type === "radio") {
           if (field.checked) payload[field.dataset.cmField] = field.value;
           return;
@@ -1583,11 +1520,6 @@
       errors.push("Select Chart of Account Group.");
     }
     if (!payload.customer_group) errors.push("Select customer group.");
-    if (payload.customer_group && chartIds.length) {
-      if (!isCustomerGroupValidForChart(payload.customer_group, chartIds[0])) {
-        errors.push(INVALID_COMBO_MSG);
-      }
-    }
     required.forEach(function (key) {
       if (!(payload[key] || "").trim()) {
         errors.push(key.replace(/_/g, " ") + " is required.");
@@ -1648,14 +1580,6 @@
       }
       if (!payload.customer_group && els.customerGroup) {
         els.customerGroup.classList.add("cm-field-error");
-      }
-      if (
-        payload.customer_group &&
-        chartIds.length &&
-        !isCustomerGroupValidForChart(payload.customer_group, chartIds[0])
-      ) {
-        if (els.customerGroup) els.customerGroup.classList.add("cm-field-error");
-        if (els.chartGroups) els.chartGroups.classList.add("cm-field-error");
       }
     }
     return errors;
@@ -1846,14 +1770,7 @@
 
   els.customerGroup?.addEventListener("change", function () {
     els.customerGroup.classList.remove("cm-field-error");
-    buildTabs(els.customerGroup.value);
-    const chartId = selectedChartGroupIds()[0] || "";
-    const group = (els.customerGroup.value || "").trim();
-    if (group && chartId && !isCustomerGroupValidForChart(group, chartId)) {
-      setGroupComboWarning(INVALID_COMBO_MSG);
-    } else {
-      setGroupComboWarning("");
-    }
+    setGroupComboWarning("");
     syncMandatoryMarkers();
     syncIeWorkBar();
     if (cmDynFields) cmDynFields.sync();

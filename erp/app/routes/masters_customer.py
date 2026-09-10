@@ -13,7 +13,6 @@ from app.customer_master.constants import (
 from app.decorators import login_required, require_delete_reauth
 from app.utils.roles import has_admin_role
 from app.services.chart_group_service import ChartGroupService
-from app.services.customer_group_service import CustomerGroupService
 from app.services.customer_master_service import (
     CustomerMasterService,
     CustomerInUseError,
@@ -38,7 +37,6 @@ def _in_use_response(exc: CustomerInUseError):
 @login_required
 def index():
     service = CustomerMasterService()
-    group_service = CustomerGroupService()
     menu_service = MenuService()
     ui = service.ui_config()
     cm_api = {
@@ -81,14 +79,6 @@ def index():
             default_chart_group_id = g.get("group_id")
             break
     try:
-        customer_group_filter = group_service.customer_form_filter_payload()
-    except Exception:
-        customer_group_filter = {
-            "groups": ui["groups"],
-            "usage": {},
-            "chart_natures": {},
-        }
-    try:
         income_expense_works = WorkMasterService().list_records()
     except Exception:
         income_expense_works = []
@@ -99,7 +89,6 @@ def index():
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=service.list_records(),
         customer_groups=ui["groups"],
-        customer_group_filter=customer_group_filter,
         chart_of_groups=chart_of_groups,
         dyn_master_fields=dyn_master_fields,
         default_chart_group_id=default_chart_group_id,
@@ -109,7 +98,6 @@ def index():
         genders=GENDERS,
         countries=COUNTRIES,
         gst_filing_frequencies=GST_FILING_FREQUENCIES,
-        group_tabs=ui["group_tabs"],
         tab_labels=TAB_LABELS,
         ui_config=ui,
         cm_api=cm_api,

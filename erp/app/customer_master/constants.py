@@ -1,5 +1,5 @@
 """
-Customer Master — field groups, tabs per customer group, form/DB mapping.
+Customer Master — field mapping, tabs, and form/DB keys.
 """
 
 from app.customer_master.countries import COUNTRIES

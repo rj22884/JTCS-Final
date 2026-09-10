@@ -35,10 +35,7 @@ def test_customer_group_filter() -> None:
         usage=usage,
         nature_by_chart_id=natures,
     )
-    assert "ITR" in asset_codes
-    assert "TDS" in asset_codes
-    assert "MISC" in asset_codes  # unused stays available
-    assert "GST" not in asset_codes  # used only with Income
+    assert asset_codes == ["ITR", "GST", "TDS", "MISC"]
 
     income_codes = fn(
         active_codes=["ITR", "GST", "TDS", "MISC"],
@@ -47,9 +44,7 @@ def test_customer_group_filter() -> None:
         usage=usage,
         nature_by_chart_id=natures,
     )
-    assert "GST" in income_codes
-    assert "ITR" not in income_codes
-    assert "MISC" in income_codes
+    assert income_codes == ["ITR", "GST", "TDS", "MISC"]
 
     none = fn(
         active_codes=["ITR"],
@@ -66,8 +61,10 @@ def test_customer_group_filter() -> None:
         chart_nature="Asset",
         usage=usage,
         nature_by_chart_id=natures,
-        include_code="GST",
+        include_code="OLD",
     )
+    assert "OLD" in legacy
+    assert "ITR" in legacy
     assert "GST" in legacy
 
 

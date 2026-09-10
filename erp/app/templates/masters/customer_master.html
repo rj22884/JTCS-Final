@@ -154,7 +154,7 @@
               (select first).
               Customer groups:
               <a href="{{ url_for('masters_group.index') }}">Customer Group Master</a>
-              (filtered by Chart of Account Group).
+              (all active groups).
             </div>
             <div id="cmGroupComboWarn" class="alert alert-warning py-2 small d-none mt-2 mb-0" role="alert"></div>
           </div>
@@ -441,7 +441,6 @@
   window.CM_API = {{ cm_api|tojson }};
   window.CM_CSRF = {{ csrf_token()|tojson }};
   window.CM_INITIAL_ROWS = {{ initial_rows|tojson }};
-  window.CM_GROUP_TABS = {{ group_tabs|tojson }};
   window.CM_TAB_LABELS = {{ tab_labels|tojson }};
   window.CM_MANDATORY = {{ ui_config.mandatory_fields|tojson }};
   window.CM_OTHER_MANDATORY = {{ ui_config.other_type_mandatory_fields|tojson }};
@@ -450,7 +449,6 @@
   window.CM_CHART_GROUPS = {{ chart_of_groups|tojson }};
   window.CM_DEFAULT_CHART_GROUP_ID = {{ default_chart_group_id|tojson }};
   window.CM_CUSTOMER_GROUPS = {{ customer_groups|tojson }};
-  window.CM_GROUP_CHART_FILTER = {{ customer_group_filter|tojson }};
   window.CM_IE_WORKS = {{ income_expense_works|tojson }};
   window.CM_PORTALS = {
     incomeTaxLogin: "https://eportal.incometax.gov.in/iec/foservices/#/login",
@@ -460,5 +458,5 @@
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% include 'ledger_report/_embed.html' %}
 {% include 'masters/_dynamic_master_fields_js.html' %}
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260906dyn13"></script>
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260910grp2"></script>
 {% endblock %}
