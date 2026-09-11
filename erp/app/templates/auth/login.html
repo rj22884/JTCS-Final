@@ -1,6 +1,8 @@
 {% extends 'layouts/auth_base.html' %}
 
-
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol3" rel="stylesheet">
+{% endblock %}
 
 {% block subtitle %}Sign in to your account{% endblock %}
 
@@ -135,6 +137,19 @@
   </div>
 
 </form>
+
+<div class="ol-auth-divider my-4">or</div>
+
+<a class="ol-entry-card" href="{{ url_for('other_login.services') }}">
+  <div class="ol-entry-kicker">Enabled</div>
+  <div class="d-flex justify-content-between align-items-center gap-3">
+    <div>
+      <div class="fw-semibold">Other Login</div>
+      <div class="small text-muted mb-0">Government &amp; Business Services</div>
+    </div>
+    <span class="btn btn-primary btn-sm">Continue</span>
+  </div>
+</a>
 
 {% endblock %}
 

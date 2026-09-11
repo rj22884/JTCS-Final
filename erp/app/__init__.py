@@ -66,6 +66,8 @@ from app.routes.website_snapshot_public import bp as website_snapshot_public_bp
 from app.routes.recruitment_applications import bp as recruitment_applications_bp
 from app.routes.property_listings import bp as property_listings_bp
 from app.routes.hr import bp as hr_bp
+from app.routes.public_report import bp as public_report_bp
+from app.routes.other_login import bp as other_login_bp
 from app.routes.market_quotes import bp as market_quotes_bp
 from app.routes.runtime import bp as runtime_bp
 from app.modules.crm.routes import (
@@ -123,6 +125,7 @@ def create_app(config_class: type = Config) -> Flask:
 
     app.register_blueprint(setup_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(other_login_bp)
     app.register_blueprint(server_auth_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(transactions_bp)
@@ -183,6 +186,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(recruitment_applications_bp)
     app.register_blueprint(property_listings_bp)
     app.register_blueprint(hr_bp)
+    app.register_blueprint(public_report_bp)
     app.register_blueprint(market_quotes_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
@@ -231,6 +235,14 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("CRM/core nav menu ensure skipped: %s", exc)
 
         try:
+            from app.routes.public_report import ensure_public_report_menus
+
+            ensure_public_report_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Public Report menu ensure skipped: %s", exc)
+
+        try:
             from app.modules.settings.routes import ensure_integration_settings_bootstrap
 
             ensure_integration_settings_bootstrap()
@@ -245,6 +257,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Login activity schema ensure skipped: %s", exc)
+
+        try:
+            from app.services.fps_login_service import FpsLoginService
+
+            FpsLoginService().ensure_schema()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("FPS login schema ensure skipped: %s", exc)
 
         try:
             from app.services.server_auth_service import ServerAuthService
@@ -504,6 +524,39 @@ def create_app(config_class: type = Config) -> Flask:
             return redirect(url_for("setup.index"))
         return None
 
+    @app.before_request
+    def enforce_fps_user_scope():
+        if request.endpoint in (None, "static"):
+            return None
+        from app.utils.fps_access import (
+            fps_page_denied_response,
+            fps_user_request_allowed,
+            is_fps_session,
+        )
+
+        if not is_fps_session():
+            return None
+        if fps_user_request_allowed(request.path, request.method):
+            return None
+        try:
+            from app.services.server_audit_service import STATUS_FAILED, ServerAuditService
+
+            ServerAuditService().log(
+                action="Unauthorized access attempt",
+                module="FPSLogin",
+                status=STATUS_FAILED,
+                new_value=request.path,
+            )
+        except Exception:
+            app.logger.debug("FPS unauthorized audit skipped", exc_info=True)
+        return fps_page_denied_response()
+
+    # Run before CSRF so FPS_USER write/admin routes return 403, not a CSRF 400.
+    _before = app.before_request_funcs.setdefault(None, [])
+    if enforce_fps_user_scope in _before:
+        _before.remove(enforce_fps_user_scope)
+        _before.insert(0, enforce_fps_user_scope)
+
     @app.context_processor
     def inject_globals():
         navigation = []
@@ -519,6 +572,7 @@ def create_app(config_class: type = Config) -> Flask:
         else:
             financial_year = f"FY {today.year - 1}-{today.year}"
 
+        from app.utils.fps_access import is_fps_session
         from app.utils.roles import has_admin_role
 
         pending_user_notifications = []
@@ -526,10 +580,12 @@ def create_app(config_class: type = Config) -> Flask:
         crm_notifications = []
         crm_unread_count = 0
         is_admin_user = False
+        is_fps_user = False
         if has_request_context() and session.get("user_id"):
             menu_service = MenuService()
             navigation = menu_service.get_navigation(session.get("role"))
             is_admin_user = has_admin_role(session.get("role"))
+            is_fps_user = is_fps_session()
             if is_admin_user:
                 try:
                     pending_users = AuthService().list_pending_users()
@@ -547,19 +603,23 @@ def create_app(config_class: type = Config) -> Flask:
                 except Exception:
                     pending_user_count = 0
                     pending_user_notifications = []
-            try:
-                from app.modules.notification.services import NotificationService
-
-                notif_data = NotificationService().list_for_user(
-                    session.get("user_id"),
-                    page=1,
-                    page_size=8,
-                )
-                crm_unread_count = int(notif_data.get("unread_count") or 0)
-                crm_notifications = notif_data.get("rows") or []
-            except Exception:
+            if is_fps_user:
                 crm_unread_count = 0
                 crm_notifications = []
+            else:
+                try:
+                    from app.modules.notification.services import NotificationService
+
+                    notif_data = NotificationService().list_for_user(
+                        session.get("user_id"),
+                        page=1,
+                        page_size=8,
+                    )
+                    crm_unread_count = int(notif_data.get("unread_count") or 0)
+                    crm_notifications = notif_data.get("rows") or []
+                except Exception:
+                    crm_unread_count = 0
+                    crm_notifications = []
 
         db_server = app.config.get("DB_SERVER_DISPLAY", r"JTCS\JTCS")
         db_name = app.config.get("DB_NAME_DISPLAY", "JTCSS")
@@ -624,6 +684,7 @@ def create_app(config_class: type = Config) -> Flask:
             "crm_notifications": crm_notifications,
             "notification_poll_seconds": app.config.get("NOTIFICATION_POLL_SECONDS", 15),
             "is_admin_user": is_admin_user,
+            "is_fps_user": is_fps_user,
             "current_login_id": login_id,
             "seo_active_keywords": seo_active_keywords,
             "seo_meta_keywords": seo_meta_keywords,
@@ -681,6 +742,14 @@ def create_app(config_class: type = Config) -> Flask:
             ServerAuditService().log_request(response)
         except Exception:
             app.logger.debug("Mutation audit skipped", exc_info=True)
+        try:
+            from app.utils.fps_access import is_fps_session
+
+            if is_fps_session():
+                response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+                response.headers["Pragma"] = "no-cache"
+        except Exception:
+            pass
         return response
 
     return app

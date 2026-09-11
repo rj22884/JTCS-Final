@@ -31,6 +31,19 @@ from app.models.hr import (
     HrOfferLetter,
     HrWorkLocation,
 )
+from app.models.ration_card import (
+    PdsAroMaster,
+    PdsDistrictMaster,
+    PdsDsoMaster,
+    PdsFpsMaster,
+    PdsGeoImport,
+    PdsRationCardMaster,
+    PdsSiMaster,
+    PdsStateMaster,
+    RationCardMember,
+    RationCardUploadBatch,
+    RationDealerMaster,
+)
 from app.models.whats_new import WhatsNewEntry
 from app.models.app_version import AppVersionHistory
 from app.models.transactions import (
@@ -78,6 +91,17 @@ __all__ = [
     "CredentialsMaster",
     "SeoKeyword",
     "WebsiteEStampOrder",
+    "RationDealerMaster",
+    "RationCardUploadBatch",
+    "RationCardMember",
+    "PdsStateMaster",
+    "PdsDistrictMaster",
+    "PdsDsoMaster",
+    "PdsAroMaster",
+    "PdsSiMaster",
+    "PdsFpsMaster",
+    "PdsRationCardMaster",
+    "PdsGeoImport",
     "WhatsNewEntry",
     "AppVersionHistory",
     "RdAccountMaster",

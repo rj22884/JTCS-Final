@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260909emo1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260911bankpct1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -241,6 +241,32 @@
                 </tbody>
               </table>
             </div>
+          </div>
+          {% set _bb_asset = bank_asset_closing_total|abs %}
+          {% set _bb_liab = bank_liability_closing_total|abs %}
+          {% set _bb_max = _bb_asset if _bb_asset > _bb_liab else _bb_liab %}
+          {% set _bb_sum = _bb_asset + _bb_liab %}
+          {% set _bb_asset_h = ((_bb_asset / _bb_max) * 46) if _bb_max else 0 %}
+          {% set _bb_liab_h = ((_bb_liab / _bb_max) * 46) if _bb_max else 0 %}
+          {% set _bb_asset_pct = ((_bb_asset / _bb_sum) * 100) if _bb_sum else 0 %}
+          {% set _bb_liab_pct = ((_bb_liab / _bb_sum) * 100) if _bb_sum else 0 %}
+          <div class="dash-bank-balance-chart" role="img"
+               aria-label="Asset {{ '%.1f'|format(_bb_asset_pct) }} percent, Liability {{ '%.1f'|format(_bb_liab_pct) }} percent">
+            <div class="dash-bank-balance-pcts">
+              <span class="is-asset" title="Asset {{ '%.1f'|format(_bb_asset_pct) }}%">{{ '%.1f'|format(_bb_asset_pct) }}%</span>
+              <span class="is-liability" title="Liability {{ '%.1f'|format(_bb_liab_pct) }}%">{{ '%.1f'|format(_bb_liab_pct) }}%</span>
+            </div>
+            <svg viewBox="0 0 40 50" preserveAspectRatio="none" focusable="false">
+              <line x1="3" y1="48.5" x2="37" y2="48.5" stroke="#cbd5e1" stroke-width="1"></line>
+              <rect class="is-asset" x="6" y="{{ '%.1f'|format(48 - _bb_asset_h) }}" width="11"
+                    height="{{ '%.1f'|format(_bb_asset_h) }}" rx="1.6" fill="#0f766e">
+                <title>Asset ₹ {{ '%.2f'|format(bank_asset_closing_total) }} ({{ '%.1f'|format(_bb_asset_pct) }}%)</title>
+              </rect>
+              <rect class="is-liability" x="23" y="{{ '%.1f'|format(48 - _bb_liab_h) }}" width="11"
+                    height="{{ '%.1f'|format(_bb_liab_h) }}" rx="1.6" fill="#be123c">
+                <title>Liability ₹ {{ '%.2f'|format(bank_liability_closing_total) }} ({{ '%.1f'|format(_bb_liab_pct) }}%)</title>
+              </rect>
+            </svg>
           </div>
           <div class="dash-bank-closing-wrap dash-bank-balance-col-wrap is-liability">
             <button type="button" class="dash-metric-btn dash-bank-balance-col is-liability"
@@ -784,7 +810,7 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260909emo1"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260911bankbar1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>

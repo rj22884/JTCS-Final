@@ -93,6 +93,8 @@
     dutyGroupHint: document.getElementById("stampDutyGroupHint"),
     dutyGroupTotalNos: document.getElementById("stampDutyGroupTotalNos"),
     dutyGroupTotalAmt: document.getElementById("stampDutyGroupTotalAmt"),
+    dutyGroupTotalSale: document.getElementById("stampDutyGroupTotalSale"),
+    dutyGroupTotalPct: document.getElementById("stampDutyGroupTotalPct"),
   };
 
   let mainGridRows = [];
@@ -350,6 +352,14 @@
     return num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function formatSaleBuyPct(sale, buy) {
+    const saleNum = parseFloat(sale || "0");
+    const buyNum = parseFloat(buy || "0");
+    if (!buyNum || Number.isNaN(buyNum) || Number.isNaN(saleNum)) return "—";
+    const pct = ((saleNum - buyNum) / buyNum) * 100;
+    return pct.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
   function dutyGroupDateParams() {
     const params = new URLSearchParams();
     const from = (els.dutyGroupFrom?.value || "").trim();
@@ -371,7 +381,7 @@
     if (els.dutyGroupBody) {
       if (!rows.length) {
         els.dutyGroupBody.innerHTML =
-          '<tr><td colspan="3" class="text-muted text-center py-3">No duty records</td></tr>';
+          '<tr><td colspan="5" class="text-muted text-center py-3">No duty records</td></tr>';
       } else {
         els.dutyGroupBody.innerHTML = rows.map(function (row) {
           return (
@@ -379,13 +389,19 @@
             "<td>" + escapeHtml(formatDutyValue(row.value)) + "</td>" +
             '<td class="text-end">' + escapeHtml(String(row.nos || 0)) + "</td>" +
             '<td class="text-end">' + escapeHtml(formatMoney(row.amount)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(formatMoney(row.sale)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(formatSaleBuyPct(row.sale, row.amount)) + "</td>" +
             "</tr>"
           );
         }).join("");
       }
     }
+    const totalAmount = (data && data.total_amount) || "0.00";
+    const totalSale = (data && data.total_sale) || "0.00";
     if (els.dutyGroupTotalNos) els.dutyGroupTotalNos.textContent = String((data && data.total_nos) || 0);
-    if (els.dutyGroupTotalAmt) els.dutyGroupTotalAmt.textContent = formatMoney((data && data.total_amount) || 0);
+    if (els.dutyGroupTotalAmt) els.dutyGroupTotalAmt.textContent = formatMoney(totalAmount);
+    if (els.dutyGroupTotalSale) els.dutyGroupTotalSale.textContent = formatMoney(totalSale);
+    if (els.dutyGroupTotalPct) els.dutyGroupTotalPct.textContent = formatSaleBuyPct(totalSale, totalAmount);
   }
 
   async function loadDutyGrouping() {
@@ -399,7 +415,7 @@
       renderDutyGrouping(data);
     } catch (err) {
       if (els.dutyGroupHint) els.dutyGroupHint.textContent = err.message || "Load failed";
-      renderDutyGrouping({ rows: [], total_nos: 0, total_amount: "0.00" });
+      renderDutyGrouping({ rows: [], total_nos: 0, total_amount: "0.00", total_sale: "0.00" });
     }
   }
 

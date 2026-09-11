@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
-from flask import Blueprint, current_app, jsonify, render_template, request, session
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 
 from app.utils.timezone import today_app
 
@@ -83,6 +83,10 @@ def _resolve_period(dashboard_service: DashboardService) -> tuple[date, date, st
 @bp.route("/dashboard")
 @login_required
 def index():
+    from app.utils.fps_access import is_fps_session
+
+    if is_fps_session():
+        return redirect(url_for("public_report.fps_detail"))
     menu_service = MenuService()
     dashboard_service = DashboardService()
     today = today_app()

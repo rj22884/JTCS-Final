@@ -1,0 +1,430 @@
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("../fonts/NotoSansDevanagari-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0900-097F, U+A8E0-A8FF;
+}
+
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("../fonts/NotoSansDevanagari-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0900-097F, U+A8E0-A8FF;
+}
+
+.rc-page .rc-panel {
+  padding: 1rem 1.1rem;
+}
+
+.rc-dealer-grid-wrap {
+  max-height: calc(100vh - 360px);
+  overflow: auto;
+  border: 1px solid #d9e2ef;
+  border-radius: 0.45rem;
+}
+
+#rcDealerGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f4f8fb;
+  white-space: nowrap;
+}
+
+#rcDealerGrid tbody tr {
+  cursor: pointer;
+}
+
+#rcDealerGrid tbody tr.table-active {
+  --bs-table-bg: rgba(14, 116, 144, 0.12);
+}
+
+.rc-dealer-row-name {
+  font-weight: 600;
+  color: #1f3b63;
+}
+
+.rc-dealer-row-meta {
+  font-size: 0.78rem;
+  color: #6c757d;
+}
+
+.rc-selected-dealer {
+  border: 1px solid #b7e0d4;
+  background: #f3fbf7;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.rc-selected-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #0e7490;
+  font-weight: 600;
+}
+
+.rc-selected-name {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #12324d;
+}
+
+.rc-fps-block,
+.rc-upload-block {
+  border-top: 1px dashed #d5deea;
+  padding-top: 0.9rem;
+}
+
+.rc-report {
+  background: #fff;
+  border: 1px solid #c5d0dc;
+  border-radius: 0.45rem;
+  padding: 1.1rem 1.15rem 1.4rem;
+}
+
+.rc-report-letterhead {
+  text-align: center;
+  border-bottom: 2px solid #0e7490;
+  padding-bottom: 0.7rem;
+  margin-bottom: 0.85rem;
+}
+
+.rc-report-org {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0b3b4d;
+}
+
+.rc-report-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #12324d;
+  margin-top: 0.15rem;
+}
+
+.rc-report-sub {
+  font-size: 0.82rem;
+  color: #445566;
+  margin-top: 0.2rem;
+}
+
+.rc-summary-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+}
+
+.rc-summary-chip {
+  border: 1px solid #d5deea;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  background: #f7fafc;
+}
+
+.rc-summary-chip strong {
+  color: #0e7490;
+}
+
+.rc-group {
+  border: 1px solid #cfd8e3;
+  border-radius: 0.35rem;
+  margin-bottom: 0.9rem;
+  overflow: hidden;
+  page-break-inside: avoid;
+}
+
+.rc-group-head {
+  display: grid;
+  grid-template-columns: 1.2fr 1.4fr 1fr 1.4fr;
+  gap: 0.4rem;
+  background: #0e7490;
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.rc-group-head span small {
+  display: block;
+  font-weight: 500;
+  opacity: 0.85;
+  font-size: 0.68rem;
+}
+
+.rc-group-table-wrap {
+  overflow: auto;
+}
+
+.rc-group-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+
+.rc-group-table th {
+  background: #e8f4f7;
+  color: #1f3b63;
+  font-weight: 600;
+  padding: 0.28rem 0.4rem;
+  border: 1px solid #d5e3ea;
+  white-space: nowrap;
+}
+
+.rc-group-table td {
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #e4edf2;
+  vertical-align: top;
+}
+
+.rc-group-table tbody tr:nth-child(even) {
+  background: #fbfefe;
+}
+
+.rc-grid-wrap {
+  max-height: calc(100vh - 360px);
+  overflow: auto;
+  border: 1px solid #d5deea;
+  border-radius: 0.35rem;
+}
+
+.rc-import-grid {
+  font-size: 0.78rem;
+  margin-bottom: 0;
+}
+
+.rc-import-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #e8f4f7;
+  color: #1f3b63;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.rc-import-grid td,
+.rc-import-grid th {
+  padding: 0.28rem 0.4rem;
+  border-color: #e4edf2;
+  vertical-align: middle;
+}
+
+.rc-import-grid .rc-grid-group td {
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: #0e7490;
+}
+
+.rc-import-grid .rc-grid-group.rc-scheme-aay td { background: #b45309; }
+.rc-import-grid .rc-grid-group.rc-scheme-phh td { background: #1d4ed8; }
+.rc-import-grid .rc-grid-group.rc-scheme-sfy td { background: #ca8a04; }
+.rc-import-grid .rc-grid-group.rc-scheme-ner td { background: #166534; }
+
+.rc-import-grid .rc-hof-row {
+  background: #f3fbf7;
+}
+
+.rc-import-grid .rc-hof {
+  font-weight: 700;
+  color: #0b3b4d;
+}
+
+.rc-import-grid td .rc-hindi {
+  font-family: "Noto Sans Devanagari", "Nirmala UI", Mangal, sans-serif;
+  font-weight: 700;
+  font-feature-settings: "kern" 1, "liga" 1, "clig" 1, "calt" 1;
+}
+
+.rc-import-grid td .rc-hindi-aay {
+  color: #9f1853 !important;
+}
+
+.rc-import-grid td .rc-hindi-sfy {
+  color: #a16207 !important;
+}
+
+.rc-import-grid td .rc-hindi-phh {
+  color: #a8a29e !important;
+}
+
+.rc-import-grid td .rc-hindi-ner {
+  color: #166534 !important;
+}
+
+.rc-import-grid .rc-row-added td,
+.rc-import-grid .rc-row-added .rc-hof {
+  color: #15803d !important;
+  font-weight: 700;
+}
+
+.rc-import-grid .rc-row-deleted td,
+.rc-import-grid .rc-row-deleted .rc-hof {
+  color: #b91c1c !important;
+  font-weight: 700;
+}
+
+.rc-import-grid .rc-row-updated td {
+  color: #1d4ed8;
+}
+
+.rc-import-grid .rc-row-deleted {
+  background: #fef2f2;
+}
+
+.rc-import-grid .rc-row-added {
+  background: #f0fdf4;
+}
+
+.rc-change-detail {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.rc-change-cell {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rc-chip-added {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.rc-chip-deleted {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.rc-chip-updated {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.rc-group-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.4rem 0.65rem;
+  background: #f4fafb;
+  border-top: 1px solid #d5e3ea;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #245;
+}
+
+.rc-scheme-aay .rc-group-head { background: #b45309; }
+.rc-scheme-phh .rc-group-head { background: #1d4ed8; }
+.rc-scheme-sfy .rc-group-head { background: #ca8a04; }
+.rc-scheme-ner .rc-group-head { background: #166534; }
+
+.rc-report-footer {
+  font-size: 0.75rem;
+  color: #667;
+  border-top: 1px solid #dde;
+  padding-top: 0.55rem;
+  margin-top: 0.4rem;
+}
+
+#rcDealerModal .modal-header {
+  background: linear-gradient(90deg, #0e7490, #155e75);
+  color: #fff;
+}
+
+#rcDealerModal .btn-close {
+  filter: invert(1);
+}
+
+@media (max-width: 767.98px) {
+  .rc-page .rc-panel {
+    padding: 0.75rem;
+  }
+
+  .rc-dealer-grid-wrap,
+  .rc-grid-wrap {
+    max-height: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rc-selected-meta,
+  .ol-selected-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .rc-page .btn {
+    min-height: 40px;
+  }
+}
+
+html.jtcs-form-phone .rc-dealer-grid-wrap,
+html.jtcs-form-phone .rc-grid-wrap {
+  max-height: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  .rc-no-print,
+  .jtcs-page-head,
+  .jtcs-breadcrumb,
+  .jtcs-app-header,
+  .jtcs-ribbon-toolbar,
+  .jtcs-status-bar {
+    display: none !important;
+  }
+
+  .rc-page,
+  .rc-report {
+    border: 0;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .rc-report {
+    display: block !important;
+  }
+
+  .rc-grid-wrap {
+    max-height: none;
+    overflow: visible;
+    border: 0;
+  }
+
+  .rc-import-grid thead th {
+    position: static;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .rc-import-grid .rc-grid-group td,
+  .rc-group-head,
+  .rc-import-grid .rc-row-added td,
+  .rc-import-grid .rc-row-deleted td,
+  .rc-import-grid .rc-row-updated td,
+  .rc-import-grid td .rc-hindi {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .rc-import-grid th,
+  .rc-import-grid td {
+    font-size: 8px;
+  }
+}

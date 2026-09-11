@@ -801,7 +801,11 @@ class StampRepository:
             StampMaster.CertificateIssuedDate,
         )
         base = (
-            select(StampMaster.StampID, StampMaster.StampDutyAmount)
+            select(
+                StampMaster.StampID,
+                StampMaster.StampDutyAmount,
+                func.coalesce(func.max(JTCSDailyTransaction.SaleAmount), 0).label("SaleAmount"),
+            )
             .select_from(StampMaster)
             .outerjoin(JTCSDailyTransaction, JTCSDailyTransaction.StampID == StampMaster.StampID)
             .where(StampMaster.IsActive == True)  # noqa: E712
@@ -812,26 +816,39 @@ class StampRepository:
             base = base.where(work_date >= date_from)
         if date_to:
             base = base.where(work_date <= date_to)
-        subq = base.distinct().subquery()
+        subq = base.group_by(StampMaster.StampID, StampMaster.StampDutyAmount).subquery()
         stmt = (
-            select(subq.c.StampDutyAmount, func.count())
+            select(
+                subq.c.StampDutyAmount,
+                func.count(),
+                func.coalesce(func.sum(subq.c.SaleAmount), 0),
+            )
             .group_by(subq.c.StampDutyAmount)
             .order_by(subq.c.StampDutyAmount.asc())
         )
         rows: list[dict] = []
         total_nos = 0
         total_amount = Decimal("0.00")
-        for value, nos in self.session.execute(stmt).all():
+        total_sale = Decimal("0.00")
+        for value, nos, sale in self.session.execute(stmt).all():
             duty = Decimal(str(value or 0)).quantize(Decimal("0.01"))
             count = int(nos or 0)
             amount = (duty * Decimal(count)).quantize(Decimal("0.01"))
-            rows.append({"value": str(duty), "nos": count, "amount": str(amount)})
+            sale_amt = Decimal(str(sale or 0)).quantize(Decimal("0.01"))
+            rows.append({
+                "value": str(duty),
+                "nos": count,
+                "amount": str(amount),
+                "sale": str(sale_amt),
+            })
             total_nos += count
             total_amount += amount
+            total_sale += sale_amt
         return {
             "rows": rows,
             "total_nos": total_nos,
             "total_amount": str(total_amount.quantize(Decimal("0.01"))),
+            "total_sale": str(total_sale.quantize(Decimal("0.01"))),
             "date_from": date_from.isoformat() if date_from else "",
             "date_to": date_to.isoformat() if date_to else "",
         }

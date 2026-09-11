@@ -14,6 +14,7 @@ GROUPS: tuple[tuple[str, str, str], ...] = (
     ("masters", "Masters", "bi-database"),
     ("accounting", "Accounting", "bi-journal-bookmark"),
     ("crm", "CRM", "bi-people"),
+    ("public", "Public Report", "bi-postcard"),
     ("hr", "HR", "bi-person-badge"),
     ("admin", "Admin Role", "bi-archive"),
 )
@@ -177,7 +178,7 @@ TOPICS: tuple[HelpTopic, ...] = (
         "The green/blue bar under the company header is the main menu. Hover a name to open its children. Your role decides which items appear — except Help, which is granted to all signed-in users.",
         url="/dashboard",
         steps=(
-            _s("Top-level modules", "Typical ribbon: Admin Role, Dashboard, Activities, Reports and Analysis, Masters, Accounting, CRM, HR."),
+            _s("Top-level modules", "Typical ribbon: Admin Role, Dashboard, Activities, Reports and Analysis, Masters, Accounting, CRM, Public Report, HR."),
             _s("Admin Role", "Administrators see backups, users, utility, and other tools. Every user still sees Help here."),
             _s("Hidden legacy modules", "Old top menus such as ITR, GST, TDS, Payroll, and Stock are kept out of the ribbon. Their work now lives under Activities, Followup, or Reports."),
         ),

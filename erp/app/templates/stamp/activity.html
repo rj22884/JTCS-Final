@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260829row1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260911sum1">
 {% endblock %}
 
 {% block content %}
@@ -191,18 +191,22 @@
             <thead>
               <tr>
                 <th>Value</th>
-                <th class="text-end">nos</th>
-                <th class="text-end">amount</th>
+                <th class="text-end">No</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Sale</th>
+                <th class="text-end">%</th>
               </tr>
             </thead>
             <tbody id="stampDutyGroupBody">
-              <tr><td colspan="3" class="text-muted text-center py-3">Loading…</td></tr>
+              <tr><td colspan="5" class="text-muted text-center py-3">Loading…</td></tr>
             </tbody>
             <tfoot>
               <tr>
                 <th>Total</th>
                 <th class="text-end" id="stampDutyGroupTotalNos">0</th>
                 <th class="text-end" id="stampDutyGroupTotalAmt">0.00</th>
+                <th class="text-end" id="stampDutyGroupTotalSale">0.00</th>
+                <th class="text-end" id="stampDutyGroupTotalPct">—</th>
               </tr>
             </tfoot>
           </table>
@@ -579,5 +583,5 @@
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260905qrbill1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260911sum1"></script>
 {% endblock %}

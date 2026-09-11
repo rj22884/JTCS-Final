@@ -27,6 +27,7 @@ class User(db.Model):
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     LastLoginDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    FpsRowID: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class CompanyProfile(db.Model):

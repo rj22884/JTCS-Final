@@ -63,6 +63,10 @@ def _render_create(*, email: str, dialog_error: str | None = None, login_id: str
 @login_required
 @server_auth_exempt
 def gate():
+    from app.utils.fps_access import is_fps_session
+
+    if is_fps_session():
+        return redirect(url_for("public_report.fps_detail"))
     service = ServerAuthService()
     # Never auto-login from the remember cookie — always show Server User ID / password.
     if service.is_authenticated():

@@ -1,0 +1,99 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block title %}Uttarakhand FPS Login{% endblock %}
+{% block subtitle %}Fair Price Shop / Ration Card Portal{% endblock %}
+{% block auth_logo_icon %}bi-shop-window{% endblock %}
+{% block body_extra_class %}jtcs-other-login-page jtcs-fps-login-page{% endblock %}
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol9" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<aside id="fpsBgNotice" class="fps-bg-notice" aria-label="महत्वपूर्ण सूचना">
+  <div class="fps-bg-notice-title">⚠️ महत्वपूर्ण सूचना</div>
+  <p>
+    JTCS भारत सरकार/उत्तराखंड सरकार का अधिकृत पोर्टल नहीं है।<br>
+    FPS सूची हेतु संबंधित आपूर्ति निरीक्षक/ARO से आधिकारिक CSV प्राप्त<br>
+    कर हमें WhatsApp/Email द्वारा उपलब्ध कराएँ। CSV प्राप्त होने के बाद<br>
+    ही संबंधित FPS एवं राशन कार्ड सूची यहाँ प्रदर्शित की जा सकेगी।
+  </p>
+</aside>
+<div class="ol-toolbar mb-3">
+  <a href="{{ url_for('other_login.services') }}" class="small" id="fpsBackLink">&larr; Back to Other Login</a>
+</div>
+<p class="text-muted small mb-3">
+  Select State, District, DSO, ARO and SI first. Then choose your FPS. FPS ID cannot be typed.
+</p>
+
+<div class="ol-cascade mb-3">
+  <div class="ol-cascade-field">
+    <label class="form-label" for="fpsState">1. State</label>
+    <select class="form-select" id="fpsState">
+      <option value="">Select State</option>
+    </select>
+  </div>
+  <div class="ol-cascade-field">
+    <label class="form-label" for="fpsDistrict">2. District</label>
+    <select class="form-select" id="fpsDistrict" disabled>
+      <option value="">Select District</option>
+    </select>
+  </div>
+  <div class="ol-cascade-field">
+    <label class="form-label" for="fpsDso">3. DSO</label>
+    <select class="form-select" id="fpsDso" disabled>
+      <option value="">Select DSO</option>
+    </select>
+  </div>
+  <div class="ol-cascade-field">
+    <label class="form-label" for="fpsAro">4. ARO</label>
+    <select class="form-select" id="fpsAro" disabled>
+      <option value="">Select ARO</option>
+    </select>
+  </div>
+  <div class="ol-cascade-field">
+    <label class="form-label" for="fpsSi">5. SI</label>
+    <select class="form-select" id="fpsSi" disabled>
+      <option value="">Select SI</option>
+    </select>
+  </div>
+</div>
+
+<div id="fpsShopBlock" class="d-none">
+  <div class="ol-search mb-3">
+    <label class="form-label" for="fpsSearch">6. Select Your FPS</label>
+    <div class="input-group">
+      <span class="input-group-text"><i class="bi bi-search"></i></span>
+      <input type="search" class="form-control" id="fpsSearch" autocomplete="off"
+             placeholder="Search FPS / Shop Name / FPS ID / Existing FPS">
+    </div>
+  </div>
+  <div id="fpsList" class="ol-fps-list"></div>
+  <div class="d-flex justify-content-between align-items-center mt-2">
+    <span class="small text-muted" id="fpsCount"></span>
+    <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="fpsMoreBtn">Load more</button>
+  </div>
+</div>
+
+<div id="fpsStatus" class="small text-muted mb-2">Select State to continue.</div>
+<div id="fpsError" class="alert alert-danger py-2 px-3 small d-none" role="alert"></div>
+
+<div id="fpsSelected" class="ol-selected d-none mb-3">
+  <div class="ol-selected-label">Selected FPS</div>
+  <div class="ol-selected-name" id="fpsSelectedName"></div>
+  <dl class="ol-selected-meta mb-3" id="fpsSelectedMeta"></dl>
+  <button type="button" class="btn btn-primary w-100" id="fpsLoginBtn">Login</button>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.FPS_LOGIN_API = {
+    csrf: {{ csrf_token() | tojson }},
+    options: {{ url_for('other_login.fps_options') | tojson }},
+    shops: {{ url_for('other_login.fps_shops') | tojson }},
+    login: {{ url_for('other_login.fps_login') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/fps_login.js') }}?v=20260911ol9"></script>
+{% endblock %}

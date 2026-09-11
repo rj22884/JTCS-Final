@@ -19,6 +19,9 @@ RESERVED_PATHS = {
     "others",
     "masters",
     "exceptional-report",
+    "public-report",
+    "other-login",
+    "fps-login",
 }
 
 

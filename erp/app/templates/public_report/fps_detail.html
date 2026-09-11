@@ -1,0 +1,251 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ration_card_report.css') }}?v=20260911noto2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol3">
+{% endblock %}
+
+{% block content %}
+<div class="rc-page{% if fps_readonly %} rc-fps-readonly{% endif %}">
+  <div class="jtcs-card rc-panel rc-no-print mb-3">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+      <div>
+        <h5 class="mb-1">Ration Card Detail Report for FPS</h5>
+        {% if fps_readonly %}
+        <p class="small text-muted mb-0">
+          This report is limited to your logged-in FPS. Data is read-only.
+        </p>
+        {% else %}
+        <p class="small text-muted mb-0">
+          FPS shops load in the grid below. Use Edit / Delete in the Actions column.
+          Select a row to import the NFSA CSV. CSV FPS ID must match the selected shop FPS ID.
+        </p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if fps_readonly and scoped_shop %}
+    <div class="ol-selected mb-3">
+      <div class="ol-selected-label">Selected FPS</div>
+      <div class="ol-selected-name">{{ scoped_shop.shop_name or scoped_shop.dealer_name }}</div>
+      <dl class="ol-selected-meta mb-0">
+        <dt>FPS ID</dt><dd>{{ scoped_shop.fps_id }}</dd>
+        {% if scoped_shop.existing_fps_id %}<dt>Existing FPS</dt><dd>{{ scoped_shop.existing_fps_id }}</dd>{% endif %}
+        {% if scoped_shop.district_name %}<dt>District</dt><dd>{{ scoped_shop.district_name }}</dd>{% endif %}
+        {% if scoped_shop.tehsil_name %}<dt>Tehsil</dt><dd>{{ scoped_shop.tehsil_name }}</dd>{% endif %}
+        <dt>Status</dt><dd>{{ scoped_shop.status_label }}</dd>
+      </dl>
+    </div>
+    {% endif %}
+
+    <div class="rc-dealer-lookup">
+      <label class="form-label" for="rcDealerSearch">FPS / ration dealer</label>
+      <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+        <div class="flex-grow-1" style="min-width: 220px; max-width: 420px;">
+          <div class="input-group input-group-sm">
+            <input type="search" class="form-control" id="rcDealerSearch"
+                   placeholder="Shop / dealer name, FPS ID, tehsil, mobile…">
+            <button type="button" class="btn btn-outline-secondary" id="rcDealerSearchBtn" title="Search">
+              <i class="bi bi-search"></i> Search
+            </button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-primary" id="rcDealerAddBtn">
+          <i class="bi bi-plus-lg"></i> Add
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="rcDealerRefreshBtn">
+          <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        <span class="small text-muted ms-auto" id="rcDealerCount">0 records</span>
+      </div>
+      <div class="small text-muted mb-2" id="rcDealerHint">
+        Click a row to select it for CSV import. Edit and Delete stay in the grid Actions column.
+      </div>
+      <div class="table-responsive rc-dealer-grid-wrap">
+        <table class="table table-sm table-hover table-striped align-middle mb-0" id="rcDealerGrid">
+          <thead>
+            <tr>
+              <th>FPS / Shop</th>
+              <th>FPS ID</th>
+              <th>Existing FPS</th>
+              <th>District</th>
+              <th>Tehsil</th>
+              <th>Mobile</th>
+              <th>Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="rcDealerGridBody"></tbody>
+        </table>
+      </div>
+      <div id="rcDealerEmpty" class="alert alert-warning py-2 px-3 small d-none mt-2 mb-0">
+        No FPS shop or dealer matches this search. Use <strong>Add</strong> to create the ration dealer.
+      </div>
+    </div>
+
+    <div id="rcSelectedDealer" class="rc-selected-dealer d-none mt-3">
+      <div class="rc-selected-label">Selected dealer</div>
+      <div class="rc-selected-name" id="rcSelectedName"></div>
+      <div class="small text-muted" id="rcSelectedMeta"></div>
+    </div>
+
+    <div id="rcFpsBlock" class="rc-fps-block d-none mt-3">
+      <label class="form-label" for="rcFpsSearch">FPS ID</label>
+      <div class="d-flex flex-wrap align-items-end gap-2">
+        <div class="flex-grow-1" style="min-width: 220px; max-width: 420px;">
+          <div class="input-group input-group-sm">
+            <input type="search" class="form-control" id="rcFpsSearch"
+                   placeholder="Search FPS ID / existing FPS ID">
+            <button type="button" class="btn btn-outline-secondary" id="rcFpsSearchBtn">
+              <i class="bi bi-search"></i> Search FPS
+            </button>
+          </div>
+        </div>
+        <span class="small text-muted" id="rcFpsHint"></span>
+      </div>
+    </div>
+
+    <div id="rcUploadBlock" class="rc-upload-block d-none mt-3">
+      <form id="rcUploadForm" class="d-flex flex-wrap align-items-end gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div>
+          <label class="form-label mb-1" for="rcCsvFile">Ration card CSV</label>
+          <input type="file" class="form-control form-control-sm" id="rcCsvFile" name="csv_file"
+                 accept=".csv,.txt">
+          <div class="form-text">CSV FPS ID must be the same as the selected dealer FPS ID.</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm" id="rcGenerateBtn">
+          <i class="bi bi-upload"></i> Import CSV
+        </button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="rcPdfBtn" disabled>
+          <i class="bi bi-file-earmark-pdf"></i> A4 PDF
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="rcPrintBtn" disabled>
+          <i class="bi bi-printer"></i> Print
+        </button>
+      </form>
+    </div>
+
+    <div id="rcError" class="alert alert-danger py-2 px-3 small d-none mt-3 mb-0" role="alert"></div>
+    <div id="rcSuccess" class="alert alert-success py-2 px-3 small d-none mt-3 mb-0" role="alert"></div>
+    <div id="rcWarning" class="alert alert-warning py-2 px-3 small d-none mt-3 mb-0" role="alert"></div>
+  </div>
+
+  <div id="rcReport" class="rc-report d-none">
+    <div class="rc-report-letterhead rc-no-print">
+      <div class="rc-report-org">{{ company_display_name }}</div>
+      <div class="rc-report-title">Ration Card Detail Report for FPS</div>
+      <div class="rc-report-sub" id="rcReportSub"></div>
+    </div>
+    <div class="rc-summary-wrap rc-no-print" id="rcSummary"></div>
+    <div class="table-responsive rc-grid-wrap" id="rcReportBody"></div>
+    <div class="rc-report-footer rc-no-print" id="rcReportFooter"></div>
+  </div>
+</div>
+
+<div class="modal fade" id="rcDealerModal" tabindex="-1" aria-labelledby="rcDealerModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rcDealerModalTitle">Ration Dealer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="rcDealerForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="DealerID" id="rcDealerId" value="">
+          <div class="mb-2">
+            <label class="form-label" for="rcDealerName">Dealer Name *</label>
+            <input type="text" class="form-control" id="rcDealerName" name="DealerName" maxlength="200" required>
+          </div>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="rcDealerExistingFps">Existing FPS ID</label>
+              <input type="text" class="form-control" id="rcDealerExistingFps" name="ExistingFPSID" maxlength="80">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="rcDealerFps">FPS ID</label>
+              <input type="text" class="form-control" id="rcDealerFps" name="FPSID" maxlength="80">
+            </div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-md-6">
+              <label class="form-label" for="rcDealerDistrict">District</label>
+              <input type="text" class="form-control" id="rcDealerDistrict" name="DistrictName" maxlength="120">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="rcDealerTehsil">Tehsil</label>
+              <input type="text" class="form-control" id="rcDealerTehsil" name="TehsilName" maxlength="120">
+            </div>
+          </div>
+          <div class="mb-2 mt-2">
+            <label class="form-label" for="rcDealerMobile">Mobile</label>
+            <input type="text" class="form-control" id="rcDealerMobile" name="MobileNumber" maxlength="20">
+          </div>
+          <div class="mb-2">
+            <label class="form-label" for="rcDealerAddress">Address</label>
+            <textarea class="form-control" id="rcDealerAddress" name="Address" rows="2" maxlength="400"></textarea>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="rcDealerActive" name="ActiveStatus" value="1" checked>
+            <label class="form-check-label" for="rcDealerActive">Active</label>
+          </div>
+          <div class="alert alert-danger py-2 small d-none mt-2 mb-0" id="rcDealerFormError"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="rcDealerSaveBtn">
+            <i class="bi bi-save"></i> Save
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="rcImportModeModal" tabindex="-1" aria-labelledby="rcImportModeTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="rcImportModeTitle">Existing import found</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2">Previous imported data stays saved. Choose how to apply this CSV:</p>
+        <ul class="small mb-0">
+          <li><strong>Update</strong> — update matching members, add new members in green, and mark missing members as Deleted in red. Deleted rows stay on the report.</li>
+          <li><strong>Overwrite</strong> — rebuild the current report from this CSV and show Added / Updated / Deleted against the previous import. History batches stay saved.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-danger" id="rcImportOverwriteBtn">Overwrite</button>
+        <button type="button" class="btn btn-primary" id="rcImportUpdateBtn">Update</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.RC_FPS_API = {
+    csrf: {{ csrf_token() | tojson }},
+    search: {{ url_for('public_report.search_dealers') | tojson }},
+    byFps: {{ url_for('public_report.dealer_by_fps') | tojson }},
+    record: {{ url_for('public_report.get_dealer', dealer_id=0) | tojson }},
+    create: {{ url_for('public_report.create_dealer') | tojson }},
+    update: {{ url_for('public_report.update_dealer', dealer_id=0) | tojson }},
+    delete: {{ url_for('public_report.delete_dealer', dealer_id=0) | tojson }},
+    generate: {{ url_for('public_report.generate_fps_detail') | tojson }},
+    latest: {{ url_for('public_report.latest_fps_detail') | tojson }},
+    pdf: {{ url_for('public_report.fps_detail_pdf') | tojson }},
+    readOnly: {{ (fps_readonly or false) | tojson }},
+    scopedDealer: {{ (scoped_dealer or none) | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/ration_card_report.js') }}?v=20260911fps1"></script>
+{% endblock %}

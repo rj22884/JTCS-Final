@@ -272,7 +272,7 @@
 .stamp-period-card.is-shcil { border-left: 4px solid #2d6a4f; }
 .stamp-records-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
   align-items: stretch;
   gap: 0.75rem;
   min-width: 0;
@@ -345,6 +345,7 @@
   font-weight: 700;
   padding: 0.35rem 0.45rem;
   white-space: nowrap;
+  text-transform: none;
 }
 #stampDutyGroupTable td,
 #stampDutyGroupTable tfoot th {

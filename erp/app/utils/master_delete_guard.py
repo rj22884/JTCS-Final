@@ -49,6 +49,16 @@ _TABLE_LABELS = {
     "CrmLead": "Lead",
     "CrmDocument": "Document",
     "HrEmployee": "HR Employee",
+    "RationDealerMaster": "Ration Dealer",
+    "RationCardUploadBatch": "Ration Card Upload",
+    "RationCardMember": "Ration Card Member",
+    "PdsStateMaster": "State Master",
+    "PdsDistrictMaster": "District Master",
+    "PdsDsoMaster": "DSO Master",
+    "PdsAroMaster": "ARO Master",
+    "PdsSiMaster": "SI Master",
+    "PdsFpsMaster": "FPS Master",
+    "PdsRationCardMaster": "Ration Card Master",
 }
 
 

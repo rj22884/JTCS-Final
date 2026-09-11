@@ -3,7 +3,8 @@ from functools import wraps
 from flask import flash, jsonify, redirect, request, session, url_for
 
 from app.utils.delete_auth import verify_delete_credentials
-from app.utils.roles import has_admin_role, has_data_backup_role
+from app.utils.fps_access import FPS_SESSION_EXPIRED, is_fps_session, wants_json_response
+from app.utils.roles import has_admin_role, has_data_backup_role, has_fps_user_role
 
 
 def server_auth_exempt(view):
@@ -13,12 +14,7 @@ def server_auth_exempt(view):
 
 
 def _wants_json() -> bool:
-    return (
-        request.is_json
-        or (request.mimetype or "").startswith("application/json")
-        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        or "application/json" in (request.headers.get("Accept") or "")
-    )
+    return wants_json_response()
 
 
 def login_required(view):
@@ -29,6 +25,14 @@ def login_required(view):
                 return jsonify({"ok": False, "error": "Please sign in to continue."}), 401
             flash("Please sign in to continue.", "warning")
             return redirect(url_for("auth.login", next=request.path))
+        if has_fps_user_role(session.get("role")):
+            if not is_fps_session():
+                session.clear()
+                if _wants_json():
+                    return jsonify({"ok": False, "error": FPS_SESSION_EXPIRED}), 401
+                flash(FPS_SESSION_EXPIRED, "warning")
+                return redirect(url_for("auth.login"))
+            return view(*args, **kwargs)
         if not getattr(view, "_server_auth_exempt", False):
             from app.services.server_auth_service import ServerAuthService
 

@@ -1098,7 +1098,28 @@ body.jtcs-body .modal textarea.form-control {
   color: #334155;
 }
 
-/* ========== MOBILE MENU ========== */
+.jtcs-menu-link.disabled,
+.jtcs-top-link.disabled,
+span.jtcs-menu-link.disabled,
+span.jtcs-top-link.disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  pointer-events: none;
+  color: #94a3b8 !important;
+}
+
+.jtcs-menu-item.is-disabled .jtcs-menu-lock,
+.jtcs-top-item.is-disabled .jtcs-menu-lock {
+  font-size: 0.72rem;
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+.jtcs-menu-item.is-disabled .jtcs-menu-link {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
 .jtcs-mobile-menu-toggle {
   display: none;
   color: #fff;
@@ -1526,6 +1547,52 @@ html.jtcs-os-ios .jtcs-status-bar {
 
 html.jtcs-form-phone .jtcs-market-ticker {
   display: none !important;
+}
+
+html.jtcs-form-phone .jtcs-app-shell,
+html.jtcs-os-android .jtcs-app-shell,
+html.jtcs-os-ios .jtcs-app-shell {
+  min-width: 0;
+}
+
+html.jtcs-os-android.jtcs-form-phone .jtcs-auth-card,
+html.jtcs-os-ios.jtcs-form-phone .jtcs-auth-card {
+  width: min(100%, 430px);
+  padding: 1.15rem 1rem 1.25rem;
+}
+
+html.jtcs-os-ios .jtcs-auth-card,
+html.jtcs-os-ios .ol-card,
+html.jtcs-os-ios .ol-fps-item,
+html.jtcs-os-ios .ol-selected,
+html.jtcs-os-ios .pds-master-card,
+html.jtcs-os-ios .rc-panel {
+  border-radius: 18px;
+}
+
+html.jtcs-os-android .jtcs-auth-card,
+html.jtcs-os-android .ol-card,
+html.jtcs-os-android .ol-fps-item,
+html.jtcs-os-android .ol-selected {
+  border-radius: 12px;
+}
+
+html.jtcs-form-phone .jtcs-menu-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+html.jtcs-form-phone .jtcs-mobile-menu-toggle {
+  min-height: 44px;
+  padding: 0.45rem 0.85rem;
+}
+
+html.jtcs-form-phone .jtcs-header-btn,
+html.jtcs-os-android .jtcs-header-btn,
+html.jtcs-os-ios .jtcs-header-btn {
+  min-height: 44px;
+  min-width: 44px;
 }
 
 @media print {

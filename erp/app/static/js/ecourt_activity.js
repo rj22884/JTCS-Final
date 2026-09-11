@@ -35,6 +35,7 @@
     denomTotalTickets: document.getElementById("ecourtDenomTotalTickets"),
     denomTotalBuy: document.getElementById("ecourtDenomTotalBuy"),
     denomTotalSale: document.getElementById("ecourtDenomTotalSale"),
+    denomTotalPct: document.getElementById("ecourtDenomTotalPct"),
     denomHint: document.getElementById("ecourtDenomHint"),
     duplicateModalEl: document.getElementById("ecourtDuplicateModal"),
     duplicateSummary: document.getElementById("ecourtDuplicateSummary"),
@@ -1028,6 +1029,14 @@
     return num.toFixed(2);
   }
 
+  function formatSaleBuyPct(sale, buy) {
+    const saleNum = parseAmount(sale);
+    const buyNum = parseAmount(buy);
+    if (!buyNum) return "—";
+    const pct = ((saleNum - buyNum) / buyNum) * 100;
+    return pct.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
   function renderDenominationSummary(prepared) {
     if (!els.denomBody) return;
     const buckets = {};
@@ -1076,7 +1085,7 @@
     let totalSale = 0;
     if (!rows.length) {
       els.denomBody.innerHTML =
-        '<tr><td colspan="4" class="text-muted text-center py-3">No receipts</td></tr>';
+        '<tr><td colspan="5" class="text-muted text-center py-3">No receipts</td></tr>';
     } else {
       els.denomBody.innerHTML = rows
         .map(function (row) {
@@ -1092,6 +1101,8 @@
             escapeHtml(formatDenomValue(row.buy)) +
             '</td><td class="text-end">' +
             escapeHtml(formatDenomValue(row.sale)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatSaleBuyPct(row.sale, row.buy)) +
             "</td></tr>"
           );
         })
@@ -1100,6 +1111,7 @@
     if (els.denomTotalTickets) els.denomTotalTickets.textContent = String(totalTickets);
     if (els.denomTotalBuy) els.denomTotalBuy.textContent = formatDenomValue(totalBuy);
     if (els.denomTotalSale) els.denomTotalSale.textContent = formatDenomValue(totalSale);
+    if (els.denomTotalPct) els.denomTotalPct.textContent = formatSaleBuyPct(totalSale, totalBuy);
     if (els.denomHint) {
       els.denomHint.textContent = hasActiveGridFilters() ? "Filtered rows" : "All rows";
     }

@@ -5,7 +5,13 @@ from dataclasses import dataclass, field
 
 from app.models.menu_master import MenuMaster
 from app.repositories.menu_repository import MenuRepository
-from app.utils.roles import has_admin_role, has_data_backup_role, join_roles, roles_intersect
+from app.utils.fps_access import (
+    FPS_DISABLED_MASTER_PATHS,
+    FPS_ENABLED_MASTER_PATHS,
+    FPS_HOME_PATH,
+    fps_nav_menu_disabled,
+)
+from app.utils.roles import has_admin_role, has_data_backup_role, has_fps_user_role, join_roles, roles_intersect
 
 
 @dataclass
@@ -21,6 +27,7 @@ class MenuNode:
     font_color: str | None = None
     font_name: str | None = None
     background_color: str | None = None
+    disabled: bool = False
 
     @property
     def inline_style(self) -> str:
@@ -95,6 +102,8 @@ class MenuService:
             return False
         if has_admin_role(role):
             return True
+        if has_fps_user_role(role):
+            return self._is_fps_user_menu(menu)
         if self._is_help_menu(menu):
             return True
         if has_data_backup_role(role) and (
@@ -102,6 +111,17 @@ class MenuService:
         ):
             return True
         return roles_intersect(role, menu.RoleName)
+
+    def _is_fps_user_menu(self, menu) -> bool:
+        url = (self.normalize_menu_url(getattr(menu, "MenuURL", None)) or "").rstrip("/").lower()
+        name = (getattr(menu, "MenuName", None) or "").strip().lower()
+        if url == FPS_HOME_PATH:
+            return True
+        if url in FPS_ENABLED_MASTER_PATHS or url in FPS_DISABLED_MASTER_PATHS:
+            return True
+        if url:
+            return False
+        return name in {"public report", "ration card report"}
 
     def build_tree(
         self,
@@ -141,6 +161,7 @@ class MenuService:
             "masters",
             "accounting",
             "crm",
+            "public report",
             "hr",
         }
     )
@@ -219,9 +240,21 @@ class MenuService:
         else:
             menus = self._menus_with_accessible_ancestors(menus, role)
             menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
-            if has_data_backup_role(role):
+            if has_fps_user_role(role):
+                menus = [m for m in menus if self._is_fps_user_menu(m)]
+            elif has_data_backup_role(role):
                 menus = self._restrict_admin_role_to_data_backup(menus)
-        return self.build_tree(menus, None)
+        tree = self.build_tree(menus, None)
+        if has_fps_user_role(role):
+            self._mark_fps_disabled_menus(tree)
+        return tree
+
+    def _mark_fps_disabled_menus(self, nodes: list[MenuNode]) -> None:
+        for node in nodes:
+            if fps_nav_menu_disabled(node.url, node.name):
+                node.disabled = True
+            if node.children:
+                self._mark_fps_disabled_menus(node.children)
 
     def _is_under_admin_role(self, menu: MenuMaster) -> bool:
         current: MenuMaster | None = menu
@@ -313,7 +346,10 @@ class MenuService:
     def _ancestors_accessible(self, menu: MenuMaster, role: str | None) -> bool:
         """True only if this menu and every parent allow the user's role."""
         if self._is_help_menu(menu):
-            # Help sits under Admin Role (admin-only parent) but is granted to every user.
+            # Help sits under Admin Role (admin-only parent) but is granted to every
+            # signed-in staff user. FPS_USER does not get Help.
+            if has_fps_user_role(role):
+                return False
             return True
         current: MenuMaster | None = menu
         seen: set[int] = set()

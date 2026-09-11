@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260907denom2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260911sum1">
 {% endblock %}
 
 {% block content %}
@@ -112,13 +112,14 @@
           <thead>
             <tr>
               <th>Denomination</th>
-              <th class="text-end">tickets</th>
-              <th class="text-end">buy amt</th>
-              <th class="text-end">sale amt</th>
+              <th class="text-end">Tickets</th>
+              <th class="text-end">Buy Amt</th>
+              <th class="text-end">Sale Amt</th>
+              <th class="text-end">%</th>
             </tr>
           </thead>
           <tbody id="ecourtDenomBody">
-            <tr><td colspan="4" class="text-muted text-center py-3">No receipts</td></tr>
+            <tr><td colspan="5" class="text-muted text-center py-3">No receipts</td></tr>
           </tbody>
           <tfoot>
             <tr>
@@ -126,6 +127,7 @@
               <th class="text-end" id="ecourtDenomTotalTickets">0</th>
               <th class="text-end" id="ecourtDenomTotalBuy">0</th>
               <th class="text-end" id="ecourtDenomTotalSale">0</th>
+              <th class="text-end" id="ecourtDenomTotalPct">—</th>
             </tr>
           </tfoot>
         </table>
@@ -392,5 +394,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260907denom2"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260911sum1"></script>
 {% endblock %}

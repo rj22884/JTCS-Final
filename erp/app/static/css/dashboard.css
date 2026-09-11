@@ -602,12 +602,64 @@
 
 #dashMetricCards .dash-bank-balance-split {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 3.35rem minmax(0, 1fr);
   gap: 0;
   border: 1px solid #dbe4ee;
   border-radius: 0.45rem;
   overflow: visible;
   background: #fff;
+  align-items: stretch;
+}
+
+#dashMetricCards .dash-bank-balance-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  width: 3.35rem;
+  padding: 0.12rem 0.12rem 0.1rem;
+  border-left: 1px solid #dbe4ee;
+  border-right: 1px solid #dbe4ee;
+  background:
+    repeating-linear-gradient(
+      to top,
+      transparent 0,
+      transparent calc(33.33% - 1px),
+      #edf2f7 calc(33.33% - 1px),
+      #edf2f7 33.33%
+    );
+}
+
+#dashMetricCards .dash-bank-balance-pcts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.08rem;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+#dashMetricCards .dash-bank-balance-pcts span {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#dashMetricCards .dash-bank-balance-pcts .is-asset {
+  color: #0f766e;
+}
+
+#dashMetricCards .dash-bank-balance-pcts .is-liability {
+  color: #be123c;
+}
+
+#dashMetricCards .dash-bank-balance-chart svg {
+  display: block;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 0;
+  min-height: 0;
 }
 
 #dashMetricCards .dash-bank-balance-col-wrap {
