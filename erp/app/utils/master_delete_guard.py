@@ -56,7 +56,6 @@ _TABLE_LABELS = {
     "PdsDistrictMaster": "District Master",
     "PdsDsoMaster": "DSO Master",
     "PdsAroMaster": "ARO Master",
-    "PdsSiMaster": "SI Master",
     "PdsFpsMaster": "FPS Master",
     "PdsRationCardMaster": "Ration Card Master",
 }

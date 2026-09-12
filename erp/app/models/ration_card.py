@@ -143,24 +143,6 @@ class PdsAroMaster(db.Model):
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class PdsSiMaster(db.Model):
-    __tablename__ = "PdsSiMaster"
-
-    SiID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    AroID: Mapped[int] = mapped_column(Integer, ForeignKey("PdsAroMaster.AroID"), nullable=False)
-    SiCode: Mapped[str] = mapped_column(Unicode(40), nullable=False)
-    SiName: Mapped[str] = mapped_column(Unicode(200), nullable=False)
-    OfficerName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
-    MobileNumber: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
-    Address: Mapped[str | None] = mapped_column(Unicode(400), nullable=True)
-    Source: Mapped[str | None] = mapped_column(Unicode(80), nullable=True)
-    ActiveStatus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    CreatedBy: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
-    CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    ModifiedBy: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
-    ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
 class PdsFpsMaster(db.Model):
     __tablename__ = "PdsFpsMaster"
 
@@ -168,12 +150,13 @@ class PdsFpsMaster(db.Model):
     DistrictID: Mapped[int] = mapped_column(Integer, ForeignKey("PdsDistrictMaster.DistrictID"), nullable=False)
     DsoID: Mapped[int | None] = mapped_column(Integer, ForeignKey("PdsDsoMaster.DsoID"), nullable=True)
     AroID: Mapped[int | None] = mapped_column(Integer, ForeignKey("PdsAroMaster.AroID"), nullable=True)
-    SiID: Mapped[int | None] = mapped_column(Integer, ForeignKey("PdsSiMaster.SiID"), nullable=True)
     FpsCode: Mapped[str] = mapped_column(Unicode(80), nullable=False)
     ExistingFpsId: Mapped[str | None] = mapped_column(Unicode(80), nullable=True)
     FpsName: Mapped[str] = mapped_column(Unicode(200), nullable=False)
     DealerName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
     TehsilName: Mapped[str | None] = mapped_column(Unicode(120), nullable=True)
+    VillageName: Mapped[str | None] = mapped_column(Unicode(120), nullable=True)
+    PinCode: Mapped[str | None] = mapped_column(Unicode(12), nullable=True)
     MobileNumber: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     Address: Mapped[str | None] = mapped_column(Unicode(400), nullable=True)
     Source: Mapped[str | None] = mapped_column(Unicode(80), nullable=True)

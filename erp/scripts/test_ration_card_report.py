@@ -209,7 +209,6 @@ def test_app() -> None:
             "/public-report/ration-card/district-master",
             "/public-report/ration-card/dso-master",
             "/public-report/ration-card/aro-master",
-            "/public-report/ration-card/si-master",
             "/public-report/ration-card/fps-master",
             "/public-report/ration-card/ration-card-master",
         ]

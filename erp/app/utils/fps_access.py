@@ -16,7 +16,7 @@ FPS_INACTIVE_MESSAGE = "Your FPS account is inactive. Please contact JTCS Admini
 FPS_LOGIN_ERROR = "Unable to login. Please try again."
 
 FPS_ENABLED_PDS_SLUGS = frozenset({"fps", "ration-card"})
-FPS_DISABLED_PDS_SLUGS = frozenset({"state", "district", "dso", "aro", "si"})
+FPS_DISABLED_PDS_SLUGS = frozenset({"state", "district", "dso", "aro"})
 FPS_ENABLED_MASTER_PATHS = frozenset(
     {f"/public-report/ration-card/{slug}-master" for slug in FPS_ENABLED_PDS_SLUGS}
 )

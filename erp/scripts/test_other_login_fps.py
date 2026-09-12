@@ -123,8 +123,10 @@ def test_pages_and_scope() -> None:
         raise SystemExit("FPS login page failed")
     if 'id="fpsState"' not in fps_html or 'id="fpsDistrict"' not in fps_html:
         raise SystemExit("FPS login cascade (State/District) is missing")
-    if 'id="fpsDso"' not in fps_html or 'id="fpsAro"' not in fps_html or 'id="fpsSi"' not in fps_html:
-        raise SystemExit("FPS login cascade (DSO/ARO/SI) is missing")
+    if 'id="fpsDso"' not in fps_html or 'id="fpsAro"' not in fps_html:
+        raise SystemExit("FPS login cascade (DSO/ARO) is missing")
+    if 'id="fpsSi"' in fps_html:
+        raise SystemExit("SI cascade must be removed from FPS login")
     if 'id="fpsSearch"' not in fps_html:
         raise SystemExit("FPS search box missing")
     if 'id="fpsBgNotice"' not in fps_html or "महत्वपूर्ण सूचना" not in fps_html:
@@ -139,11 +141,11 @@ def test_pages_and_scope() -> None:
     csrf_token = csrf_match.group(1) if csrf_match else ""
     blocked_shops = client.get("/fps-login/api/shops?q=TARA", headers={"Accept": "application/json"})
     blocked_payload = blocked_shops.get_json(silent=True) or {}
-    print("FPS SHOPS WITHOUT SI", blocked_shops.status_code, blocked_payload.get("total"), blocked_payload.get("requires_si"))
+    print("FPS SHOPS WITHOUT ARO", blocked_shops.status_code, blocked_payload.get("total"), blocked_payload.get("requires_aro"))
     if blocked_shops.status_code != 200 or not blocked_payload.get("ok"):
         raise SystemExit(blocked_payload.get("error") or "FPS shop API failed")
     if blocked_payload.get("rows"):
-        raise SystemExit("FPS list must stay empty until SI is selected")
+        raise SystemExit("FPS list must stay empty until ARO is selected")
     states = client.get("/fps-login/api/options?level=state", headers={"Accept": "application/json"})
     states_payload = states.get_json(silent=True) or {}
     print("FPS STATES", states.status_code, states_payload.get("count"))
@@ -174,16 +176,14 @@ def test_pages_and_scope() -> None:
     if not aro_rows:
         raise SystemExit("FPS login ARO list failed")
     aro_id = aro_rows[0]["id"]
-    sis = client.get(
+    si_level = client.get(
         f"/fps-login/api/options?level=si&parent_id={aro_id}",
         headers={"Accept": "application/json"},
     )
-    si_rows = (sis.get_json(silent=True) or {}).get("rows") or []
-    if not si_rows:
-        raise SystemExit("FPS login SI list failed")
-    si_id = si_rows[0]["id"]
+    if si_level.status_code == 200 and (si_level.get_json(silent=True) or {}).get("ok"):
+        raise SystemExit("SI cascade API must be removed")
     shops = client.get(
-        f"/fps-login/api/shops?state_id={state_id}&district_id={district_id}&dso_id={dso_id}&aro_id={aro_id}&si_id={si_id}&q=TARA",
+        f"/fps-login/api/shops?state_id={state_id}&district_id={district_id}&dso_id={dso_id}&aro_id={aro_id}&q=TARA",
         headers={"Accept": "application/json"},
     )
     shops_payload = shops.get_json(silent=True) or {}
@@ -307,9 +307,11 @@ def test_pages_and_scope() -> None:
             raise SystemExit("FPS Master and Ration Card Master must be enabled")
         if "Ration Card Detail Report for FPS" not in enabled:
             raise SystemExit("FPS detail report must stay enabled")
-        for blocked in ("State Master", "District Master", "DSO Master", "ARO Master", "SI Master"):
+        for blocked in ("State Master", "District Master", "DSO Master", "ARO Master"):
             if blocked not in disabled:
                 raise SystemExit(f"{blocked} must be disabled for FPS_USER")
+        if "SI Master" in enabled:
+            raise SystemExit("SI Master must not be enabled")
         if "Dashboard" in enabled or "Masters" in enabled or "Accounting" in enabled:
             raise SystemExit("ERP modules leaked into FPS_USER navigation")
         admin_nav = MenuService().get_navigation("Administrator")

@@ -79,7 +79,6 @@ def fps_shops():
             district_id=_int_arg("district_id", 0) or None,
             dso_id=_int_arg("dso_id", 0) or None,
             aro_id=_int_arg("aro_id", 0) or None,
-            si_id=_int_arg("si_id", 0) or None,
         )
         return jsonify({"ok": True, **payload})
     except Exception as exc:

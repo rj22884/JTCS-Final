@@ -242,6 +242,17 @@ def _ensure_pds_master_menus() -> None:
                     "desc": desc,
                 },
             )
+    db.session.execute(
+        text(
+            """
+            UPDATE dbo.MenuMaster
+            SET IsActive = 0
+            WHERE MenuURL LIKE N'%/si-master%'
+               OR (ParentMenuID = :parent AND MenuName = N'SI Master')
+            """
+        ),
+        {"parent": parent_id},
+    )
     db.session.commit()
 
 

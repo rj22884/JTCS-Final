@@ -16,7 +16,6 @@ from app.models.ration_card import (
     PdsDistrictMaster,
     PdsDsoMaster,
     PdsFpsMaster,
-    PdsSiMaster,
     PdsStateMaster,
 )
 from app.repositories.pds_master_repository import PdsMasterRepository
@@ -95,7 +94,6 @@ class FpsLoginService:
         state_name: str | None = None,
         dso_name: str | None = None,
         aro_name: str | None = None,
-        si_name: str | None = None,
     ) -> dict:
         district = district_name
         if district is None:
@@ -113,7 +111,6 @@ class FpsLoginService:
             "district_name": district or "",
             "dso_name": dso_name or "",
             "aro_name": aro_name or "",
-            "si_name": si_name or "",
             "tehsil_name": fps.TehsilName or "",
             "mobile_number": fps.MobileNumber or "",
             "address": fps.Address or "",
@@ -136,7 +133,6 @@ class FpsLoginService:
             PdsFpsMaster.ActiveStatus == True,  # noqa: E712
             PdsFpsMaster.DsoID.isnot(None),
             PdsFpsMaster.AroID.isnot(None),
-            PdsFpsMaster.SiID.isnot(None),
         )
 
     def cascade_options(self, level: str, *, parent_id: int | None = None) -> list[dict]:
@@ -198,21 +194,6 @@ class FpsLoginService:
                 .distinct()
                 .order_by(PdsAroMaster.AroName, PdsAroMaster.AroID)
             )
-        elif step == "si":
-            if parent <= 0:
-                return []
-            stmt = (
-                select(PdsSiMaster.SiID, PdsSiMaster.SiName, PdsSiMaster.SiCode)
-                .join(PdsFpsMaster, PdsFpsMaster.SiID == PdsSiMaster.SiID)
-                .where(
-                    PdsSiMaster.AroID == parent,
-                    PdsFpsMaster.AroID == parent,
-                    PdsSiMaster.ActiveStatus == True,  # noqa: E712
-                    *active_fps,
-                )
-                .distinct()
-                .order_by(PdsSiMaster.SiName, PdsSiMaster.SiID)
-            )
         else:
             raise ValueError("Unknown selection step.")
         rows = db.session.execute(stmt).all()
@@ -228,7 +209,6 @@ class FpsLoginService:
         district_id: int | None = None,
         dso_id: int | None = None,
         aro_id: int | None = None,
-        si_id: int | None = None,
     ) -> dict:
         self.ensure_schema()
         per_page = max(1, min(int(per_page or PAGE_SIZE), 100))
@@ -241,9 +221,9 @@ class FpsLoginService:
             "per_page": per_page,
             "has_more": False,
             "query": (term or "").strip(),
-            "requires_si": True,
+            "requires_aro": True,
         }
-        if not int(si_id or 0):
+        if not int(aro_id or 0):
             return empty
         stmt = (
             select(
@@ -252,26 +232,21 @@ class FpsLoginService:
                 PdsStateMaster.StateName,
                 PdsDsoMaster.DsoName,
                 PdsAroMaster.AroName,
-                PdsSiMaster.SiName,
             )
             .outerjoin(PdsDistrictMaster, PdsFpsMaster.DistrictID == PdsDistrictMaster.DistrictID)
             .outerjoin(PdsStateMaster, PdsDistrictMaster.StateID == PdsStateMaster.StateID)
             .outerjoin(PdsDsoMaster, PdsFpsMaster.DsoID == PdsDsoMaster.DsoID)
             .outerjoin(PdsAroMaster, PdsFpsMaster.AroID == PdsAroMaster.AroID)
-            .outerjoin(PdsSiMaster, PdsFpsMaster.SiID == PdsSiMaster.SiID)
             .where(PdsFpsMaster.ActiveStatus == True)  # noqa: E712
-            .where(PdsFpsMaster.SiID == int(si_id))
+            .where(PdsFpsMaster.AroID == int(aro_id))
         )
         count_stmt = (
             select(func.count(PdsFpsMaster.FpsRowID))
             .select_from(PdsFpsMaster)
             .outerjoin(PdsDistrictMaster, PdsFpsMaster.DistrictID == PdsDistrictMaster.DistrictID)
             .where(PdsFpsMaster.ActiveStatus == True)  # noqa: E712
-            .where(PdsFpsMaster.SiID == int(si_id))
+            .where(PdsFpsMaster.AroID == int(aro_id))
         )
-        if int(aro_id or 0):
-            stmt = stmt.where(PdsFpsMaster.AroID == int(aro_id))
-            count_stmt = count_stmt.where(PdsFpsMaster.AroID == int(aro_id))
         if int(dso_id or 0):
             stmt = stmt.where(PdsFpsMaster.DsoID == int(dso_id))
             count_stmt = count_stmt.where(PdsFpsMaster.DsoID == int(dso_id))
@@ -314,9 +289,8 @@ class FpsLoginService:
                     state_name=state or "",
                     dso_name=dso or "",
                     aro_name=aro or "",
-                    si_name=si or "",
                 )
-                for fps, district, state, dso, aro, si in rows
+                for fps, district, state, dso, aro in rows
             ],
             "count": len(rows),
             "total": total,
@@ -324,7 +298,7 @@ class FpsLoginService:
             "per_page": per_page,
             "has_more": (page * per_page) < total,
             "query": cleaned,
-            "requires_si": False,
+            "requires_aro": False,
         }
 
     def get_active(self, fps_row_id: int) -> PdsFpsMaster | None:

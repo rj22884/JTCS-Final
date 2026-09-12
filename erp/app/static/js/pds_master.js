@@ -272,6 +272,21 @@
     });
   }
 
+  function applyCodeLock(isEdit) {
+    (cfg.fields || []).forEach(function (field) {
+      const input = document.getElementById("pdsField_" + field.key);
+      if (!input) return;
+      const lock = !!(field.locked && isEdit);
+      input.readOnly = lock;
+      input.classList.toggle("bg-light", lock);
+      if (lock) {
+        input.setAttribute("title", "Code cannot be changed after save");
+      } else {
+        input.removeAttribute("title");
+      }
+    });
+  }
+
   function resetForm() {
     els.form.reset();
     els.rowId.value = "";
@@ -280,6 +295,7 @@
       const input = document.getElementById("pdsField_" + field.key);
       if (input) input.value = "";
     });
+    applyCodeLock(false);
   }
 
   async function openCreate() {
@@ -290,6 +306,7 @@
     }
     await reloadParentsFrom(0, selectedMap);
     if (els.modalTitle) els.modalTitle.textContent = "Add " + cfg.title.replace(" Master", "");
+    applyCodeLock(false);
     if (modal) modal.show();
   }
 
@@ -323,6 +340,7 @@
       if (field.name === "csrf_token" || field.id === "pdsRowId") return;
       field.disabled = readOnly;
     });
+    if (!readOnly) applyCodeLock(true);
     if (modal) modal.show();
   }
 

@@ -20,7 +20,7 @@
 {% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/pds_master.css') }}?v=20260911pds2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pds_master.css') }}?v=20260912pds1">
 {% endblock %}
 
 {% block content %}
@@ -108,5 +108,5 @@
   };
   window.PDS_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/pds_master.js') }}?v=20260911pds2"></script>
+<script src="{{ url_for('static', filename='js/pds_master.js') }}?v=20260912pds1"></script>
 {% endblock %}

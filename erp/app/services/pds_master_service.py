@@ -11,7 +11,6 @@ from app.models.ration_card import (
     PdsDsoMaster,
     PdsFpsMaster,
     PdsRationCardMaster,
-    PdsSiMaster,
     PdsStateMaster,
 )
 from app.repositories.pds_master_repository import PdsMasterRepository
@@ -40,6 +39,8 @@ FALLBACK_UK_DISTRICTS = (
     ("UT", "Uttarkashi", "Uttarkashi", "Garhwal"),
 )
 
+WIKI_DISTRICT_CODE_ALIASES = {"PG": "PA", "TG": "TE", "US": "UD"}
+
 WIKI_LINK_RE = re.compile(r"\[\[(?:[^\|\]]*\|)?([^\]]+)\]\]")
 
 
@@ -66,6 +67,7 @@ def parse_wikipedia_districts(wikitext: str) -> list[dict]:
             name_idx = 1
         if len(code) != 2 or name_idx >= len(cells):
             continue
+        code = WIKI_DISTRICT_CODE_ALIASES.get(code, code)
         name = _wiki_text(cells[name_idx]).replace(" district", "").replace(" District", "").strip()
         if not name:
             continue
@@ -112,6 +114,7 @@ class PdsField:
     required: bool = False
     maxlength: int = 120
     kind: str = "text"
+    locked: bool = False
 
 
 @dataclass(frozen=True)
@@ -132,8 +135,17 @@ class PdsEntity:
     child_slug: str | None = None
 
 
-def _f(column: str, key: str, label: str, *, required: bool = False, maxlength: int = 120, kind: str = "text") -> PdsField:
-    return PdsField(column, key, label, required, maxlength, kind)
+def _f(
+    column: str,
+    key: str,
+    label: str,
+    *,
+    required: bool = False,
+    maxlength: int = 120,
+    kind: str = "text",
+    locked: bool = False,
+) -> PdsField:
+    return PdsField(column, key, label, required, maxlength, kind, locked)
 
 
 ENTITIES: dict[str, PdsEntity] = {
@@ -147,7 +159,7 @@ ENTITIES: dict[str, PdsEntity] = {
         "/public-report/ration-card/state-master",
         2,
         (
-            _f("StateCode", "state_code", "State Code", required=True, maxlength=10),
+            _f("StateCode", "state_code", "State Code", required=True, maxlength=10, locked=True),
             _f("StateName", "state_name", "State Name", required=True, maxlength=120),
         ),
         child_slug="district",
@@ -162,7 +174,7 @@ ENTITIES: dict[str, PdsEntity] = {
         "/public-report/ration-card/district-master",
         3,
         (
-            _f("DistrictCode", "district_code", "District Code", required=True, maxlength=20),
+            _f("DistrictCode", "district_code", "District Code", required=True, maxlength=20, locked=True),
             _f("DistrictName", "district_name", "District Name", required=True, maxlength=120),
             _f("Headquarters", "headquarters", "Headquarters", maxlength=120),
             _f("DivisionName", "division_name", "Division", maxlength=80),
@@ -182,7 +194,7 @@ ENTITIES: dict[str, PdsEntity] = {
         "/public-report/ration-card/dso-master",
         4,
         (
-            _f("DsoCode", "dso_code", "DSO Code", required=True, maxlength=40),
+            _f("DsoCode", "dso_code", "DSO Code", required=True, maxlength=40, locked=True),
             _f("DsoName", "dso_name", "DSO Name", required=True, maxlength=200),
             _f("OfficerName", "officer_name", "Officer Name", maxlength=200),
             _f("MobileNumber", "mobile_number", "Mobile", maxlength=20),
@@ -203,7 +215,7 @@ ENTITIES: dict[str, PdsEntity] = {
         "/public-report/ration-card/aro-master",
         5,
         (
-            _f("AroCode", "aro_code", "ARO Code", required=True, maxlength=40),
+            _f("AroCode", "aro_code", "ARO Code", required=True, maxlength=40, locked=True),
             _f("AroName", "aro_name", "ARO Name", required=True, maxlength=200),
             _f("OfficerName", "officer_name", "Officer Name", maxlength=200),
             _f("MobileNumber", "mobile_number", "Mobile", maxlength=20),
@@ -211,27 +223,6 @@ ENTITIES: dict[str, PdsEntity] = {
         ),
         parent_slug="dso",
         parent_column="DsoID",
-        parent_required=True,
-        child_slug="si",
-    ),
-    "si": PdsEntity(
-        "si",
-        "SI Master",
-        PdsSiMaster,
-        "SiID",
-        "si_id",
-        "bi-person-badge",
-        "/public-report/ration-card/si-master",
-        6,
-        (
-            _f("SiCode", "si_code", "SI Code", required=True, maxlength=40),
-            _f("SiName", "si_name", "SI Name", required=True, maxlength=200),
-            _f("OfficerName", "officer_name", "Officer Name", maxlength=200),
-            _f("MobileNumber", "mobile_number", "Mobile", maxlength=20),
-            _f("Address", "address", "Address", maxlength=400, kind="textarea"),
-        ),
-        parent_slug="aro",
-        parent_column="AroID",
         parent_required=True,
         child_slug="fps",
     ),
@@ -243,20 +234,22 @@ ENTITIES: dict[str, PdsEntity] = {
         "fps_row_id",
         "bi-shop",
         "/public-report/ration-card/fps-master",
-        7,
+        6,
         (
-            _f("FpsCode", "fps_code", "FPS ID", required=True, maxlength=80),
+            _f("FpsCode", "fps_code", "FPS ID", required=True, maxlength=80, locked=True),
             _f("ExistingFpsId", "existing_fps_id", "Existing FPS ID", maxlength=80),
             _f("FpsName", "fps_name", "FPS / Shop Name", required=True, maxlength=200),
             _f("DealerName", "dealer_name", "Dealer Name", maxlength=200),
             _f("TehsilName", "tehsil_name", "Tehsil", maxlength=120),
+            _f("VillageName", "village_name", "Village", maxlength=120),
+            _f("PinCode", "pin_code", "PIN", maxlength=12),
             _f("MobileNumber", "mobile_number", "Mobile", maxlength=20),
             _f("Address", "address", "Address", maxlength=400, kind="textarea"),
         ),
         parent_slug="district",
         parent_column="DistrictID",
         parent_required=True,
-        extra_parents=(("dso", "DsoID", False), ("aro", "AroID", False), ("si", "SiID", False)),
+        extra_parents=(("dso", "DsoID", False), ("aro", "AroID", False)),
         child_slug="ration-card",
     ),
     "ration-card": PdsEntity(
@@ -267,7 +260,7 @@ ENTITIES: dict[str, PdsEntity] = {
         "card_id",
         "bi-card-heading",
         "/public-report/ration-card/ration-card-master",
-        8,
+        7,
         (
             _f("RcNumber", "rc_number", "RC Number", required=True, maxlength=80),
             _f("ExistingRcNumber", "existing_rc_number", "Existing RC Number", maxlength=80),
@@ -337,6 +330,7 @@ class PdsMasterService:
                     "required": field.required,
                     "maxlength": field.maxlength,
                     "kind": field.kind,
+                    "locked": field.locked,
                 }
                 for field in entity.fields
             ],
@@ -349,13 +343,13 @@ class PdsMasterService:
         if slug in {"state", "district"}:
             return "Uttarakhand is imported once from the public Wikipedia district list. Other states can be added later."
         if slug == "dso":
-            return "One DSO office row is created per Uttarakhand district as a starting point. Officer names can be edited here."
+            return "One DSO office row is created per Uttarakhand district as a starting point. Officer names can be edited here. Codes stay fixed after save."
         if slug == "ration-card":
             return (
                 "FPS ID + RC Number is the match key. A new pair is appended. "
                 "A matching pair is overwritten: Existing RC Number is cleared and Members is replaced."
             )
-        return "Add records here. Public FPS / ration-card dumps are not available without a government login."
+        return "Add, edit, or delete records here. After save, the code field stays locked. Duplicate codes are not allowed."
 
     def _label(self, entity: PdsEntity, row) -> str:
         name = None
@@ -506,9 +500,24 @@ class PdsMasterService:
                 raise ValueError(f"{ENTITIES[extra_slug].title.replace(' Master', '')} is required.")
         return data
 
+    def _code_field(self, entity: PdsEntity) -> PdsField | None:
+        return next((field for field in entity.fields if field.locked), None)
+
+    def _assert_unique_code(self, entity: PdsEntity, data: dict, *, exclude_id: int | None = None) -> None:
+        field = self._code_field(entity)
+        if field is None:
+            return
+        code = data.get(field.column)
+        if not code:
+            return
+        found = self.repo.find_by_code(entity.model, field.column, str(code), exclude_id=exclude_id)
+        if found is not None:
+            raise ValueError(f"{field.label} already exists. Duplicate codes are not allowed.")
+
     def create_record(self, slug: str, form: dict, *, created_by: str = "System") -> dict:
         entity = self.entity(slug)
         data = self._parse_form(entity, form)
+        self._assert_unique_code(entity, data)
 
         def _write() -> dict:
             if entity.slug == "ration-card":
@@ -565,6 +574,9 @@ class PdsMasterService:
             row = self.repo.get(entity.model, row_id)
             if row is None:
                 raise ValueError(f"{entity.title} record not found.")
+            for field in entity.fields:
+                if field.locked:
+                    data[field.column] = getattr(row, field.column)
             self.repo.update(row, {**data, "ModifiedBy": modified_by})
             return self.serialize(slug, row)
 
@@ -677,6 +689,326 @@ class PdsMasterService:
                 "districts": len(districts),
                 "created": created,
                 "message": f"Imported Uttarakhand ({len(districts)} districts) from {source}.",
+            }
+
+        return persist(_write)
+
+    @staticmethod
+    def _workbook_cell(row: dict, *names) -> str:
+        for name in names:
+            value = row.get(name)
+            if value is None:
+                continue
+            text = " ".join(str(value).split())
+            if text:
+                return text
+        return ""
+
+    @staticmethod
+    def _workbook_address(*parts) -> str | None:
+        bits = []
+        for part in parts:
+            text = " ".join(str(part or "").split())
+            if text:
+                bits.append(text)
+        return ", ".join(bits)[:400] or None
+
+    @classmethod
+    def read_district_fps_workbook(cls, path) -> list[dict]:
+        from pathlib import Path
+
+        from openpyxl import load_workbook
+
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise ValueError(f"Excel file not found: {file_path}")
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        try:
+            sheet = workbook["Merged Data"] if "Merged Data" in workbook.sheetnames else workbook[workbook.sheetnames[0]]
+            rows = sheet.iter_rows(values_only=True)
+            raw_headers = next(rows, None) or []
+            headers = [" ".join(str(cell or "").split()) for cell in raw_headers]
+            if "FPS ID" not in headers or "DistrictCode" not in headers:
+                raise ValueError("Excel needs FPS ID and DistrictCode columns. Use the WithCodes file.")
+            records = []
+            for raw in rows:
+                item = {headers[index]: raw[index] if index < len(raw) else None for index in range(len(headers))}
+                fps_code = cls._workbook_cell(item, "FPS ID", "FpsCode")
+                district_code = cls._workbook_cell(item, "DistrictCode").upper()
+                if not fps_code or not district_code:
+                    continue
+                records.append(item)
+            if not records:
+                raise ValueError("Excel has no FPS rows to import.")
+            return records
+        finally:
+            workbook.close()
+
+    def import_district_fps_workbook(self, path, *, actor: str = "Excel Import") -> dict:
+        records = self.read_district_fps_workbook(path)
+        source = "fps-excel-overwrite"
+
+        def _key(*values) -> tuple[str, ...]:
+            return tuple(str(value or "").strip().upper() for value in values)
+
+        def _write() -> dict:
+            self.repo.ensure_schema()
+            states = {_key(row.StateCode): row for row in self.repo.list_rows(PdsStateMaster, limit=None)}
+            districts = {
+                _key(row.StateID, row.DistrictCode): row
+                for row in self.repo.list_rows(PdsDistrictMaster, limit=None)
+            }
+            dsos = {
+                _key(row.DistrictID, row.DsoCode): row
+                for row in self.repo.list_rows(PdsDsoMaster, limit=None)
+            }
+            aros = {
+                _key(row.DsoID, row.AroCode): row
+                for row in self.repo.list_rows(PdsAroMaster, limit=None)
+            }
+            shops = {_key(row.FpsCode): row for row in self.repo.list_rows(PdsFpsMaster, limit=None)}
+            counts = {
+                "state_added": 0,
+                "state_updated": 0,
+                "district_added": 0,
+                "district_updated": 0,
+                "dso_added": 0,
+                "dso_updated": 0,
+                "aro_added": 0,
+                "aro_updated": 0,
+                "fps_added": 0,
+                "fps_updated": 0,
+            }
+            touched = {"state": set(), "district": set(), "dso": set(), "aro": set()}
+
+            for item in records:
+                state_code = (self._workbook_cell(item, "StateCode") or "05")[:10]
+                state_name = (self._workbook_cell(item, "State") or "Uttarakhand")[:120]
+                district_code = self._workbook_cell(item, "DistrictCode").upper()[:20]
+                district_name = (
+                    self._workbook_cell(item, "DistrictNameMaster", "District") or district_code
+                )[:120]
+                headquarters = self._clean(self._workbook_cell(item, "Headquarters"), 120)
+                division_name = self._clean(self._workbook_cell(item, "DivisionName"), 80)
+                dso_code = (self._workbook_cell(item, "DsoCode") or f"{district_code}-DSO")[:40]
+                dso_name = (self._workbook_cell(item, "DsoName") or f"{district_name} DSO")[:200]
+                aro_code = self._workbook_cell(item, "AroCode")[:40]
+                aro_name = (self._workbook_cell(item, "AroName", "Block / Tehsil / Taluka / Circle") or aro_code)[:200]
+                fps_code = self._workbook_cell(item, "FPS ID", "FpsCode")[:80]
+                existing_fps = self._clean(self._workbook_cell(item, "OLD FPS ID", "ExistingFpsId"), 80)
+                fps_name = (self._workbook_cell(item, "FPS Name", "FpsName") or fps_code)[:200]
+                tehsil_name = self._clean(
+                    self._workbook_cell(item, "AroName", "Block / Tehsil / Taluka / Circle", "TehsilName"),
+                    120,
+                )
+                village_name = self._clean(self._workbook_cell(item, "Village", "VillageName"), 120)
+                pin_code = self._clean(self._workbook_cell(item, "pin", "Pin", "PinCode"), 12)
+                address = self._workbook_address(
+                    village_name,
+                    self._workbook_cell(item, "Add1"),
+                    self._workbook_cell(item, "Add2"),
+                    self._workbook_cell(item, "ADD3", "Add3"),
+                    pin_code,
+                )
+
+                state_key = _key(state_code)
+                state = states.get(state_key)
+                if state_key not in touched["state"]:
+                    if state is None:
+                        state = self.repo.create(
+                            PdsStateMaster,
+                            {
+                                "StateCode": state_code,
+                                "StateName": state_name,
+                                "Source": source,
+                                "CreatedBy": actor,
+                                "ActiveStatus": True,
+                            },
+                        )
+                        states[state_key] = state
+                        counts["state_added"] += 1
+                    else:
+                        self.repo.update(
+                            state,
+                            {
+                                "StateName": state_name,
+                                "Source": source,
+                                "ModifiedBy": actor,
+                                "ActiveStatus": True,
+                            },
+                        )
+                        counts["state_updated"] += 1
+                    touched["state"].add(state_key)
+
+                district_key = _key(state.StateID, district_code)
+                district = districts.get(district_key)
+                if district_key not in touched["district"]:
+                    district_payload = {
+                        "StateID": state.StateID,
+                        "DistrictCode": district_code,
+                        "DistrictName": district_name,
+                        "Headquarters": headquarters,
+                        "DivisionName": division_name,
+                        "Source": source,
+                        "ActiveStatus": True,
+                    }
+                    if district is None:
+                        district = self.repo.create(
+                            PdsDistrictMaster,
+                            {**district_payload, "CreatedBy": actor},
+                        )
+                        districts[district_key] = district
+                        counts["district_added"] += 1
+                    else:
+                        self.repo.update(district, {**district_payload, "ModifiedBy": actor})
+                        counts["district_updated"] += 1
+                    touched["district"].add(district_key)
+
+                dso_key = _key(district.DistrictID, dso_code)
+                dso = dsos.get(dso_key)
+                if dso_key not in touched["dso"]:
+                    dso_payload = {
+                        "DistrictID": district.DistrictID,
+                        "DsoCode": dso_code,
+                        "DsoName": dso_name,
+                        "Source": source,
+                        "ActiveStatus": True,
+                    }
+                    if dso is None:
+                        dso = self.repo.create(
+                            PdsDsoMaster,
+                            {**dso_payload, "CreatedBy": actor},
+                        )
+                        dsos[dso_key] = dso
+                        counts["dso_added"] += 1
+                    else:
+                        self.repo.update(dso, {**dso_payload, "ModifiedBy": actor})
+                        counts["dso_updated"] += 1
+                    touched["dso"].add(dso_key)
+
+                aro = None
+                if aro_code:
+                    aro_key = _key(dso.DsoID, aro_code)
+                    aro = aros.get(aro_key)
+                    if aro_key not in touched["aro"]:
+                        aro_payload = {
+                            "DsoID": dso.DsoID,
+                            "AroCode": aro_code,
+                            "AroName": aro_name,
+                            "Source": source,
+                            "ActiveStatus": True,
+                        }
+                        if aro is None:
+                            aro = self.repo.create(
+                                PdsAroMaster,
+                                {**aro_payload, "CreatedBy": actor},
+                            )
+                            aros[aro_key] = aro
+                            counts["aro_added"] += 1
+                        else:
+                            self.repo.update(aro, {**aro_payload, "ModifiedBy": actor})
+                            counts["aro_updated"] += 1
+                        touched["aro"].add(aro_key)
+
+                shop = shops.get(_key(fps_code))
+                shop_payload = {
+                    "DistrictID": district.DistrictID,
+                    "DsoID": dso.DsoID,
+                    "AroID": aro.AroID if aro is not None else None,
+                    "FpsCode": fps_code,
+                    "ExistingFpsId": existing_fps,
+                    "FpsName": fps_name,
+                    "DealerName": fps_name,
+                    "TehsilName": tehsil_name,
+                    "VillageName": village_name,
+                    "PinCode": pin_code,
+                    "Address": address,
+                    "Source": source,
+                    "ActiveStatus": True,
+                }
+                if shop is None:
+                    shop = self.repo.create(
+                        PdsFpsMaster,
+                        {**shop_payload, "CreatedBy": actor},
+                    )
+                    shops[_key(fps_code)] = shop
+                    counts["fps_added"] += 1
+                else:
+                    if shop.MobileNumber and not shop_payload.get("MobileNumber"):
+                        shop_payload["MobileNumber"] = shop.MobileNumber
+                    self.repo.update(shop, {**shop_payload, "ModifiedBy": actor})
+                    counts["fps_updated"] += 1
+
+            imported_district_codes = {
+                self._workbook_cell(item, "DistrictCode").upper() for item in records
+            }
+            imported_dso_codes = {
+                (self._workbook_cell(item, "DsoCode") or f"{self._workbook_cell(item, 'DistrictCode').upper()}-DSO").upper()
+                for item in records
+            }
+            imported_aro_codes = {
+                self._workbook_cell(item, "AroCode").upper()
+                for item in records
+                if self._workbook_cell(item, "AroCode")
+            }
+            fps_by_district: dict[int, int] = {}
+            fps_by_dso: dict[int, int] = {}
+            fps_by_aro: dict[int, int] = {}
+            for shop in shops.values():
+                if shop.DistrictID:
+                    fps_by_district[shop.DistrictID] = fps_by_district.get(shop.DistrictID, 0) + 1
+                if shop.DsoID:
+                    fps_by_dso[shop.DsoID] = fps_by_dso.get(shop.DsoID, 0) + 1
+                if shop.AroID:
+                    fps_by_aro[shop.AroID] = fps_by_aro.get(shop.AroID, 0) + 1
+            leftover = {"district": 0, "dso": 0, "aro": 0}
+            for row in self.repo.list_rows(PdsDistrictMaster, limit=None):
+                if (row.DistrictCode or "").upper() in imported_district_codes:
+                    continue
+                if fps_by_district.get(row.DistrictID, 0) == 0 and row.ActiveStatus:
+                    self.repo.update(row, {"ActiveStatus": False, "ModifiedBy": actor, "Source": source})
+                    leftover["district"] += 1
+            for row in self.repo.list_rows(PdsDsoMaster, limit=None):
+                if (row.DsoCode or "").upper() in imported_dso_codes:
+                    continue
+                if fps_by_dso.get(row.DsoID, 0) == 0 and row.ActiveStatus:
+                    self.repo.update(row, {"ActiveStatus": False, "ModifiedBy": actor, "Source": source})
+                    leftover["dso"] += 1
+            for row in self.repo.list_rows(PdsAroMaster, limit=None):
+                if (row.AroCode or "").upper() in imported_aro_codes:
+                    continue
+                if fps_by_aro.get(row.AroID, 0) == 0 and row.ActiveStatus:
+                    self.repo.update(row, {"ActiveStatus": False, "ModifiedBy": actor, "Source": source})
+                    leftover["aro"] += 1
+            counts["district_deactivated"] = leftover["district"]
+            counts["dso_deactivated"] = leftover["dso"]
+            counts["aro_deactivated"] = leftover["aro"]
+
+            unique_states = len({self._workbook_cell(item, "StateCode") or "05" for item in records})
+            unique_districts = len({self._workbook_cell(item, "DistrictCode").upper() for item in records})
+            unique_dso = len({self._workbook_cell(item, "DsoCode") for item in records})
+            unique_aro = len({self._workbook_cell(item, "AroCode") for item in records if self._workbook_cell(item, "AroCode")})
+            self.repo.mark_import(
+                "uk-fps-excel-overwrite",
+                source=str(path),
+                row_count=len(records),
+                detail=(
+                    f"Upserted {unique_states} state, {unique_districts} districts, "
+                    f"{unique_dso} DSO, {unique_aro} ARO, {len(records)} FPS."
+                ),
+            )
+            return {
+                "file": str(path),
+                "fps_rows": len(records),
+                "unique_states": unique_states,
+                "unique_districts": unique_districts,
+                "unique_dso": unique_dso,
+                "unique_aro": unique_aro,
+                **counts,
+                "message": (
+                    f"Imported {len(records)} FPS rows: "
+                    f"{counts['fps_added']} added, {counts['fps_updated']} updated."
+                ),
             }
 
         return persist(_write)

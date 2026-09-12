@@ -5,7 +5,6 @@
     district: document.getElementById("fpsDistrict"),
     dso: document.getElementById("fpsDso"),
     aro: document.getElementById("fpsAro"),
-    si: document.getElementById("fpsSi"),
     search: document.getElementById("fpsSearch"),
     shopBlock: document.getElementById("fpsShopBlock"),
     list: document.getElementById("fpsList"),
@@ -25,8 +24,7 @@
     { key: "state", el: els.state, level: "state", placeholder: "Select State", next: "district" },
     { key: "district", el: els.district, level: "district", placeholder: "Select District", next: "dso" },
     { key: "dso", el: els.dso, level: "dso", placeholder: "Select DSO", next: "aro" },
-    { key: "aro", el: els.aro, level: "aro", placeholder: "Select ARO", next: "si" },
-    { key: "si", el: els.si, level: "si", placeholder: "Select SI", next: null },
+    { key: "aro", el: els.aro, level: "aro", placeholder: "Select ARO", next: null },
   ];
 
   let page = 1;
@@ -70,8 +68,8 @@
     return value > 0 ? value : 0;
   }
 
-  function siReady() {
-    return !!selectedId(els.si);
+  function aroReady() {
+    return !!selectedId(els.aro);
   }
 
   function fillSelect(select, rows, placeholder) {
@@ -111,7 +109,6 @@
       ["District", row.district_name],
       ["DSO", row.dso_name],
       ["ARO", row.aro_name],
-      ["SI", row.si_name],
       ["FPS ID", row.fps_id],
       ["Existing FPS", row.existing_fps_id],
       ["Tehsil", row.tehsil_name],
@@ -185,9 +182,9 @@
 
   async function loadShops(options) {
     const opts = options || {};
-    if (!siReady()) {
+    if (!aroReady()) {
       if (els.shopBlock) els.shopBlock.classList.add("d-none");
-      setStatus("Select State, District, DSO, ARO and SI first.");
+      setStatus("Select State, District, DSO and ARO first.");
       return;
     }
     if (loading) return;
@@ -203,7 +200,6 @@
     url.searchParams.set("district_id", String(selectedId(els.district)));
     url.searchParams.set("dso_id", String(selectedId(els.dso)));
     url.searchParams.set("aro_id", String(selectedId(els.aro)));
-    url.searchParams.set("si_id", String(selectedId(els.si)));
     try {
       const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
       const data = await parseJson(res);
@@ -279,7 +275,7 @@
   });
 
   els.search?.addEventListener("input", function () {
-    if (!siReady()) return;
+    if (!aroReady()) return;
     clearTimeout(timer);
     timer = setTimeout(function () {
       query = (els.search.value || "").trim();
@@ -288,7 +284,7 @@
     }, 280);
   });
   els.more?.addEventListener("click", function () {
-    if (!hasMore || !siReady()) return;
+    if (!hasMore || !aroReady()) return;
     page += 1;
     loadShops();
   });
