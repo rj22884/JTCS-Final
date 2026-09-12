@@ -636,7 +636,7 @@ MORE_TOPICS: tuple[HelpTopic, ...] = (
         "Admin Role → eStamp orders",
         "Orders received from the public eStamp API. Fulfilment still happens in Stamp Activity.",
         url="/admin/estamp-orders",
-        audience="Administrator",
+        audience="All staff",
         related=("stamp-activity",),
         keywords="estamp orders api",
     ),

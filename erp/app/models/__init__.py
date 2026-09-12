@@ -2,6 +2,7 @@ from app.models.account_type import AccountTypeMaster
 from app.models.gst_billing import GstInvoice, GstInvoiceLine, ItemMaster
 from app.models.auth import AuthToken, CompanyProfile, User
 from app.models.menu_master import MenuMaster
+from app.models.menu_user_allow import MenuUserAllow
 from app.models.ecourt import ECourtReceiptBatch, ECourtReceiptLine, ECourtSale
 from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
 from app.models.stamp import StampMaster, StampOcrImage
@@ -59,6 +60,7 @@ from app.models.transactions import (
 
 __all__ = [
     "MenuMaster",
+    "MenuUserAllow",
     "User",
     "CompanyProfile",
     "AuthToken",

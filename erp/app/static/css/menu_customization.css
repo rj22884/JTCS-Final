@@ -141,3 +141,41 @@
   font-size: 1.1rem;
   color: #0d47a1;
 }
+
+.mcust-user-box {
+  border: 1px solid #d7e0ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 0.65rem 0.75rem;
+}
+
+.mcust-user-list {
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid #e4ebf5;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.35rem 0.55rem;
+}
+
+.mcust-user-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.22rem 0;
+}
+
+.mcust-user-row .form-check-label {
+  font-size: 0.86rem;
+}
+
+.mcust-user-role {
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.mcust-users-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}

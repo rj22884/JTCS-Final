@@ -86,6 +86,18 @@ class UserRepository:
         )
         return list(self.session.scalars(stmt).all())
 
+    def list_for_menu_allow(self) -> list[User]:
+        """Active staff users that can be allowed on a menu (not FPS shop logins)."""
+        from app.utils.roles import has_fps_user_role
+
+        stmt = (
+            select(User)
+            .where(User.UserStatus != "Rejected")
+            .where(User.IsActive == True)  # noqa: E712
+            .order_by(User.FullName)
+        )
+        return [user for user in self.session.scalars(stmt).all() if not has_fps_user_role(user.Role)]
+
     def list_all_for_admin(self) -> list[User]:
         """All users for Admin Role → Users grid (excludes rejected)."""
         stmt = select(User).where(User.UserStatus != "Rejected")

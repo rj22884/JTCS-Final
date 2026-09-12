@@ -5,13 +5,21 @@ from dataclasses import dataclass, field
 
 from app.models.menu_master import MenuMaster
 from app.repositories.menu_repository import MenuRepository
+from app.repositories.user_repository import UserRepository
 from app.utils.fps_access import (
     FPS_DISABLED_MASTER_PATHS,
     FPS_ENABLED_MASTER_PATHS,
     FPS_HOME_PATH,
     fps_nav_menu_disabled,
 )
-from app.utils.roles import has_admin_role, has_data_backup_role, has_fps_user_role, join_roles, roles_intersect
+from app.utils.roles import (
+    format_roles_display,
+    has_admin_role,
+    has_data_backup_role,
+    has_fps_user_role,
+    join_roles,
+    roles_intersect,
+)
 
 
 @dataclass
@@ -68,6 +76,7 @@ class MenuService:
 
     def __init__(self, repository: MenuRepository | None = None):
         self.repository = repository or MenuRepository()
+        self._allowed_users_cache: dict[int, set[int]] | None = None
 
     @classmethod
     def normalize_menu_url(cls, menu_url: str | None) -> str | None:
@@ -97,15 +106,57 @@ class MenuService:
         url = (cls.normalize_menu_url(getattr(menu, "MenuURL", None)) or "").rstrip("/").lower()
         return name == cls.HELP_MENU_NAME or url in cls.HELP_URLS or url.startswith("/help/")
 
-    def can_access_menu(self, menu: MenuMaster, role: str | None) -> bool:
+    def _menu_allowed_users(self) -> dict[int, set[int]]:
+        if self._allowed_users_cache is None:
+            self._allowed_users_cache = self.repository.list_allowed_users_map()
+        return self._allowed_users_cache
+
+    def _allowed_user_ids_for(self, menu_id: int) -> set[int]:
+        return self._menu_allowed_users().get(menu_id, set())
+
+    def _invalidate_allow_cache(self) -> None:
+        self._allowed_users_cache = None
+
+    def _is_all_users_menu(self, menu) -> bool:
+        if self._is_help_menu(menu):
+            return True
+        return bool(getattr(menu, "AllowAllUsers", False))
+
+    def _user_is_explicitly_allowed(self, menu, user_id: int | None) -> bool:
+        if user_id is None:
+            return False
+        return int(user_id) in self._allowed_user_ids_for(menu.MenuID)
+
+    def _is_staff_shared_menu(self, menu, user_id: int | None) -> bool:
+        """Menus a non-admin staff user may see even under Admin Role."""
+        return self._is_all_users_menu(menu) or self._user_is_explicitly_allowed(menu, user_id)
+
+    def _users_label(self, menu: MenuMaster) -> str:
+        if bool(getattr(menu, "AllowAllUsers", False)) or self._is_help_menu(menu):
+            return "All users"
+        allowed = self._allowed_user_ids_for(menu.MenuID)
+        if allowed:
+            count = len(allowed)
+            return f"{count} user" + ("" if count == 1 else "s")
+        return format_roles_display(menu.RoleName)
+
+    def can_access_menu(
+        self,
+        menu: MenuMaster,
+        role: str | None,
+        user_id: int | None = None,
+    ) -> bool:
         if not menu.IsActive:
             return False
         if has_admin_role(role):
             return True
         if has_fps_user_role(role):
             return self._is_fps_user_menu(menu)
-        if self._is_help_menu(menu):
+        if self._is_all_users_menu(menu):
             return True
+        allowed_ids = self._allowed_user_ids_for(menu.MenuID)
+        if allowed_ids:
+            return bool(user_id and int(user_id) in allowed_ids)
         if has_data_backup_role(role) and (
             self._is_admin_role_root(menu) or self._is_data_backup_menu(menu)
         ):
@@ -210,7 +261,7 @@ class MenuService:
         }
     )
 
-    def get_navigation(self, role: str | None) -> list[MenuNode]:
+    def get_navigation(self, role: str | None, user_id: int | None = None) -> list[MenuNode]:
         try:
             from app.routes.admin_import_export import ensure_import_export_menus
 
@@ -227,7 +278,7 @@ class MenuService:
             from app.extensions import db
 
             db.session.rollback()
-        menus = [m for m in self.repository.get_all() if self.can_access_menu(m, role)]
+        menus = [m for m in self.repository.get_all() if self.can_access_menu(m, role, user_id)]
         # Hidden from app nav (CRM / Exceptional / Settings / non-core modules).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
         # Drop children of ITR/GST/Payroll/… so _include_parent_chain cannot
@@ -238,12 +289,12 @@ class MenuService:
             menus = self._include_parent_chain(menus, allowed_ids)
             menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
         else:
-            menus = self._menus_with_accessible_ancestors(menus, role)
+            menus = self._menus_with_accessible_ancestors(menus, role, user_id)
             menus = [m for m in menus if not self._is_hidden_nav_menu(m) and self._is_under_core_nav(m)]
             if has_fps_user_role(role):
                 menus = [m for m in menus if self._is_fps_user_menu(m)]
             elif has_data_backup_role(role):
-                menus = self._restrict_admin_role_to_data_backup(menus)
+                menus = self._restrict_admin_role_to_data_backup(menus, user_id)
         tree = self.build_tree(menus, None)
         if has_fps_user_role(role):
             self._mark_fps_disabled_menus(tree)
@@ -270,8 +321,12 @@ class MenuService:
             current = self.repository.get_by_id(current.ParentMenuID)
         return False
 
-    def _restrict_admin_role_to_data_backup(self, menus: list[MenuMaster]) -> list[MenuMaster]:
-        """Manager / Operator / Viewer: Admin Role shows Data Backup and Help only."""
+    def _restrict_admin_role_to_data_backup(
+        self,
+        menus: list[MenuMaster],
+        user_id: int | None = None,
+    ) -> list[MenuMaster]:
+        """Manager / Operator / Viewer: Admin Role shows shared staff menus only."""
         kept: list[MenuMaster] = []
         for menu in menus:
             if not self._is_under_admin_role(menu):
@@ -280,11 +335,12 @@ class MenuService:
             if (
                 self._is_admin_role_root(menu)
                 or self._is_data_backup_menu(menu)
-                or self._is_help_menu(menu)
+                or self._is_staff_shared_menu(menu, user_id)
             ):
                 kept.append(menu)
         if not any(
-            self._is_data_backup_menu(menu) or self._is_help_menu(menu) for menu in kept
+            self._is_data_backup_menu(menu) or self._is_staff_shared_menu(menu, user_id)
+            for menu in kept
         ):
             kept = [menu for menu in kept if not self._is_admin_role_root(menu)]
         return kept
@@ -343,11 +399,16 @@ class MenuService:
             return True
         return False
 
-    def _ancestors_accessible(self, menu: MenuMaster, role: str | None) -> bool:
+    def _ancestors_accessible(
+        self,
+        menu: MenuMaster,
+        role: str | None,
+        user_id: int | None = None,
+    ) -> bool:
         """True only if this menu and every parent allow the user's role."""
-        if self._is_help_menu(menu):
-            # Help sits under Admin Role (admin-only parent) but is granted to every
-            # signed-in staff user. FPS_USER does not get Help.
+        if self._is_staff_shared_menu(menu, user_id):
+            # Help / All users / selected users sit under Admin Role (admin-only
+            # parent) but are granted to the chosen staff. FPS_USER stays excluded.
             if has_fps_user_role(role):
                 return False
             return True
@@ -357,7 +418,7 @@ class MenuService:
             if current.MenuID in seen:
                 return False
             seen.add(current.MenuID)
-            if not self.can_access_menu(current, role):
+            if not self.can_access_menu(current, role, user_id):
                 return False
             if not current.ParentMenuID:
                 return True
@@ -368,18 +429,19 @@ class MenuService:
         self,
         menus: list[MenuMaster],
         role: str | None,
+        user_id: int | None = None,
     ) -> list[MenuMaster]:
         """Keep role-allowed menus only when their full parent chain is also allowed.
 
         Prevents Admin Role from appearing for Operators when a child row has
         RoleName NULL (legacy "all roles") under an admin-only parent.
-        Help is the exception: it is granted to every signed-in user.
+        All-users / selected-user menus are the exception (same as Help).
         """
         by_id: dict[int, MenuMaster] = {}
         kept_ids: set[int] = set()
 
         for menu in menus:
-            if not self._ancestors_accessible(menu, role):
+            if not self._ancestors_accessible(menu, role, user_id):
                 continue
             kept_ids.add(menu.MenuID)
             by_id[menu.MenuID] = menu
@@ -433,12 +495,17 @@ class MenuService:
 
         return [by_id[menu_id] for menu_id in expanded_ids if menu_id in by_id]
 
-    def get_breadcrumb(self, menu_url: str, role: str | None) -> list[MenuMaster]:
+    def get_breadcrumb(
+        self,
+        menu_url: str,
+        role: str | None,
+        user_id: int | None = None,
+    ) -> list[MenuMaster]:
         menu = self.repository.find_by_url(menu_url)
-        if menu is None or not self.can_access_menu(menu, role):
+        if menu is None or not self.can_access_menu(menu, role, user_id):
             return []
 
-        return self._breadcrumb_from_menu(menu, role)
+        return self._breadcrumb_from_menu(menu, role, user_id)
 
     def get_breadcrumb_for_work_type(
         self,
@@ -446,23 +513,34 @@ class MenuService:
         role: str | None,
         *,
         fallback_url: str = "/transactions/new",
+        user_id: int | None = None,
     ) -> list[MenuMaster]:
         if work_type:
             module = self.repository.find_top_level_by_name(work_type.strip())
-            if module is not None and self.can_access_menu(module, role):
-                return self._breadcrumb_from_menu(module, role)
+            if module is not None and self.can_access_menu(module, role, user_id):
+                return self._breadcrumb_from_menu(module, role, user_id)
 
-        return self.get_breadcrumb(fallback_url, role) or self.get_breadcrumb(
+        return self.get_breadcrumb(fallback_url, role, user_id) or self.get_breadcrumb(
             "/transactions/new",
             role,
+            user_id,
         )
 
-    def _breadcrumb_from_menu(self, menu: MenuMaster, role: str | None) -> list[MenuMaster]:
+    def _breadcrumb_from_menu(
+        self,
+        menu: MenuMaster,
+        role: str | None,
+        user_id: int | None = None,
+    ) -> list[MenuMaster]:
         trail: list[MenuMaster] = [menu]
         current = menu
         while current.ParentMenuID:
             parent = self.repository.get_by_id(current.ParentMenuID)
-            if parent is None or not self.can_access_menu(parent, role):
+            if parent is None:
+                break
+            if not self.can_access_menu(parent, role, user_id):
+                if self._is_staff_shared_menu(menu, user_id) and self._is_admin_role_root(parent):
+                    trail.insert(0, parent)
                 break
             trail.insert(0, parent)
             current = parent
@@ -793,6 +871,8 @@ class MenuService:
             name_key = (m.MenuName or "").strip().lower()
             protected = parent_id is None and name_key in self.PROTECTED_MAIN_MENUS
             child_count = self._customization_child_count(m.MenuID)
+            allow_all = bool(getattr(m, "AllowAllUsers", False))
+            allowed_ids = sorted(self._allowed_user_ids_for(m.MenuID))
             items.append(
                 {
                     "menu_id": m.MenuID,
@@ -804,6 +884,9 @@ class MenuService:
                     "has_children": child_count > 0,
                     "child_count": child_count,
                     "parent_menu_id": m.ParentMenuID,
+                    "allow_all_users": allow_all,
+                    "allowed_user_ids": allowed_ids,
+                    "users_label": self._users_label(m),
                 }
             )
 
@@ -816,6 +899,14 @@ class MenuService:
                 slug = slug.strip("_")
                 parent_url = f"/{slug}" if slug else ""
 
+        users = [
+            {
+                "user_id": user.UserID,
+                "name": user.FullName,
+                "role": user.Role,
+            }
+            for user in UserRepository().list_for_menu_allow()
+        ]
         return {
             "ok": True,
             "parent_id": parent_id,
@@ -823,6 +914,7 @@ class MenuService:
             "parent_url": parent_url.rstrip("/") if parent_url else "",
             "breadcrumb": breadcrumb,
             "items": items,
+            "users": users,
         }
 
     def list_main_menus_for_customization(self) -> list[dict]:
@@ -874,6 +966,21 @@ class MenuService:
     def move_main_menu(self, menu_id: int, direction: str) -> tuple[bool, str | None]:
         return self.move_customization_menu(menu_id, direction, parent_id=None)
 
+    def _apply_user_allow(
+        self,
+        menu: MenuMaster,
+        *,
+        allow_all_users: bool,
+        allowed_user_ids: list[int] | None,
+    ) -> None:
+        menu.AllowAllUsers = bool(allow_all_users)
+        if menu.AllowAllUsers:
+            menu.RoleName = None
+            self.repository.replace_allowed_users(menu.MenuID, [])
+        elif allowed_user_ids is not None:
+            self.repository.replace_allowed_users(menu.MenuID, allowed_user_ids)
+        self._invalidate_allow_cache()
+
     def add_customization_menu(
         self,
         name: str,
@@ -881,6 +988,8 @@ class MenuService:
         parent_id: int | None = None,
         url: str | None = None,
         icon: str | None = None,
+        allow_all_users: bool = False,
+        allowed_user_ids: list[int] | None = None,
     ) -> tuple[MenuMaster | None, str | None]:
         clean_name = (name or "").strip()
         if not clean_name:
@@ -912,11 +1021,18 @@ class MenuService:
                 "IsActive": True,
                 "Description": "Added via Menu Customization",
                 "RoleName": None,
+                "AllowAllUsers": bool(allow_all_users),
                 "FontColor": None,
                 "FontName": None,
                 "BackgroundColor": None,
             }
         )
+        self._apply_user_allow(
+            menu,
+            allow_all_users=allow_all_users,
+            allowed_user_ids=allowed_user_ids or [],
+        )
+        self.repository.session.commit()
         return menu, None
 
     def add_main_menu(
@@ -951,6 +1067,8 @@ class MenuService:
         name: str,
         url: str | None = None,
         icon: str | None = None,
+        allow_all_users: bool | None = None,
+        allowed_user_ids: list[int] | None = None,
     ) -> tuple[MenuMaster | None, str | None]:
         menu = self.repository.get_by_id(menu_id)
         if menu is None or not menu.IsActive:
@@ -977,9 +1095,15 @@ class MenuService:
                 ):
                     return None, "A submenu with this name already exists here."
 
-        # Keep parent + order; only edit label / link / icon.
+        # Keep parent + order; only edit label / link / icon / user allow.
         menu.MenuName = clean_name
         menu.MenuURL = self.normalize_menu_url(url)
         menu.MenuIcon = (icon or "").strip() or menu.MenuIcon or "bi-circle"
+        if allow_all_users is not None:
+            self._apply_user_allow(
+                menu,
+                allow_all_users=allow_all_users,
+                allowed_user_ids=allowed_user_ids,
+            )
         self.repository.session.commit()
         return menu, None

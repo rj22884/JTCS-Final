@@ -94,7 +94,6 @@ END
 
 _MENU_SQL = """
 DECLARE @ParentID INT;
-DECLARE @AdminRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Reception,Operator';
 
 SELECT TOP 1 @ParentID = MenuID
 FROM dbo.MenuMaster
@@ -109,11 +108,11 @@ AND NOT EXISTS (
 BEGIN
     INSERT INTO dbo.MenuMaster (
         ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-        Description, IsActive, RoleName
+        Description, IsActive, RoleName, AllowAllUsers
     )
     VALUES (
         @ParentID, N'e-Stamp Orders', N'bi-postage', N'/admin/estamp-orders', 68,
-        N'Paid website e-Stamp purchase requests', 1, @AdminRoles
+        N'Paid website e-Stamp purchase requests — all staff users', 1, NULL, 1
     );
 END
 ELSE IF EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuURL = N'/admin/estamp-orders')
@@ -121,7 +120,9 @@ BEGIN
     UPDATE dbo.MenuMaster
     SET MenuName = N'e-Stamp Orders',
         IsActive = 1,
-        Description = N'Paid website e-Stamp purchase requests'
+        RoleName = NULL,
+        AllowAllUsers = 1,
+        Description = N'Paid website e-Stamp purchase requests — all staff users'
     WHERE MenuURL = N'/admin/estamp-orders';
 END
 """
@@ -213,6 +214,9 @@ def _poi_url(reference_no: str, *, inline: bool) -> str:
 
 class WebsiteEStampService:
     def ensure_schema(self) -> None:
+        from app.repositories.menu_repository import MenuRepository
+
+        MenuRepository().ensure_style_columns()
         db.session.execute(text(_SCHEMA_SQL))
         db.session.execute(text(_COLUMNS_SQL))
         db.session.execute(text(_MENU_SQL))

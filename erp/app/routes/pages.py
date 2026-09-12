@@ -76,10 +76,12 @@ def render_page(page_path: str):
     if menu is None:
         abort(404)
 
-    if not menu_service.can_access_menu(menu, session.get("role")):
+    if not menu_service.can_access_menu(menu, session.get("role"), session.get("user_id")):
         abort(403)
 
-    breadcrumb = menu_service.get_breadcrumb(menu_url, session.get("role"))
+    breadcrumb = menu_service.get_breadcrumb(
+        menu_url, session.get("role"), session.get("user_id")
+    )
     return render_template(
         "pages/placeholder.html",
         page_title=menu.MenuName,

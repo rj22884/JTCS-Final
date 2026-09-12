@@ -219,6 +219,14 @@ def create_app(config_class: type = Config) -> Flask:
         OcrProviderService.initialize()
 
         try:
+            from app.repositories.menu_repository import MenuRepository
+
+            MenuRepository().ensure_style_columns()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Menu schema ensure skipped: %s", exc)
+
+        try:
             from app.modules.shared.schema import (
                 ensure_activities_shcil_menus,
                 ensure_crm_menus,
@@ -583,7 +591,10 @@ def create_app(config_class: type = Config) -> Flask:
         is_fps_user = False
         if has_request_context() and session.get("user_id"):
             menu_service = MenuService()
-            navigation = menu_service.get_navigation(session.get("role"))
+            navigation = menu_service.get_navigation(
+                session.get("role"),
+                session.get("user_id"),
+            )
             is_admin_user = has_admin_role(session.get("role"))
             is_fps_user = is_fps_session()
             if is_admin_user:

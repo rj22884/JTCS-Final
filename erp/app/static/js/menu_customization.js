@@ -50,6 +50,7 @@
     btnDown: document.getElementById("mcustBtnDown"),
     btnAdd: document.getElementById("mcustBtnAdd"),
     btnEdit: document.getElementById("mcustBtnEdit"),
+    btnUsers: document.getElementById("mcustBtnUsers"),
     btnRemove: document.getElementById("mcustBtnRemove"),
     btnRefresh: document.getElementById("mcustBtnRefresh"),
     addTitle: document.getElementById("mcustAddTitle"),
@@ -59,6 +60,9 @@
     addIcon: document.getElementById("mcustAddIcon"),
     addError: document.getElementById("mcustAddError"),
     addSave: document.getElementById("mcustAddSave"),
+    allowAllUsers: document.getElementById("mcustAllowAllUsers"),
+    userSearch: document.getElementById("mcustUserSearch"),
+    userList: document.getElementById("mcustUserList"),
     urlHint: document.getElementById("mcustUrlHint"),
     iconPreview: document.getElementById("mcustIconPreview"),
     btnBrowseIcon: document.getElementById("mcustBtnBrowseIcon"),
@@ -70,7 +74,10 @@
   let parentUrl = "";
   let breadcrumb = [];
   let items = [];
+  let catalogUsers = [];
+  let formSelectedUserIds = [];
   let selectedId = null;
+  const COLSPAN = 6;
   let addModal = null;
   let iconModal = null;
   let urlManualEdit = false;
@@ -185,6 +192,7 @@
     els.btnUp.disabled = idx <= 0;
     els.btnDown.disabled = idx < 0 || idx >= items.length - 1;
     if (els.btnEdit) els.btnEdit.disabled = !row;
+    if (els.btnUsers) els.btnUsers.disabled = !row;
     els.btnRemove.disabled = !row || !!row.protected;
   }
 
@@ -223,7 +231,9 @@
       items.length + " item" + (items.length === 1 ? "" : "s");
     if (!items.length) {
       els.body.innerHTML =
-        '<tr><td colspan="5" class="text-muted text-center py-4">No menus at this level.</td></tr>';
+        '<tr><td colspan="' +
+        COLSPAN +
+        '" class="text-muted text-center py-4">No menus at this level.</td></tr>';
       updateButtons();
       return;
     }
@@ -239,6 +249,13 @@
             row.child_count +
             "</span>"
           : '<span class="text-muted">—</span>';
+        const usersLabel = row.users_label || "All roles";
+        const usersAll = !!row.allow_all_users;
+        const usersBadgeClass = usersAll
+          ? "text-bg-success"
+          : row.allowed_user_ids && row.allowed_user_ids.length
+            ? "text-bg-primary"
+            : "text-bg-light border";
         return (
           '<tr class="' +
           selected +
@@ -262,6 +279,11 @@
           '<td class="small text-muted">' +
           escapeHtml(row.url || "(dropdown parent)") +
           "</td>" +
+          '<td><span class="badge mcust-users-badge ' +
+          usersBadgeClass +
+          '">' +
+          escapeHtml(usersLabel) +
+          "</span></td>" +
           '<td class="text-center">' +
           sub +
           "</td>" +
@@ -317,6 +339,7 @@
     try {
       const data = await api(listUrlFor(parentId));
       items = data.items || [];
+      catalogUsers = data.users || catalogUsers || [];
       breadcrumb = data.breadcrumb || [];
       parentId = data.parent_id == null ? null : data.parent_id;
       parentUrl = data.parent_url || "";
@@ -332,7 +355,9 @@
       setStatus("Ready. Double-click a menu with submenus to open it.");
     } catch (err) {
       els.body.innerHTML =
-        '<tr><td colspan="5" class="text-danger text-center py-4">' +
+        '<tr><td colspan="' +
+        COLSPAN +
+        '" class="text-danger text-center py-4">' +
         escapeHtml(err.message || "Load failed") +
         "</td></tr>";
       setStatus(err.message || "Load failed", true);
@@ -370,6 +395,7 @@
         },
       });
       items = data.items || [];
+      catalogUsers = data.users || catalogUsers || [];
       breadcrumb = data.breadcrumb || [];
       parentUrl = data.parent_url || parentUrl;
       render();
@@ -392,6 +418,7 @@
         body: { menu_id: selectedId, parent_id: parentId },
       });
       items = data.items || [];
+      catalogUsers = data.users || catalogUsers || [];
       breadcrumb = data.breadcrumb || [];
       parentUrl = data.parent_url || parentUrl;
       selectedId = null;
@@ -400,6 +427,84 @@
     } catch (err) {
       setStatus(err.message || "Remove failed", true);
     }
+  }
+
+  function selectedUserIds() {
+    return formSelectedUserIds.slice();
+  }
+
+  function captureVisibleUserChecks() {
+    if (!els.userList) return;
+    els.userList.querySelectorAll("input.mcust-user-check").forEach(function (box) {
+      const id = parseInt(box.value, 10);
+      if (!(id > 0)) return;
+      const idx = formSelectedUserIds.indexOf(id);
+      if (box.checked && idx < 0) formSelectedUserIds.push(id);
+      if (!box.checked && idx >= 0) formSelectedUserIds.splice(idx, 1);
+    });
+  }
+
+  function syncUserChecks() {
+    const allOn = !!(els.allowAllUsers && els.allowAllUsers.checked);
+    if (!els.userList) return;
+    els.userList.querySelectorAll("input.mcust-user-check").forEach(function (box) {
+      box.disabled = allOn;
+      if (allOn) box.checked = false;
+    });
+    if (allOn) formSelectedUserIds = [];
+  }
+
+  function renderUserList() {
+    if (!els.userList) return;
+    const chosen = {};
+    formSelectedUserIds.forEach(function (id) {
+      chosen[String(id)] = true;
+    });
+    const q = String((els.userSearch && els.userSearch.value) || "")
+      .trim()
+      .toLowerCase();
+    const rows = (catalogUsers || []).filter(function (user) {
+      if (!q) return true;
+      const hay = (
+        (user.name || "") +
+        " " +
+        (user.role || "") +
+        " " +
+        (user.user_id || "")
+      ).toLowerCase();
+      return hay.indexOf(q) >= 0;
+    });
+    if (!rows.length) {
+      els.userList.innerHTML =
+        '<div class="text-muted small py-2">' +
+        (catalogUsers.length ? "No users match." : "No active users found.") +
+        "</div>";
+      return;
+    }
+    els.userList.innerHTML = rows
+      .map(function (user) {
+        const id = String(user.user_id);
+        return (
+          '<div class="form-check mcust-user-row">' +
+          '<input class="form-check-input mcust-user-check" type="checkbox" id="mcustUser_' +
+          escapeHtml(id) +
+          '" value="' +
+          escapeHtml(id) +
+          '"' +
+          (chosen[id] ? " checked" : "") +
+          ">" +
+          '<label class="form-check-label" for="mcustUser_' +
+          escapeHtml(id) +
+          '">' +
+          escapeHtml(user.name || "User " + id) +
+          ' <span class="mcust-user-role">(' +
+          escapeHtml(user.role || "") +
+          ")</span></label>" +
+          "</div>"
+        );
+      })
+      .join("");
+    syncUserChecks();
   }
 
   function openFormModal(mode) {
@@ -426,6 +531,14 @@
       els.addName.value = row.name || "";
       els.addUrl.value = row.url || "";
       els.addIcon.value = normalizeIconClass(row.icon || "bi-circle");
+      if (els.allowAllUsers) els.allowAllUsers.checked = !!row.allow_all_users;
+      if (els.userSearch) els.userSearch.value = "";
+      formSelectedUserIds = (row.allowed_user_ids || []).map(function (id) {
+        return parseInt(id, 10);
+      }).filter(function (id) {
+        return id > 0;
+      });
+      renderUserList();
       els.addSave.textContent = "Save changes";
       els.addSave.classList.remove("btn-success");
       els.addSave.classList.add("btn-warning");
@@ -437,6 +550,10 @@
       els.addName.value = "";
       els.addUrl.value = "";
       els.addIcon.value = "bi-circle";
+      if (els.allowAllUsers) els.allowAllUsers.checked = false;
+      if (els.userSearch) els.userSearch.value = "";
+      formSelectedUserIds = [];
+      renderUserList();
       els.addSave.textContent = "Add menu";
       els.addSave.classList.remove("btn-warning");
       els.addSave.classList.add("btn-success");
@@ -464,12 +581,15 @@
       return;
     }
     if (formMode === "add" && !urlManualEdit) syncAutoUrl();
+    captureVisibleUserChecks();
     const icon = normalizeIconClass(els.addIcon.value);
     const body = {
       name: name,
       url: (els.addUrl.value || "").trim(),
       icon: icon,
       parent_id: parentId,
+      allow_all_users: !!(els.allowAllUsers && els.allowAllUsers.checked),
+      allowed_user_ids: selectedUserIds(),
     };
     try {
       let data;
@@ -482,6 +602,7 @@
         setStatus("Menu added. Refresh the page to see it.");
       }
       items = data.items || [];
+      catalogUsers = data.users || catalogUsers || [];
       breadcrumb = data.breadcrumb || [];
       parentUrl = data.parent_url || parentUrl;
       selectedId = data.menu_id || selectedId;
@@ -594,6 +715,28 @@
   if (els.btnEdit) {
     els.btnEdit.addEventListener("click", function () {
       openFormModal("edit");
+    });
+  }
+  if (els.btnUsers) {
+    els.btnUsers.addEventListener("click", function () {
+      openFormModal("edit");
+    });
+  }
+  if (els.allowAllUsers) {
+    els.allowAllUsers.addEventListener("change", syncUserChecks);
+  }
+  if (els.userSearch) {
+    els.userSearch.addEventListener("input", function () {
+      captureVisibleUserChecks();
+      renderUserList();
+    });
+  }
+  if (els.userList) {
+    els.userList.addEventListener("change", function (ev) {
+      if (!ev.target || !ev.target.classList || !ev.target.classList.contains("mcust-user-check")) {
+        return;
+      }
+      captureVisibleUserChecks();
     });
   }
   els.addSave.addEventListener("click", saveForm);
