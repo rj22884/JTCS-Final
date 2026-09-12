@@ -541,14 +541,43 @@
     return "rc-hindi";
   }
 
+  function stripHindiBrackets(name) {
+    return String(name || "")
+      .replace(/\s*\([^)]*[\u0900-\u097F][^)]*\)\s*/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function toProperCase(name) {
+    return String(name || "")
+      .trim()
+      .split(/\s+/)
+      .map(function (word) {
+        return word.split("-").map(function (part) {
+          if (!part) return part;
+          const sep = part.indexOf("'") >= 0 ? "'" : (part.indexOf("’") >= 0 ? "’" : "");
+          if (sep) {
+            return part.split(sep).map(function (bit) {
+              return bit ? bit.charAt(0).toUpperCase() + bit.slice(1).toLowerCase() : bit;
+            }).join(sep);
+          }
+          return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+        }).join("-");
+      })
+      .filter(Boolean)
+      .join(" ");
+  }
+
   function renderFullName(member) {
-    const english = String(member.full_name_en || "").trim();
     const hindi = String(member.full_name_hi || "").trim();
+    const rawEnglish = String(member.full_name_en || "").trim() ||
+      stripHindiBrackets(member.full_name_display || member.full_name || "");
+    const english = /[\u0900-\u097F]/.test(rawEnglish) ? rawEnglish : toProperCase(rawEnglish);
     if (english && hindi) {
       return escapeHtml(english) +
         ' <span class="rc-hindi ' + hindiClass(member.scheme_name) + '">(' + escapeHtml(hindi) + ")</span>";
     }
-    return escapeHtml(member.full_name_display || member.full_name || english || hindi);
+    return escapeHtml(english || hindi);
   }
 
   function enableExport(enabled) {
@@ -627,6 +656,13 @@
       }).join("");
       els.reportBody.innerHTML =
         '<table class="table table-sm table-hover align-middle mb-0 rc-import-grid" id="rcImportGrid">' +
+          "<colgroup>" +
+            '<col class="rc-col-sr">' +
+            '<col class="rc-col-name">' +
+            '<col class="rc-col-scheme">' +
+            '<col class="rc-col-rc">' +
+            '<col class="rc-col-change">' +
+          "</colgroup>" +
           "<thead><tr>" +
             "<th>#</th><th>Full Name</th><th>Scheme Name</th><th>RC Number</th><th>Change</th>" +
           "</tr></thead>" +

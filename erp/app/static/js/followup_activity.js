@@ -1249,9 +1249,40 @@
     renderGrid();
   }
 
+  function compareDscWorkDateDesc(a, b) {
+    const av = String(a.work_date || a.WorkDate || "").slice(0, 10);
+    const bv = String(b.work_date || b.WorkDate || "").slice(0, 10);
+    if (av && bv && av !== bv) {
+      if (av < bv) return 1;
+      if (av > bv) return -1;
+    } else if (av && !bv) {
+      return -1;
+    } else if (!av && bv) {
+      return 1;
+    }
+    const aid = parseInt(a.entry_id || a.EntryID || 0, 10) || 0;
+    const bid = parseInt(b.entry_id || b.EntryID || 0, 10) || 0;
+    return bid - aid;
+  }
+
+  function applyDscGridSort(dataRows) {
+    if (!isDscModule) return dataRows;
+    return dataRows.slice().sort(function (a, b) {
+      const aLocked = rowHasPaymentReceived(a) ? 1 : 0;
+      const bLocked = rowHasPaymentReceived(b) ? 1 : 0;
+      if (aLocked !== bLocked) return aLocked - bLocked;
+      return compareDscWorkDateDesc(a, b);
+    });
+  }
+
+  function applyGridSort(dataRows) {
+    if (isDscModule) return applyDscGridSort(dataRows);
+    return applyItrGridSort(dataRows);
+  }
+
   function renderGrid(data) {
     if (data) rawGridRows = data;
-    rows = applyItrGridSort(rawGridRows);
+    rows = applyGridSort(rawGridRows);
     if (!els.gridBody) return;
     if (!rows.length) {
       els.gridBody.innerHTML = "";

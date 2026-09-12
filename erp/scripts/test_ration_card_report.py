@@ -11,7 +11,7 @@ ERP_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ERP_ROOT))
 
 from app.services.pds_master_service import parse_wikipedia_districts
-from app.services.ration_card_report_service import RationCardReportService, to_hindi_name
+from app.services.ration_card_report_service import RationCardReportService, to_hindi_name, to_proper_case
 
 SAMPLE = Path(r"C:\Users\USER\Downloads\ramesh chandra pinaro.csv")
 
@@ -78,6 +78,10 @@ def test_parse() -> None:
     assert "(" in display and ")" in display, "Hindi name in brackets is missing"
     first_row = report["grid_rows"][0]
     assert first_row.get("full_name_hi"), "Hindi name part is missing"
+    assert to_proper_case("kamala DEVI") == "Kamala Devi"
+    assert to_proper_case("ROHIT palariya") == "Rohit Palariya"
+    assert to_proper_case("ASHA PANDEY") == "Asha Pandey"
+    assert first_row.get("full_name_en") == to_proper_case(first_row.get("full_name_en") or "")
     assert to_hindi_name("Omprakash trilochan joshi") == "ओमप्रकाश त्रिलोचन जोशी"
     assert to_hindi_name("TEJPRAKASH OMPRAKASH JOSHI") == "तेजप्रकाश ओमप्रकाश जोशी"
     assert to_hindi_name("Girish Chandra") == "गिरीश चन्द्र"
@@ -109,6 +113,11 @@ def test_pdf_layouts() -> None:
     assert "A4 Portrait" not in pages_text
     assert "Group: Scheme Name" not in pages_text
     assert re.search(r"Page\s+1\s+of\s+\d+", first_page), first_page[-400:]
+    assert not re.search(r"[\u0900-\u097F]", pages_text), "Hindi names must not appear in the PDF"
+    sample_en = (report["grid_rows"][0].get("full_name_en") or "").strip()
+    if sample_en:
+        assert sample_en in pages_text, sample_en
+        assert sample_en == to_proper_case(sample_en)
     print("PDF LAYOUTS OK")
 
 
