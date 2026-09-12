@@ -21,6 +21,7 @@ from app.routes.masters_item import bp as masters_item_bp
 from app.routes.dynamic_master_fields import bp as dynamic_master_fields_bp
 from app.routes.accounting_invoice import bp as accounting_invoice_bp
 from app.routes.invoice_pay_public import bp as invoice_pay_public_bp
+from app.routes.public_resume import bp as public_resume_bp
 from app.routes.masters_sub_work import bp as masters_sub_work_bp
 from app.routes.masters_work import (
     bp as masters_work_bp,
@@ -105,6 +106,10 @@ SETUP_PUBLIC_ENDPOINTS = {
     "seo_api.keywords",
     "website_analytics_public.visit",
     "invoice_pay_public.public_upi_pay",
+    "pages.public_dsc_resume",
+    "public_resume.config",
+    "public_resume.vkyc",
+    "public_resume.otp",
     "customer_portal.login_page",
     "customer_portal.login_api",
     "customer_portal.login_start_api",
@@ -147,6 +152,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(dynamic_master_fields_bp)
     app.register_blueprint(accounting_invoice_bp)
     app.register_blueprint(invoice_pay_public_bp)
+    app.register_blueprint(public_resume_bp)
     app.register_blueprint(masters_income_legacy_bp)
     app.register_blueprint(masters_expense_legacy_bp)
     app.register_blueprint(reports_bp)
@@ -207,6 +213,7 @@ def create_app(config_class: type = Config) -> Flask:
     # Public website visitor ingest (CORS + no CSRF). Admin analytics stay CSRF-protected.
     csrf.exempt(website_analytics_public_bp)
     csrf.exempt(invoice_pay_public_bp)
+    csrf.exempt(public_resume_bp)
 
     # Integration Settings (and JSON clients): CSRF failures as JSON, not HTML.
     from app.modules.settings.routes import register_integration_csrf_json_handler

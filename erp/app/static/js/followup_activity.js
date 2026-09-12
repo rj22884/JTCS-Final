@@ -192,21 +192,20 @@
   }
 
   function buildDscRowVideoLink(applicationId, mobile) {
-    const base = currentCustomerVideoBase();
-    if (!base) return "";
+    const publicResume = (window.FU_API && window.FU_API.public_resume) || "";
+    const configured = currentCustomerVideoBase();
+    const base = publicResume || configured;
     const app = String(applicationId == null ? "" : applicationId).trim();
     const mob = String(mobile == null ? "" : mobile).trim();
+    if (!base || !app || !mob) return "";
     try {
-      const url = new URL(base);
-      if (app) url.searchParams.set("applicationId", app);
-      if (mob) url.searchParams.set("mobile", mob);
+      const url = new URL(base, window.location.origin);
+      url.searchParams.set("applicationId", app);
+      url.searchParams.set("mobile", mob);
       return url.toString();
     } catch (err) {
       const sep = base.indexOf("?") >= 0 ? "&" : "?";
-      const parts = [];
-      if (app) parts.push("applicationId=" + encodeURIComponent(app));
-      if (mob) parts.push("mobile=" + encodeURIComponent(mob));
-      return parts.length ? base + sep + parts.join("&") : base;
+      return base + sep + "applicationId=" + encodeURIComponent(app) + "&mobile=" + encodeURIComponent(mob);
     }
   }
 
@@ -2273,18 +2272,18 @@
   els.gridBody?.addEventListener("click", function (event) {
     const videoCopyBtn = event.target.closest(".fu-video-link-copy");
     if (videoCopyBtn) {
+      event.preventDefault();
       const appNo = (videoCopyBtn.getAttribute("data-app-no") || "").trim();
       const mobile = (videoCopyBtn.getAttribute("data-mobile") || "").trim();
-      if (!currentCustomerVideoBase()) {
-        alert("Set Video link for Customer first.");
-        return;
-      }
       if (!appNo || !mobile) {
         alert("Application No. and Mobile are required to copy the Video Link.");
         return;
       }
       const url = buildDscRowVideoLink(appNo, mobile);
-      if (!url) return;
+      if (!url) {
+        alert("Unable to create the Video Link.");
+        return;
+      }
       copyTextToClipboard(url, videoCopyBtn);
       if (window.JTCSDialog && typeof JTCSDialog.alert === "function") {
         JTCSDialog.alert("Video Link Copied", "success");

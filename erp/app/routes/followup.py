@@ -39,6 +39,12 @@ def _followup_api_urls(blueprint_name: str, module_code: str, allow_customer_cre
     if module_code == "DSC":
         urls["sync_status"] = url_for(f"{blueprint_name}.sync_idsign_status", entry_id=0)
         urls["assist"] = url_for(f"{blueprint_name}.dsc_assist")
+        try:
+            from app.utils.url_helpers import external_url_for
+
+            urls["public_resume"] = external_url_for("pages.public_dsc_resume")
+        except Exception:
+            urls["public_resume"] = "/resume"
     if module_code == "ITR":
         urls["itr_sync_start"] = url_for(f"{blueprint_name}.itr_sync_start")
         urls["itr_sync_job"] = url_for(f"{blueprint_name}.itr_sync_job", job_id="__JOB__")

@@ -20,6 +20,7 @@ RESERVED_PATHS = {
     "masters",
     "exceptional-report",
     "public-report",
+    "resume",
     "other-login",
     "fps-login",
 }
@@ -56,6 +57,13 @@ def _render_builtin_module(page_path: str):
 
         return credentials_master_index()
     return None
+
+
+@bp.route("/resume", methods=["GET"], strict_slashes=False)
+def public_dsc_resume():
+    from app.routes.public_resume import index as resume_index
+
+    return resume_index()
 
 
 @bp.route("/<path:page_path>")
