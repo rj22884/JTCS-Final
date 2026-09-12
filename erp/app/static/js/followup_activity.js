@@ -192,14 +192,12 @@
   }
 
   function buildDscRowVideoLink(applicationId, mobile) {
-    const publicResume = (window.FU_API && window.FU_API.public_resume) || "";
-    const configured = currentCustomerVideoBase();
-    const base = publicResume || configured;
+    const base = currentCustomerVideoBase();
     const app = String(applicationId == null ? "" : applicationId).trim();
     const mob = String(mobile == null ? "" : mobile).trim();
     if (!base || !app || !mob) return "";
     try {
-      const url = new URL(base, window.location.origin);
+      const url = new URL(base);
       url.searchParams.set("applicationId", app);
       url.searchParams.set("mobile", mob);
       return url.toString();
@@ -1331,13 +1329,24 @@
           '><i class="bi bi-arrow-repeat"></i></button>' +
           "</td>"
         : "<td>" + escapeHtml(workTypeLabel) + "</td>";
+      const videoLocked = isDscModule && rowHasPaymentReceived(row);
       const videoLinkCell = isDscModule
         ? '<td class="fu-copy-cell fu-video-link-cell">' +
-          '<button type="button" class="fu-copy-btn fu-video-link-copy" title="Copy Video Link" aria-label="Copy Video Link" data-app-no="' +
+          '<button type="button" class="fu-copy-btn fu-video-link-copy' +
+          (videoLocked ? " fu-video-link-locked" : "") +
+          '" title="' +
+          (videoLocked ? "Video Link locked after Payment Received" : "Copy Video Link") +
+          '" aria-label="' +
+          (videoLocked ? "Video Link locked" : "Copy Video Link") +
+          '" data-app-no="' +
           escapeHtml(appNo) +
           '" data-mobile="' +
           escapeHtml(row.mobile_number || "") +
-          '"><i class="bi bi-copy"></i></button></td>'
+          '"' +
+          (videoLocked ? " disabled" : "") +
+          '><i class="' +
+          (videoLocked ? "bi bi-x-lg" : "bi bi-copy") +
+          '"></i></button></td>'
         : "";
       const deleteDisabledAttrs = ' title="Delete"';
       const editTitle = "Edit";
@@ -2273,17 +2282,19 @@
     const videoCopyBtn = event.target.closest(".fu-video-link-copy");
     if (videoCopyBtn) {
       event.preventDefault();
+      if (videoCopyBtn.disabled) return;
       const appNo = (videoCopyBtn.getAttribute("data-app-no") || "").trim();
       const mobile = (videoCopyBtn.getAttribute("data-mobile") || "").trim();
+      if (!currentCustomerVideoBase()) {
+        alert("Set Video link for Customer first.");
+        return;
+      }
       if (!appNo || !mobile) {
         alert("Application No. and Mobile are required to copy the Video Link.");
         return;
       }
       const url = buildDscRowVideoLink(appNo, mobile);
-      if (!url) {
-        alert("Unable to create the Video Link.");
-        return;
-      }
+      if (!url) return;
       copyTextToClipboard(url, videoCopyBtn);
       if (window.JTCSDialog && typeof JTCSDialog.alert === "function") {
         JTCSDialog.alert("Video Link Copied", "success");

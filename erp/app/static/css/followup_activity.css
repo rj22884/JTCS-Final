@@ -447,6 +447,21 @@ button.fu-stat-card {
   background: rgba(25, 135, 84, 0.1);
 }
 
+.fu-activity-page[data-module="DSC"] .fu-copy-btn:disabled {
+  color: #9aa3b2;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn.fu-video-link-locked,
+.fu-activity-page[data-module="DSC"] .fu-copy-btn.fu-video-link-locked:disabled {
+  color: #dc3545;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ITR only: Payment Received rows — light navy + locked controls (Edit / Thank You stay active) */
 .fu-activity-page[data-module="ITR"] #fuDataGrid tbody tr.fu-payment-received-row > td {
   background-color: #c5d0e6 !important;
