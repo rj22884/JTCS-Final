@@ -392,6 +392,7 @@
   width: 1%;
 }
 #stampDataGrid .stamp-col-grow,
+#stampDataGrid .stamp-col-mode,
 #stampDataGrid .stamp-col-cert,
 #stampDataGrid .stamp-col-num,
 #stampDataGrid .stamp-col-date,
@@ -434,6 +435,13 @@
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr,
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr td {
   color: #5a9e5a !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-online,
+.stamp-data-grid-wrap tbody tr.stamp-row-online td {
+  color: #1d4ed8 !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-online.table-active {
+  background: #eef2ff !important;
 }
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr.table-active {
   background: #edf7ed !important;

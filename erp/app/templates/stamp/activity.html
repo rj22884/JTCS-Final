@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260911sum1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260912on1">
 {% endblock %}
 
 {% block content %}
@@ -52,6 +52,9 @@
       <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampDataGrid">
         <thead>
           <tr>
+            <th class="stamp-sortable stamp-col-mode" data-sort-key="entry_mode" role="button" tabindex="0">
+              Mode <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
             <th class="stamp-sortable stamp-col-cert" data-sort-key="certificate_number" role="button" tabindex="0">
               Certificate <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
@@ -82,6 +85,7 @@
             <th class="text-end stamp-grid-actions-col">Actions</th>
           </tr>
           <tr class="stamp-filter-row">
+            <th class="stamp-col-mode"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="entry_mode" placeholder="Filter…" aria-label="Filter mode"></th>
             <th class="stamp-col-cert"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_number" placeholder="Filter…" aria-label="Filter certificate"></th>
             <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_date" placeholder="Filter…" aria-label="Filter cert date"></th>
             <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="stamp_duty_amount" placeholder="Filter…" aria-label="Filter duty"></th>
@@ -269,6 +273,14 @@
         <input class="form-check-input" type="radio" name="EntryMode" id="modeOcr" value="ocr">
         <label class="form-check-label" for="modeOcr">Integration from Image</label>
       </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="radio" name="EntryMode" id="modeOnline" value="online">
+        <label class="form-check-label" for="modeOnline">Online e-Stamp</label>
+      </div>
+      <div class="small text-primary d-none" id="stampOnlineHint">
+        Load the e-Stamp order reference, then enter the certificate number manually. All other fields stay editable.
+        <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="stampLoadOnlineBtn">Load Reference</button>
+      </div>
     </div>
   </div>
 
@@ -289,7 +301,11 @@
 
   {% if duplicate_existing %}
   <div class="alert alert-danger py-2">
+    {% if duplicate_existing.kind == 'reference' %}
+    e-Stamp reference <strong>{{ duplicate_existing.website_reference or duplicate_existing.certificate_number }}</strong> is already entered as certificate <strong>{{ duplicate_existing.certificate_number }}</strong>.
+    {% else %}
     Certificate <strong>{{ duplicate_existing.certificate_number }}</strong> is already sold in full.
+    {% endif %}
     {% if duplicate_existing.transaction_id %}
     Transaction <strong>#{{ duplicate_existing.transaction_id }}</strong>,
     {% else %}
@@ -337,6 +353,7 @@
     <input type="hidden" name="StampID" id="StampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EditStampID" id="EditStampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EntryMode" id="EntryMode" value="manual">
+    <input type="hidden" name="WebsiteReference" id="WebsiteReference" value="">
 
     <div class="row g-2" id="stampFormLayout">
       <div class="col-auto d-none" id="stampImageColumn">
@@ -579,9 +596,10 @@
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
   window.STAMP_CONTINUE_MOBILE = {{ continue_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
+  window.STAMP_ONLINE_ORDER_URL = {{ url_for('stamp.stamp_online_order', reference_no='__REF__') | tojson }};
   window.STAMP_OPEN_LOGIN_URL = {{ url_for('stamp.stamp_open_login') | tojson }};
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260911sum1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260912on1"></script>
 {% endblock %}

@@ -10,6 +10,7 @@ from app.services.ocr_provider_service import OcrProviderService
 from app.services.stamp_ocr_service import StampOcrService
 from app.services.shcil_open_login_service import SHCIL_LOGIN_URL
 from app.services.stamp_service import StampService
+from app.services.website_estamp_service import WebsiteEStampService
 from app.utils.roles import has_admin_role
 from app.utils.runtime_env import is_vps_runtime
 
@@ -60,6 +61,35 @@ def stamp_activity():
         except (TypeError, ValueError):
             load_stamp_id = None
 
+    website_prefill = {
+        "mobile": (request.args.get("mobile") or "").strip(),
+        "first_party": (request.args.get("first_party") or "").strip(),
+        "second_party": (request.args.get("second_party") or "").strip(),
+        "amount": (request.args.get("amount") or "").strip(),
+        "sale_amount": (request.args.get("sale_amount") or "").strip(),
+        "description": (request.args.get("description") or "").strip(),
+        "website_ref": (request.args.get("website_ref") or "").strip(),
+    }
+    if website_prefill["website_ref"] and request.method == "GET":
+        try:
+            website_prefill = WebsiteEStampService().stamp_activity_prefill(
+                website_prefill["website_ref"]
+            )
+            existing_id = website_prefill.get("existing_stamp_id")
+            if existing_id and not load_stamp_id:
+                flash(
+                    f"e-Stamp reference {website_prefill.get('website_ref')} is already entered"
+                    + (
+                        f" as certificate {website_prefill.get('existing_certificate')}."
+                        if website_prefill.get("existing_certificate")
+                        else "."
+                    ),
+                    "warning",
+                )
+                return redirect(url_for("stamp.stamp_activity", load_stamp=existing_id))
+        except ValueError as exc:
+            flash(str(exc), "danger")
+
     return render_template(
         "stamp/activity.html",
         page_title="Stamp Activity",
@@ -77,15 +107,7 @@ def stamp_activity():
         shcil_login_url=SHCIL_LOGIN_URL,
         load_stamp_id=load_stamp_id,
         continue_mobile=continue_mobile,
-        website_prefill={
-            "mobile": (request.args.get("mobile") or "").strip(),
-            "first_party": (request.args.get("first_party") or "").strip(),
-            "second_party": (request.args.get("second_party") or "").strip(),
-            "amount": (request.args.get("amount") or "").strip(),
-            "sale_amount": (request.args.get("sale_amount") or "").strip(),
-            "description": (request.args.get("description") or "").strip(),
-            "website_ref": (request.args.get("website_ref") or "").strip(),
-        },
+        website_prefill=website_prefill,
     )
 
 
@@ -249,6 +271,25 @@ def check_certificate():
     if not number:
         return jsonify({"exists": False})
     return jsonify(StampService().check_certificate(number))
+
+
+@bp.route("/stamp-activity/online-order/<reference_no>")
+@login_required
+def stamp_online_order(reference_no: str):
+    try:
+        prefill = WebsiteEStampService().stamp_activity_prefill(reference_no)
+        existing = None
+        if prefill.get("existing_stamp_id"):
+            existing = StampService().check_certificate(prefill.get("existing_certificate") or "")
+            if not existing.get("exists"):
+                existing = {
+                    "exists": True,
+                    "stamp_id": prefill["existing_stamp_id"],
+                    "certificate_number": prefill.get("existing_certificate") or "",
+                }
+        return jsonify({"ok": True, "prefill": prefill, "existing": existing})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
 
 
 @bp.route("/stamp-activity/view/<int:stamp_id>")

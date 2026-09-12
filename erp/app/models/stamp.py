@@ -64,6 +64,8 @@ class StampMaster(db.Model):
 
     IPAddress: Mapped[str | None] = mapped_column(Unicode(45), nullable=True)
     MobileNumber: Mapped[str | None] = mapped_column(Unicode(15), nullable=True)
+    EntrySource: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    WebsiteReference: Mapped[str | None] = mapped_column(Unicode(40), nullable=True)
 
 
 

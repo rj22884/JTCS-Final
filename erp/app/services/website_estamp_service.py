@@ -10,7 +10,7 @@ from pathlib import Path
 
 from flask import current_app
 from flask_mail import Message
-from sqlalchemy import text
+from sqlalchemy import func, text
 
 from app.extensions import db, mail
 from app.models.auth import CompanyProfile
@@ -132,12 +132,19 @@ def _clean(value, limit: int = 160) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
+def _money(value) -> str:
+    try:
+        return f"{float(value):.2f}"
+    except (TypeError, ValueError):
+        return ""
+
+
 _STAMP_NAME_RE = re.compile(r"[^A-Za-z0-9 ]+")
 _NAME_ERROR = "Only letters (A-Z) and numbers (0-9) are allowed. Special characters are not accepted."
 
 
 def _stamp_alnum(value: str, limit: int = 160) -> str:
-    return " ".join(_STAMP_NAME_RE.sub(" ", str(value or "")).split())[:limit]
+    return " ".join(_STAMP_NAME_RE.sub(" ", str(value or "")).split())[:limit].upper()
 
 
 def _stamp_relation(value: str) -> str:
@@ -242,6 +249,75 @@ class WebsiteEStampService:
             return None
         return db.session.query(WebsiteEStampOrder).filter(WebsiteEStampOrder.ReferenceNo == ref).one_or_none()
 
+    def stamp_activity_prefill(self, reference_no: str) -> dict:
+        self.ensure_schema()
+        from app.repositories.stamp_repository import StampRepository
+
+        StampRepository().ensure_schema()
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found for this reference.")
+        if (row.ReviewStatus or "").strip().lower() == "rejected":
+            raise ValueError("This e-Stamp order was rejected.")
+
+        first = stamp_party_line(
+            row.FullName or "",
+            row.FirstPartyRelation or "",
+            row.FatherOrHusbandName or "",
+        )
+        second = stamp_party_line(
+            row.SecondPartyName or "",
+            row.SecondPartyRelation or "",
+            row.SecondPartyFatherOrHusbandName or "",
+        )
+        address = ", ".join(
+            part.strip()
+            for part in (
+                row.HouseNo,
+                row.Gali,
+                row.Mohalla,
+                row.Landmark,
+                row.AddressNote,
+                row.GeoAddress,
+            )
+            if part and str(part).strip()
+        )
+        amount = row.Amount or 0
+        payable = row.PayableAmount if row.PayableAmount is not None else amount
+        consideration = row.ConsiderationPrice
+        purchased = _stamp_alnum(row.FullName or "")
+        remarks = f"Online {row.ReferenceNo}"
+        if row.UtrNumber:
+            remarks = f"{remarks} · UTR {row.UtrNumber}"
+
+        from app.models.stamp import StampMaster
+
+        used = (
+            db.session.query(StampMaster)
+            .filter(StampMaster.IsActive == True)  # noqa: E712
+            .filter(func.upper(func.ltrim(func.rtrim(StampMaster.WebsiteReference))) == row.ReferenceNo)
+            .first()
+        )
+
+        return {
+            "website_ref": row.ReferenceNo,
+            "mobile": row.Mobile,
+            "first_party": first,
+            "second_party": second,
+            "purchased_by": purchased,
+            "stamp_duty_paid_by": purchased,
+            "amount": _money(amount),
+            "sale_amount": _money(payable),
+            "consideration": _money(consideration) if consideration is not None else "",
+            "description": (row.Description or row.ArticleLabel or "").strip(),
+            "article": (row.ArticleLabel or "").strip(),
+            "property_description": address,
+            "remarks": remarks,
+            "payment_confirmed": (row.PaymentConfirmed or "").strip(),
+            "existing_stamp_id": used.StampID if used else None,
+            "existing_certificate": used.CertificateNumber if used else "",
+        }
+
     def create_paid(self, data: dict) -> dict:
         self.ensure_schema()
         first = _require_stamp_name(data.get("name") or data.get("full_name") or data.get("first_party_name"), "First party name")
@@ -312,6 +388,13 @@ class WebsiteEStampService:
 
         from app.services.dsc_documents import _save_upload
 
+        if file_storage is not None:
+            raw_name = str(getattr(file_storage, "filename", "") or "")
+            ext = Path(raw_name).suffix.lower()
+            mime = str(getattr(file_storage, "mimetype", "") or "").lower()
+            if not ext and mime.startswith("image/"):
+                suffix = ".png" if "png" in mime else ".jpg"
+                file_storage.filename = (Path(raw_name).stem or "poi-camera") + suffix
         folder = Path(current_app.config["UPLOAD_FOLDER"]) / "estamp_poi"
         path, name = _save_upload(folder, f"{row.ReferenceNo}_poi", file_storage)
         ext = Path(name).suffix.lower()
@@ -427,7 +510,7 @@ class WebsiteEStampService:
         if row.SecondPartyFatherOrHusbandName and not row.SecondPartyRelation:
             raise ValueError("Please select Father or Husband for the second party.")
         _require_parent_if_relation(row.SecondPartyRelation, second_parent, "second party father / husband name")
-        desc = _clean(data.get("description"), 50)
+        desc = _require_stamp_name(data.get("description") or "", "Description")[:50]
         row.Description = desc or None
         consideration_raw = data.get("consideration_price")
         if consideration_raw in (None, ""):
