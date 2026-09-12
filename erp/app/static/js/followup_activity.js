@@ -183,6 +183,33 @@
     return !!(window.FU_API && window.FU_API.payment_reminder);
   }
 
+  function currentCustomerVideoBase() {
+    const input = document.getElementById("fuDscVideoLink");
+    const field = input ? input.closest(".fu-dsc-assist-field") : null;
+    const saved = field && field.dataset.savedValue != null ? String(field.dataset.savedValue).trim() : "";
+    const typed = input ? String(input.value || "").trim() : "";
+    return typed || saved;
+  }
+
+  function buildDscRowVideoLink(applicationId, mobile) {
+    const base = currentCustomerVideoBase();
+    if (!base) return "";
+    const app = String(applicationId == null ? "" : applicationId).trim();
+    const mob = String(mobile == null ? "" : mobile).trim();
+    try {
+      const url = new URL(base);
+      if (app) url.searchParams.set("applicationId", app);
+      if (mob) url.searchParams.set("mobile", mob);
+      return url.toString();
+    } catch (err) {
+      const sep = base.indexOf("?") >= 0 ? "&" : "?";
+      const parts = [];
+      if (app) parts.push("applicationId=" + encodeURIComponent(app));
+      if (mob) parts.push("mobile=" + encodeURIComponent(mob));
+      return parts.length ? base + sep + parts.join("&") : base;
+    }
+  }
+
   function copyableCell(value) {
     const text = (value == null ? "" : String(value)).trim();
     if (!text) {
@@ -218,6 +245,106 @@
       return;
     }
     fallbackCopy(value, done);
+  }
+
+  function dscAssistUrl() {
+    return window.FU_API.assist || "/dsc/followup/assist";
+  }
+
+  function setDscAssistMode(field, savedValue) {
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const editBtn = field.querySelector(".fu-dsc-assist-edit");
+    const copyBtn = field.querySelector(".fu-dsc-assist-copy");
+    const hasSaved = !!(savedValue || "").trim();
+    field.dataset.savedValue = savedValue || "";
+    if (input) {
+      input.value = savedValue || "";
+      input.readOnly = hasSaved;
+      input.classList.toggle("fu-dsc-assist-readonly", hasSaved);
+    }
+    saveBtn?.classList.toggle("d-none", hasSaved);
+    editBtn?.classList.toggle("d-none", !hasSaved);
+    copyBtn?.classList.toggle("d-none", !hasSaved);
+  }
+
+  function startDscAssistEdit(field) {
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const editBtn = field.querySelector(".fu-dsc-assist-edit");
+    const copyBtn = field.querySelector(".fu-dsc-assist-copy");
+    if (input) {
+      input.readOnly = false;
+      input.classList.remove("fu-dsc-assist-readonly");
+      input.focus();
+      input.select();
+    }
+    saveBtn?.classList.remove("d-none");
+    editBtn?.classList.add("d-none");
+    copyBtn?.classList.add("d-none");
+  }
+
+  async function saveDscAssistField(field) {
+    const key = field.dataset.assistKey;
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const value = (input?.value || "").trim();
+    if (!key) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      const res = await fetch(dscAssistUrl(), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken(),
+        },
+        body: JSON.stringify({ key: key, value: value, csrf_token: csrfToken() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to save.");
+      }
+      const saved = (data.values && data.values[key]) || value;
+      setDscAssistMode(field, saved);
+    } catch (err) {
+      alert(err.message || String(err));
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  function initDscAssist() {
+    const box = document.getElementById("fuDscAssist");
+    if (!box || !isDscModule) return;
+    box.querySelectorAll(".fu-dsc-assist-field").forEach(function (field) {
+      field.querySelector(".fu-dsc-assist-save")?.addEventListener("click", function () {
+        saveDscAssistField(field);
+      });
+      field.querySelector(".fu-dsc-assist-edit")?.addEventListener("click", function () {
+        startDscAssistEdit(field);
+      });
+      field.querySelector(".fu-dsc-assist-copy")?.addEventListener("click", function () {
+        const value = field.dataset.savedValue || field.querySelector("input")?.value || "";
+        copyTextToClipboard(value, this);
+      });
+      field.querySelector("input")?.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (!this.readOnly) saveDscAssistField(field);
+        }
+      });
+    });
+    fetch(dscAssistUrl(), { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        const values = data.values || {};
+        box.querySelectorAll(".fu-dsc-assist-field").forEach(function (field) {
+          setDscAssistMode(field, values[field.dataset.assistKey] || "");
+        });
+      })
+      .catch(function () { /* keep empty editable fields */ });
   }
 
   function fallbackCopy(text, done) {
@@ -1205,6 +1332,14 @@
           '><i class="bi bi-arrow-repeat"></i></button>' +
           "</td>"
         : "<td>" + escapeHtml(workTypeLabel) + "</td>";
+      const videoLinkCell = isDscModule
+        ? '<td class="fu-copy-cell fu-video-link-cell">' +
+          '<button type="button" class="fu-copy-btn fu-video-link-copy" title="Copy Video Link" aria-label="Copy Video Link" data-app-no="' +
+          escapeHtml(appNo) +
+          '" data-mobile="' +
+          escapeHtml(row.mobile_number || "") +
+          '"><i class="bi bi-copy"></i></button></td>'
+        : "";
       const deleteDisabledAttrs = ' title="Delete"';
       const editTitle = "Edit";
       const appNoValue = isDscModule
@@ -1233,6 +1368,7 @@
         appOrBillCell +
         "<td>" + escapeHtml(formatDate(row.bill_date)) + "</td>" +
         workOrCheckCell +
+        videoLinkCell +
         returnCol +
         filingCols +
         '<td><span class="fu-status-badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + "</span></td>" +
@@ -2135,6 +2271,26 @@
   }
 
   els.gridBody?.addEventListener("click", function (event) {
+    const videoCopyBtn = event.target.closest(".fu-video-link-copy");
+    if (videoCopyBtn) {
+      const appNo = (videoCopyBtn.getAttribute("data-app-no") || "").trim();
+      const mobile = (videoCopyBtn.getAttribute("data-mobile") || "").trim();
+      if (!currentCustomerVideoBase()) {
+        alert("Set Video link for Customer first.");
+        return;
+      }
+      if (!appNo || !mobile) {
+        alert("Application No. and Mobile are required to copy the Video Link.");
+        return;
+      }
+      const url = buildDscRowVideoLink(appNo, mobile);
+      if (!url) return;
+      copyTextToClipboard(url, videoCopyBtn);
+      if (window.JTCSDialog && typeof JTCSDialog.alert === "function") {
+        JTCSDialog.alert("Video Link Copied", "success");
+      }
+      return;
+    }
     const copyBtn = event.target.closest(".fu-copy-btn");
     if (copyBtn) {
       if (!isDscModule) return;
@@ -2221,6 +2377,7 @@
 
   applyItrDefaultStatusFilter();
   syncStatCardActive();
+  initDscAssist();
 
   loadGrid().finally(function () {
     if (!window.FU_AUTO_LOAD_ENTRY_ID) return;

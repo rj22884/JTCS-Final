@@ -1426,3 +1426,37 @@ class FollowupService:
             return "Workflow stage marked inactive successfully."
 
         return persist(_write)
+
+    DSC_ASSIST_KEYS = {
+        "idsign_business_id": 80,
+        "customer_video_link": 500,
+    }
+
+    def get_dsc_assist(self) -> dict[str, str]:
+        stored = self.followup_repo.list_dsc_settings()
+        return {key: stored.get(key, "") for key in self.DSC_ASSIST_KEYS}
+
+    def save_dsc_assist(self, key: str, value: str, *, modified_by: str) -> dict[str, str]:
+        setting_key = (key or "").strip()
+        max_len = self.DSC_ASSIST_KEYS.get(setting_key)
+        if max_len is None:
+            raise ValueError("Unknown DSC setting.")
+        cleaned = (value or "").strip()
+        if len(cleaned) > max_len:
+            raise ValueError(f"Value is too long (max {max_len} characters).")
+        if setting_key == "customer_video_link" and cleaned:
+            lower = cleaned.lower()
+            if not (lower.startswith("http://") or lower.startswith("https://")):
+                raise ValueError("Video link must start with http:// or https://")
+
+        def _write() -> dict[str, str]:
+            saved = self.followup_repo.upsert_dsc_setting(
+                setting_key,
+                cleaned,
+                modified_by=modified_by,
+            )
+            values = self.get_dsc_assist()
+            values[setting_key] = saved
+            return values
+
+        return persist(_write)

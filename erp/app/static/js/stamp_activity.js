@@ -1618,6 +1618,19 @@
     return select;
   }
 
+  function defaultStampAccountId() {
+    const accounts = paymentReceivedAccounts();
+    const marked = accounts.find(function (item) {
+      return item && item.is_default;
+    });
+    if (marked) return String(marked.bank_account_id || "");
+    const match = accounts.find(function (item) {
+      const number = String(item.account_number || item.display_account_number || "").replace(/\D/g, "");
+      return number === "58250200000396" || number.endsWith("0396");
+    });
+    return match ? String(match.bank_account_id || "") : "";
+  }
+
   function autoSelectPaymentBank(select, preferredValue) {
     if (
       preferredValue &&
@@ -1626,6 +1639,16 @@
       })
     ) {
       select.value = String(preferredValue);
+      return;
+    }
+    const defaultId = defaultStampAccountId();
+    if (
+      defaultId &&
+      Array.from(select.options).some(function (opt) {
+        return opt.value === defaultId;
+      })
+    ) {
+      select.value = defaultId;
       return;
     }
     const cashOption = Array.from(select.options).find(function (opt) {

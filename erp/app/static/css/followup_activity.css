@@ -69,6 +69,49 @@ button.fu-stat-card {
   height: 100%;
 }
 
+.fu-dsc-assist {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.6rem 0.45rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 0.4rem;
+  background: #f8fafc;
+}
+
+.fu-dsc-assist-field + .fu-dsc-assist-field {
+  margin-top: 0.5rem;
+}
+
+.fu-dsc-assist .form-label {
+  margin-bottom: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.fu-dsc-assist-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.fu-dsc-assist-row .form-control {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.fu-dsc-assist-row .btn {
+  flex: 0 0 auto;
+}
+
+.fu-dsc-assist-copy {
+  width: 1.85rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fu-dsc-assist-readonly {
+  background: #eef2f7;
+}
+
 .fu-grid-wrap {
   max-height: 480px;
   overflow: auto;

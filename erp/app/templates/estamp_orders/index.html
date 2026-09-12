@@ -38,6 +38,7 @@
   margin-top: 0.35rem;
   white-space: nowrap;
 }
+.estamp-row-locked { background: #f4f6f8; }
 @media (max-width: 768px) {
   .estamp-poi-thumb { width: 72px; height: 56px; }
   .estamp-poi-modal-body iframe { height: 60vh; }
@@ -60,7 +61,7 @@
 {% endblock %}
 
 {% block content %}
-<p class="small text-muted mb-3">Paid website e-Stamp orders only. Click <strong>Check Documents</strong> to preview the POI before you Save payment as Yes. <strong>Edit / Save / Reject</strong> stay on the No / pending grid.</p>
+<p class="small text-muted mb-3">Paid website e-Stamp orders only. Payment Yes needs an uploaded POI file. Click <strong>Check Documents</strong> to preview it, then Save. <strong>Edit / Save / Reject</strong> stay on the No / pending grid.</p>
 
 <div class="jtcs-card mb-3">
   <div class="estamp-grid-title mb-2">
@@ -86,10 +87,12 @@
           <th>Actions</th>
           <th>Status</th>
           <th>Date</th>
+          <th>Certificate No.</th>
+          <th>Generated</th>
         </tr>
       </thead>
       <tbody id="estampPendingBody">
-        <tr><td colspan="15" class="text-muted">Loading…</td></tr>
+        <tr><td colspan="17" class="text-muted">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -119,10 +122,12 @@
           <th>Actions</th>
           <th>Status</th>
           <th>Date</th>
+          <th>Certificate No.</th>
+          <th>Generated</th>
         </tr>
       </thead>
       <tbody id="estampYesBody">
-        <tr><td colspan="15" class="text-muted">Loading…</td></tr>
+        <tr><td colspan="17" class="text-muted">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -241,6 +246,10 @@
     return String((row && row.payment_confirmed) || "").toLowerCase() === "yes";
   }
 
+  function isLocked(row) {
+    return !!(row && row.stamp_locked);
+  }
+
   function partyLine(row, which) {
     if (which === "first") return (row.first_party_display || row.full_name || "").trim();
     return (row.second_party_display || row.second_party_name || "").trim();
@@ -269,7 +278,12 @@
 
   function poiCell(row) {
     if (!row.poi_has_file) {
-      return '<div class="estamp-poi-cell"><div>' + esc(row.poi_document_type || "—") + "</div></div>";
+      return (
+        '<div class="estamp-poi-cell">' +
+          "<div>" + esc(row.poi_document_type || "—") + "</div>" +
+          '<div class="small text-danger mt-1">No POI file uploaded</div>' +
+        "</div>"
+      );
     }
     var view = row.poi_view_url || ("/admin/estamp-orders/" + encodeURIComponent(row.reference_no || "") + "/poi?inline=1");
     var file = row.poi_file_url || ("/admin/estamp-orders/" + encodeURIComponent(row.reference_no || "") + "/poi");
@@ -282,7 +296,9 @@
         '<button type="button" class="estamp-poi-thumb mt-1" data-act="poi-view" data-kind="' + esc(row.poi_kind || "") + '" data-view="' + esc(view) + '" title="View uploaded file">' +
           thumb +
         "</button>" +
-        '<button type="button" class="btn btn-sm btn-outline-primary estamp-check-docs" data-act="check-docs" data-kind="' + esc(row.poi_kind || "") + '" data-view="' + esc(view) + '">Check Documents</button>' +
+        (isLocked(row)
+          ? ""
+          : '<button type="button" class="btn btn-sm btn-outline-primary estamp-check-docs" data-act="check-docs" data-kind="' + esc(row.poi_kind || "") + '" data-view="' + esc(view) + '">Check Documents</button>') +
         '<div class="small mt-1"><a href="' + esc(file) + '">Download</a></div>' +
         (row.poi_file_name ? '<div class="small text-muted">' + esc(row.poi_file_name) + "</div>" : "") +
       "</div>"
@@ -321,12 +337,13 @@
       return;
     }
     if (choice === "Yes") {
-      if (row.poi_has_file && !poiChecked[ref]) {
-        openPoi(row);
-        alert("Check Documents first. Preview the POI (PDF / image), then click Save.");
+      if (!row.poi_has_file) {
+        alert("POI file is not uploaded. Payment cannot be confirmed as Yes until the applicant uploads the document.");
         return;
       }
-      if (!row.poi_has_file && !window.confirm("No POI file is uploaded. Confirm payment anyway?")) {
+      if (!poiChecked[ref]) {
+        openPoi(row);
+        alert("Check Documents first. Preview the POI (PDF / image), then click Save.");
         return;
       }
     }
@@ -341,15 +358,28 @@
 
   function confirmRadios(row) {
     var confirmed = (row.payment_confirmed || "").toLowerCase();
+    var disabled = isLocked(row) ? " disabled" : "";
     return (
       '<div class="estamp-confirm">' +
-        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="Yes"' + (confirmed === "yes" ? " checked" : "") + "> Yes</label>" +
-        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="No"' + (confirmed === "no" ? " checked" : "") + "> No</label>" +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="Yes"' + (confirmed === "yes" ? " checked" : "") + disabled + "> Yes</label>" +
+        '<label><input type="radio" name="pc-' + esc(row.reference_no) + '" value="No"' + (confirmed === "no" ? " checked" : "") + disabled + "> No</label>" +
       "</div>"
     );
   }
 
   function actionButtons(row, confirmedYes) {
+    if (isLocked(row)) {
+      return (
+        '<div class="estamp-actions estamp-actions-col">' +
+          '<button type="button" class="btn btn-sm btn-outline-warning" data-act="undo">Undo</button>' +
+          (confirmedYes
+            ? '<a class="btn btn-sm btn-primary" href="{{ url_for("stamp.stamp_activity") }}?website_ref=' +
+              encodeURIComponent(row.reference_no || "") +
+              '">Stamp Activity</a>'
+            : "") +
+        "</div>"
+      );
+    }
     return (
       '<div class="estamp-actions estamp-actions-col">' +
         '<button type="button" class="btn btn-sm btn-outline-primary" data-act="edit">Edit</button>' +
@@ -366,7 +396,7 @@
 
   function rowHtml(row, confirmedYes) {
     var amount = amountValue(row);
-    return "<tr data-ref=\"" + esc(row.reference_no) + "\">" +
+    return "<tr data-ref=\"" + esc(row.reference_no) + "\"" + (isLocked(row) ? ' class="estamp-row-locked"' : "") + ">" +
       "<td><strong>" + esc(row.reference_no || "") + "</strong></td>" +
       "<td>" + esc(row.article_label || row.article_code || "—") + "</td>" +
       "<td>" + copyCell(partyLine(row, "first"), "first party") + "</td>" +
@@ -383,11 +413,13 @@
       "<td>" + actionButtons(row, confirmedYes) + "</td>" +
       "<td>" + esc(row.review_status || "") + "</td>" +
       "<td>" + esc(row.created_date || "") + "</td>" +
+      "<td>" + esc(row.certificate_number || "—") + "</td>" +
+      "<td>" + esc(row.generated_date || "—") + "</td>" +
       "</tr>";
   }
 
   function emptyRow(message) {
-    return '<tr><td colspan="15" class="text-muted">' + esc(message) + "</td></tr>";
+    return '<tr><td colspan="17" class="text-muted">' + esc(message) + "</td></tr>";
   }
 
   function render(rows) {
@@ -422,7 +454,11 @@
   }
 
   function openEdit(row) {
-    if (isYes(row)) {
+    if (isLocked(row)) {
+      alert("This order is generated in Stamp Activity. Use Undo to edit.");
+      return;
+    }
+    if (isYes(row) && !row.stamp_generated) {
       alert("Edit is allowed only when Payment confirm is No.");
       return;
     }
@@ -481,7 +517,31 @@
     var ref = tr && tr.getAttribute("data-ref");
     var row = rowsByRef[ref];
     if (!ref || !row) return;
+    if (isLocked(row) && act !== "undo" && act !== "poi-view") {
+      alert("This order is generated in Stamp Activity. Use Undo to edit.");
+      return;
+    }
     try {
+      if (act === "undo") {
+        var creds = null;
+        if (!window.JTCSDeleteConfirm || !window.JTCSDeleteConfirm.ask) {
+          if (!window.confirm("Unlock this generated order for edit?")) return;
+        } else {
+          creds = await window.JTCSDeleteConfirm.ask({
+            title: "Confirm Undo",
+            message: "This order is generated in Stamp Activity. Enter your User ID and password to unlock it for edit.",
+            confirmLabel: "Undo",
+            cancelLabel: "Cancel",
+            confirmIcon: "bi-arrow-counterclockwise",
+            variant: "warning",
+          });
+          if (!creds) return;
+        }
+        var unlock = await post("/admin/estamp-orders/" + encodeURIComponent(ref) + "/undo", creds || {});
+        if (!unlock.res.ok || unlock.data.ok === false) throw new Error(unlock.data.error || "Unable to unlock.");
+        await load();
+        return;
+      }
       if (act === "edit") {
         openEdit(row);
         return;

@@ -245,6 +245,7 @@ class MasterRepository:
                     "display_account_number": display,
                     "display_order": int(getattr(account, "DisplayOrder", 100) or 100),
                     "qr_bill_received": bool(getattr(account, "QrBillReceived", False)),
+                    "is_default": self._is_primary_stamp_account(account),
                 }
             )
         items.sort(

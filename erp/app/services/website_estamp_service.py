@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime
 from pathlib import Path
 
-from flask import current_app
+from flask import current_app, session
 from flask_mail import Message
 from sqlalchemy import func, text
 
@@ -219,6 +219,9 @@ def _poi_url(reference_no: str, *, inline: bool) -> str:
     return f"{path}?inline=1" if inline else path
 
 
+_STAMP_UNSET = object()
+
+
 class WebsiteEStampService:
     def ensure_schema(self) -> None:
         from app.repositories.menu_repository import MenuRepository
@@ -241,7 +244,8 @@ class WebsiteEStampService:
             .limit(limit)
             .all()
         )
-        return [self._row(row) for row in rows]
+        stamps = self._stamps_by_website_ref([row.ReferenceNo for row in rows])
+        return [self._row(row, stamp=stamps.get((row.ReferenceNo or "").strip().upper())) for row in rows]
 
     def get_by_reference(self, reference_no: str) -> WebsiteEStampOrder | None:
         ref = _clean(reference_no, 40).upper()
@@ -443,6 +447,11 @@ class WebsiteEStampService:
         choice = _clean(confirmed, 10).title()
         if choice not in {"Yes", "No"}:
             raise ValueError("Select Yes or No for payment confirm.")
+        self._assert_order_mutable(row, "Save")
+        if choice == "Yes" and not (row.PoiDocPath or "").strip():
+            raise ValueError(
+                "POI file is not uploaded. Payment cannot be confirmed as Yes until the document is uploaded."
+            )
         row.PaymentConfirmed = choice
         row.ModifiedDate = datetime.utcnow()
         if choice == "Yes":
@@ -456,7 +465,8 @@ class WebsiteEStampService:
         if row is None:
             raise ValueError("e-Stamp order not found.")
         no_pay = (reason or "").strip().lower() in {"no_payment", "no", "unpaid"}
-        if not no_pay:
+        self._assert_order_mutable(row, "Reject")
+        if not no_pay and not self._is_unlocked(row.ReferenceNo):
             self._assert_not_confirmed(row, "Reject")
         row.PaymentConfirmed = "No" if no_pay else (row.PaymentConfirmed or "Yes")
         row.ReviewStatus = "Rejected — no payment" if no_pay else "Rejected"
@@ -474,11 +484,78 @@ class WebsiteEStampService:
         if (row.PaymentConfirmed or "").strip().title() == "Yes":
             raise ValueError(f"{action} is allowed only when Payment confirm is No.")
 
+    def _find_stamp(self, reference_no: str):
+        ref = _clean(reference_no, 40).upper()
+        if not ref:
+            return None
+        from app.models.stamp import StampMaster
+
+        return (
+            db.session.query(StampMaster)
+            .filter(StampMaster.IsActive == True)  # noqa: E712
+            .filter(func.upper(func.ltrim(func.rtrim(StampMaster.WebsiteReference))) == ref)
+            .first()
+        )
+
+    def _stamps_by_website_ref(self, references: list[str]) -> dict:
+        refs = sorted({_clean(ref, 40).upper() for ref in references if _clean(ref, 40)})
+        if not refs:
+            return {}
+        from app.models.stamp import StampMaster
+
+        rows = (
+            db.session.query(StampMaster)
+            .filter(StampMaster.IsActive == True)  # noqa: E712
+            .filter(func.upper(func.ltrim(func.rtrim(StampMaster.WebsiteReference))).in_(refs))
+            .all()
+        )
+        found: dict = {}
+        for stamp in rows:
+            key = _clean(getattr(stamp, "WebsiteReference", None), 40).upper()
+            if key and key not in found:
+                found[key] = stamp
+        return found
+
+    def _unlocked_refs(self) -> set[str]:
+        try:
+            from flask import has_request_context
+
+            if not has_request_context():
+                return set()
+            raw = session.get("estamp_order_unlocked") or []
+        except Exception:
+            return set()
+        return {_clean(item, 40).upper() for item in raw if _clean(item, 40)}
+
+    def _is_unlocked(self, reference_no: str) -> bool:
+        return _clean(reference_no, 40).upper() in self._unlocked_refs()
+
+    def _assert_order_mutable(self, row: WebsiteEStampOrder, action: str) -> None:
+        if self._find_stamp(row.ReferenceNo) and not self._is_unlocked(row.ReferenceNo):
+            raise ValueError(
+                f"{action} is locked because this stamp is already generated in Stamp Activity. Use Undo."
+            )
+
+    def unlock_for_edit(self, reference_no: str) -> dict:
+        row = self.get_by_reference(reference_no)
+        if row is None:
+            raise ValueError("e-Stamp order not found.")
+        stamp = self._find_stamp(row.ReferenceNo)
+        if stamp is None:
+            raise ValueError("This order is not yet generated in Stamp Activity.")
+        refs = self._unlocked_refs()
+        refs.add(row.ReferenceNo)
+        session["estamp_order_unlocked"] = list(refs)
+        session.modified = True
+        return self._row(row, stamp=stamp)
+
     def admin_delete(self, reference_no: str) -> None:
         row = self.get_by_reference(reference_no)
         if row is None:
             return
-        self._assert_not_confirmed(row, "Permanent delete")
+        self._assert_order_mutable(row, "Permanent delete")
+        if not self._is_unlocked(row.ReferenceNo):
+            self._assert_not_confirmed(row, "Permanent delete")
         db.session.delete(row)
         db.session.commit()
 
@@ -486,7 +563,9 @@ class WebsiteEStampService:
         row = self.get_by_reference(reference_no)
         if row is None:
             raise ValueError("e-Stamp order not found.")
-        self._assert_not_confirmed(row, "Edit")
+        self._assert_order_mutable(row, "Edit")
+        if not self._is_unlocked(row.ReferenceNo):
+            self._assert_not_confirmed(row, "Edit")
         first = _require_stamp_name(data.get("full_name") or data.get("name") or row.FullName, "First party name")
         second = _require_stamp_name(data.get("second_party_name") or row.SecondPartyName, "Second party name")
         if len(first) < 2:
@@ -620,8 +699,8 @@ class WebsiteEStampService:
         day = datetime.utcnow().strftime("%Y%m%d")
         return f"EST-{day}-{secrets.token_hex(2).upper()}"
 
-    def _row(self, row: WebsiteEStampOrder) -> dict:
-        return {
+    def _row(self, row: WebsiteEStampOrder, stamp=_STAMP_UNSET) -> dict:
+        data = {
             "order_id": row.OrderID,
             "reference_no": row.ReferenceNo,
             "full_name": row.FullName,
@@ -667,7 +746,27 @@ class WebsiteEStampService:
             "review_notes": row.ReviewNotes or "",
             "payment_confirmed": (row.PaymentConfirmed or "").strip(),
             "created_date": row.CreatedDate.strftime("%d/%m/%Y %H:%M") if row.CreatedDate else "",
+            "certificate_number": "",
+            "generated_date": "",
+            "stamp_generated": False,
+            "stamp_locked": False,
         }
+        if stamp is _STAMP_UNSET:
+            stamp = self._find_stamp(row.ReferenceNo)
+        if stamp is not None:
+            issued = getattr(stamp, "CertificateIssuedDate", None)
+            created = getattr(stamp, "CreatedDate", None)
+            if issued and hasattr(issued, "strftime"):
+                generated = issued.strftime("%d/%m/%Y")
+            elif created and hasattr(created, "strftime"):
+                generated = created.strftime("%d/%m/%Y")
+            else:
+                generated = ""
+            data["certificate_number"] = (stamp.CertificateNumber or "").strip()
+            data["generated_date"] = generated
+            data["stamp_generated"] = True
+            data["stamp_locked"] = not self._is_unlocked(row.ReferenceNo)
+        return data
 
     def _public(self, row: WebsiteEStampOrder, message: str) -> dict:
         data = self._row(row)
