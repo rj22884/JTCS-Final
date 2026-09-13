@@ -26,6 +26,8 @@ class OtherLoginService:
     def status_label(self) -> str:
         if self.enabled:
             return "Login"
+        if self.status == STATUS_DISABLED:
+            return "Computer Off"
         return "Coming Soon"
 
 
@@ -209,11 +211,39 @@ OTHER_LOGIN_SERVICES: tuple[OtherLoginService, ...] = (
 )
 
 
+def _login_url_for(item: OtherLoginService) -> str:
+    if item.login_url:
+        return item.login_url
+    if item.key == "uttarakhand_fps":
+        return "/fps-login"
+    return f"/other-login/{item.key}"
+
+
 def list_other_login_services() -> list[OtherLoginService]:
-    return list(OTHER_LOGIN_SERVICES)
+    from dataclasses import replace
+
+    from app.services.other_login_bridge import computer_is_online
+
+    online = computer_is_online()
+    rows: list[OtherLoginService] = []
+    for item in OTHER_LOGIN_SERVICES:
+        login_url = _login_url_for(item)
+        if online:
+            rows.append(replace(item, status=STATUS_ENABLED, login_url=login_url))
+        else:
+            rows.append(replace(item, status=STATUS_DISABLED, login_url=None))
+    return rows
 
 
 def get_other_login_service(key: str) -> OtherLoginService | None:
+    needle = (key or "").strip().lower()
+    for item in list_other_login_services():
+        if item.key == needle:
+            return item
+    return None
+
+
+def get_other_login_definition(key: str) -> OtherLoginService | None:
     needle = (key or "").strip().lower()
     for item in OTHER_LOGIN_SERVICES:
         if item.key == needle:

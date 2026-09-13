@@ -118,12 +118,15 @@ def fps_user_request_allowed(path: str | None, method: str | None) -> bool:
         "/logout",
         "/login",
         "/other-login",
+        "/other_login",
         "/fps-login",
         "/server-auth",
         "/sw.js",
         "/manifest.webmanifest",
         "/api/runtime",
     }:
+        return verb == "GET"
+    if target.startswith("/other-login") or target.startswith("/other_login"):
         return verb == "GET"
     if target == FPS_HOME_PATH or target in FPS_ENABLED_MASTER_PATHS:
         return verb == "GET"

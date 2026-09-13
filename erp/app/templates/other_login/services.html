@@ -5,15 +5,25 @@
 {% block body_extra_class %}jtcs-other-login-page{% endblock %}
 
 {% block extra_css %}
-<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol3" rel="stylesheet">
+<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260913ol4" rel="stylesheet">
 {% endblock %}
 
 {% block content %}
 <div class="ol-toolbar mb-3">
   <a href="{{ url_for('auth.login') }}" class="small">&larr; Back to JTCS Login</a>
 </div>
+{% if computer_online %}
+  <div class="ol-presence ol-presence-on" id="olPresence">
+    Office computer is <strong>ON</strong> — all Other Logins are enabled.
+    Data stays on this PC under <code>E:\Web-Data</code>.
+  </div>
+{% else %}
+  <div class="ol-presence ol-presence-off" id="olPresence">
+    Office computer is <strong>OFF</strong> — all Other Logins are disabled until this PC is on and the Other Login Bridge is running.
+  </div>
+{% endif %}
 <p class="text-muted small mb-3">
-  Choose a service. Only enabled services can be opened. Others stay Coming Soon until they are switched on.
+  Each login has its own folder inside <code>E:\Web-Data</code>. No other JTCS / VPS data is stored there.
 </p>
 <div class="ol-grid">
   {% for item in services %}
@@ -24,7 +34,7 @@
           <h2 class="ol-card-title">{{ item.name }}</h2>
           <p class="ol-card-sub">{{ item.subtitle }}</p>
         </div>
-        <span class="ol-card-action btn btn-primary btn-sm">Login</span>
+        <span class="ol-card-action btn btn-primary btn-sm">{{ item.status_label }}</span>
       </a>
     {% else %}
       <div class="ol-card ol-card-disabled" aria-disabled="true">
@@ -33,9 +43,19 @@
           <h2 class="ol-card-title">{{ item.name }}</h2>
           <p class="ol-card-sub">{{ item.subtitle }}</p>
         </div>
-        <span class="ol-card-action ol-coming-soon"><i class="bi bi-lock-fill"></i> Coming Soon</span>
+        <span class="ol-card-action ol-coming-soon"><i class="bi bi-lock-fill"></i> {{ item.status_label }}</span>
       </div>
     {% endif %}
   {% endfor %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.OTHER_LOGIN_PRESENCE = {
+    online: {{ computer_online | tojson }},
+    url: {{ url_for('other_login.presence') | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/other_login_presence.js') }}?v=20260913ol4"></script>
 {% endblock %}

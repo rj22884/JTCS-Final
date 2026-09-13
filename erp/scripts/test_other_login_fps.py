@@ -1,6 +1,7 @@
 """Smoke-test Other Login catalog, FPS login pages, and FPS_USER restrictions."""
 from __future__ import annotations
 
+import os
 import re
 import sys
 from datetime import datetime, timezone
@@ -11,12 +12,17 @@ sys.path.insert(0, str(ERP_ROOT))
 
 from app import create_app
 from app.services.menu_service import MenuService
-from app.services.other_login_catalog import STATUS_ENABLED, list_other_login_services
+from app.services.other_login_catalog import STATUS_DISABLED, STATUS_ENABLED, list_other_login_services
 from app.utils.fps_access import FPS_FORBIDDEN_MESSAGE, fps_user_request_allowed
 from app.utils.roles import FPS_USER_ROLE, has_fps_user_role
 
 
+def _set_presence(mode: str) -> None:
+    os.environ["OTHER_LOGIN_PRESENCE"] = mode
+
+
 def test_catalog() -> None:
+    _set_presence("offline")
     services = list_other_login_services()
     names = [item.name for item in services]
     print("SERVICES", len(services))
@@ -25,12 +31,20 @@ def test_catalog() -> None:
     if len(set(names)) != 25:
         raise SystemExit("Other Login service names are not unique")
     enabled = [item for item in services if item.enabled]
-    if len(enabled) != 1 or enabled[0].key != "uttarakhand_fps":
-        raise SystemExit("Only Uttarakhand FPS Login should be enabled")
-    if enabled[0].status != STATUS_ENABLED or not enabled[0].login_url:
-        raise SystemExit("Enabled FPS service is missing login URL")
+    if enabled:
+        raise SystemExit("All Other Login services must stay disabled when the office PC is off")
+    if any(item.status != STATUS_DISABLED or item.login_url for item in services):
+        raise SystemExit("Offline Other Login cards must not expose login URLs")
     if services[0].name != "Uttarakhand FPS Login":
         raise SystemExit("First service must be Uttarakhand FPS Login")
+    _set_presence("online")
+    online = list_other_login_services()
+    if any(not item.enabled or item.status != STATUS_ENABLED or not item.login_url for item in online):
+        raise SystemExit("All Other Login services must be enabled when the office PC is on")
+    if online[0].key != "uttarakhand_fps" or online[0].login_url != "/fps-login":
+        raise SystemExit("Enabled FPS service is missing login URL")
+    if online[1].login_url != "/other-login/aadhaar":
+        raise SystemExit("Enabled Aadhaar service is missing workspace URL")
     expected = {
         "Aadhaar Login",
         "PAN Login",
@@ -105,17 +119,33 @@ def test_pages_and_scope() -> None:
         raise SystemExit("Login page failed")
     if "Other Login" not in html or "other-login" not in html:
         raise SystemExit("Login page is missing the Other Login card")
+    _set_presence("offline")
+    other_off = client.get("/other-login")
+    other_off_html = other_off.get_data(as_text=True)
+    print("OTHER LOGIN OFF", other_off.status_code)
+    if other_off.status_code != 200:
+        raise SystemExit("Other Login page failed")
+    if "Uttarakhand FPS Login" not in other_off_html:
+        raise SystemExit("Other Login page missing FPS service")
+    if other_off_html.count("Computer Off") < 20:
+        raise SystemExit("Offline services are not showing Computer Off")
+    if 'href="/fps-login"' in other_off_html:
+        raise SystemExit("FPS login must stay closed while the office PC is off")
+    alias = client.get("/other_login")
+    if alias.status_code != 200 or "Other Login" not in alias.get_data(as_text=True):
+        raise SystemExit("other_login alias failed")
+    _set_presence("online")
     other = client.get("/other-login")
     other_html = other.get_data(as_text=True)
-    print("OTHER LOGIN", other.status_code)
+    print("OTHER LOGIN ON", other.status_code)
     if other.status_code != 200:
-        raise SystemExit("Other Login page failed")
-    if "Uttarakhand FPS Login" not in other_html:
-        raise SystemExit("Other Login page missing FPS service")
-    if other_html.count("Coming Soon") < 20:
-        raise SystemExit("Disabled services are not showing Coming Soon")
+        raise SystemExit("Other Login page failed while computer is on")
     if 'href="/fps-login"' not in other_html:
         raise SystemExit("Enabled FPS service is not linked")
+    if 'href="/other-login/aadhaar"' not in other_html:
+        raise SystemExit("Enabled Aadhaar workspace is not linked")
+    if "Computer Off" in other_html:
+        raise SystemExit("Online Other Login page still shows Computer Off")
     fps_page = client.get("/fps-login")
     fps_html = fps_page.get_data(as_text=True)
     print("FPS LOGIN PAGE", fps_page.status_code)

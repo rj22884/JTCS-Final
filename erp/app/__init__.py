@@ -117,6 +117,10 @@ SETUP_PUBLIC_ENDPOINTS = {
     "customer_portal.login_set_password_api",
     "customer_portal.reset_password_api",
     "customer_portal.profile_api_legacy",
+    "other_login.local_heartbeat",
+    "other_login.local_jobs",
+    "other_login.local_job_result",
+    "other_login.presence",
 }
 
 

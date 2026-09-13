@@ -22,6 +22,7 @@ RESERVED_PATHS = {
     "public-report",
     "resume",
     "other-login",
+    "other_login",
     "fps-login",
 }
 
