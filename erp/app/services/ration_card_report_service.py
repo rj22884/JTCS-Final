@@ -1235,9 +1235,28 @@ class RationCardReportService:
         district = self.repo.session.get(PdsDistrictMaster, district_id)
         return (district.DistrictName if district else "") or ""
 
-    def _search_fps_master(self, term: str | None, *, limit: int = 400) -> list[PdsFpsMaster]:
+    def _search_fps_master(
+        self,
+        term: str | None,
+        *,
+        limit: int = 400,
+        state_id: int | None = None,
+        district_id: int | None = None,
+        dso_id: int | None = None,
+        aro_id: int | None = None,
+    ) -> list[PdsFpsMaster]:
         PdsMasterRepository(self.repo.session).ensure_schema()
-        stmt = select(PdsFpsMaster)
+        if not int(aro_id or 0):
+            return []
+        stmt = select(PdsFpsMaster).where(PdsFpsMaster.AroID == int(aro_id))
+        if int(dso_id or 0):
+            stmt = stmt.where(PdsFpsMaster.DsoID == int(dso_id))
+        if int(district_id or 0):
+            stmt = stmt.where(PdsFpsMaster.DistrictID == int(district_id))
+        if int(state_id or 0):
+            stmt = stmt.join(
+                PdsDistrictMaster, PdsFpsMaster.DistrictID == PdsDistrictMaster.DistrictID
+            ).where(PdsDistrictMaster.StateID == int(state_id))
         cleaned = (term or "").strip()
         if cleaned:
             needle = f"%{cleaned.lower()}%"
@@ -1252,6 +1271,26 @@ class RationCardReportService:
                 )
             )
         stmt = stmt.order_by(PdsFpsMaster.DealerName, PdsFpsMaster.FpsName, PdsFpsMaster.FpsRowID).limit(limit)
+        return list(self.repo.session.scalars(stmt).all())
+
+    def _search_fps_master_any(self, term: str | None, *, limit: int = 20) -> list[PdsFpsMaster]:
+        """Direct FPS ID lookup (no ARO cascade) for by-fps confirm."""
+        PdsMasterRepository(self.repo.session).ensure_schema()
+        cleaned = (term or "").strip()
+        if not cleaned:
+            return []
+        needle = f"%{cleaned.lower()}%"
+        stmt = (
+            select(PdsFpsMaster)
+            .where(
+                or_(
+                    func.lower(PdsFpsMaster.FpsCode).like(needle),
+                    func.lower(PdsFpsMaster.ExistingFpsId).like(needle),
+                )
+            )
+            .order_by(PdsFpsMaster.FpsCode, PdsFpsMaster.FpsRowID)
+            .limit(limit)
+        )
         return list(self.repo.session.scalars(stmt).all())
 
     def _ensure_dealer_for_fps(self, fps: PdsFpsMaster):
@@ -1342,26 +1381,37 @@ class RationCardReportService:
             return self._serialize_fps_shop(dealer, fps)
         return self._serialize_dealer(dealer)
 
-    def search_dealers(self, term: str | None = None, *, limit: int = 400) -> list[dict]:
+    def search_dealers(
+        self,
+        term: str | None = None,
+        *,
+        limit: int = 400,
+        state_id: int | None = None,
+        district_id: int | None = None,
+        dso_id: int | None = None,
+        aro_id: int | None = None,
+    ) -> list[dict]:
+        """FPS/shop list for the report page.
+
+        Cascade is required: State → District → DSO → ARO → FPS.
+        Without ARO, the grid stays empty.
+        """
+        if not int(aro_id or 0):
+            return []
+
         def _load() -> list[dict]:
-            fps_rows = self._search_fps_master(term, limit=limit)
+            fps_rows = self._search_fps_master(
+                term,
+                limit=limit,
+                state_id=state_id,
+                district_id=district_id,
+                dso_id=dso_id,
+                aro_id=aro_id,
+            )
             results: list[dict] = []
-            seen_ids: set[int] = set()
-            seen_fps: set[str] = set()
             for fps in fps_rows:
                 dealer = self._ensure_dealer_for_fps(fps)
                 results.append(self._serialize_fps_shop(dealer, fps))
-                seen_ids.add(dealer.DealerID)
-                if dealer.FPSID:
-                    seen_fps.add(self._normalize_id(dealer.FPSID))
-                if fps.FpsCode:
-                    seen_fps.add(self._normalize_id(fps.FpsCode))
-            for row in self.repo.search(term, limit=limit):
-                if row.DealerID in seen_ids:
-                    continue
-                if row.FPSID and self._normalize_id(row.FPSID) in seen_fps:
-                    continue
-                results.append(self._serialize_dealer(row))
             return results
 
         return persist(_load)

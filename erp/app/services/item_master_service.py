@@ -11,7 +11,12 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 
 def _q2(value: Decimal) -> Decimal:
@@ -352,6 +357,22 @@ class ItemMasterService:
             raise ValueError("Item not found.")
         label = (row.ItemName or row.ItemCode or "Item").strip()
         ledger = ledger_payload("item", item_id)
+
+        if is_ledger_clear("item", item_id):
+            def _hard() -> str:
+                from app.services.depreciation_service import DepreciationService
+
+                DepreciationService().deactivate_item_asset(item_id)
+                purge_clear_ledger_refs("item", item_id)
+                self.repo.delete(row)
+                return "Item permanently deleted from the database."
+
+            try:
+                return persist(_hard)
+            except IntegrityError as exc:
+                raise_if_integrity_in_use(exc, label, ledger=ledger)
+                raise
+
         raise_if_ledger_in_use("item", item_id, label)
         assert_master_unused(
             table="ItemMaster",

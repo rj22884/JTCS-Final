@@ -1,6 +1,12 @@
 (function () {
   const api = window.RC_FPS_API || {};
   const els = {
+    state: document.getElementById("rcState"),
+    district: document.getElementById("rcDistrict"),
+    dso: document.getElementById("rcDso"),
+    aro: document.getElementById("rcAro"),
+    cascadeHint: document.getElementById("rcCascadeHint"),
+    shopBlock: document.getElementById("rcShopBlock"),
     search: document.getElementById("rcDealerSearch"),
     searchBtn: document.getElementById("rcDealerSearchBtn"),
     addBtn: document.getElementById("rcDealerAddBtn"),
@@ -38,7 +44,7 @@
     dealerName: document.getElementById("rcDealerName"),
     existingFps: document.getElementById("rcDealerExistingFps"),
     fps: document.getElementById("rcDealerFps"),
-    district: document.getElementById("rcDealerDistrict"),
+    districtField: document.getElementById("rcDealerDistrict"),
     tehsil: document.getElementById("rcDealerTehsil"),
     mobile: document.getElementById("rcDealerMobile"),
     address: document.getElementById("rcDealerAddress"),
@@ -370,13 +376,129 @@
     highlightSelected();
   }
 
-  async function searchDealers(term) {
-    const query = String(term == null ? els.search.value : term).trim();
-    lastQuery = query;
-    const url = new URL(api.search, window.location.origin);
-    if (query) url.searchParams.set("q", query);
+  function selectedCascadeId(el) {
+    const value = parseInt((el && el.value) || "0", 10);
+    return value > 0 ? value : 0;
+  }
+
+  function aroReady() {
+    if (isReadOnly) return true;
+    return !!selectedCascadeId(els.aro);
+  }
+
+  const CASCADE_STEPS = [
+    { key: "state", el: () => els.state, level: "state", placeholder: "Select State", parent: null },
+    { key: "district", el: () => els.district, level: "district", placeholder: "Select District", parent: "state" },
+    { key: "dso", el: () => els.dso, level: "dso", placeholder: "Select DSO", parent: "district" },
+    { key: "aro", el: () => els.aro, level: "aro", placeholder: "Select ARO", parent: "dso" },
+  ];
+
+  function fillCascadeSelect(select, rows, placeholder) {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = '<option value="">' + escapeHtml(placeholder) + "</option>";
+    (rows || []).forEach(function (row) {
+      const option = document.createElement("option");
+      option.value = String(row.id);
+      option.textContent = row.label;
+      if (String(row.id) === current) option.selected = true;
+      select.appendChild(option);
+    });
+  }
+
+  function setCascadeHint(message) {
+    if (els.cascadeHint) els.cascadeHint.textContent = message || "";
+  }
+
+  function hideShopBlock() {
+    if (els.shopBlock) els.shopBlock.classList.add("d-none");
+    if (els.gridBody) els.gridBody.innerHTML = "";
+    if (els.count) els.count.textContent = "0 records";
+    if (els.empty) els.empty.classList.add("d-none");
+    setSelected(null);
+    if (els.report) els.report.classList.add("d-none");
+  }
+
+  function showShopBlock() {
+    if (els.shopBlock) els.shopBlock.classList.remove("d-none");
+  }
+
+  function resetCascadeFrom(index) {
+    CASCADE_STEPS.slice(index).forEach(function (step, offset) {
+      const el = step.el();
+      if (!el) return;
+      fillCascadeSelect(el, [], step.placeholder);
+      el.disabled = offset !== 0;
+      if (offset !== 0) el.value = "";
+    });
+    hideShopBlock();
+    setCascadeHint("Select State, then District, DSO and ARO. FPS / Shop list opens after ARO.");
+  }
+
+  async function loadCascadeOptions(step, parentId) {
+    if (!api.cascade || !step) return [];
+    const url = new URL(api.cascade, window.location.origin);
+    url.searchParams.set("level", step.level);
+    if (parentId) url.searchParams.set("parent_id", String(parentId));
     const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
     const data = await parseJsonResponse(res);
+    const el = step.el();
+    fillCascadeSelect(el, data.rows || [], step.placeholder);
+    if (el) el.disabled = false;
+    if (!(data.rows || []).length) {
+      setCascadeHint("No active records found for this selection.");
+    }
+    return data.rows || [];
+  }
+
+  async function onCascadeChange(stepKey) {
+    const index = CASCADE_STEPS.findIndex(function (s) { return s.key === stepKey; });
+    if (index < 0) return;
+    const step = CASCADE_STEPS[index];
+    const value = selectedCascadeId(step.el());
+    resetCascadeFrom(index + 1);
+    if (!value) {
+      if (step.key === "state") {
+        setCascadeHint("Select State to continue.");
+      }
+      return;
+    }
+    const next = CASCADE_STEPS[index + 1];
+    if (next) {
+      setCascadeHint("Loading " + next.placeholder.replace("Select ", "") + "...");
+      await loadCascadeOptions(next, value);
+      setCascadeHint("Select " + next.placeholder.replace("Select ", "") + " to continue.");
+      return;
+    }
+    // ARO selected → show FPS list
+    showShopBlock();
+    setCascadeHint("ARO selected. FPS / Shop list loaded below.");
+    await searchDealers(els.search ? els.search.value.trim() : "");
+  }
+
+  async function searchDealers(term) {
+    const query = String(term == null ? (els.search && els.search.value) : term).trim();
+    lastQuery = query;
+    if (!isReadOnly && !aroReady()) {
+      hideShopBlock();
+      setCascadeHint("Select State → District → DSO → ARO first. Tab FPS list ARO ke baad aayegi.");
+      return [];
+    }
+    const url = new URL(api.search, window.location.origin);
+    if (query) url.searchParams.set("q", query);
+    if (!isReadOnly) {
+      const stateId = selectedCascadeId(els.state);
+      const districtId = selectedCascadeId(els.district);
+      const dsoId = selectedCascadeId(els.dso);
+      const aroId = selectedCascadeId(els.aro);
+      if (stateId) url.searchParams.set("state_id", String(stateId));
+      if (districtId) url.searchParams.set("district_id", String(districtId));
+      if (dsoId) url.searchParams.set("dso_id", String(dsoId));
+      if (aroId) url.searchParams.set("aro_id", String(aroId));
+    }
+    const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+    const data = await parseJsonResponse(res);
+    showShopBlock();
     renderResults(data.rows || [], query);
     return data.rows || [];
   }
@@ -402,7 +524,7 @@
     els.dealerName.value = row.dealer_name || "";
     els.existingFps.value = row.existing_fps_id || "";
     els.fps.value = row.fps_id || "";
-    els.district.value = row.district_name || "";
+    els.districtField.value = row.district_name || "";
     els.tehsil.value = row.tehsil_name || "";
     els.mobile.value = row.mobile_number || "";
     els.address.value = row.address || "";
@@ -848,6 +970,7 @@
     }
   });
   els.search?.addEventListener("input", function () {
+    if (!aroReady()) return;
     const value = els.search.value.trim();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(function () {
@@ -857,6 +980,18 @@
   els.addBtn?.addEventListener("click", openCreate);
   els.refreshBtn?.addEventListener("click", function () {
     searchDealers(els.search.value.trim()).catch(function (err) { setError(err.message); });
+  });
+  els.state?.addEventListener("change", function () {
+    onCascadeChange("state").catch(function (err) { setError(err.message); });
+  });
+  els.district?.addEventListener("change", function () {
+    onCascadeChange("district").catch(function (err) { setError(err.message); });
+  });
+  els.dso?.addEventListener("change", function () {
+    onCascadeChange("dso").catch(function (err) { setError(err.message); });
+  });
+  els.aro?.addEventListener("change", function () {
+    onCascadeChange("aro").catch(function (err) { setError(err.message); });
   });
   els.fpsSearchBtn?.addEventListener("click", function () {
     searchFps().catch(function (err) { setError(err.message); });
@@ -880,6 +1015,11 @@
   });
   if (isReadOnly && api.scopedDealer) {
     selectDealer(api.scopedDealer);
+  } else if (els.state && api.cascade) {
+    hideShopBlock();
+    loadCascadeOptions(CASCADE_STEPS[0], null)
+      .then(function () { setCascadeHint("Select State to continue."); })
+      .catch(function (err) { setError(err.message); });
   } else {
     searchDealers("").catch(function (err) { setError(err.message); });
   }

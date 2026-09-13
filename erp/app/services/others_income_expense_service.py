@@ -922,6 +922,27 @@ class OthersIncomeExpenseService:
             elif existing_daily is not None:
                 self._remove_daily_transaction(existing_daily)
 
+            if (
+                payment_received
+                and tally_bill
+                and tally_bill_no
+                and ledger_kind == self.LEDGER_MISC
+            ):
+                from app.services.gst_invoice_service import GstInvoiceService
+
+                GstInvoiceService().ensure_automatic_invoice(
+                    tally_bill_no=tally_bill_no,
+                    customer_name=(customer_name or "").strip() or "Customer",
+                    bill_amount=tally_bill_amount or amount,
+                    invoice_date=tally_bill_date or work_date,
+                    customer_id=customer_id,
+                    contact_mobile=(mobile_number or "").strip() or None,
+                    particulars=f"Others / Misc — {work_label}"[:300],
+                    notes="Automatic from Others Income/Expense (payment received).",
+                    created_by=created_by or "Automatic",
+                    commit=False,
+                )
+
             if daily is not None:
                 message = (
                     f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount}). "

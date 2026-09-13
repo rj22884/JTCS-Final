@@ -10,7 +10,12 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 
 
@@ -351,6 +356,20 @@ class WorkMasterService:
             raise ValueError("Work type not found.")
         work_name = (row.WorkName or "").strip()
         ledger = ledger_payload("work", work_id)
+
+        # Opening 0 + no ledger transactions → permanent delete (purge child links first).
+        if is_ledger_clear("work", work_id):
+            def _hard() -> str:
+                purge_clear_ledger_refs("work", work_id)
+                self.repository.session.delete(row)
+                return "Work type permanently deleted from the database."
+
+            try:
+                return persist(_hard)
+            except IntegrityError as exc:
+                raise_if_integrity_in_use(exc, work_name or "Work", ledger=ledger)
+                raise
+
         raise_if_ledger_in_use("work", work_id, work_name or "Work")
         assert_master_unused(
             table="WorkMaster",

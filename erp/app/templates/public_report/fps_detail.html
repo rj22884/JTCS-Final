@@ -4,7 +4,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ration_card_report.css') }}?v=20260912case3">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ration_card_report.css') }}?v=20260913cascade1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol3">
 {% endblock %}
 
@@ -20,8 +20,8 @@
         </p>
         {% else %}
         <p class="small text-muted mb-0">
-          FPS shops load in the grid below. Use Edit / Delete in the Actions column.
-          Select a row to import the NFSA CSV. CSV FPS ID must match the selected shop FPS ID.
+          Pehle State → District → DSO → ARO select karein. ARO ke baad hi FPS / Shop list aayegi.
+          Phir row Select karke NFSA CSV import karein. CSV FPS ID selected shop se match hona chahiye.
         </p>
         {% endif %}
       </div>
@@ -42,7 +42,40 @@
     {% endif %}
 
     <div class="rc-dealer-lookup">
-      <label class="form-label" for="rcDealerSearch">FPS / ration dealer</label>
+      {% if not fps_readonly %}
+      <div class="rc-cascade mb-3" id="rcCascade">
+        <div class="rc-cascade-field">
+          <label class="form-label" for="rcState">1. State</label>
+          <select class="form-select form-select-sm" id="rcState">
+            <option value="">Select State</option>
+          </select>
+        </div>
+        <div class="rc-cascade-field">
+          <label class="form-label" for="rcDistrict">2. District</label>
+          <select class="form-select form-select-sm" id="rcDistrict" disabled>
+            <option value="">Select District</option>
+          </select>
+        </div>
+        <div class="rc-cascade-field">
+          <label class="form-label" for="rcDso">3. DSO</label>
+          <select class="form-select form-select-sm" id="rcDso" disabled>
+            <option value="">Select DSO</option>
+          </select>
+        </div>
+        <div class="rc-cascade-field">
+          <label class="form-label" for="rcAro">4. ARO</label>
+          <select class="form-select form-select-sm" id="rcAro" disabled>
+            <option value="">Select ARO</option>
+          </select>
+        </div>
+      </div>
+      <div class="small text-muted mb-2" id="rcCascadeHint">
+        Select State, then District, DSO and ARO. FPS / Shop list opens after ARO.
+      </div>
+      {% endif %}
+
+      <div id="rcShopBlock" class="{% if not fps_readonly %}d-none{% endif %}">
+      <label class="form-label" for="rcDealerSearch">5. FPS / Shop</label>
       <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
         <div class="flex-grow-1" style="min-width: 220px; max-width: 420px;">
           <div class="input-group input-group-sm">
@@ -83,6 +116,7 @@
       </div>
       <div id="rcDealerEmpty" class="alert alert-warning py-2 px-3 small d-none mt-2 mb-0">
         No FPS shop or dealer matches this search. Use <strong>Add</strong> to create the ration dealer.
+      </div>
       </div>
     </div>
 
@@ -235,6 +269,7 @@
   window.RC_FPS_API = {
     csrf: {{ csrf_token() | tojson }},
     search: {{ url_for('public_report.search_dealers') | tojson }},
+    cascade: {{ url_for('public_report.ration_card_cascade') | tojson }},
     byFps: {{ url_for('public_report.dealer_by_fps') | tojson }},
     record: {{ url_for('public_report.get_dealer', dealer_id=0) | tojson }},
     create: {{ url_for('public_report.create_dealer') | tojson }},
@@ -247,5 +282,5 @@
     scopedDealer: {{ (scoped_dealer or none) | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/ration_card_report.js') }}?v=20260912case1"></script>
+<script src="{{ url_for('static', filename='js/ration_card_report.js') }}?v=20260913cascade1"></script>
 {% endblock %}

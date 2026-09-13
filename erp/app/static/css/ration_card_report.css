@@ -27,6 +27,30 @@
   border-radius: 0.45rem;
 }
 
+.rc-cascade {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+.rc-cascade-field .form-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 0.2rem;
+}
+
+.rc-cascade-field .form-select:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+@media (min-width: 900px) {
+  .rc-cascade {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 #rcDealerGrid thead th {
   position: sticky;
   top: 0;

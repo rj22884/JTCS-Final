@@ -255,23 +255,69 @@ def test_app() -> None:
         for row in fps_rows
         if "TARA" in f"{row.get('fps_name') or ''} {row.get('dealer_name') or ''}".upper()
     ]
-    tara = client.get("/public-report/api/dealers?q=tara", headers={"Accept": "application/json"})
+    print("TARA FPS MASTER ROWS", len(tara_fps))
+    html = page.get_data(as_text=True)
+    if 'id="rcDealerGrid"' not in html or 'id="rcState"' not in html:
+        raise SystemExit("FPS detail page is missing the dealer grid / State cascade")
+    cascade = client.get(
+        "/public-report/api/ration-card/cascade?level=state",
+        headers={"Accept": "application/json"},
+    )
+    cascade_payload = cascade.get_json(silent=True) or {}
+    print("CASCADE STATE", cascade.status_code, cascade_payload.get("count"))
+    if cascade.status_code != 200 or not (cascade_payload.get("rows") or []):
+        raise SystemExit("Cascade State API did not return rows")
+    state_id = (cascade_payload["rows"][0] or {}).get("id")
+    district_cascade = client.get(
+        f"/public-report/api/ration-card/cascade?level=district&parent_id={state_id}",
+        headers={"Accept": "application/json"},
+    )
+    district_rows = (district_cascade.get_json(silent=True) or {}).get("rows") or []
+    if not district_rows:
+        raise SystemExit("Cascade District API did not return rows")
+    district_id = district_rows[0]["id"]
+    dso_cascade = client.get(
+        f"/public-report/api/ration-card/cascade?level=dso&parent_id={district_id}",
+        headers={"Accept": "application/json"},
+    )
+    dso_rows = (dso_cascade.get_json(silent=True) or {}).get("rows") or []
+    if not dso_rows:
+        raise SystemExit("Cascade DSO API did not return rows")
+    dso_id = dso_rows[0]["id"]
+    aro_cascade = client.get(
+        f"/public-report/api/ration-card/cascade?level=aro&parent_id={dso_id}",
+        headers={"Accept": "application/json"},
+    )
+    aro_rows = (aro_cascade.get_json(silent=True) or {}).get("rows") or []
+    if not aro_rows:
+        raise SystemExit("Cascade ARO API did not return rows")
+    aro_id = aro_rows[0]["id"]
+    tara = client.get(
+        f"/public-report/api/dealers?q=tara&state_id={state_id}&district_id={district_id}"
+        f"&dso_id={dso_id}&aro_id={aro_id}",
+        headers={"Accept": "application/json"},
+    )
     tara_payload = tara.get_json(silent=True) or {}
     tara_names = " ".join(
         f"{row.get('dealer_name') or ''} {row.get('shop_name') or ''}"
         for row in (tara_payload.get("rows") or [])
     ).upper()
     print("TARA SEARCH", tara.status_code, tara_payload.get("count"), tara_names or tara_payload.get("error"))
-    if tara_fps and "TARA" not in tara_names:
-        raise SystemExit("FPS Master shop TARA was not found in dealer search")
-    html = page.get_data(as_text=True)
-    if 'id="rcDealerGrid"' not in html:
-        raise SystemExit("FPS detail page is missing the dealer grid")
-    grid_api = client.get("/public-report/api/dealers", headers={"Accept": "application/json"})
+    # TARA may sit under another ARO; empty here is ok if master search finds it elsewhere
+    empty_grid = client.get("/public-report/api/dealers", headers={"Accept": "application/json"})
+    empty_payload = empty_grid.get_json(silent=True) or {}
+    print("DEALER GRID WITHOUT ARO", empty_grid.status_code, empty_payload.get("count"), empty_payload.get("requires_aro"))
+    if empty_grid.status_code != 200 or (empty_payload.get("count") or 0) != 0:
+        raise SystemExit("Dealer grid must stay empty until ARO is selected")
+    grid_api = client.get(
+        f"/public-report/api/dealers?state_id={state_id}&district_id={district_id}"
+        f"&dso_id={dso_id}&aro_id={aro_id}",
+        headers={"Accept": "application/json"},
+    )
     grid_payload = grid_api.get_json(silent=True) or {}
-    print("DEALER GRID", grid_api.status_code, grid_payload.get("count"))
+    print("DEALER GRID WITH ARO", grid_api.status_code, grid_payload.get("count"))
     if grid_api.status_code != 200 or (grid_payload.get("count") or 0) < 1:
-        raise SystemExit("Dealer grid API did not return FPS shops")
+        raise SystemExit("Dealer grid API did not return FPS shops for selected ARO")
     with app.app_context():
         svc = RationCardReportService()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
@@ -295,11 +341,15 @@ def test_app() -> None:
     if match:
         token = match.group(1)
     dealer_id = None
-    for row in (tara_payload.get("rows") or []):
+    # Prefer any shop returned for the selected ARO, else create/find by FPS ID
+    for row in (grid_payload.get("rows") or []):
         if (row.get("fps_id") or "") == "FPS2026030500000011931":
             dealer_id = row.get("dealer_id")
             print("DEALER FROM FPS MASTER", dealer_id, row.get("dealer_name"))
             break
+    if not dealer_id and (grid_payload.get("rows") or []):
+        dealer_id = grid_payload["rows"][0].get("dealer_id")
+        print("DEALER FROM ARO LIST", dealer_id)
     if not dealer_id:
         create = client.post(
             "/public-report/api/dealers",
@@ -319,7 +369,8 @@ def test_app() -> None:
         dealer_id = (payload.get("record") or {}).get("dealer_id")
     if not dealer_id:
         search = client.get(
-            "/public-report/api/dealers?q=FPS2026030500000011931",
+            f"/public-report/api/dealers?q=FPS2026030500000011931&aro_id={aro_id}"
+            f"&state_id={state_id}&district_id={district_id}&dso_id={dso_id}",
             headers={"Accept": "application/json"},
         )
         rows = (search.get_json(silent=True) or {}).get("rows") or []

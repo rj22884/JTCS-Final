@@ -336,11 +336,53 @@ def search_dealers():
             db.session.rollback()
             return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
     term = (request.args.get("q") or request.args.get("search") or "").strip()
+
+    def _id(name: str) -> int | None:
+        raw = (request.args.get(name) or "").strip()
+        if not raw.isdigit():
+            return None
+        value = int(raw)
+        return value if value > 0 else None
+
     try:
-        rows = RationCardReportService().search_dealers(term or None)
-        return jsonify({"ok": True, "rows": rows, "count": len(rows), "query": term})
+        rows = RationCardReportService().search_dealers(
+            term or None,
+            state_id=_id("state_id"),
+            district_id=_id("district_id"),
+            dso_id=_id("dso_id"),
+            aro_id=_id("aro_id"),
+        )
+        return jsonify(
+            {
+                "ok": True,
+                "rows": rows,
+                "count": len(rows),
+                "query": term,
+                "requires_aro": not bool(_id("aro_id")),
+            }
+        )
     except Exception as exc:
         db.session.rollback()
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
+@bp.route("/api/ration-card/cascade")
+@login_required
+def ration_card_cascade():
+    """State → District → DSO → ARO options for FPS detail page."""
+    if is_fps_session():
+        return jsonify({"ok": False, "error": "Cascade is not used for FPS login sessions."}), 403
+    level = (request.args.get("level") or "").strip().lower()
+    parent_raw = (request.args.get("parent_id") or "").strip()
+    parent_id = int(parent_raw) if parent_raw.isdigit() else None
+    try:
+        rows = FpsLoginService().cascade_options(level, parent_id=parent_id)
+        return jsonify({"ok": True, "level": level, "rows": rows, "count": len(rows)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("Ration card cascade options failed")
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 
@@ -358,12 +400,15 @@ def dealer_by_fps():
         record = service.find_dealer_by_fps(fps_id)
         if record:
             return jsonify({"ok": True, "found": True, "record": record})
-        matches = [
-            row
-            for row in service.search_dealers(fps_id)
-            if fps_id.lower() in (row.get("fps_id") or "").lower()
-            or fps_id.lower() in (row.get("existing_fps_id") or "").lower()
-        ]
+        # Fallback: look up FPS master by code without cascade filter
+        matches = []
+        try:
+            fps_rows = service._search_fps_master_any(fps_id, limit=20)
+            for fps in fps_rows:
+                dealer = service._ensure_dealer_for_fps(fps)
+                matches.append(service._serialize_fps_shop(dealer, fps))
+        except Exception:
+            matches = []
         if matches:
             return jsonify({"ok": True, "found": True, "record": matches[0], "rows": matches})
         return jsonify({"ok": True, "found": False, "record": None, "rows": []})

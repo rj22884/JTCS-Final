@@ -101,6 +101,10 @@ class GstInvoiceRepository:
             ("TallyBillNo", "NVARCHAR(50) NULL"),
             ("DailyTransactionID", "INT NULL"),
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
+            (
+                "BillSource",
+                "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_BillSource DEFAULT (N'Manual')",
+            ),
         ):
             self.session.execute(
                 text(

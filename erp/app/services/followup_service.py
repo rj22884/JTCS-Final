@@ -1274,6 +1274,22 @@ class FollowupService:
                 payment_service.remove_followup_accounting(old_bill)
 
             amount_value = data.get("BillAmount")
+            if new_bill and "payment_received" in stage_codes:
+                from app.services.gst_invoice_service import GstInvoiceService
+
+                cust_name = (customer.get("CustomerName") or "").strip()
+                GstInvoiceService().ensure_automatic_invoice(
+                    tally_bill_no=new_bill,
+                    customer_name=cust_name,
+                    bill_amount=amount_value,
+                    invoice_date=bill_date or work_date,
+                    customer_id=customer_id,
+                    contact_mobile=(customer.get("MobileNumber") or "").strip() or None,
+                    particulars=f"{self.module_code} Followup — auto bill",
+                    notes=f"Automatic from {self.module_code} follow-up (payment received).",
+                    created_by=created_by or "Automatic",
+                    commit=False,
+                )
             if new_bill:
                 payment_service.accounting.ensure_gst_invoice_posted(new_bill)
                 payment_service.accounting.reconcile_reference(new_bill)

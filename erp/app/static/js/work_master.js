@@ -341,10 +341,10 @@
     }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!(await JTCSDialog.confirm("Mark selected work type as Inactive?"))) return;
+      if (!(await JTCSDialog.confirm("Delete selected work type? If opening balance and transactions are 0 it will be permanently removed."))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
-        message: "Mark selected work type as Inactive?",
+        message: "Delete selected work type? If opening balance and transactions are 0 it will be permanently removed.",
       });
       if (!creds) return;
     }

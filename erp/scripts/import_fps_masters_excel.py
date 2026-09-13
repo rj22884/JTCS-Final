@@ -1,4 +1,11 @@
-"""Overwrite PDS State / District / DSO / ARO / FPS from the coded FPS Excel."""
+"""Overwrite PDS State / District / DSO / ARO / FPS from the coded FPS Excel.
+
+STRICT SCOPE (public-report ration-card masters only):
+  https://app.jtcsxpert.com/public-report/ration-card
+  → state / district / dso / aro / fps master pages
+
+Does not touch other ERP modules (billing, follow-up, bank, daybook, etc.).
+"""
 from __future__ import annotations
 
 import sys
@@ -15,9 +22,17 @@ DEFAULT_FILE = Path(r"C:\Users\USER\Downloads\DistrictWiseFpsDetails_Merged_With
 
 def main() -> int:
     path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_FILE
+    if not path.is_file():
+        print(f"[FAIL] Excel not found: {path}", file=sys.stderr)
+        return 1
+    print("STRICT SCOPE: Public Report → Ration Card masters only")
+    print("  State / District / DSO / ARO / FPS")
+    print(f"  File: {path}")
     app = create_app()
     with app.app_context():
-        result = PdsMasterService().import_district_fps_workbook(path, actor="Excel Import")
+        result = PdsMasterService().import_district_fps_workbook(
+            path, actor="Excel Import VPS"
+        )
     for key in (
         "message",
         "fps_rows",

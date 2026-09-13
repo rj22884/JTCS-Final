@@ -312,6 +312,19 @@ class GstInvoiceService:
     VOUCHER_PURCHASE = "PURCHASE"
     DAILY_WORK_TYPE = "Accounting"
     DAILY_SUB_WORK_TYPE = "Sale / Service Invoice"
+    BILL_SOURCE_MANUAL = "Manual"
+    BILL_SOURCE_AUTOMATIC = "Automatic"
+    BILL_SOURCE_IMPORT = "Import"
+    BILL_SOURCES = (BILL_SOURCE_MANUAL, BILL_SOURCE_AUTOMATIC, BILL_SOURCE_IMPORT)
+
+    @staticmethod
+    def normalize_bill_source(value) -> str:
+        raw = (str(value or "")).strip().lower().replace(" ", "_").replace("-", "_")
+        if raw in {"automatic", "auto", "temp", "temporary"}:
+            return GstInvoiceService.BILL_SOURCE_AUTOMATIC
+        if raw in {"import", "imported", "daybook"}:
+            return GstInvoiceService.BILL_SOURCE_IMPORT
+        return GstInvoiceService.BILL_SOURCE_MANUAL
 
     @staticmethod
     def normalize_voucher_type(value) -> str:
@@ -430,6 +443,9 @@ class GstInvoiceService:
                 else None
             ),
             "tally_bill_no": (getattr(inv, "TallyBillNo", None) or "").strip(),
+            "bill_source": self.normalize_bill_source(
+                getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
+            ),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
             "lines": self._serialize_lines(lines),
         }
@@ -479,6 +495,13 @@ class GstInvoiceService:
         date_to: date | None = None,
         voucher_type: str | None = None,
     ) -> list[dict]:
+        try:
+            self.backfill_automatic_invoices(limit=25)
+        except Exception:
+            try:
+                current_app.logger.exception("Automatic invoice backfill skipped")
+            except Exception:
+                pass
         vt = self.normalize_voucher_type(voucher_type) if voucher_type else None
         return [
             self._serialize(inv, lines=[])
@@ -814,6 +837,9 @@ class GstInvoiceService:
                 (payload.get("tally_bill_no") or payload.get("TallyBillNo") or "").strip()[:50]
                 or None
             ),
+            "BillSource": self.normalize_bill_source(
+                payload.get("bill_source") or payload.get("BillSource")
+            ),
             "CreatedBy": (payload.get("created_by") or None),
             "CreatedAt": datetime.utcnow(),
         }
@@ -1071,10 +1097,25 @@ class GstInvoiceService:
             db.session.commit()
         return posted
 
-    def create_record(self, payload: dict, *, created_by: str | None = None) -> dict:
+    def create_record(
+        self,
+        payload: dict,
+        *,
+        created_by: str | None = None,
+        commit: bool = True,
+        require_payment_bank: bool | None = None,
+    ) -> dict:
         if created_by:
             payload = {**payload, "created_by": created_by}
-        header, lines, _ = self._build_header_and_lines(payload, persist_no=True)
+        bill_source = self.normalize_bill_source(
+            payload.get("bill_source") or payload.get("BillSource")
+        )
+        if require_payment_bank is None:
+            require_payment_bank = bill_source == self.BILL_SOURCE_MANUAL
+        header, lines, _ = self._build_header_and_lines(
+            payload, persist_no=True, require_payment_bank=require_payment_bank
+        )
+        header["BillSource"] = bill_source
         self._assert_tally_bill_unique(header.get("TallyBillNo"))
 
         def _write() -> dict:
@@ -1082,14 +1123,28 @@ class GstInvoiceService:
             self._sync_sale_daily(inv)
             return self._serialize(inv)
 
-        return persist(_write)
+        if commit:
+            return persist(_write)
+        return _write()
 
     def update_record(self, invoice_id: int, payload: dict) -> dict:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
-        payload = {**payload, "invoice_no": inv.InvoiceNo}
-        header, lines, _ = self._build_header_and_lines(payload, persist_no=False)
+        existing_source = self.normalize_bill_source(
+            getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
+        )
+        if "bill_source" not in payload and "BillSource" not in payload:
+            payload = {**payload, "bill_source": existing_source}
+        bill_source = self.normalize_bill_source(
+            payload.get("bill_source") or payload.get("BillSource")
+        )
+        payload = {**payload, "invoice_no": inv.InvoiceNo, "bill_source": bill_source}
+        # Automatic / Import rows can be edited without payment bank.
+        require_bank = bill_source == self.BILL_SOURCE_MANUAL
+        header, lines, _ = self._build_header_and_lines(
+            payload, persist_no=False, require_payment_bank=require_bank
+        )
         self._assert_tally_bill_unique(header.get("TallyBillNo"), exclude_invoice_id=invoice_id)
         header["UpdatedAt"] = datetime.utcnow()
         header.pop("CreatedAt", None)
@@ -1101,6 +1156,230 @@ class GstInvoiceService:
             return self._serialize(updated)
 
         return persist(_write)
+
+    def ensure_automatic_invoice(
+        self,
+        *,
+        tally_bill_no: str,
+        customer_name: str,
+        bill_amount,
+        invoice_date: date | None = None,
+        customer_id: int | None = None,
+        contact_mobile: str | None = None,
+        place_of_supply: str | None = None,
+        notes: str | None = None,
+        particulars: str | None = None,
+        created_by: str | None = None,
+        commit: bool = True,
+    ) -> dict | None:
+        """Create a temporary Sale/Service invoice row (Bill source = Automatic).
+
+        Idempotent on Tally Bill No: if an invoice already exists, return it.
+        """
+        bill_no = (tally_bill_no or "").strip()
+        if not bill_no:
+            return None
+        name = (customer_name or "").strip()
+        if not name:
+            return None
+        try:
+            amount = Decimal(str(bill_amount or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            amount = Decimal("0")
+        if amount <= 0:
+            return None
+
+        self.repo.ensure_schema()
+        existing = self.repo.find_by_tally_bill_no(bill_no)
+        if existing is not None:
+            return self._serialize(existing)
+
+        inv_date = invoice_date or date.today()
+        line_label = (particulars or "").strip() or f"Services (auto from Tally Bill {bill_no})"
+        payload = {
+            "invoice_date": inv_date.isoformat(),
+            "customer_id": customer_id,
+            "customer_name": name,
+            "contact_mobile": (contact_mobile or "").strip() or None,
+            "place_of_supply": (place_of_supply or "").strip() or None,
+            "invoice_kind": self.INVOICE_KIND_NON_GST,
+            "voucher_type": self.VOUCHER_SALE,
+            "tally_bill_no": bill_no,
+            "bill_source": self.BILL_SOURCE_AUTOMATIC,
+            "notes": (notes or "").strip()
+            or "Temporary Automatic bill — created when payment was received with Tally bill number.",
+            "created_by": (created_by or "Automatic")[:100],
+            "lines": [
+                {
+                    "particulars": line_label[:300],
+                    "qty": 1,
+                    "rate": str(amount),
+                    "discount_amount": "0",
+                    "gst_rate_percent": "0",
+                    "unit": "NOS",
+                }
+            ],
+        }
+        return self.create_record(
+            payload,
+            created_by=created_by or "Automatic",
+            commit=commit,
+            require_payment_bank=False,
+        )
+
+    def backfill_automatic_invoices(self, *, limit: int = 40) -> int:
+        """Create missing Automatic invoices for paid follow-up / OIE tally bills."""
+        self.repo.ensure_schema()
+        created = 0
+        for row in self._list_paid_bills_missing_invoice(limit=limit):
+            try:
+                bill_key = (row.get("tally_bill_no") or "").strip()
+                if not bill_key or self.repo.find_by_tally_bill_no(bill_key) is not None:
+                    continue
+                result = self.ensure_automatic_invoice(
+                    tally_bill_no=bill_key,
+                    customer_name=row["customer_name"],
+                    bill_amount=row["bill_amount"],
+                    invoice_date=row.get("invoice_date"),
+                    customer_id=row.get("customer_id"),
+                    contact_mobile=row.get("contact_mobile"),
+                    particulars=row.get("particulars"),
+                    notes=row.get("notes"),
+                    created_by="Automatic",
+                    commit=True,
+                )
+                if result:
+                    created += 1
+            except Exception:
+                try:
+                    current_app.logger.exception(
+                        "Automatic invoice backfill failed for %s",
+                        row.get("tally_bill_no"),
+                    )
+                except Exception:
+                    pass
+        return created
+
+    def _list_paid_bills_missing_invoice(self, *, limit: int = 40) -> list[dict]:
+        """Paid follow-up / OIE rows that have a Tally bill but no GstInvoice yet."""
+        rows: list[dict] = []
+        try:
+            followup_rows = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (:lim)
+                        e.BillNo AS TallyBillNo,
+                        e.BillAmount AS BillAmount,
+                        e.BillDate AS BillDate,
+                        e.WorkDate AS WorkDate,
+                        e.CustomerID AS CustomerID,
+                        e.ModuleCode AS ModuleCode,
+                        c.CustomerName AS CustomerName,
+                        c.MobileNumber AS MobileNumber
+                    FROM dbo.FollowupEntryMaster e
+                    INNER JOIN dbo.FollowupEntryStage es ON es.EntryID = e.EntryID
+                    INNER JOIN dbo.FollowupWorkflowStage ws ON ws.StageID = es.StageID
+                    LEFT JOIN dbo.CustomerMaster c ON c.CustomerID = e.CustomerID
+                    WHERE e.IsActive = 1
+                      AND e.BillNo IS NOT NULL
+                      AND LTRIM(RTRIM(e.BillNo)) <> N''
+                      AND e.BillAmount IS NOT NULL
+                      AND e.BillAmount > 0
+                      AND LOWER(ws.StageCode) = N'payment_received'
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.GstInvoice i
+                            WHERE UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.BillNo)))
+                      )
+                    ORDER BY e.EntryID DESC
+                    """
+                ),
+                {"lim": int(limit)},
+            ).mappings().all()
+        except Exception:
+            followup_rows = []
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+        for r in followup_rows:
+            bill = (r["TallyBillNo"] or "").strip()
+            if not bill:
+                continue
+            module = (r["ModuleCode"] or "").strip().upper() or "Followup"
+            rows.append(
+                {
+                    "tally_bill_no": bill,
+                    "bill_amount": r["BillAmount"],
+                    "invoice_date": r["BillDate"] or r["WorkDate"],
+                    "customer_id": r["CustomerID"],
+                    "customer_name": (r["CustomerName"] or "").strip() or "Customer",
+                    "contact_mobile": (r["MobileNumber"] or "").strip() or None,
+                    "particulars": f"{module} Followup — auto bill",
+                    "notes": f"Automatic from {module} follow-up (payment received).",
+                }
+            )
+
+        remaining = max(0, int(limit) - len(rows))
+        if remaining <= 0:
+            return rows
+
+        try:
+            oie_rows = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (:lim)
+                        e.TallyBillNo AS TallyBillNo,
+                        ISNULL(e.TallyBillAmount, e.Amount) AS BillAmount,
+                        e.TallyBillDate AS BillDate,
+                        e.WorkDate AS WorkDate,
+                        e.CustomerID AS CustomerID,
+                        e.CustomerName AS CustomerName,
+                        e.MobileNumber AS MobileNumber
+                    FROM dbo.OthersIncomeExpenseMaster e
+                    WHERE e.IsActive = 1
+                      AND e.PaymentReceived = 1
+                      AND e.TallyBillGenerated = 1
+                      AND e.TallyBillNo IS NOT NULL
+                      AND LTRIM(RTRIM(e.TallyBillNo)) <> N''
+                      AND ISNULL(e.TallyBillAmount, e.Amount) > 0
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.GstInvoice i
+                            WHERE UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                      )
+                    ORDER BY e.EntryID DESC
+                    """
+                ),
+                {"lim": remaining},
+            ).mappings().all()
+        except Exception:
+            oie_rows = []
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+        for r in oie_rows:
+            bill = (r["TallyBillNo"] or "").strip()
+            if not bill:
+                continue
+            rows.append(
+                {
+                    "tally_bill_no": bill,
+                    "bill_amount": r["BillAmount"],
+                    "invoice_date": r["BillDate"] or r["WorkDate"],
+                    "customer_id": r["CustomerID"],
+                    "customer_name": (r["CustomerName"] or "").strip() or "Customer",
+                    "contact_mobile": (r["MobileNumber"] or "").strip() or None,
+                    "particulars": "Others Income/Expense — auto bill",
+                    "notes": "Automatic from Others Income/Expense (payment received).",
+                }
+            )
+        return rows
 
     def list_ids(self) -> list[int]:
         return self.repo.list_ids()

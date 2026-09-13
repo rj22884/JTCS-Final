@@ -16,7 +16,12 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -424,6 +429,17 @@ class BankMasterService:
                 raise ValueError("Bank account not found.")
             label = (row.BankName or "").strip() or "Bank account"
             ledger = ledger_payload("bank", account_id)
+            if is_ledger_clear("bank", account_id):
+                self._unlink_unused_payment_modes(account_id)
+                self._detach_inactive_bank_cash(account_id)
+                purge_clear_ledger_refs("bank", account_id)
+                try:
+                    self.repo.delete(row)
+                except IntegrityError as exc:
+                    raise_if_integrity_in_use(exc, label, ledger=ledger)
+                    raise
+                return "Bank account permanently deleted from the database."
+
             raise_if_ledger_in_use("bank", account_id, label)
             self._unlink_unused_payment_modes(account_id)
             self._detach_inactive_bank_cash(account_id)

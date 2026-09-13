@@ -70,6 +70,7 @@
   let searchTimer = null;
   let gridTimer = null;
   let editingId = null;
+  let currentBillSource = "Manual";
   let lastTallyLookup = "";
 
   function apiUrl(template, id) {
@@ -518,6 +519,7 @@
       amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
         ? ""
         : els.amountPaid.value,
+      bill_source: currentBillSource || "Manual",
       lines: lines,
     };
   }
@@ -573,6 +575,7 @@
 
   function fillRecord(record) {
     editingId = record.invoice_id || null;
+    currentBillSource = record.bill_source || "Manual";
     if (els.id) els.id.value = String(record.invoice_id || "");
     if (els.no) els.no.value = record.invoice_no || "";
     setInvoiceKind(record.invoice_kind || "NON_GST", true);
@@ -659,6 +662,7 @@
 
   async function startNew() {
     editingId = null;
+    currentBillSource = "Manual";
     if (els.id) els.id.value = "";
     setInvoiceKind("NON_GST", false);
     if (els.customerId) els.customerId.value = "";
@@ -750,7 +754,8 @@
       showStatus("Add at least one line item.", "danger");
       return;
     }
-    if (!payload.payment_bank_account_id) {
+    const source = (payload.bill_source || currentBillSource || "Manual").toString();
+    if (!payload.payment_bank_account_id && source === "Manual" && voucherType !== "PURCHASE") {
       showStatus("Payment Bank Account is required.", "danger");
       els.payBank?.focus();
       return;
@@ -862,7 +867,13 @@
         row.tax_type === "CGST_SGST"
           ? "CGST+SGST"
           : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
+      const billSource = (row.bill_source || "Manual").toString();
       const tr = document.createElement("tr");
+      if (billSource.toLowerCase() === "automatic") {
+        tr.className = "inv-row-automatic";
+      } else if (billSource.toLowerCase() === "import") {
+        tr.className = "inv-row-import";
+      }
       tr.innerHTML =
         "<td><code>" +
         escapeHtml(row.invoice_no) +
@@ -879,6 +890,11 @@
         "<td>" +
         escapeHtml(taxLabel) +
         "</td>" +
+        "<td><span class=\"inv-bill-source inv-bill-source-" +
+        escapeHtml(billSource.toLowerCase()) +
+        '">' +
+        escapeHtml(billSource) +
+        "</span></td>" +
         '<td class="text-end fw-semibold">' +
         money(row.invoice_value) +
         "</td>" +

@@ -19,7 +19,12 @@ from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import MasterInUseError
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -457,6 +462,19 @@ class CustomerMasterService:
         inactive = (row.get("CustomerStatus") or "").strip().lower() == "inactive"
         name = (row.get("CustomerName") or "Customer").strip() or "Customer"
         ledger = ledger_payload("customer", customer_id)
+
+        # Opening 0 + no transactions → permanently purge even if soft links remain.
+        if is_ledger_clear("customer", customer_id):
+            def _hard() -> str:
+                purge_clear_ledger_refs("customer", customer_id)
+                self.repository.purge(customer_id)
+                return "Customer permanently deleted. This cannot be recovered."
+
+            try:
+                return persist(_hard)
+            except IntegrityError as exc:
+                raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE, ledger=ledger) from exc
+
         if not usage.get("can_delete"):
             try:
                 raise_if_ledger_in_use("customer", customer_id, name)
