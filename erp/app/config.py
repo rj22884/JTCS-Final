@@ -177,3 +177,16 @@ class Config:
     DB_TRUST_SERVER_CERTIFICATE = _env_bool("DB_TRUST_SERVER_CERTIFICATE", "True")
     DB_USER = os.getenv("DB_USER", "")
     DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+
+    # Other Login vault lives only on the office PC (E:\Web-Data\<login>).
+    # VPS keeps a heartbeat/job file, not the login data itself.
+    OTHER_LOGIN_DATA_ROOT = Path(
+        (os.getenv("OTHER_LOGIN_DATA_ROOT") or r"E:\Web-Data").strip().strip('"').strip("'")
+    )
+    OTHER_LOGIN_BRIDGE_TOKEN = (
+        os.getenv("OTHER_LOGIN_BRIDGE_TOKEN") or ""
+    ).strip().strip('"').strip("'")
+    OTHER_LOGIN_VPS_URL = (
+        os.getenv("OTHER_LOGIN_VPS_URL") or "https://app.jtcsxpert.com"
+    ).strip().strip('"').strip("'")
+    OTHER_LOGIN_HEARTBEAT_TTL = int(os.getenv("OTHER_LOGIN_HEARTBEAT_TTL", "90"))

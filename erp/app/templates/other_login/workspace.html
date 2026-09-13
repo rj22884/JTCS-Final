@@ -1,0 +1,49 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block title %}{{ service.name }}{% endblock %}
+{% block subtitle %}{{ service.subtitle }}{% endblock %}
+{% block auth_logo_icon %}{{ service.icon }}{% endblock %}
+{% block body_extra_class %}jtcs-other-login-page jtcs-other-login-workspace{% endblock %}
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260913ol4" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ol-toolbar mb-3">
+  <a href="{{ url_for('other_login.services') }}" class="small">&larr; Back to Other Login</a>
+</div>
+<div class="ol-presence ol-presence-on mb-3">
+  This login’s data is only in <code>E:\Web-Data\{{ service.key }}</code>.
+</div>
+<p class="text-muted small mb-3" id="olWorkspaceStatus">Loading local data…</p>
+<div id="olWorkspaceError" class="alert alert-danger py-2 px-3 small d-none" role="alert"></div>
+
+<label class="form-label" for="olPortalUrl">Official portal URL</label>
+<div class="input-group mb-3">
+  <input type="url" class="form-control" id="olPortalUrl" placeholder="https://">
+  <a class="btn btn-outline-primary" id="olPortalOpen" target="_blank" rel="noopener">Open</a>
+</div>
+
+<label class="form-label" for="olNotes">Notes</label>
+<textarea class="form-control mb-3" id="olNotes" rows="3" placeholder="Office notes for this login"></textarea>
+
+<div class="d-flex justify-content-between align-items-center mb-2">
+  <h3 class="h6 mb-0">Saved logins</h3>
+  <button type="button" class="btn btn-sm btn-outline-secondary" id="olAddRecord">Add row</button>
+</div>
+<div id="olRecords" class="ol-records mb-3"></div>
+<button type="button" class="btn btn-primary w-100" id="olSaveBtn">Save to E:\Web-Data</button>
+<p class="text-muted small mt-2 mb-0" id="olFolderHint"></p>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.OTHER_LOGIN_WORKSPACE = {
+    csrf: {{ csrf_token() | tojson }},
+    key: {{ service.key | tojson }},
+    api: {{ url_for('other_login.workspace_api', key=service.key) | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/other_login_workspace.js') }}?v=20260913ol4"></script>
+{% endblock %}

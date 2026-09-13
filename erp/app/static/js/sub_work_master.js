@@ -281,10 +281,26 @@
     }
     cachedRows.forEach(function (row) {
       const tr = document.createElement("tr");
-      tr.dataset.id = String(row.work_type_id);
+      const workOnly = !!row.is_work_only || !row.work_type_id;
+      tr.dataset.id = String(row.work_type_id || "");
+      const actions = workOnly
+        ? '<button type="button" class="btn btn-outline-primary btn-sm sw-add-child"' +
+          ' data-work-id="' +
+          escapeHtml(row.work_id || "") +
+          '" data-kind="' +
+          escapeHtml(row.ledger_kind || "") +
+          '" data-work-name="' +
+          escapeHtml(row.work_name || row.work_type_name || "") +
+          '"><i class="bi bi-plus-lg"></i> Add Sub Work</button>'
+        : '<button type="button" class="btn btn-outline-primary btn-sm me-1 sw-edit" data-id="' +
+          row.work_type_id +
+          '"><i class="bi bi-pencil"></i> Edit</button>' +
+          '<button type="button" class="btn btn-outline-danger btn-sm sw-delete" data-id="' +
+          row.work_type_id +
+          '"><i class="bi bi-trash"></i> Delete</button>';
       tr.innerHTML =
         "<td>" +
-        escapeHtml(row.work_type_id) +
+        escapeHtml(workOnly ? "—" : row.work_type_id) +
         "</td>" +
         "<td>" +
         ledgerBadge(row.ledger_kind) +
@@ -296,7 +312,7 @@
         escapeHtml(isMiscKind(row.ledger_kind) ? "—" : row.under_group || "—") +
         "</td>" +
         "<td>" +
-        escapeHtml(row.sub_work_type) +
+        escapeHtml(row.sub_work_type || "—") +
         "</td>" +
         "<td>" +
         (row.active_status
@@ -304,12 +320,7 @@
           : '<span class="badge text-bg-secondary">Inactive</span>') +
         "</td>" +
         '<td class="text-end text-nowrap">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm me-1 sw-edit" data-id="' +
-        row.work_type_id +
-        '"><i class="bi bi-pencil"></i> Edit</button>' +
-        '<button type="button" class="btn btn-outline-danger btn-sm sw-delete" data-id="' +
-        row.work_type_id +
-        '"><i class="bi bi-trash"></i> Delete</button>' +
+        actions +
         "</td>";
       els.body.appendChild(tr);
     });
@@ -345,19 +356,22 @@
       });
   }
 
-  function openAdd() {
+  function openAdd(preset) {
+    preset = preset || {};
+    const kind = normalizeKind(preset.kind || "Misc.") || "Misc.";
     if (els.id) els.id.value = "";
     if (els.subWorkType) els.subWorkType.value = "";
     if (els.underGroup) els.underGroup.value = "";
-    setLedgerKind("Misc.");
+    setLedgerKind(kind);
     if (els.modalTitle) els.modalTitle.textContent = "Add Sub Work";
-    fillWorkOptions("Misc.", null, null);
+    fillWorkOptions(kind, preset.workId || null, preset.workName || null);
     syncChartGroupVisibility();
     showModal();
-    return loadWorksFromApi("Misc.", null, null)
+    return loadWorksFromApi(kind, preset.workId || null, preset.workName || null)
       .then(function () {
         syncChartGroupVisibility();
-        els.workId?.focus();
+        if (preset.workId || preset.workName) els.subWorkType?.focus();
+        else els.workId?.focus();
       })
       .catch(function (err) {
         showStatus(err.message || "Unable to load works.", "danger");
@@ -500,6 +514,15 @@
     searchTimer = setTimeout(loadRows, 250);
   });
   els.body?.addEventListener("click", function (event) {
+    const addChild = event.target.closest(".sw-add-child");
+    if (addChild) {
+      openAdd({
+        kind: addChild.getAttribute("data-kind") || "Misc.",
+        workId: addChild.getAttribute("data-work-id") || "",
+        workName: addChild.getAttribute("data-work-name") || "",
+      });
+      return;
+    }
     const editBtn = event.target.closest(".sw-edit");
     if (editBtn) {
       openEdit(editBtn.getAttribute("data-id"));

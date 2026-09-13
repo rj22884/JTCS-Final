@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from calendar import monthrange
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from sqlalchemy import text
@@ -74,6 +74,20 @@ class WorkMasterRepository:
             IF COL_LENGTH(N'dbo.WorkMaster', N'OpeningBalanceDrCr') IS NULL
                 ALTER TABLE dbo.WorkMaster ADD OpeningBalanceDrCr NVARCHAR(2) NULL;
             """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'PurchaseDate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD PurchaseDate DATE NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'DepreciationRate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD DepreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_WorkMaster_DepreciationRate DEFAULT (0);
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'AppreciationRate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD AppreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_WorkMaster_AppreciationRate DEFAULT (0);
+            """,
         ):
             self.session.execute(text(col_sql))
         self.session.execute(
@@ -109,7 +123,9 @@ class WorkMasterRepository:
         self.ensure_schema()
         stmt = select(WorkMaster)
         if active_only is True:
-            stmt = stmt.where(WorkMaster.ActiveStatus == True)  # noqa: E712
+            stmt = stmt.where(
+                or_(WorkMaster.ActiveStatus == True, WorkMaster.ActiveStatus.is_(None))  # noqa: E712
+            )
         elif active_only is False:
             stmt = stmt.where(WorkMaster.ActiveStatus == False)  # noqa: E712
         stmt = stmt.order_by(
@@ -444,6 +460,15 @@ class OthersIncomeExpenseRepository:
                 IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'TallyBillGenerated') IS NULL
                     ALTER TABLE dbo.OthersIncomeExpenseMaster ADD TallyBillGenerated BIT NOT NULL
                         CONSTRAINT DF_OIE_TallyBillGenerated DEFAULT (0);
+                """
+            )
+        )
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'PaymentReceived') IS NULL
+                    ALTER TABLE dbo.OthersIncomeExpenseMaster ADD PaymentReceived BIT NOT NULL
+                        CONSTRAINT DF_OIE_PaymentReceived DEFAULT (0);
                 """
             )
         )

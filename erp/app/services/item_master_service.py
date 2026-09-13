@@ -25,6 +25,70 @@ def _q3(value: Decimal) -> Decimal:
 class ItemMasterService:
     def __init__(self, repository: ItemMasterRepository | None = None):
         self.repo = repository or ItemMasterRepository()
+        self._fa_group_ids: set[int] | None = None
+        self._inv_group_ids: set[int] | None = None
+        self._group_names: dict[int, str] | None = None
+
+    def _fixed_asset_group_ids(self) -> set[int]:
+        if self._fa_group_ids is None:
+            try:
+                from app.services.depreciation_service import DepreciationService
+
+                self._fa_group_ids = DepreciationService().fixed_asset_group_ids()
+            except Exception:
+                self._fa_group_ids = set()
+        return self._fa_group_ids
+
+    def _is_fixed_asset_group(self, group_id) -> bool:
+        if not group_id:
+            return False
+        try:
+            return int(group_id) in self._fixed_asset_group_ids()
+        except (TypeError, ValueError):
+            return False
+
+    def _investment_group_ids(self) -> set[int]:
+        if self._inv_group_ids is None:
+            try:
+                from app.services.depreciation_service import DepreciationService
+
+                self._inv_group_ids = DepreciationService().investment_group_ids()
+            except Exception:
+                self._inv_group_ids = set()
+        return self._inv_group_ids
+
+    def _is_investment_group(self, group_id) -> bool:
+        if not group_id:
+            return False
+        try:
+            return int(group_id) in self._investment_group_ids()
+        except (TypeError, ValueError):
+            return False
+
+    def _chart_group_names(self) -> dict[int, str]:
+        if self._group_names is not None:
+            return self._group_names
+        names: dict[int, str] = {}
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            for item in ChartGroupService().list_records():
+                gid = item.get("group_id")
+                if not gid:
+                    continue
+                names[int(gid)] = (item.get("group_name") or "").strip()
+        except Exception:
+            names = {}
+        self._group_names = names
+        return names
+
+    def _chart_group_name(self, group_id) -> str:
+        if not group_id:
+            return ""
+        try:
+            return self._chart_group_names().get(int(group_id), "") or ""
+        except (TypeError, ValueError):
+            return ""
 
     @staticmethod
     def _money(value, default: str = "0", *, places: str = "0.01") -> Decimal:
@@ -47,14 +111,21 @@ class ItemMasterService:
         except ValueError as exc:
             raise ValueError("Opening balance date is invalid.") from exc
 
-    @staticmethod
-    def _serialize(row) -> dict:
+    def _serialize(self, row) -> dict:
         gst_applicable = bool(getattr(row, "GstApplicable", True))
         opening_qty = getattr(row, "OpeningQty", None)
         opening_rate = getattr(row, "OpeningRate", None)
         opening_balance = getattr(row, "OpeningBalance", None)
         opening_date = getattr(row, "OpeningBalanceDate", None)
+        purchase_date = getattr(row, "PurchaseDate", None)
         chart_group_id = getattr(row, "ChartGroupID", None)
+        dep_rate = getattr(row, "DepreciationRate", None)
+        app_rate = getattr(row, "AppreciationRate", None)
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        profile = DynamicMasterFieldService().profile_key_for_group(chart_group_id)
+        is_fixed_asset = profile == "fixed_assets"
+        is_investment = profile == "investments"
         return {
             "item_id": row.ItemID,
             "item_code": row.ItemCode or "",
@@ -64,6 +135,11 @@ class ItemMasterService:
             "hsn_sac_type": row.HsnSacType or "SAC",
             "unit": row.Unit or "NOS",
             "default_rate": str(row.DefaultRate if row.DefaultRate is not None else "0.00"),
+            "depreciation_rate": str(dep_rate if dep_rate is not None else "0.00"),
+            "appreciation_rate": str(app_rate if app_rate is not None else "0.00"),
+            "purchase_date": purchase_date.isoformat() if purchase_date else "",
+            "is_fixed_asset": is_fixed_asset,
+            "is_investment": is_investment,
             "gst_applicable": gst_applicable,
             "gst_rate_percent": str(row.GstRatePercent if row.GstRatePercent is not None else "0.00"),
             "opening_qty": str(opening_qty if opening_qty is not None else "0.000"),
@@ -71,6 +147,7 @@ class ItemMasterService:
             "opening_balance": str(opening_balance if opening_balance is not None else "0.00"),
             "opening_balance_date": opening_date.isoformat() if opening_date else "",
             "chart_group_id": int(chart_group_id) if chart_group_id else None,
+            "chart_group_name": self._chart_group_name(chart_group_id),
             "order_no": int(row.OrderNo or 100),
             "is_active": bool(row.IsActive),
             "created_at": row.CreatedAt.isoformat() if row.CreatedAt else "",
@@ -196,6 +273,17 @@ class ItemMasterService:
             raise ValueError("Qty cannot be negative.")
         if opening_rate < 0:
             raise ValueError("Rate cannot be negative.")
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        dyn = DynamicMasterFieldService()
+        dyn.validate_required(
+            {
+                **payload,
+                "opening_balance_date": opening_date.isoformat() if opening_date else "",
+            },
+            chart_group_id,
+        )
+        extras = dyn.extra_db_values(payload, chart_group_id, opening_date=opening_date)
 
         return {
             "ItemCode": code[:40],
@@ -211,10 +299,18 @@ class ItemMasterService:
             "OpeningRate": _q2(opening_rate),
             "OpeningBalance": opening_balance,
             "OpeningBalanceDate": opening_date,
+            "PurchaseDate": extras["PurchaseDate"],
+            "DepreciationRate": extras["DepreciationRate"],
+            "AppreciationRate": extras["AppreciationRate"],
             "ChartGroupID": chart_group_id,
             "OrderNo": order_no,
             "IsActive": is_active,
         }
+
+    def _sync_fixed_asset(self, row) -> None:
+        from app.services.depreciation_service import DepreciationService
+
+        DepreciationService().sync_item_row(row)
 
     def create_record(self, payload: dict) -> dict:
         data = self._parse(payload)
@@ -223,6 +319,7 @@ class ItemMasterService:
 
         def _write() -> dict:
             row = self.repo.create({**data, "CreatedAt": datetime.utcnow()})
+            self._sync_fixed_asset(row)
             return self._serialize(row)
 
         try:
@@ -241,6 +338,7 @@ class ItemMasterService:
 
         def _write() -> dict:
             updated = self.repo.update(row, {**data, "UpdatedAt": datetime.utcnow()})
+            self._sync_fixed_asset(updated)
             return self._serialize(updated)
 
         try:
@@ -272,6 +370,9 @@ class ItemMasterService:
         )
 
         def _write() -> str:
+            from app.services.depreciation_service import DepreciationService
+
+            DepreciationService().deactivate_item_asset(item_id)
             self.repo.delete(row)
             return "Item deleted successfully."
 

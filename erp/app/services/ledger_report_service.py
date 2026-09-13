@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 import xml.etree.ElementTree as ET
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from xml.dom import minidom
+
+_log = logging.getLogger(__name__)
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -22,6 +25,11 @@ from sqlalchemy import text
 
 from app.extensions import db
 from app.services.ledger_export_service import LedgerExportService
+from app.services.payment_accounting_service import (
+    sql_customer_receipt_expr,
+    sql_unpaid_followup_exclusion,
+)
+from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 
 
 def _iso(value) -> str:
@@ -99,6 +107,88 @@ class LedgerReportService:
             "date_to_iso": _iso(date_to),
         }
 
+    @staticmethod
+    def _meta_label(item: Any) -> str:
+        if isinstance(item, dict):
+            return str(item.get("label") or "")
+        if isinstance(item, (list, tuple)) and item:
+            return str(item[0] or "")
+        return ""
+
+    def _period_txn_totals(self, lines: list[dict[str, Any]]) -> tuple[Decimal, Decimal]:
+        debit = Decimal("0.00")
+        credit = Decimal("0.00")
+        for line in lines or []:
+            if (line.get("kind") or "txn") != "txn":
+                continue
+            debit += self._money(line.get("debit"))
+            credit += self._money(line.get("credit"))
+        return self._money(debit), self._money(credit)
+
+    @staticmethod
+    def _as_of_display(date_to: Any) -> str:
+        if date_to is None or date_to == "":
+            return ""
+        if hasattr(date_to, "strftime"):
+            return date_to.strftime("%d/%m/%Y")
+        raw = str(date_to).strip()
+        if len(raw) >= 10 and raw[4] == "-":
+            try:
+                return datetime.strptime(raw[:10], "%Y-%m-%d").date().strftime("%d/%m/%Y")
+            except ValueError:
+                return raw
+        return raw
+
+    @staticmethod
+    def _is_closing_meta_label(label: str) -> bool:
+        text = (label or "").strip()
+        return text in {"Ledger Balance", "Closing Balance"} or text.startswith(
+            "Closing Balance as of"
+        )
+
+    def _meta_with_period_totals(
+        self,
+        meta: list,
+        lines: list[dict[str, Any]],
+        *,
+        closing: Any = None,
+        date_to: Any = None,
+    ) -> list:
+        """Refresh period totals and closing-as-of-To-Date without dropping Closing Balance."""
+        total_debit, total_credit = self._period_txn_totals(lines)
+        totals = {
+            "Total Credit": f"{total_credit:,.2f}",
+            "Total Debit": f"{total_debit:,.2f}",
+        }
+        as_of = self._as_of_display(date_to)
+        closing_label = f"Closing Balance as of {as_of}" if as_of else "Closing Balance"
+        closing_value = None if closing is None else f"{self._money(closing):,.2f}"
+        out: list = []
+        closing_written = False
+        for item in meta or []:
+            label = self._meta_label(item)
+            if self._is_closing_meta_label(label):
+                if closing_value is not None and not closing_written:
+                    out.append((closing_label, closing_value))
+                    closing_written = True
+                continue
+            if label in totals:
+                out.append((label, totals[label]))
+                continue
+            out.append(item)
+        if closing_value is not None and not closing_written:
+            inserted = False
+            with_closing: list = []
+            for item in out:
+                if not inserted and self._meta_label(item) == "Period":
+                    with_closing.append((closing_label, closing_value))
+                    inserted = True
+                with_closing.append(item)
+            if not inserted:
+                with_closing.append((closing_label, closing_value))
+            return with_closing
+        return out
+
     def _dash(self):
         from app.services.dashboard_service import DashboardService
 
@@ -116,31 +206,45 @@ class LedgerReportService:
         kind: str | None = None,
         search: str | None = None,
         limit: int = 100,
+        date_from: date | None = None,
+        date_to: date | None = None,
     ) -> list[dict[str, Any]]:
         kind_key = (kind or "all").strip().lower()
         needle = (search or "").strip()
-        lim = max(1, min(int(limit or 100), 300))
+        listing_all = not needle
+        if listing_all:
+            lim = 10000
+            per_kind = lim if kind_key != "all" else 5000
+        else:
+            lim = max(1, min(int(limit or 100), 300))
+            per_kind = lim if kind_key != "all" else min(lim, 50)
         rows: list[dict[str, Any]] = []
 
         if kind_key in ("all", "bank"):
-            rows.extend(self._search_banks(needle, lim if kind_key == "bank" else min(lim, 50)))
+            rows.extend(self._search_banks(needle, per_kind))
         if kind_key in ("all", "customer"):
-            if kind_key == "customer" or len(needle) >= 2:
-                rows.extend(
-                    self._search_customers(needle, lim if kind_key == "customer" else min(lim, 50))
-                )
+            rows.extend(self._search_customers(needle, per_kind))
         if kind_key in ("all", "work"):
-            rows.extend(self._search_works(needle, lim if kind_key == "work" else min(lim, 50)))
+            rows.extend(self._search_works(needle, per_kind))
         if kind_key in ("all", "item"):
-            rows.extend(self._search_items(needle, lim if kind_key == "item" else min(lim, 50)))
+            rows.extend(self._search_items(needle, per_kind))
 
-        return rows[:lim]
+        if not listing_all:
+            rows = rows[:lim]
+        # Grid closing is always as of the current system date. Preview / summaries
+        # still use the page From–To dates; those args are ignored here.
+        _ = (date_from, date_to)
+        as_of = date.today()
+        self._attach_search_closings(rows, as_of)
+        return rows
 
     def _search_banks(self, search: str, limit: int) -> list[dict[str, Any]]:
         export = LedgerExportService()
         banks = export.list_bank_accounts(search=search or None)
         result = []
         for row in banks[:limit]:
+            if not bool(row.get("active", True)):
+                continue
             result.append(
                 {
                     "kind": "bank",
@@ -149,18 +253,18 @@ class LedgerReportService:
                     "subtitle": row.get("account_holder") or row.get("account_type") or "Bank Account",
                     "meta": row.get("masked_account") or "",
                     "txn_count": int(row.get("txn_count") or 0),
-                    "active": bool(row.get("active", True)),
+                    "active": True,
                 }
             )
         return result
 
     def _search_customers(self, search: str, limit: int) -> list[dict[str, Any]]:
-        if len((search or "").strip()) < 2:
-            return []
         export = LedgerExportService()
-        customers = export.list_customers(search=search, limit=limit)
+        customers = export.list_customers(search=search or None, limit=limit)
         result = []
         for row in customers:
+            if (row.get("status") or "Active").strip().lower() != "active":
+                continue
             bits = [b for b in (row.get("mobile_number"), row.get("pan_number")) if b]
             result.append(
                 {
@@ -170,7 +274,7 @@ class LedgerReportService:
                     "subtitle": " · ".join(bits) if bits else "Customer",
                     "meta": row.get("status") or "",
                     "txn_count": int(row.get("txn_count") or 0),
-                    "active": (row.get("status") or "Active").strip().lower() == "active",
+                    "active": True,
                 }
             )
         return result
@@ -206,7 +310,7 @@ class LedgerReportService:
                           )
                     ) AS txn_count
                 FROM dbo.WorkMaster w
-                WHERE 1 = 1
+                WHERE ISNULL(w.ActiveStatus, 1) = 1
                   {search_sql}
                 ORDER BY
                     CASE WHEN ISNULL(w.ActiveStatus, 1) = 1 THEN 0 ELSE 1 END,
@@ -257,7 +361,7 @@ class LedgerReportService:
                         WHERE l.ItemID = i.ItemID
                     ) AS txn_count
                 FROM dbo.ItemMaster i
-                WHERE 1 = 1
+                WHERE ISNULL(i.IsActive, 1) = 1
                   {search_sql}
                 ORDER BY
                     CASE WHEN ISNULL(i.IsActive, 1) = 1 THEN 0 ELSE 1 END,
@@ -282,6 +386,1154 @@ class LedgerReportService:
             for row in rows
         ]
 
+    @staticmethod
+    def _sql_id_list(ids: list[Any]) -> str:
+        clean: list[int] = []
+        seen: set[int] = set()
+        for raw in ids:
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or n in seen:
+                continue
+            seen.add(n)
+            clean.append(n)
+        return ", ".join(str(n) for n in clean)
+
+    @staticmethod
+    def _customer_preview_aligned_date_sql(date_expr: str, has_ob: bool) -> str:
+        """Match preview: period (>= From Date) plus prior rows after opening date.
+
+        Preview prior uses ``date > OpeningBalanceDate``; the period still includes
+        From–To, so same-day opening-date bills in the selected range are counted.
+        """
+        if not has_ob:
+            return ""
+        return (
+            f"AND ({date_expr} >= :date_from "
+            f"OR c.OpeningBalanceDate IS NULL "
+            f"OR {date_expr} > c.OpeningBalanceDate)"
+        )
+
+    @staticmethod
+    def _customer_as_of_date_sql(date_expr: str, has_ob: bool) -> str:
+        """Movements on/after opening date for as-of-today grid closing."""
+        if not has_ob:
+            return ""
+        return f"AND (c.OpeningBalanceDate IS NULL OR {date_expr} >= c.OpeningBalanceDate)"
+
+    @staticmethod
+    def _dr_cr_side(amount: Decimal, *, credit_normal: bool = False) -> str:
+        if abs(amount) < Decimal("0.01"):
+            return ""
+        if credit_normal:
+            return "Cr" if amount > 0 else "Dr"
+        return "Dr" if amount > 0 else "Cr"
+
+    def _attach_search_openings(self, rows: list[dict[str, Any]]) -> None:
+        """Master opening only — skip period movements until From/To dates are set."""
+        for row in rows:
+            row.setdefault("closing", None)
+            row["opening_only"] = True
+        by_kind: dict[str, list[int]] = {"bank": [], "customer": [], "work": [], "item": []}
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            if kind not in by_kind:
+                continue
+            try:
+                by_kind[kind].append(int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+        closings: dict[tuple[str, int], dict[str, Any]] = {}
+        if by_kind["bank"]:
+            closings.update(self._search_bank_openings(by_kind["bank"]))
+        if by_kind["customer"]:
+            closings.update(self._search_customer_openings(by_kind["customer"]))
+        if by_kind["item"]:
+            closings.update(self._search_item_openings(by_kind["item"]))
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            try:
+                key = (kind, int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+            if kind == "work":
+                row["closing"] = 0.0
+                row["closing_dr_cr"] = ""
+                continue
+            info = closings.get(key)
+            if not info:
+                row["closing"] = 0.0
+                row["closing_dr_cr"] = ""
+                continue
+            amount = self._money(info.get("amount"))
+            row["closing"] = float(amount)
+            row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
+
+    def _search_bank_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        group_select = """
+                    CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                    CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+        """
+        group_join = ""
+        try:
+            has_group = bool(
+                db.session.execute(
+                    text(
+                        """
+                        SELECT CASE
+                            WHEN COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'ChartGroupID') IS NULL THEN 0
+                            WHEN OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NULL THEN 0
+                            ELSE 1
+                        END
+                        """
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_group = False
+        if has_group:
+            group_select = """
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+            """
+            group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        a.JtcsBankAccountID AS account_id,
+                        ISNULL(a.OpeningBalance, 0) AS opening_balance,
+                        {group_select}
+                    FROM dbo.JtcsBankAccountMaster a
+                    {group_join}
+                    WHERE a.JtcsBankAccountID IN ({id_sql})
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
+            opening = self._money(row["opening_balance"])
+            result[("bank", int(row["account_id"]))] = {
+                "amount": opening,
+                "dr_cr": self._dr_cr_side(opening, credit_normal=credit_normal),
+            }
+        return result
+
+    def _search_customer_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            has_ob = bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.CustomerMaster', N'OpeningBalance') "
+                        "IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_ob = False
+        if not has_ob:
+            return {("customer", int(cid)): {"amount": Decimal("0.00"), "dr_cr": ""} for cid in ids if cid}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        try:
+            for row in db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        c.CustomerID,
+                        ISNULL(c.OpeningBalance, 0) AS OpeningBalance,
+                        c.OpeningBalanceDrCr
+                    FROM dbo.CustomerMaster c
+                    WHERE c.CustomerID IN ({id_sql})
+                    """
+                )
+            ).mappings().all():
+                cid = int(row["CustomerID"])
+                ob_amount = self._money(row["OpeningBalance"])
+                ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
+                signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+                result[("customer", cid)] = {
+                    "amount": signed,
+                    "dr_cr": self._dr_cr_side(signed),
+                }
+        except Exception:
+            db.session.rollback()
+            return {}
+        return result
+
+    def _search_item_openings(
+        self, ids: list[int]
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT ItemID, ISNULL(OpeningBalance, 0) AS OpeningBalance
+                    FROM dbo.ItemMaster
+                    WHERE ItemID IN ({id_sql})
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            opening = self._money(row["OpeningBalance"])
+            result[("item", int(row["ItemID"]))] = {
+                "amount": opening,
+                "dr_cr": self._dr_cr_side(opening),
+            }
+        return result
+
+    def _attach_search_closings(self, rows: list[dict[str, Any]], as_of: date) -> None:
+        """Add closing as of the current system date for the search grid."""
+        for row in rows:
+            row.setdefault("closing", None)
+        by_kind: dict[str, list[int]] = {"bank": [], "customer": [], "work": [], "item": []}
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            if kind not in by_kind:
+                continue
+            try:
+                by_kind[kind].append(int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+
+        closings: dict[tuple[str, int], dict[str, Any]] = {}
+        if by_kind["bank"]:
+            closings.update(self._search_bank_closings(by_kind["bank"], as_of))
+        if by_kind["customer"]:
+            closings.update(self._search_customer_closings(by_kind["customer"], as_of))
+        if by_kind["work"]:
+            closings.update(self._search_work_closings(by_kind["work"], as_of))
+        if by_kind["item"]:
+            closings.update(self._search_item_closings(by_kind["item"], as_of))
+
+        for row in rows:
+            kind = (row.get("kind") or "").strip().lower()
+            try:
+                key = (kind, int(row.get("id")))
+            except (TypeError, ValueError):
+                continue
+            info = closings.get(key)
+            if not info:
+                continue
+            amount = self._money(info.get("amount"))
+            row["closing"] = float(amount)
+            row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
+
+    def _search_bank_closings(
+        self, ids: list[int], as_of: date
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        group_select = """
+                    CAST(NULL AS NVARCHAR(20)) AS UnderType,
+                    CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
+        """
+        group_join = ""
+        try:
+            has_group = bool(
+                db.session.execute(
+                    text(
+                        """
+                        SELECT CASE
+                            WHEN COL_LENGTH(N'dbo.JtcsBankAccountMaster', N'ChartGroupID') IS NULL THEN 0
+                            WHEN OBJECT_ID(N'dbo.ChartOfGroupMaster', N'U') IS NULL THEN 0
+                            ELSE 1
+                        END
+                        """
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_group = False
+        if has_group:
+            group_select = """
+                    g.UnderType,
+                    ISNULL(
+                        NULLIF(g.GroupNature, N''),
+                        CASE
+                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
+                            WHEN g.UnderType = N'Assets' THEN N'Asset'
+                            ELSE N'Asset'
+                        END
+                    ) AS GroupNature
+            """
+            group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
+        date_to_next = as_of + timedelta(days=1)
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        a.JtcsBankAccountID AS account_id,
+                        CASE
+                            WHEN a.OpeningBalanceDate IS NULL OR a.OpeningBalanceDate <= :as_of
+                            THEN ISNULL(a.OpeningBalance, 0)
+                            ELSE 0
+                        END AS opening_balance,
+                        ISNULL((
+                            SELECT SUM(ISNULL(t.Debit, 0))
+                            FROM dbo.JtcsBankTransaction t
+                            WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
+                              AND t.TransactionDate >= ISNULL(a.OpeningBalanceDate, '20000101')
+                              AND t.TransactionDate < :date_to_next
+                        ), 0) AS debit_sum,
+                        ISNULL((
+                            SELECT SUM(ISNULL(t.Credit, 0))
+                            FROM dbo.JtcsBankTransaction t
+                            WHERE t.JtcsBankAccountID = a.JtcsBankAccountID
+                              AND t.TransactionDate >= ISNULL(a.OpeningBalanceDate, '20000101')
+                              AND t.TransactionDate < :date_to_next
+                        ), 0) AS credit_sum,
+                        {group_select}
+                    FROM dbo.JtcsBankAccountMaster a
+                    {group_join}
+                    WHERE a.JtcsBankAccountID IN ({id_sql})
+                    """
+                ),
+                {"as_of": as_of, "date_to_next": date_to_next},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            credit_normal = is_credit_normal_nature(row.get("GroupNature"), row.get("UnderType"))
+            closing = apply_account_running(
+                self._money(row["opening_balance"]),
+                self._money(row["debit_sum"]),
+                self._money(row["credit_sum"]),
+                credit_normal=credit_normal,
+            )
+            result[("bank", int(row["account_id"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing, credit_normal=credit_normal),
+            }
+        return result
+
+    def _search_customer_closings(
+        self, ids: list[int], as_of: date
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        unique_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for raw in ids:
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if n <= 0 or n in seen_ids:
+                continue
+            seen_ids.add(n)
+            unique_ids.append(n)
+        chunk_size = 300
+        if len(unique_ids) > chunk_size:
+            merged: dict[tuple[str, int], dict[str, Any]] = {}
+            for start in range(0, len(unique_ids), chunk_size):
+                merged.update(
+                    self._search_customer_closings(
+                        unique_ids[start : start + chunk_size], as_of
+                    )
+                )
+            return merged
+        ids = unique_ids
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            has_ob = bool(
+                db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.CustomerMaster', N'OpeningBalance') "
+                        "IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_ob = False
+
+        openings: dict[int, Decimal] = {}
+        asset_meta: dict[int, dict[str, Any]] = {}
+        if has_ob:
+            try:
+                from app.repositories.customer_repository import CustomerRepository
+
+                CustomerRepository().ensure_schema()
+            except Exception:
+                db.session.rollback()
+            try:
+                for row in db.session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            c.CustomerID,
+                            ISNULL(c.OpeningBalance, 0) AS OpeningBalance,
+                            c.OpeningBalanceDate,
+                            c.OpeningBalanceDrCr,
+                            c.PurchaseDate,
+                            c.DepreciationRate,
+                            c.AppreciationRate
+                        FROM dbo.CustomerMaster c
+                        WHERE c.CustomerID IN ({id_sql})
+                        """
+                    )
+                ).mappings().all():
+                    cid = int(row["CustomerID"])
+                    ob_date = row["OpeningBalanceDate"]
+                    if hasattr(ob_date, "date"):
+                        ob_date = ob_date.date()
+                    ob_amount = self._money(row["OpeningBalance"])
+                    ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
+                    signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+                    if ob_amount != 0 and (ob_date is None or ob_date <= as_of):
+                        openings[cid] = signed
+                    else:
+                        openings[cid] = Decimal("0.00")
+                    asset_meta[cid] = {
+                        "opening_date": ob_date,
+                        "purchase_date": row.get("PurchaseDate"),
+                        "depreciation_rate": self._money(row.get("DepreciationRate")),
+                        "appreciation_rate": self._money(row.get("AppreciationRate")),
+                    }
+            except Exception:
+                db.session.rollback()
+                _log.exception("Ledger search customer openings failed")
+
+        ob_date_sql = self._customer_as_of_date_sql("d.TransactionDate", has_ob)
+        billed: dict[int, Decimal] = {}
+        received: dict[int, Decimal] = {}
+        date_params = {"date_to": as_of}
+        try:
+            # Receipt expression contains scalar subqueries — wrap first, then SUM
+            # (SQL Server cannot SUM() an aggregate/subquery expression directly).
+            for row in db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        x.CustomerID,
+                        ISNULL(SUM(x.billed), 0) AS billed,
+                        ISNULL(SUM(x.received), 0) AS received
+                    FROM (
+                        SELECT
+                            d.CustomerID,
+                            ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) AS billed,
+                            {sql_customer_receipt_expr("d", "b")} AS received
+                        FROM dbo.JTCSDailyTransaction d
+                        LEFT JOIN dbo.JtcsBankTransaction b
+                            ON b.JtcsBankTransactionID = d.BankTransactionID
+                        INNER JOIN dbo.CustomerMaster c ON c.CustomerID = d.CustomerID
+                        WHERE d.CustomerID IN ({id_sql})
+                          AND d.Status = N'Posted'
+                          AND d.TransactionDate <= :date_to
+                          {ob_date_sql}
+                    ) x
+                    GROUP BY x.CustomerID
+                    """
+                ),
+                date_params,
+            ).mappings().all():
+                cid = int(row["CustomerID"])
+                billed[cid] = self._money(row["billed"])
+                received[cid] = self._money(row["received"])
+        except Exception:
+            db.session.rollback()
+            _log.exception("Ledger search customer billed/received failed")
+
+        followup: dict[int, Decimal] = {}
+        fu_date_sql = self._customer_as_of_date_sql(
+            "ISNULL(f.BillDate, f.WorkDate)", has_ob
+        )
+        try:
+            if db.session.execute(text("SELECT OBJECT_ID(N'dbo.FollowupEntryMaster', N'U')")).scalar():
+                for row in db.session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            f.CustomerID,
+                            ISNULL(SUM(ISNULL(f.BillAmount, 0)), 0) AS billed
+                        FROM dbo.FollowupEntryMaster f
+                        INNER JOIN dbo.CustomerMaster c ON c.CustomerID = f.CustomerID
+                        WHERE f.CustomerID IN ({id_sql})
+                          AND ISNULL(f.IsActive, 1) = 1
+                          AND f.BillNo IS NOT NULL
+                          AND LTRIM(RTRIM(f.BillNo)) <> N''
+                          AND ISNULL(f.BillAmount, 0) > 0
+                          AND ISNULL(f.BillDate, f.WorkDate) <= :date_to
+                          {fu_date_sql}
+                          {sql_unpaid_followup_exclusion()}
+                        GROUP BY f.CustomerID
+                        """
+                    ),
+                    date_params,
+                ).mappings().all():
+                    followup[int(row["CustomerID"])] = self._money(row["billed"])
+        except Exception:
+            db.session.rollback()
+            _log.exception("Ledger search customer followup billed failed")
+
+        obc_billed: dict[int, Decimal] = {}
+        obc_received: dict[int, Decimal] = {}
+        try:
+            has_obc = bool(
+                db.session.execute(
+                    text("SELECT OBJECT_ID(N'dbo.OthersBankCashTransaction', N'U')")
+                ).scalar()
+            )
+            has_keys = bool(
+                has_obc
+                and db.session.execute(
+                    text(
+                        "SELECT CASE WHEN COL_LENGTH(N'dbo.OthersBankCashTransaction', "
+                        "N'CreditLedgerKey') IS NULL THEN 0 ELSE 1 END"
+                    )
+                ).scalar()
+            )
+        except Exception:
+            db.session.rollback()
+            has_obc = False
+            has_keys = False
+        if has_keys:
+            obc_date_sql = self._customer_as_of_date_sql("e.WorkDate", has_ob)
+            try:
+                for row in db.session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            a.CustomerID,
+                            ISNULL(SUM(CASE
+                                WHEN e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                                THEN e.Amount ELSE 0 END), 0) AS billed,
+                            ISNULL(SUM(CASE
+                                WHEN e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                                THEN e.Amount ELSE 0 END), 0) AS received
+                        FROM dbo.ChartOfAccountMaster a
+                        INNER JOIN dbo.CustomerMaster c ON c.CustomerID = a.CustomerID
+                        INNER JOIN dbo.OthersBankCashTransaction e
+                            ON ISNULL(e.IsActive, 1) = 1
+                           AND (
+                                e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                             OR e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                           )
+                        WHERE a.CustomerID IN ({id_sql})
+                          AND ISNULL(a.IsActive, 1) = 1
+                          AND a.CustomerID IS NOT NULL
+                          AND e.WorkDate <= :date_to
+                          {obc_date_sql}
+                        GROUP BY a.CustomerID
+                        """
+                    ),
+                    date_params,
+                ).mappings().all():
+                    cid = int(row["CustomerID"])
+                    obc_billed[cid] = self._money(row["billed"])
+                    obc_received[cid] = self._money(row["received"])
+            except Exception:
+                db.session.rollback()
+                _log.exception("Ledger search customer other-bank/cash failed")
+
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for raw_id in ids:
+            try:
+                cid = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            closing = self._money(
+                openings.get(cid, Decimal("0.00"))
+                + billed.get(cid, Decimal("0.00"))
+                + followup.get(cid, Decimal("0.00"))
+                + obc_billed.get(cid, Decimal("0.00"))
+                - received.get(cid, Decimal("0.00"))
+                - obc_received.get(cid, Decimal("0.00"))
+            )
+            result[("customer", cid)] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
+        self._adjust_customer_asset_class_closings(result, asset_meta, as_of)
+        return result
+
+    def _customer_asset_class_calc(
+        self,
+        group_ids: list[int],
+        meta: dict[str, Any],
+        book: Decimal,
+        date_to: date,
+        fa_ids: set[int],
+        inv_ids: set[int],
+        dep_svc,
+    ) -> dict[str, Any] | None:
+        if book <= Decimal("0.00") or not group_ids:
+            return None
+        gids = []
+        for raw in group_ids:
+            try:
+                gids.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        is_fa = any(gid in fa_ids for gid in gids)
+        is_inv = (not is_fa) and any(gid in inv_ids for gid in gids)
+        if not is_fa and not is_inv:
+            return None
+        rate = self._money(
+            meta.get("depreciation_rate") if is_fa else meta.get("appreciation_rate")
+        )
+        if rate <= Decimal("0.00"):
+            return None
+        purchase = meta.get("purchase_date")
+        opening = meta.get("opening_date")
+        if purchase is None and opening is None:
+            return None
+        if is_fa:
+            calc = dep_svc.calculate(
+                cost=book,
+                rate=rate,
+                purchase_date=purchase,
+                opening_date=opening,
+                as_of=date_to,
+            )
+            cy = self._money(calc["current_year"])
+            if cy <= Decimal("0.00"):
+                return None
+            return {
+                "kind": "depreciation",
+                "rate": rate,
+                "current_year": cy,
+                "closing": self._money(book - cy),
+            }
+        calc = dep_svc.calculate_appreciation(
+            cost=book,
+            rate=rate,
+            purchase_date=purchase,
+            opening_date=opening,
+            as_of=date_to,
+        )
+        cy = self._money(calc["current_year"])
+        if cy <= Decimal("0.00"):
+            return None
+        return {
+            "kind": "appreciation",
+            "rate": rate,
+            "current_year": cy,
+            "closing": self._money(book + cy),
+        }
+
+    def _adjust_customer_asset_class_closings(
+        self,
+        result: dict[tuple[str, int], dict[str, Any]],
+        asset_meta: dict[int, dict[str, Any]],
+        date_to: date,
+    ) -> None:
+        if not result:
+            return
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+        except Exception:
+            db.session.rollback()
+            return
+        if not fa_ids and not inv_ids:
+            return
+        ids = [cid for (_kind, cid) in result.keys()]
+        mapping: dict[int, dict] = {}
+        try:
+            from app.services.chart_account_service import ChartAccountService
+
+            mapping = ChartAccountService().repo.map_customer_chart_groups(ids)
+        except Exception:
+            db.session.rollback()
+            mapping = {}
+        for key, row in result.items():
+            cid = key[1]
+            adj = self._customer_asset_class_calc(
+                (mapping.get(cid) or {}).get("chart_group_ids") or [],
+                asset_meta.get(cid) or {},
+                self._money(row.get("amount")),
+                date_to,
+                fa_ids,
+                inv_ids,
+                dep_svc,
+            )
+            if not adj:
+                continue
+            row["amount"] = adj["closing"]
+            row["dr_cr"] = self._dr_cr_side(adj["closing"])
+
+    def _append_customer_asset_class_line(
+        self, data: dict[str, Any], customer_id: int, date_to: date | None
+    ) -> dict[str, Any]:
+        as_of = date_to or date.today()
+        try:
+            from app.repositories.customer_repository import CustomerRepository
+
+            CustomerRepository().ensure_schema()
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+            from app.services.chart_account_service import ChartAccountService
+
+            linked = ChartAccountService().get_customer_record(int(customer_id))
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate,
+                        PurchaseDate,
+                        DepreciationRate,
+                        AppreciationRate
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID = :id
+                    """
+                ),
+                {"id": int(customer_id)},
+            ).mappings().first()
+        except Exception:
+            db.session.rollback()
+            return data
+        if not row:
+            return data
+        book = self._money(data.get("closing"))
+        adj = self._customer_asset_class_calc(
+            list(linked.get("group_ids") or []),
+            {
+                "opening_date": row.get("OpeningBalanceDate"),
+                "purchase_date": row.get("PurchaseDate"),
+                "depreciation_rate": self._money(row.get("DepreciationRate")),
+                "appreciation_rate": self._money(row.get("AppreciationRate")),
+            },
+            book,
+            as_of,
+            fa_ids,
+            inv_ids,
+            dep_svc,
+        )
+        if not adj:
+            return data
+        running = adj["closing"]
+        desc = (
+            f"Depreciation @ {adj['rate']}% WDV"
+            if adj["kind"] == "depreciation"
+            else f"Appreciation @ {adj['rate']}%"
+        )
+        debit = Decimal("0.00") if adj["kind"] == "depreciation" else adj["current_year"]
+        credit = adj["current_year"] if adj["kind"] == "depreciation" else Decimal("0.00")
+        data.setdefault("lines", []).append(
+            self._decorate_line(
+                {
+                    "date": as_of.strftime("%d/%m/%Y"),
+                    "description": desc,
+                    "debit": debit,
+                    "credit": credit,
+                    "balance": running,
+                    "kind": "txn",
+                }
+            )
+        )
+        data["closing"] = running
+        data["meta"] = self._meta_with_period_totals(
+            data.get("meta") or [],
+            data.get("lines") or [],
+            closing=running,
+            date_to=data.get("date_to"),
+        )
+        return data
+
+    def _search_work_closings(
+        self, ids: list[int], as_of: date
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        w.WorkID,
+                        w.LedgerKind,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate < :date_from
+                            THEN ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)
+                            ELSE 0
+                        END), 0) AS prior_income,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate < :date_from
+                            THEN ISNULL(d.ExpenseAmount, 0)
+                            ELSE 0
+                        END), 0) AS prior_expense,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate < :date_from
+                            THEN ISNULL(pay.paid_amt, 0)
+                            ELSE 0
+                        END), 0) AS prior_paid,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate >= :date_from
+                            THEN ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)
+                            ELSE 0
+                        END), 0) AS period_income,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate >= :date_from
+                            THEN ISNULL(d.ExpenseAmount, 0)
+                            ELSE 0
+                        END), 0) AS period_expense,
+                        ISNULL(SUM(CASE
+                            WHEN d.TransactionDate >= :date_from
+                            THEN ISNULL(pay.paid_amt, 0)
+                            ELSE 0
+                        END), 0) AS period_paid
+                    FROM dbo.WorkMaster w
+                    LEFT JOIN dbo.JTCSDailyTransaction d
+                        ON d.Status = N'Posted'
+                       AND d.TransactionDate <= :date_to
+                       AND (
+                            d.WorkType = w.WorkName
+                         OR d.SubWorkType = w.WorkName
+                         OR d.SubWorkType LIKE N'%' + w.WorkName + N'%'
+                       )
+                    LEFT JOIN (
+                        SELECT TransactionID, SUM(Amount) AS paid_amt
+                        FROM dbo.JTCSDailyTransactionPayment
+                        GROUP BY TransactionID
+                    ) pay ON pay.TransactionID = d.TransactionID
+                    WHERE w.WorkID IN ({id_sql})
+                    GROUP BY w.WorkID, w.LedgerKind
+                    """
+                ),
+                {"date_from": date(2000, 1, 1), "date_to": as_of},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in rows:
+            ledger_kind = (row["LedgerKind"] or "").strip().upper()
+            if ledger_kind.startswith("E"):
+                prior = self._money(row["prior_expense"]) - self._money(row["prior_paid"])
+                closing = self._money(
+                    prior + self._money(row["period_expense"]) - self._money(row["period_paid"])
+                )
+            else:
+                prior = self._money(row["prior_income"]) - self._money(row["prior_paid"])
+                closing = self._money(
+                    prior + self._money(row["period_paid"]) - self._money(row["period_income"])
+                )
+            result[("work", int(row["WorkID"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
+        return result
+
+    def _search_item_closings(
+        self, ids: list[int], as_of: date
+    ) -> dict[tuple[str, int], dict[str, Any]]:
+        id_sql = self._sql_id_list(ids)
+        if not id_sql:
+            return {}
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        i.ItemID,
+                        ISNULL(i.OpeningBalance, 0) AS OpeningBalance,
+                        i.OpeningBalanceDate,
+                        i.PurchaseDate,
+                        i.DepreciationRate,
+                        i.AppreciationRate,
+                        i.ChartGroupID,
+                        ISNULL((
+                            SELECT SUM(ISNULL(l.TaxableValue, 0))
+                            FROM dbo.GstInvoiceLine l
+                            INNER JOIN dbo.GstInvoice inv ON inv.InvoiceID = l.InvoiceID
+                            WHERE l.ItemID = i.ItemID
+                              AND inv.InvoiceDate <= :date_to
+                        ), 0) AS billed
+                    FROM dbo.ItemMaster i
+                    WHERE i.ItemID IN ({id_sql})
+                    """
+                ),
+                {"date_to": as_of},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        result: dict[tuple[str, int], dict[str, Any]] = {}
+        fa_ids: set[int] = set()
+        inv_ids: set[int] = set()
+        dep_svc = None
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            fa_ids = dep_svc.fixed_asset_group_ids()
+            inv_ids = dep_svc.investment_group_ids()
+        except Exception:
+            db.session.rollback()
+            dep_svc = None
+        for row in rows:
+            ob_date = row["OpeningBalanceDate"]
+            if hasattr(ob_date, "date"):
+                ob_date = ob_date.date()
+            opening = Decimal("0.00")
+            if ob_date is None or ob_date <= as_of:
+                opening = self._money(row["OpeningBalance"])
+            closing = self._money(opening - self._money(row["billed"]))
+            gid = row.get("ChartGroupID")
+            if dep_svc and gid and closing > 0:
+                try:
+                    gid_int = int(gid)
+                except (TypeError, ValueError):
+                    gid_int = 0
+                if gid_int in fa_ids:
+                    rate = self._money(row.get("DepreciationRate"))
+                    if rate > 0:
+                        calc = dep_svc.calculate(
+                            cost=closing,
+                            rate=rate,
+                            purchase_date=row.get("PurchaseDate"),
+                            opening_date=ob_date,
+                            as_of=as_of,
+                        )
+                        closing = self._money(calc["wdv"])
+                elif gid_int in inv_ids:
+                    rate = self._money(row.get("AppreciationRate"))
+                    if rate > 0:
+                        calc = dep_svc.calculate_appreciation(
+                            cost=closing,
+                            rate=rate,
+                            purchase_date=row.get("PurchaseDate"),
+                            opening_date=ob_date,
+                            as_of=as_of,
+                        )
+                        closing = self._money(calc["current_value"])
+            result[("item", int(row["ItemID"]))] = {
+                "amount": closing,
+                "dr_cr": self._dr_cr_side(closing),
+            }
+        return result
+
+    def _opening_preview_payload(
+        self,
+        *,
+        kind: str,
+        title: str,
+        entity_name: str,
+        entity_id: int,
+        meta: list[tuple[str, str]],
+        opening: Decimal,
+        opening_date: date | None,
+    ) -> dict[str, Any]:
+        running = self._money(opening)
+        ob = opening_date
+        if ob is not None and hasattr(ob, "date") and not isinstance(ob, date):
+            ob = ob.date()
+        date_str = ob.strftime("%d/%m/%Y") if ob else ""
+        line = self._decorate_line(
+            {
+                "date": date_str,
+                "description": "Opening Balance",
+                "debit": Decimal("0.00"),
+                "credit": Decimal("0.00"),
+                "balance": running,
+                "kind": "opening",
+            }
+        )
+        period = self._period_fields(None, None)
+        return {
+            "kind": kind,
+            "title": title,
+            "entity_name": entity_name,
+            "entity_id": entity_id,
+            "meta": meta
+            + [
+                ("Opening Balance", f"{running:,.2f}"),
+                ("Period", "Opening balance only — enter From and To dates to load transactions"),
+            ],
+            "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
+            "lines": [line],
+            "closing": running,
+            "opening_only": True,
+            **period,
+        }
+
+    def _preview_opening_only(self, kind_key: str, entity_id: int) -> dict[str, Any]:
+        """Fast preview: master opening line, no period movements."""
+        if kind_key == "bank":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        JtcsBankAccountID,
+                        ISNULL(AccountHolderName, N'') AS AccountHolderName,
+                        ISNULL(AccountType, N'') AS AccountType,
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate
+                    FROM dbo.JtcsBankAccountMaster
+                    WHERE JtcsBankAccountID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Bank account not found.")
+            name = (row["AccountHolderName"] or row["AccountType"] or f"Bank {entity_id}").strip()
+            return self._opening_preview_payload(
+                kind="bank",
+                title="Bank Account Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Bank Account", name),
+                    ("Account Type", (row["AccountType"] or "").strip() or "—"),
+                ],
+                opening=self._money(row["OpeningBalance"]),
+                opening_date=row["OpeningBalanceDate"],
+            )
+        if kind_key == "customer":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        CustomerID, CustomerName, MobileNumber, PANNumber,
+                        ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                        OpeningBalanceDate,
+                        ISNULL(OpeningBalanceDrCr, N'Dr') AS OpeningBalanceDrCr
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Customer not found.")
+            name = (row["CustomerName"] or f"Customer {entity_id}").strip()
+            ob_amount = self._money(row["OpeningBalance"])
+            ob_type = (row["OpeningBalanceDrCr"] or "Dr").strip()
+            signed = ob_amount if ob_type.upper().startswith("D") else -ob_amount
+            return self._opening_preview_payload(
+                kind="customer",
+                title="Customer Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Customer", name),
+                    ("Customer ID", str(entity_id)),
+                    ("Mobile", (row["MobileNumber"] or "").strip() or "—"),
+                    ("PAN", (row["PANNumber"] or "").strip() or "—"),
+                ],
+                opening=signed,
+                opening_date=row["OpeningBalanceDate"],
+            )
+        if kind_key == "work":
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT WorkID, WorkName, LedgerKind
+                    FROM dbo.WorkMaster
+                    WHERE WorkID = :id
+                    """
+                ),
+                {"id": entity_id},
+            ).mappings().first()
+            if row is None:
+                raise ValueError("Work / Category not found.")
+            name = (row["WorkName"] or f"Work {entity_id}").strip()
+            return self._opening_preview_payload(
+                kind="work",
+                title="Work / Category Ledger",
+                entity_name=name,
+                entity_id=entity_id,
+                meta=[
+                    ("Work / Category", name),
+                    ("Ledger Kind", (row["LedgerKind"] or "").strip() or "—"),
+                ],
+                opening=Decimal("0.00"),
+                opening_date=None,
+            )
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
+        row = db.session.execute(
+            text(
+                """
+                SELECT ItemID, ItemCode, ItemName,
+                       ISNULL(OpeningBalance, 0) AS OpeningBalance,
+                       OpeningBalanceDate
+                FROM dbo.ItemMaster
+                WHERE ItemID = :id
+                """
+            ),
+            {"id": entity_id},
+        ).mappings().first()
+        if row is None:
+            raise ValueError("Item not found.")
+        name = (row["ItemName"] or f"Item {entity_id}").strip()
+        return self._opening_preview_payload(
+            kind="item",
+            title="Item Ledger",
+            entity_name=name,
+            entity_id=entity_id,
+            meta=[
+                ("Item", name),
+                ("Item Code", (row["ItemCode"] or "").strip() or "—"),
+            ],
+            opening=self._money(row["OpeningBalance"]),
+            opening_date=row["OpeningBalanceDate"],
+        )
+
     def preview_ledger(
         self,
         kind: str,
@@ -293,6 +1545,8 @@ class LedgerReportService:
         kind_key = (kind or "").strip().lower()
         if kind_key not in self.KINDS:
             raise ValueError("Invalid ledger type.")
+        if date_from is None or date_to is None:
+            return self._preview_opening_only(kind_key, entity_id)
         if kind_key == "bank":
             return self._simplify_export_ledger(
                 LedgerExportService().bank_ledger_preview_data(
@@ -301,12 +1555,13 @@ class LedgerReportService:
                 title="Bank Account Ledger",
             )
         if kind_key == "customer":
-            return self._simplify_export_ledger(
+            data = self._simplify_export_ledger(
                 LedgerExportService().customer_ledger_preview_data(
                     entity_id, date_from=date_from, date_to=date_to
                 ),
                 title="Customer Ledger",
             )
+            return self._append_customer_asset_class_line(data, entity_id, date_to)
         if kind_key == "work":
             return self._work_ledger_data(entity_id, date_from=date_from, date_to=date_to)
         return self._item_ledger_data(entity_id, date_from=date_from, date_to=date_to)
@@ -424,7 +1679,12 @@ class LedgerReportService:
             "title": title,
             "entity_name": data.get("entity_name") or "",
             "entity_id": data.get("entity_id"),
-            "meta": data.get("meta") or [],
+            "meta": self._meta_with_period_totals(
+                data.get("meta") or [],
+                lines,
+                closing=data.get("closing"),
+                date_to=data.get("date_to"),
+            ),
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,
             "closing": data.get("closing") or Decimal("0.00"),
@@ -606,6 +1866,12 @@ class LedgerReportService:
         date_from: date | None,
         date_to: date | None,
     ) -> dict[str, Any]:
+        try:
+            from app.repositories.item_master_repository import ItemMasterRepository
+
+            ItemMasterRepository().ensure_schema()
+        except Exception:
+            db.session.rollback()
         item = db.session.execute(
             text(
                 """
@@ -613,6 +1879,10 @@ class LedgerReportService:
                     ItemID, ItemCode, ItemName, HsnSac, Unit,
                     ISNULL(OpeningBalance, 0) AS OpeningBalance,
                     OpeningBalanceDate,
+                    PurchaseDate,
+                    DepreciationRate,
+                    AppreciationRate,
+                    ChartGroupID,
                     ISNULL(IsActive, 1) AS IsActive
                 FROM dbo.ItemMaster
                 WHERE ItemID = :item_id
@@ -726,6 +1996,63 @@ class LedgerReportService:
                     },
                 )
             )
+
+        try:
+            from app.services.depreciation_service import DepreciationService
+
+            dep_svc = DepreciationService()
+            if dep_svc.is_fixed_asset_group(item.get("ChartGroupID")):
+                rate = self._money(item.get("DepreciationRate"))
+                if rate > 0 and running > 0:
+                    calc = dep_svc.calculate(
+                        cost=running,
+                        rate=rate,
+                        purchase_date=item.get("PurchaseDate"),
+                        opening_date=ob_date,
+                        as_of=date_to,
+                    )
+                    cy = self._money(calc["current_year"])
+                    if cy > 0:
+                        running = self._money(running - cy)
+                        lines.append(
+                            self._decorate_line(
+                                {
+                                    "date": date_to.strftime("%d/%m/%Y"),
+                                    "description": f"Depreciation @ {rate}% WDV",
+                                    "debit": Decimal("0.00"),
+                                    "credit": cy,
+                                    "balance": running,
+                                    "kind": "txn",
+                                }
+                            )
+                        )
+            elif dep_svc.is_investment_group(item.get("ChartGroupID")):
+                rate = self._money(item.get("AppreciationRate"))
+                if rate > 0 and running > 0:
+                    calc = dep_svc.calculate_appreciation(
+                        cost=running,
+                        rate=rate,
+                        purchase_date=item.get("PurchaseDate"),
+                        opening_date=ob_date,
+                        as_of=date_to,
+                    )
+                    cy = self._money(calc["current_year"])
+                    if cy > 0:
+                        running = self._money(running + cy)
+                        lines.append(
+                            self._decorate_line(
+                                {
+                                    "date": date_to.strftime("%d/%m/%Y"),
+                                    "description": f"Appreciation @ {rate}%",
+                                    "debit": cy,
+                                    "credit": Decimal("0.00"),
+                                    "balance": running,
+                                    "kind": "txn",
+                                }
+                            )
+                        )
+        except Exception:
+            db.session.rollback()
 
         period = self._period_fields(date_from, date_to)
         return {

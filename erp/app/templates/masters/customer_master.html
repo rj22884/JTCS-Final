@@ -34,6 +34,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/customer_master.css') }}?v=20260818usage1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dynamic_master_fields.css') }}?v=20260906dyn13">
 {% endblock %}
 
 {% block content %}
@@ -81,6 +82,7 @@
             <th>ID</th>
             <th>Customer Name</th>
             <th>Group</th>
+            <th>Chart of Account Group</th>
             <th>Mobile</th>
             <th>PAN</th>
             <th>Email</th>
@@ -127,7 +129,11 @@
                 <select class="form-select cm-chart-group-select" id="cm_chart_groups" aria-required="true">
                   <option value="">— Select Group —</option>
                   {% for g in chart_of_groups %}
-                  <option value="{{ g.group_id }}">{{ g.label or g.group_name }}</option>
+                  <option value="{{ g.group_id }}"
+                          data-group-name="{{ g.group_name or '' }}"
+                          data-dyn-profile="{{ g.dyn_profile or '' }}"
+                          data-fixed-asset="{{ 1 if g.is_fixed_asset else 0 }}"
+                          data-investment="{{ 1 if g.is_investment else 0 }}">{{ g.label or g.group_name }}</option>
                   {% endfor %}
                 </select>
               </div>
@@ -148,10 +154,12 @@
               (select first).
               Customer groups:
               <a href="{{ url_for('masters_group.index') }}">Customer Group Master</a>
-              (filtered by Chart of Account Group).
+              (all active groups).
             </div>
             <div id="cmGroupComboWarn" class="alert alert-warning py-2 small d-none mt-2 mb-0" role="alert"></div>
           </div>
+
+          <div class="jtcs-dyn-master-fields mb-2 d-none" id="cmDynFields"></div>
 
           <div class="cm-ie-work-bar mb-3 d-none" id="cmIeWorkBar">
             <label class="form-label mb-1" for="cm_ie_works">
@@ -433,7 +441,6 @@
   window.CM_API = {{ cm_api|tojson }};
   window.CM_CSRF = {{ csrf_token()|tojson }};
   window.CM_INITIAL_ROWS = {{ initial_rows|tojson }};
-  window.CM_GROUP_TABS = {{ group_tabs|tojson }};
   window.CM_TAB_LABELS = {{ tab_labels|tojson }};
   window.CM_MANDATORY = {{ ui_config.mandatory_fields|tojson }};
   window.CM_OTHER_MANDATORY = {{ ui_config.other_type_mandatory_fields|tojson }};
@@ -442,7 +449,6 @@
   window.CM_CHART_GROUPS = {{ chart_of_groups|tojson }};
   window.CM_DEFAULT_CHART_GROUP_ID = {{ default_chart_group_id|tojson }};
   window.CM_CUSTOMER_GROUPS = {{ customer_groups|tojson }};
-  window.CM_GROUP_CHART_FILTER = {{ customer_group_filter|tojson }};
   window.CM_IE_WORKS = {{ income_expense_works|tojson }};
   window.CM_PORTALS = {
     incomeTaxLogin: "https://eportal.incometax.gov.in/iec/foservices/#/login",
@@ -451,5 +457,6 @@
 </script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% include 'ledger_report/_embed.html' %}
-<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260831ob1"></script>
+{% include 'masters/_dynamic_master_fields_js.html' %}
+<script src="{{ url_for('static', filename='js/customer_master.js') }}?v=20260910grp2"></script>
 {% endblock %}

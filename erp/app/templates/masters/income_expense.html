@@ -24,6 +24,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/work_master.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dynamic_master_fields.css') }}?v=20260906dyn1">
 {% endblock %}
 
 {% block content %}
@@ -126,11 +127,12 @@
             <select class="form-select" id="workMasterUnderGroup" name="ChartGroupID" required>
               <option value="">— Select group —</option>
               {% for g in chart_groups|default([]) %}
-              <option value="{{ g.group_id }}" data-under-type="{{ g.under_type or '' }}">{{ g.label or g.group_name }}</option>
+              <option value="{{ g.group_id }}" data-under-type="{{ g.under_type or '' }}" data-dyn-profile="{{ g.dyn_profile or '' }}">{{ g.label or g.group_name }}</option>
               {% endfor %}
             </select>
             <div class="form-text">From Chart of Group Master — used when adding / editing / deleting work heads.</div>
           </div>
+          <div class="jtcs-dyn-master-fields mb-3 d-none" id="workMasterDynFields"></div>
           <div class="row g-2 mb-3">
             <div class="col-md-4">
               <label class="form-label" for="workMasterOpeningBalance">Opening Balance</label>
@@ -203,5 +205,6 @@
   window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
 {% include 'ledger_report/_embed.html' %}
-<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260831ob1"></script>
+{% include 'masters/_dynamic_master_fields_js.html' %}
+<script src="{{ url_for('static', filename='js/work_master.js') }}?v=20260906dyn1"></script>
 {% endblock %}

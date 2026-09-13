@@ -463,9 +463,17 @@ echo %C_BOLD%[1] Run at local%C_RESET%
 
 if exist "%ROOT%\scripts\run_local_auto_backup_watch.bat" (
 
-    call "%ROOT%\scripts\run_local_auto_backup_watch.bat"
+    start "" /MIN "%ROOT%\scripts\run_local_auto_backup_watch.bat"
 
     call :info "Auto-backup: D:\JTCS Backup\Auto"
+
+)
+
+if exist "%ROOT%\scripts\run_other_login_bridge.bat" (
+
+    start "" /MIN "%ROOT%\scripts\run_other_login_bridge.bat"
+
+    call :info "Other Login data: E:\Web-Data"
 
 )
 
@@ -479,55 +487,46 @@ if errorlevel 1 (
 
 )
 
-where python >nul 2>&1
+set "LOCAL_PY=%ROOT%\erp\.venv\Scripts\python.exe"
 
-if errorlevel 1 (
-
-    call :fail "Python not found in PATH"
-    pause
-    cd /d "%ROOT%"
-    goto menu
-
-)
-
-if not exist ".venv\Scripts\python.exe" (
+if not exist "%LOCAL_PY%" (
 
     call :info "First run - creating venv and installing requirements..."
 
-    python -m venv .venv
+    py -3 -m venv .venv 2>nul
 
-    if errorlevel 1 (
+    if not exist "%LOCAL_PY%" python -m venv .venv
 
-        call :fail "venv create failed"
+    if not exist "%LOCAL_PY%" (
+
+        call :fail "venv create failed. Install Python 3 from python.org, then retry option 1."
         pause
         cd /d "%ROOT%"
         goto menu
 
     )
 
-    call ".venv\Scripts\activate.bat"
+    "%LOCAL_PY%" -m pip install --upgrade pip
 
-    python -m pip install --upgrade pip
-
-    if exist "requirements.txt" python -m pip install -r requirements.txt
+    if exist "requirements.txt" "%LOCAL_PY%" -m pip install -r requirements.txt
 
     if not exist ".env" if exist ".env.example" copy /Y ".env.example" ".env" >nul
 
     call :pass "Local install done"
 
+)
+
+if exist "%ROOT%\scripts\free_port_8000.ps1" (
+
+    powershell -NoProfile -File "%ROOT%\scripts\free_port_8000.ps1" >nul 2>&1
+
 ) else (
 
-    call ".venv\Scripts\activate.bat"
+    for /f "tokens=5" %%P in ('netstat -ano ^| findstr /C:":8000" ^| findstr /C:"LISTENING"') do taskkill /F /PID %%P >nul 2>&1
 
 )
 
-REM --------------------------------------------------------------------------
-REM Before starting local server, clear port 8000
-REM --------------------------------------------------------------------------
-
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000 " ^| findstr "LISTENING"') do (
-    taskkill /PID %%a /T /F >nul 2>&1
-)
+timeout /t 1 /nobreak >nul
 
 echo.
 echo URL: http://localhost:8000/login
@@ -536,7 +535,7 @@ echo.
 
 start "" cmd /c "timeout /t 1 /nobreak >nul & start http://localhost:8000/login"
 
-python run.py
+"%LOCAL_PY%" run.py
 
 cd /d "%ROOT%"
 

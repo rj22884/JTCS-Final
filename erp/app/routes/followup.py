@@ -38,6 +38,13 @@ def _followup_api_urls(blueprint_name: str, module_code: str, allow_customer_cre
     }
     if module_code == "DSC":
         urls["sync_status"] = url_for(f"{blueprint_name}.sync_idsign_status", entry_id=0)
+        urls["assist"] = url_for(f"{blueprint_name}.dsc_assist")
+        try:
+            from app.utils.url_helpers import external_url_for
+
+            urls["public_resume"] = external_url_for("pages.public_dsc_resume")
+        except Exception:
+            urls["public_resume"] = "/resume"
     if module_code == "ITR":
         urls["itr_sync_start"] = url_for(f"{blueprint_name}.itr_sync_start")
         urls["itr_sync_job"] = url_for(f"{blueprint_name}.itr_sync_job", job_id="__JOB__")
@@ -174,6 +181,25 @@ def _make_activity_blueprint(
                 return jsonify({"ok": False, "error": str(exc)}), 400
             except Exception as exc:
                 return jsonify({"ok": False, "error": f"Unable to sync ID Sign status: {exc}"}), 500
+
+        @bp.route("/assist", methods=["GET", "POST"], strict_slashes=False)
+        @login_required
+        def dsc_assist():
+            service = FollowupService(module_code)
+            if request.method == "GET":
+                return jsonify({"ok": True, "values": service.get_dsc_assist()})
+            payload = request.get_json(silent=True) or request.form.to_dict()
+            try:
+                values = service.save_dsc_assist(
+                    payload.get("key") or "",
+                    payload.get("value") or "",
+                    modified_by=session.get("user_name", "System"),
+                )
+                return jsonify({"ok": True, "values": values, "message": "Saved."})
+            except ValueError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc) or "Unable to save."}), 500
 
     if module_code == "ITR":
 

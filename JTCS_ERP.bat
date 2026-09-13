@@ -131,6 +131,15 @@ exit /b 0
 echo %C_CYAN%[INFO]%C_RESET% %~1
 exit /b 0
 
+:free_port_8000
+if exist "%ROOT%\scripts\free_port_8000.ps1" (
+    powershell -NoProfile -File "%ROOT%\scripts\free_port_8000.ps1" >nul 2>&1
+) else (
+    for /f "tokens=5" %%P in ('netstat -ano ^| findstr /C:":8000" ^| findstr /C:"LISTENING"') do taskkill /F /PID %%P >nul 2>&1
+)
+timeout /t 1 /nobreak >nul
+exit /b 0
+
 :run_public_health
 powershell -NoProfile -Command ^
   "try { $r = Invoke-WebRequest -Uri '%PUBLIC_HEALTH_URL%' -UseBasicParsing -TimeoutSec 25 -Headers @{ 'Cache-Control'='no-cache' }; if ($r.StatusCode -eq 200) { Write-Host '[PASS] Health HTTP 200'; exit 0 } else { Write-Host ('[FAIL] Health HTTP ' + $r.StatusCode); exit 1 } } catch { Write-Host ('[FAIL] Health: ' + $_.Exception.Message); exit 1 }"
@@ -243,8 +252,12 @@ REM ============================================================================
 echo.
 echo %C_BOLD%[1] Run at local%C_RESET%
 if exist "%ROOT%\scripts\run_local_auto_backup_watch.bat" (
-    call "%ROOT%\scripts\run_local_auto_backup_watch.bat"
+    start "" /MIN "%ROOT%\scripts\run_local_auto_backup_watch.bat"
     call :info "Auto-backup: D:\JTCS Backup\Auto"
+)
+if exist "%ROOT%\scripts\run_other_login_bridge.bat" (
+    start "" /MIN "%ROOT%\scripts\run_other_login_bridge.bat"
+    call :info "Other Login data: E:\Web-Data"
 )
 cd /d "%ROOT%\erp"
 if errorlevel 1 (
@@ -253,39 +266,30 @@ if errorlevel 1 (
     goto menu
 )
 
-where python >nul 2>&1
-if errorlevel 1 (
-    call :fail "Python not found in PATH"
-    pause
-    cd /d "%ROOT%"
-    goto menu
-)
-
-if not exist ".venv\Scripts\python.exe" (
+set "LOCAL_PY=%ROOT%\erp\.venv\Scripts\python.exe"
+if not exist "%LOCAL_PY%" (
     call :info "First run - creating venv and installing requirements..."
-    python -m venv .venv
-    if errorlevel 1 (
-        call :fail "venv create failed"
+    py -3 -m venv .venv 2>nul
+    if not exist "%LOCAL_PY%" python -m venv .venv
+    if not exist "%LOCAL_PY%" (
+        call :fail "venv create failed. Install Python 3 from python.org, then retry option 1."
         pause
         cd /d "%ROOT%"
         goto menu
     )
-    call ".venv\Scripts\activate.bat"
-    python -m pip install --upgrade pip
-    if exist "requirements.txt" python -m pip install -r requirements.txt
+    "%LOCAL_PY%" -m pip install --upgrade pip
+    if exist "requirements.txt" "%LOCAL_PY%" -m pip install -r requirements.txt
     if not exist ".env" if exist ".env.example" copy /Y ".env.example" ".env" >nul
     call :pass "Local install done"
-) else (
-    call ".venv\Scripts\activate.bat"
 )
 
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000 " ^| findstr "LISTENING"') do taskkill /PID %%a /F >nul 2>&1
+call :free_port_8000
 echo.
 echo URL: http://localhost:8000/login
 echo Press Ctrl+C to stop the server, then any key to return to menu.
 echo.
 start "" cmd /c "timeout /t 1 /nobreak >nul & start http://localhost:8000/login"
-python run.py
+"%LOCAL_PY%" run.py
 cd /d "%ROOT%"
 pause
 goto menu

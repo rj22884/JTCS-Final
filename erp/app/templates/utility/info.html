@@ -14,6 +14,14 @@
     <div><span class="utility-meta-label">Database</span> {{ info.db_server }}\{{ info.db_name }}</div>
     <div><span class="utility-meta-label">ERP dir</span> <code>{{ info.erp_dir }}</code></div>
     <div><span class="utility-meta-label">Repo</span> <code>{{ info.repo_root }}</code></div>
+    <div>
+      <span class="utility-meta-label">Git branch</span>
+      {% if info.git_branch %}
+      <code>{{ info.git_branch }}</code>
+      {% else %}
+      <span class="text-danger">{{ info.git_branch_error or 'Not detected' }}</span>
+      {% endif %}
+    </div>
     <div><span class="utility-meta-label">VPS host</span> {{ info.vps_host }}</div>
     <div><span class="utility-meta-label">VPS App path</span> {{ info.vps_path }}</div>
     <div><span class="utility-meta-label">VPS Web path</span> {{ info.vps_web_dir }}</div>

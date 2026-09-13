@@ -41,6 +41,9 @@ class BankMasterRepository:
             and self._column_exists("QrBillReceived")
             and self._column_exists("ChartGroupID")
             and self._column_exists("OpeningBalanceDrCr")
+            and self._column_exists("PurchaseDate")
+            and self._column_exists("DepreciationRate")
+            and self._column_exists("AppreciationRate")
         ):
             return
         try:
@@ -184,9 +187,42 @@ class BankMasterRepository:
                 )
                 self.session.commit()
 
+            if not self._column_exists("PurchaseDate"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD PurchaseDate DATE NULL
+                        """
+                    )
+                )
+                self.session.commit()
+            if not self._column_exists("DepreciationRate"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD DepreciationRate DECIMAL(9, 4) NOT NULL
+                            CONSTRAINT DF_Bank_DepreciationRate DEFAULT (0)
+                        """
+                    )
+                )
+                self.session.commit()
+            if not self._column_exists("AppreciationRate"):
+                self.session.execute(
+                    text(
+                        """
+                        ALTER TABLE dbo.JtcsBankAccountMaster
+                        ADD AppreciationRate DECIMAL(9, 4) NOT NULL
+                            CONSTRAINT DF_Bank_AppreciationRate DEFAULT (0)
+                        """
+                    )
+                )
+                self.session.commit()
+
             self._schema_ready = self._column_exists("QrBillReceived") and self._column_exists(
                 "ChartGroupID"
-            )
+            ) and self._column_exists("AppreciationRate")
             if not self._schema_ready:
                 raise RuntimeError(
                     "Bank Master schema update failed: required columns are missing."

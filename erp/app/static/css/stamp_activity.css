@@ -272,7 +272,7 @@
 .stamp-period-card.is-shcil { border-left: 4px solid #2d6a4f; }
 .stamp-records-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
   align-items: stretch;
   gap: 0.75rem;
   min-width: 0;
@@ -345,6 +345,7 @@
   font-weight: 700;
   padding: 0.35rem 0.45rem;
   white-space: nowrap;
+  text-transform: none;
 }
 #stampDutyGroupTable td,
 #stampDutyGroupTable tfoot th {
@@ -391,6 +392,7 @@
   width: 1%;
 }
 #stampDataGrid .stamp-col-grow,
+#stampDataGrid .stamp-col-mode,
 #stampDataGrid .stamp-col-cert,
 #stampDataGrid .stamp-col-num,
 #stampDataGrid .stamp-col-date,
@@ -433,6 +435,13 @@
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr,
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr td {
   color: #5a9e5a !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-online,
+.stamp-data-grid-wrap tbody tr.stamp-row-online td {
+  color: #1d4ed8 !important;
+}
+.stamp-data-grid-wrap tbody tr.stamp-row-online.table-active {
+  background: #eef2ff !important;
 }
 .stamp-data-grid-wrap tbody tr.stamp-row-ocr.table-active {
   background: #edf7ed !important;

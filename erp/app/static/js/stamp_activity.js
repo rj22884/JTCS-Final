@@ -26,6 +26,10 @@
     ocrImageId: document.getElementById("OcrImageID"),
     modeManual: document.getElementById("modeManual"),
     modeOcr: document.getElementById("modeOcr"),
+    modeOnline: document.getElementById("modeOnline"),
+    onlineHint: document.getElementById("stampOnlineHint"),
+    loadOnlineBtn: document.getElementById("stampLoadOnlineBtn"),
+    websiteRefHidden: document.getElementById("WebsiteReference"),
     imageColumn: document.getElementById("stampImageColumn"),
     photoBox: document.getElementById("stampPhotoBox"),
     placeholder: document.getElementById("stampPhotoPlaceholder"),
@@ -93,6 +97,8 @@
     dutyGroupHint: document.getElementById("stampDutyGroupHint"),
     dutyGroupTotalNos: document.getElementById("stampDutyGroupTotalNos"),
     dutyGroupTotalAmt: document.getElementById("stampDutyGroupTotalAmt"),
+    dutyGroupTotalSale: document.getElementById("stampDutyGroupTotalSale"),
+    dutyGroupTotalPct: document.getElementById("stampDutyGroupTotalPct"),
   };
 
   let mainGridRows = [];
@@ -113,6 +119,7 @@
     shcil_stamp_deposit: { label: "Deposited in SHCILStamp", className: "is-shcil" },
   };
   const gridFilters = {
+    entry_mode: "",
     certificate_number: "",
     certificate_date: "",
     stamp_duty_amount: "",
@@ -184,6 +191,11 @@
     { id: "SaleAmount", label: "Sale Amount" },
   ];
 
+  const ONLINE_REQUIRED_FIELDS = MANUAL_REQUIRED_FIELDS.concat([
+    { id: "FirstPartyName", label: "First Party" },
+    { id: "ReferenceNo", label: "e-Stamp Reference" },
+  ]);
+
   if (els.zoomModalEl && window.bootstrap) zoomModal = new bootstrap.Modal(els.zoomModalEl);
   if (els.duplicateModalEl && window.bootstrap) duplicateModal = new bootstrap.Modal(els.duplicateModalEl);
   if (els.entryModalEl && window.bootstrap) entryModal = new bootstrap.Modal(els.entryModalEl);
@@ -236,15 +248,23 @@
     return !!(els.modeManual && els.modeManual.checked);
   }
 
+  function isOnlineEntry() {
+    return !!(els.modeOnline && els.modeOnline.checked);
+  }
+
   function syncEntryModeHidden() {
-    if (els.entryModeHidden) {
-      els.entryModeHidden.value = isManualEntry() ? "manual" : "ocr";
-    }
+    if (!els.entryModeHidden) return;
+    if (isOnlineEntry()) els.entryModeHidden.value = "online";
+    else if (isManualEntry()) els.entryModeHidden.value = "manual";
+    else els.entryModeHidden.value = "ocr";
   }
 
   function activeRequiredFields() {
     if (ocrImportedLock) {
       return REQUIRED_FIELDS;
+    }
+    if (isOnlineEntry()) {
+      return ONLINE_REQUIRED_FIELDS;
     }
     if (isManualEntry()) {
       return MANUAL_REQUIRED_FIELDS;
@@ -312,9 +332,34 @@
     els.transactionDate.classList.remove("stamp-field-readonly", "stamp-field-manual-disabled");
   }
 
+  function setReferenceLocked(locked) {
+    const ref = document.getElementById("ReferenceNo");
+    if (!ref) return;
+    ref.readOnly = !!locked;
+    ref.classList.toggle("stamp-field-readonly", !!locked);
+    if (locked) ref.tabIndex = -1;
+    else if (ref.classList.contains("stamp-field-optional")) ref.tabIndex = -1;
+    else ref.removeAttribute("tabindex");
+  }
+
+  function enablePaymentLines() {
+    if (els.paymentAddBtn) els.paymentAddBtn.disabled = false;
+    els.paymentLines?.querySelectorAll("input, select, button").forEach(function (el) {
+      el.disabled = false;
+    });
+  }
+
+  function currentWebsiteRef() {
+    return (
+      (els.websiteRefHidden && els.websiteRefHidden.value) ||
+      (document.getElementById("ReferenceNo") && document.getElementById("ReferenceNo").value) ||
+      ""
+    ).trim().toUpperCase();
+  }
+
   function getMandatoryFields() {
-    if (isManualEntry() && !ocrImportedLock) {
-      const base = MANUAL_REQUIRED_FIELDS.map(function (field) {
+    if ((isManualEntry() || isOnlineEntry()) && !ocrImportedLock) {
+      const base = activeRequiredFields().map(function (field) {
         return document.getElementById(field.id);
       }).filter(function (el) {
         return el && !el.disabled;
@@ -350,6 +395,14 @@
     return num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function formatSaleBuyPct(sale, buy) {
+    const saleNum = parseFloat(sale || "0");
+    const buyNum = parseFloat(buy || "0");
+    if (!buyNum || Number.isNaN(buyNum) || Number.isNaN(saleNum)) return "—";
+    const pct = ((saleNum - buyNum) / buyNum) * 100;
+    return pct.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
   function dutyGroupDateParams() {
     const params = new URLSearchParams();
     const from = (els.dutyGroupFrom?.value || "").trim();
@@ -371,7 +424,7 @@
     if (els.dutyGroupBody) {
       if (!rows.length) {
         els.dutyGroupBody.innerHTML =
-          '<tr><td colspan="3" class="text-muted text-center py-3">No duty records</td></tr>';
+          '<tr><td colspan="5" class="text-muted text-center py-3">No duty records</td></tr>';
       } else {
         els.dutyGroupBody.innerHTML = rows.map(function (row) {
           return (
@@ -379,13 +432,19 @@
             "<td>" + escapeHtml(formatDutyValue(row.value)) + "</td>" +
             '<td class="text-end">' + escapeHtml(String(row.nos || 0)) + "</td>" +
             '<td class="text-end">' + escapeHtml(formatMoney(row.amount)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(formatMoney(row.sale)) + "</td>" +
+            '<td class="text-end">' + escapeHtml(formatSaleBuyPct(row.sale, row.amount)) + "</td>" +
             "</tr>"
           );
         }).join("");
       }
     }
+    const totalAmount = (data && data.total_amount) || "0.00";
+    const totalSale = (data && data.total_sale) || "0.00";
     if (els.dutyGroupTotalNos) els.dutyGroupTotalNos.textContent = String((data && data.total_nos) || 0);
-    if (els.dutyGroupTotalAmt) els.dutyGroupTotalAmt.textContent = formatMoney((data && data.total_amount) || 0);
+    if (els.dutyGroupTotalAmt) els.dutyGroupTotalAmt.textContent = formatMoney(totalAmount);
+    if (els.dutyGroupTotalSale) els.dutyGroupTotalSale.textContent = formatMoney(totalSale);
+    if (els.dutyGroupTotalPct) els.dutyGroupTotalPct.textContent = formatSaleBuyPct(totalSale, totalAmount);
   }
 
   async function loadDutyGrouping() {
@@ -399,7 +458,7 @@
       renderDutyGrouping(data);
     } catch (err) {
       if (els.dutyGroupHint) els.dutyGroupHint.textContent = err.message || "Load failed";
-      renderDutyGrouping({ rows: [], total_nos: 0, total_amount: "0.00" });
+      renderDutyGrouping({ rows: [], total_nos: 0, total_amount: "0.00", total_sale: "0.00" });
     }
   }
 
@@ -491,6 +550,12 @@
     }
     if (key === "transaction_id") {
       return row.transaction_id != null ? String(row.transaction_id) : "";
+    }
+    if (key === "entry_mode") {
+      return [row.entry_mode, row.entry_source, row.website_reference]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
     }
     return String(row[key] == null ? "" : row[key]).toLowerCase();
   }
@@ -716,7 +781,7 @@
     if (!els.cardDetailHead || !els.cardDetailBody) return;
     els.cardDetailHead.innerHTML =
       "<tr>" +
-      "<th>Certificate</th><th>Cert Date</th><th class=\"text-end\">Duty ₹</th>" +
+      "<th>Mode</th><th>Certificate</th><th>Cert Date</th><th class=\"text-end\">Duty ₹</th>" +
       "<th class=\"text-end\">Sale ₹</th><th>Txn Date</th><th>Customer</th>" +
       "<th>Mobile</th><th>Payment</th><th class=\"text-end\">Daily #</th>" +
       "</tr>";
@@ -724,6 +789,7 @@
     rows.forEach(function (row) {
       const tr = document.createElement("tr");
       tr.innerHTML =
+        "<td>" + escapeHtml(row.entry_mode || "Manual") + "</td>" +
         "<td>" + escapeHtml(row.certificate_number || "") + "</td>" +
         "<td>" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
         "<td class=\"text-end\">" + escapeHtml(row.stamp_duty_amount || "") + "</td>" +
@@ -769,7 +835,7 @@
     if (els.cardDetailTotal) els.cardDetailTotal.textContent = "";
     if (els.cardDetailBody) {
       els.cardDetailBody.innerHTML =
-        "<tr><td colspan=\"10\" class=\"text-muted\">Loading...</td></tr>";
+        "<tr><td colspan=\"11\" class=\"text-muted\">Loading...</td></tr>";
     }
     els.cardDetailEmpty?.classList.add("d-none");
     cardDetailModal.show();
@@ -976,7 +1042,9 @@
     pageRows.forEach(function (row) {
       const tr = document.createElement("tr");
       tr.dataset.stampId = String(row.stamp_id);
-      if (row.is_ocr_entry) {
+      if (row.entry_source === "online") {
+        tr.classList.add("stamp-row-online");
+      } else if (row.is_ocr_entry || row.entry_source === "integration") {
         tr.classList.add("stamp-row-ocr");
       }
       const actionsHtml =
@@ -987,6 +1055,7 @@
         "<i class=\"bi bi-trash\"></i></button>" +
         "</td>";
       tr.innerHTML =
+        "<td class=\"stamp-col-mode\" title=\"" + escapeHtml(row.website_reference || row.entry_mode || "") + "\">" + escapeHtml(row.entry_mode || "Manual") + "</td>" +
         "<td class=\"stamp-col-cert\" title=\"" + escapeHtml(row.certificate_number || "") + "\">" + escapeHtml(row.certificate_number || "") + "</td>" +
         "<td class=\"stamp-col-date\">" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
         "<td class=\"text-end stamp-col-num\">" + escapeHtml(row.stamp_duty_amount || "") + "</td>" +
@@ -1390,7 +1459,13 @@
     setOcrFieldLock(false);
     setManualFieldLock(false);
     switchingMode = true;
-    if (els.modeManual) els.modeManual.checked = true;
+    if (record.entry_source === "online" || (record.WebsiteReference || "").trim()) {
+      if (els.modeOnline) els.modeOnline.checked = true;
+    } else if (record.entry_source === "integration" || record.is_ocr_entry) {
+      if (els.modeOcr) els.modeOcr.checked = true;
+    } else if (els.modeManual) {
+      els.modeManual.checked = true;
+    }
     syncEntryModeHidden();
     toggleEntryMode();
     switchingMode = false;
@@ -1398,12 +1473,20 @@
       els.partialOcrAlert.classList.add("d-none");
       els.partialOcrAlert.textContent = "";
     }
-    if (record.is_ocr_entry) {
-      // Saved image-import records must stay fully editable on edit.
+    if (isOnlineEntry()) {
+      if (els.websiteRefHidden) {
+        els.websiteRefHidden.value = (record.WebsiteReference || record.ReferenceNo || "").trim();
+      }
+      setReferenceLocked(true);
+      enablePaymentLines();
+    } else if (record.is_ocr_entry || record.entry_source === "integration") {
       setOcrFieldLock(false);
       setManualFieldLock(false);
+      enablePaymentLines();
+      setReferenceLocked(false);
     } else {
       setManualFieldLock(true);
+      setReferenceLocked(false);
     }
     applySessionMobile(record.MobileNumber || record.mobile_number || "");
     enterSaveMode();
@@ -1504,12 +1587,19 @@
     return String(item.bank_account_id || "");
   }
 
+  function paymentReceivedAccounts() {
+    return (window.STAMP_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select stamp-payment-bank";
     select.name = "PaymentBankAccountID[]";
     select.required = true;
-    const accounts = window.STAMP_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -1528,6 +1618,19 @@
     return select;
   }
 
+  function defaultStampAccountId() {
+    const accounts = paymentReceivedAccounts();
+    const marked = accounts.find(function (item) {
+      return item && item.is_default;
+    });
+    if (marked) return String(marked.bank_account_id || "");
+    const match = accounts.find(function (item) {
+      const number = String(item.account_number || item.display_account_number || "").replace(/\D/g, "");
+      return number === "58250200000396" || number.endsWith("0396");
+    });
+    return match ? String(match.bank_account_id || "") : "";
+  }
+
   function autoSelectPaymentBank(select, preferredValue) {
     if (
       preferredValue &&
@@ -1536,6 +1639,16 @@
       })
     ) {
       select.value = String(preferredValue);
+      return;
+    }
+    const defaultId = defaultStampAccountId();
+    if (
+      defaultId &&
+      Array.from(select.options).some(function (opt) {
+        return opt.value === defaultId;
+      })
+    ) {
+      select.value = defaultId;
       return;
     }
     const cashOption = Array.from(select.options).find(function (opt) {
@@ -1874,6 +1987,8 @@
     resetPaymentLines();
     setOcrFieldLock(false);
     setManualFieldLock(true);
+    setReferenceLocked(false);
+    if (els.websiteRefHidden) els.websiteRefHidden.value = "";
     clearSelectedStamp();
     enterSaveMode();
   }
@@ -1907,18 +2022,88 @@
     els.mainWorkspace?.classList.add("d-none");
   }
 
+  function hasWebsitePrefill() {
+    const pre = window.STAMP_WEBSITE_PREFILL || {};
+    return !!(pre.website_ref || pre.first_party || pre.mobile);
+  }
+
+  function applyOnlinePrefill(pre) {
+    pre = pre || {};
+    const map = {
+      FirstPartyName: pre.first_party,
+      SecondPartyName: pre.second_party,
+      StampDutyAmount: pre.amount,
+      SaleAmount: pre.sale_amount || pre.amount,
+      DescriptionOfDocument: pre.description,
+      PurchasedBy: pre.purchased_by || pre.first_party,
+      StampDutyPaidBy: pre.stamp_duty_paid_by || pre.first_party,
+      ConsiderationPrice: pre.consideration,
+      PropertyDescription: pre.property_description,
+      Remarks: pre.remarks,
+      ReferenceNo: pre.website_ref,
+    };
+    Object.keys(map).forEach(function (id) {
+      const input = document.getElementById(id);
+      if (input && map[id] != null && map[id] !== "") input.value = map[id];
+    });
+    if (els.websiteRefHidden) els.websiteRefHidden.value = pre.website_ref || "";
+    if (pre.mobile) applySessionMobile(pre.mobile);
+    switchingMode = true;
+    if (els.modeOnline) els.modeOnline.checked = true;
+    syncEntryModeHidden();
+    toggleEntryMode();
+    switchingMode = false;
+    setReferenceLocked(!!(pre.website_ref || "").trim());
+    enablePaymentLines();
+    if (els.partialOcrAlert && pre.website_ref) {
+      els.partialOcrAlert.classList.remove("d-none");
+      els.partialOcrAlert.textContent =
+        "Online e-Stamp " + pre.website_ref + " — enter certificate number and date manually. Other fields stay editable.";
+    }
+    defaultTransactionDateToday();
+  }
+
   function applyWebsitePrefill() {
     const pre = window.STAMP_WEBSITE_PREFILL || {};
-    const first = document.getElementById("FirstPartyName");
-    const second = document.getElementById("SecondPartyName");
-    const duty = document.getElementById("StampDutyAmount");
-    const sale = document.getElementById("SaleAmount");
-    const desc = document.getElementById("DescriptionOfDocument");
-    if (first && pre.first_party) first.value = pre.first_party;
-    if (second && pre.second_party) second.value = pre.second_party;
-    if (duty && pre.amount) duty.value = pre.amount;
-    if (sale && (pre.sale_amount || pre.amount)) sale.value = pre.sale_amount || pre.amount;
-    if (desc && pre.description) desc.value = pre.description;
+    if (!hasWebsitePrefill()) return false;
+    applyOnlinePrefill(pre);
+    return true;
+  }
+
+  function onlineOrderUrl(ref) {
+    const template = window.STAMP_ONLINE_ORDER_URL || "";
+    return template.replace("__REF__", encodeURIComponent(ref || ""));
+  }
+
+  async function loadOnlineOrder(ref) {
+    const reference = (ref || currentWebsiteRef() || "").trim().toUpperCase();
+    if (!reference) {
+      alert("Enter the e-Stamp order reference.");
+      document.getElementById("ReferenceNo")?.focus();
+      return;
+    }
+    if (!window.STAMP_ONLINE_ORDER_URL) return;
+    try {
+      const res = await fetch(onlineOrderUrl(reference), {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to load e-Stamp order.");
+      }
+      if (data.existing && data.existing.stamp_id && !editingStampId) {
+        showDuplicateModal(data.existing);
+        revealStampInGrid({
+          stampId: data.existing.stamp_id,
+          certificate: data.existing.certificate_number || "",
+        });
+        return;
+      }
+      applyOnlinePrefill(data.prefill || {});
+      els.certNumber?.focus();
+    } catch (err) {
+      alert(err.message || String(err));
+    }
   }
 
   function initMobileFromRepost() {
@@ -1954,9 +2139,13 @@
     }
     clearEntryFields();
     resetPaymentLines();
-    if (els.modeManual) els.modeManual.checked = true;
-    syncEntryModeHidden();
-    toggleEntryMode();
+    if (hasWebsitePrefill()) {
+      applyWebsitePrefill();
+    } else {
+      if (els.modeManual) els.modeManual.checked = true;
+      syncEntryModeHidden();
+      toggleEntryMode();
+    }
     refreshMobileCustomers(mobile);
     openEntryModal();
     enterSaveMode();
@@ -2167,19 +2356,27 @@
 
   function toggleEntryMode() {
     if (!mobileConfirmed) return;
-    const manual = !isOcrMode();
+    const ocr = isOcrMode();
+    const online = isOnlineEntry();
     syncEntryModeHidden();
-    els.imageColumn?.classList.toggle("d-none", manual);
-    els.formLayout?.classList.toggle("stamp-layout-manual", manual);
-    els.mainWorkspace?.classList.toggle("stamp-mode-manual", manual);
+    els.imageColumn?.classList.toggle("d-none", !ocr);
+    els.formLayout?.classList.toggle("stamp-layout-manual", !ocr);
+    els.mainWorkspace?.classList.toggle("stamp-mode-manual", !ocr);
+    els.onlineHint?.classList.toggle("d-none", !online);
     els.formFooter?.classList.remove("d-none");
-    els.ocrEngineAlert?.classList.toggle("d-none", manual || !!(window.STAMP_OCR_STATUS && window.STAMP_OCR_STATUS.ready));
-    if (manual) {
+    els.ocrEngineAlert?.classList.toggle("d-none", !ocr || !!(window.STAMP_OCR_STATUS && window.STAMP_OCR_STATUS.ready));
+    if (online) {
+      setManualFieldLock(false);
+      enablePaymentLines();
+      setReferenceLocked(!!currentWebsiteRef());
+    } else if (!ocr) {
       setManualFieldLock(true);
+      setReferenceLocked(false);
     } else {
       setManualFieldLock(false);
+      setReferenceLocked(false);
     }
-    if (isOcrMode()) {
+    if (ocr) {
       els.photoBox?.focus();
       setOcrStatus("waiting", "Waiting");
     } else if (!ocrImportedLock) {
@@ -2246,7 +2443,11 @@
     } else {
       ensureSaleAmountDefault();
     }
-    if (els.certNumber.value && !document.getElementById("ReferenceNo").value) {
+    if (
+      !isOnlineEntry() &&
+      els.certNumber.value &&
+      !document.getElementById("ReferenceNo").value
+    ) {
       document.getElementById("ReferenceNo").value = els.certNumber.value;
     }
     if (!options.preserveTransactionDate) {
@@ -2586,6 +2787,25 @@
     syncEntryModeHidden();
     toggleEntryMode();
   });
+  els.modeOnline?.addEventListener("change", function () {
+    if (!mobileConfirmed || switchingMode) return;
+    setOcrFieldLock(false);
+    clearEntryFields();
+    syncEntryModeHidden();
+    toggleEntryMode();
+    setReferenceLocked(false);
+    document.getElementById("ReferenceNo")?.focus();
+  });
+  els.loadOnlineBtn?.addEventListener("click", function (e) {
+    e.preventDefault();
+    loadOnlineOrder();
+  });
+  document.getElementById("ReferenceNo")?.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && isOnlineEntry() && !this.readOnly) {
+      e.preventDefault();
+      loadOnlineOrder(this.value);
+    }
+  });
   els.browseBtn?.addEventListener("click", function (e) { e.preventDefault(); els.fileInput.click(); });
   els.pasteBtn?.addEventListener("click", function (e) { e.preventDefault(); triggerPaste(); });
   els.retryBtn?.addEventListener("click", function (e) { e.preventDefault(); runOcr(); });
@@ -2752,6 +2972,10 @@
       return;
     }
     enableFormFieldsForSubmit();
+    syncEntryModeHidden();
+    if (els.websiteRefHidden && isOnlineEntry()) {
+      els.websiteRefHidden.value = currentWebsiteRef();
+    }
     syncTransactionDateForSubmit();
     syncPaymentLinesToForm();
     ensureStampIdForSubmit();
@@ -2759,6 +2983,10 @@
     if (validationError) {
       e.preventDefault();
       alert(validationError);
+      if (isOnlineEntry()) {
+        setReferenceLocked(true);
+        enablePaymentLines();
+      }
     }
   });
 
@@ -2872,7 +3100,7 @@
     });
   });
 
-  const COL_WIDTH_KEY = "stamp-grid-col-widths-v2";
+  const COL_WIDTH_KEY = "stamp-grid-col-widths-v3";
   let columnResizeMoved = false;
 
   function readStoredColWidths() {

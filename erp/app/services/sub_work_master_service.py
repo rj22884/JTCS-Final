@@ -127,8 +127,8 @@ class SubWorkMasterService:
         ]
 
     def _work_lookup(self) -> dict[str, WorkMaster]:
-        """Map WorkName → WorkMaster (prefer Misc. when duplicate names)."""
-        rows = self._work_repo.list_active()
+        """Map WorkName → WorkMaster (prefer active, then Misc. on duplicate names)."""
+        rows = self._work_repo.list_records()
         by_name: dict[str, WorkMaster] = {}
         priority = {"Misc.": 0, "Income": 1, "Expense": 2}
         for row in rows:
@@ -139,11 +139,29 @@ class SubWorkMasterService:
             if existing is None:
                 by_name[name] = row
                 continue
-            if priority.get(self._kind_of(row.LedgerKind) or "", 9) < priority.get(
-                self._kind_of(existing.LedgerKind) or "", 9
-            ):
+            if bool(row.ActiveStatus) and not bool(existing.ActiveStatus):
+                by_name[name] = row
+                continue
+            if bool(row.ActiveStatus) == bool(existing.ActiveStatus) and priority.get(
+                self._kind_of(row.LedgerKind) or "", 9
+            ) < priority.get(self._kind_of(existing.LedgerKind) or "", 9):
                 by_name[name] = row
         return by_name
+
+    def _work_only_dict(self, work: WorkMaster) -> dict:
+        chart_group_id, under_group = self._under_group_for_work(work)
+        return {
+            "work_type_id": None,
+            "work_id": work.WorkID,
+            "work_type_name": work.WorkName or "",
+            "work_name": work.WorkName or "",
+            "sub_work_type": "",
+            "ledger_kind": self._kind_of(work.LedgerKind) or (work.LedgerKind or ""),
+            "chart_group_id": chart_group_id,
+            "under_group": under_group,
+            "active_status": bool(work.ActiveStatus),
+            "is_work_only": True,
+        }
 
     def _under_group_for_work(self, work: WorkMaster | None) -> tuple[int | None, str | None]:
         if work is None:
@@ -242,6 +260,34 @@ class SubWorkMasterService:
                 if needle not in hay:
                     continue
             result.append(item)
+
+        covered = {
+            (
+                self._kind_of(item.get("ledger_kind")) or "",
+                (item.get("work_name") or "").strip().lower(),
+            )
+            for item in result
+        }
+        for work in self._work_repo.list_records():
+            work_kind = self._kind_of(work.LedgerKind)
+            if not work_kind:
+                continue
+            if kind and work_kind != kind:
+                continue
+            name = (work.WorkName or "").strip()
+            if not name:
+                continue
+            if (work_kind, name.lower()) in covered:
+                continue
+            item = self._work_only_dict(work)
+            if needle:
+                hay = " ".join(
+                    [item["ledger_kind"], item["work_name"], item["sub_work_type"]]
+                ).lower()
+                if needle not in hay:
+                    continue
+            result.append(item)
+            covered.add((work_kind, name.lower()))
 
         kind_order = {k: i for i, k in enumerate(self.LEDGER_KINDS)}
         result.sort(

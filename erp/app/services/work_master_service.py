@@ -31,7 +31,11 @@ class WorkMasterService:
         try:
             from app.services.chart_group_service import ChartGroupService
 
-            self._chart_groups_cache = ChartGroupService().list_active_for_dropdown()
+            from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+            self._chart_groups_cache = DynamicMasterFieldService().annotate_groups(
+                ChartGroupService().list_active_for_dropdown()
+            )
         except Exception:
             self._chart_groups_cache = []
         return self._chart_groups_cache
@@ -121,6 +125,9 @@ class WorkMasterService:
         ob_dr_cr = getattr(row, "OpeningBalanceDrCr", None) or (
             default_dr_cr_for_under_type(under_type) if under_type else "Dr"
         )
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        extras = DynamicMasterFieldService().extra_serialize(row)
         return {
             "work_id": row.WorkID,
             "work_name": row.WorkName,
@@ -134,7 +141,8 @@ class WorkMasterService:
             "opening_balance": str(ob) if ob is not None else "",
             "opening_balance_date": ob_date.isoformat() if ob_date else "",
             "opening_balance_dr_cr": ob_dr_cr or "Dr",
-            "active_status": bool(row.ActiveStatus),
+            "active_status": True if row.ActiveStatus is None else bool(row.ActiveStatus),
+            **extras,
         }
 
     def list_records(
@@ -232,6 +240,18 @@ class WorkMasterService:
 
         raise ValueError("Select Income, Expense, or Misc.")
 
+    def _extra_db_values(self, payload: dict, chart_group_id: int) -> dict:
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        dyn = DynamicMasterFieldService()
+        dyn.validate_required(payload, chart_group_id)
+        return dyn.extra_db_values(
+            payload,
+            chart_group_id,
+            opening_date=payload.get("opening_balance_date")
+            or payload.get("OpeningBalanceDate"),
+        )
+
     def create_record(self, payload: dict) -> dict:
         from app.repositories.others_repository import OthersIncomeExpenseRepository
 
@@ -246,6 +266,7 @@ class WorkMasterService:
         if not ob_fields.get("OpeningBalanceDrCr"):
             _, under_type = self._group_meta(chart_group_id)
             ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under_type)
+        extra_fields = self._extra_db_values(payload, chart_group_id)
 
         existing = self.repository.find_by_name_kind(work_name, ledger_kind)
         if existing and existing.ActiveStatus:
@@ -257,6 +278,7 @@ class WorkMasterService:
                 "LedgerKind": ledger_kind,
                 "ChartGroupID": chart_group_id,
                 **ob_fields,
+                **extra_fields,
                 "ActiveStatus": active_status,
             }
             if existing and not existing.ActiveStatus:
@@ -291,6 +313,7 @@ class WorkMasterService:
         if not ob_fields.get("OpeningBalanceDrCr"):
             _, under_type = self._group_meta(chart_group_id)
             ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under_type)
+        extra_fields = self._extra_db_values(payload, chart_group_id)
 
         conflict = self.repository.find_by_name_kind(work_name, ledger_kind)
         if conflict and conflict.WorkID != row.WorkID and conflict.ActiveStatus:
@@ -309,6 +332,7 @@ class WorkMasterService:
                     "ChartGroupID": chart_group_id,
                     "ActiveStatus": active_status,
                     **ob_fields,
+                    **extra_fields,
                 },
             )
             return self._row_dict(updated)

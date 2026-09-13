@@ -4,6 +4,8 @@ deployment/deploy.env
 deployment/config/deploy.env
 erp/.env
 erp/.env.local
+erp/instance/other_login_bridge.json
+erp/instance/other_login_jobs.json
 recruitment/.env
 recruitment/var/
 

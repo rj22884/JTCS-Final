@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.menu_master import MenuMaster
+from app.models.menu_user_allow import MenuUserAllow
 
 _MENU_STYLE_SCHEMA_READY = False
 
@@ -12,7 +13,7 @@ class MenuRepository:
         self.session = session or db.session
 
     def ensure_style_columns(self) -> None:
-        """Add FontColor / FontName / BackgroundColor if missing (VPS-safe, idempotent)."""
+        """Add style / user-allow columns if missing (VPS-safe, idempotent)."""
         global _MENU_STYLE_SCHEMA_READY
         if _MENU_STYLE_SCHEMA_READY:
             return
@@ -29,10 +30,54 @@ class MenuRepository:
             IF COL_LENGTH(N'dbo.MenuMaster', N'BackgroundColor') IS NULL
                 ALTER TABLE dbo.MenuMaster ADD BackgroundColor NVARCHAR(20) NULL;
             """,
+            """
+            IF COL_LENGTH(N'dbo.MenuMaster', N'AllowAllUsers') IS NULL
+                ALTER TABLE dbo.MenuMaster ADD AllowAllUsers BIT NOT NULL
+                    CONSTRAINT DF_MenuMaster_AllowAllUsers DEFAULT (0);
+            """,
+            """
+            IF OBJECT_ID(N'dbo.MenuUserAllow', N'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.MenuUserAllow (
+                    MenuID INT NOT NULL,
+                    UserID INT NOT NULL,
+                    CONSTRAINT PK_MenuUserAllow PRIMARY KEY (MenuID, UserID),
+                    CONSTRAINT FK_MenuUserAllow_Menu FOREIGN KEY (MenuID)
+                        REFERENCES dbo.MenuMaster (MenuID)
+                );
+                CREATE INDEX IX_MenuUserAllow_UserID ON dbo.MenuUserAllow (UserID);
+            END
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()
         _MENU_STYLE_SCHEMA_READY = True
+
+    def list_allowed_users_map(self) -> dict[int, set[int]]:
+        self.ensure_style_columns()
+        rows = self.session.execute(text("SELECT MenuID, UserID FROM dbo.MenuUserAllow")).all()
+        mapping: dict[int, set[int]] = {}
+        for menu_id, user_id in rows:
+            mapping.setdefault(int(menu_id), set()).add(int(user_id))
+        return mapping
+
+    def replace_allowed_users(self, menu_id: int, user_ids: list[int]) -> None:
+        self.ensure_style_columns()
+        self.session.execute(
+            text("DELETE FROM dbo.MenuUserAllow WHERE MenuID = :mid"),
+            {"mid": menu_id},
+        )
+        seen: set[int] = set()
+        for raw_id in user_ids:
+            try:
+                user_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if user_id <= 0 or user_id in seen:
+                continue
+            seen.add(user_id)
+            self.session.add(MenuUserAllow(MenuID=menu_id, UserID=user_id))
+        self.session.flush()
 
     def get_all(self, include_inactive: bool = False) -> list[MenuMaster]:
         self.ensure_style_columns()

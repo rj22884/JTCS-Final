@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 
-from flask import Blueprint, current_app, jsonify, render_template, request, session
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
 
 from app.utils.timezone import today_app
 
@@ -83,6 +83,10 @@ def _resolve_period(dashboard_service: DashboardService) -> tuple[date, date, st
 @bp.route("/dashboard")
 @login_required
 def index():
+    from app.utils.fps_access import is_fps_session
+
+    if is_fps_session():
+        return redirect(url_for("public_report.fps_detail"))
     menu_service = MenuService()
     dashboard_service = DashboardService()
     today = today_app()
@@ -92,8 +96,16 @@ def index():
     bank_closing_hover = dashboard_service.get_bank_closing_hover(as_of=date_to)
     bank_account_closings = bank_closing_hover["accounts"]
     bank_closing_manual = bank_closing_hover["manual"]
-    bank_asset_closings = [row for row in bank_account_closings if not row.credit_normal]
-    bank_liability_closings = [row for row in bank_account_closings if row.credit_normal]
+    bank_asset_closings = [
+        row
+        for row in bank_account_closings
+        if not row.credit_normal and row.closing_balance != 0
+    ]
+    bank_liability_closings = [
+        row
+        for row in bank_account_closings
+        if row.credit_normal and row.closing_balance != 0
+    ]
     bank_asset_closing_total = sum(
         (row.closing_balance for row in bank_asset_closings), Decimal("0")
     )
@@ -101,6 +113,20 @@ def index():
         (row.closing_balance for row in bank_liability_closings), Decimal("0")
     )
     today_activity = dashboard_service.get_today_activity_summary(today)
+    currency_notes = {
+        "total_amount": 0.0,
+        "total_notes": 0,
+        "entry_date": today.isoformat(),
+    }
+    try:
+        from app.services.currency_notes_service import CurrencyNotesService
+
+        currency_notes = CurrencyNotesService().get_for_date(today)
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+        current_app.logger.exception("Currency notes card failed")
     recent = dashboard_service.recent_daily_transactions()
     fy_from, fy_to = dashboard_service.fiscal_year_bounds(today)
     month_from, month_to = dashboard_service.month_bounds(today)
@@ -142,6 +168,7 @@ def index():
         bank_liability_closing_total=bank_liability_closing_total,
         bank_closing_manual=bank_closing_manual,
         today_activity=today_activity,
+        currency_notes=currency_notes,
         recent=recent,
         date_from=date_from,
         date_to=date_to,
@@ -272,3 +299,60 @@ def ecourt_source_delete(sale_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": f"Unable to delete e-Court sale: {exc}"}), 500
+
+
+def _notes_counts_from_payload(payload: dict) -> dict[int, int]:
+    from app.services.currency_notes_service import DENOMS
+
+    counts: dict[int, int] = {}
+    raw_lines = payload.get("lines") or payload.get("counts") or {}
+    if isinstance(raw_lines, dict):
+        for denom in DENOMS:
+            counts[denom] = raw_lines.get(str(denom), raw_lines.get(denom, 0))
+        return counts
+    if isinstance(raw_lines, list):
+        for item in raw_lines:
+            try:
+                denom = int(item.get("denomination") or item.get("note") or 0)
+            except (TypeError, ValueError):
+                continue
+            counts[denom] = item.get("notes") or item.get("count") or 0
+        return counts
+    for denom in DENOMS:
+        counts[denom] = payload.get(f"note_{denom}") or payload.get(str(denom)) or 0
+    return counts
+
+
+@bp.route("/dashboard/api/currency-notes", methods=["GET"])
+@login_required
+def currency_notes_get():
+    from app.services.currency_notes_service import CurrencyNotesService
+
+    day = _parse_date(request.args.get("date") or request.args.get("entry_date"))
+    try:
+        data = CurrencyNotesService().get_for_date(day)
+        return jsonify({"ok": True, **data})
+    except Exception:
+        current_app.logger.exception("Currency notes load failed")
+        return jsonify({"ok": False, "error": "Unable to load currency notes."}), 500
+
+
+@bp.route("/dashboard/api/currency-notes", methods=["POST"])
+@login_required
+def currency_notes_save():
+    from app.services.currency_notes_service import CurrencyNotesService
+
+    payload = request.get_json(silent=True) or request.form or {}
+    day = _parse_date(payload.get("entry_date") or payload.get("date"))
+    try:
+        data = CurrencyNotesService().save(
+            entry_date=day,
+            counts=_notes_counts_from_payload(payload),
+            user_name=session.get("user_name") or session.get("role") or "System",
+        )
+        return jsonify({"ok": True, **data})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception:
+        current_app.logger.exception("Currency notes save failed")
+        return jsonify({"ok": False, "error": "Unable to save currency notes."}), 500

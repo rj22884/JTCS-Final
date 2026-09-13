@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from app.decorators import login_required, require_delete_reauth
 from app.services.ledger_report_service import LedgerReportService
 from app.services.menu_service import MenuService
+from app.services.dynamic_master_fields import DynamicMasterFieldService
 from app.services.work_master_service import WorkMasterService
 from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
@@ -110,12 +111,17 @@ def index():
     service = WorkMasterService()
     rows = service.list_records(status="active")
     today = date.today()
+    try:
+        dyn_master_fields = DynamicMasterFieldService().client_config()
+    except Exception:
+        dyn_master_fields = {"fields": {}, "profiles": {}, "group_profiles": {}, "always_required": []}
     return render_template(
         "masters/income_expense.html",
         page_title=MENU_NAME,
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
         chart_groups=service.list_chart_groups_for_form(),
+        dyn_master_fields=dyn_master_fields,
         fy_start=LedgerReportService._fy_start(today).isoformat(),
         today=today.isoformat(),
     )

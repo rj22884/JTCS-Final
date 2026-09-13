@@ -120,6 +120,9 @@ class JtcsBankAccountMaster(db.Model):
     DisplayOrder: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     UpiId: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
     ChartGroupID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    PurchaseDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    DepreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
+    AppreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
 
 
 class PaymentModeMaster(db.Model):

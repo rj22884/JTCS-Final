@@ -1,0 +1,29 @@
+<aside class="help-nav" aria-label="Help topics">
+  <form class="help-search" action="{{ url_for('help.index') }}" method="get" role="search">
+    <label class="visually-hidden" for="helpSearch">Search help</label>
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <input type="search" id="helpSearch" name="q" value="{{ query or '' }}"
+           placeholder="Search menus, screens, formulas…" autocomplete="off">
+  </form>
+  <nav class="help-toc">
+    {% for key, title, icon, topics in groups %}
+    {% if topics %}
+    <div class="help-toc-group">
+      <div class="help-toc-title"><i class="bi {{ icon }}"></i> {{ title }}</div>
+      <ul>
+        {% for item in topics %}
+        <li>
+          <a href="{{ url_for('help.topic', slug=item.slug) }}"
+             class="help-toc-link{% if item.slug == active_slug %} is-active{% endif %}"
+             data-help-topic
+             data-help-text="{{ item.title }} {{ item.menu_path }} {{ item.keywords }}">
+            {{ item.title }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </nav>
+</aside>

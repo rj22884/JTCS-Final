@@ -181,9 +181,47 @@ def index():
 def search():
     kind = (request.args.get("kind") or "all").strip().lower()
     search_q = (request.args.get("search") or "").strip() or None
+    date_from = _parse_date_arg("date_from")
+    date_to = _parse_date_arg("date_to")
     try:
-        rows = LedgerReportService().search_ledgers(kind=kind, search=search_q)
-        return jsonify({"ok": True, "rows": rows})
+        rows = LedgerReportService().search_ledgers(
+            kind=kind,
+            search=search_q,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        as_of = date.today()
+        return jsonify(
+            {
+                "ok": True,
+                "rows": rows,
+                "opening_only": False,
+                "closing_as_of": as_of.isoformat(),
+                "preview_needs_dates": date_from is None or date_to is None,
+            }
+        )
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": map_db_exception(exc) or str(exc)}), 500
+
+
+@bp.route("/api/summaries", methods=["GET"], strict_slashes=False)
+@login_required
+def summaries():
+    date_from = _parse_date_arg("date_from")
+    date_to = _parse_date_arg("date_to")
+    if date_from is None or date_to is None:
+        return jsonify({"ok": True, "summaries": None, "opening_only": True})
+    try:
+        from app.services.financial_statements.reports import FinancialStatementsService
+
+        fs = FinancialStatementsService()
+        period_from, period_to = fs.resolve_period(
+            date_from.isoformat() if date_from else None,
+            date_to.isoformat() if date_to else None,
+        )
+        data = fs.compact_summaries(period_from, period_to)
+        return jsonify({"ok": True, "summaries": data})
     except Exception as exc:
         db.session.rollback()
         return jsonify({"ok": False, "error": map_db_exception(exc) or str(exc)}), 500

@@ -6,6 +6,7 @@ from sqlalchemy import text
 from app.decorators import admin_required, login_required, require_delete_reauth, server_auth_exempt
 from app.extensions import db
 from app.services.auth_service import AuthService
+from app.utils.fps_access import is_fps_session
 from app.utils.roles import has_admin_role
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,8 @@ def _client_ip() -> str | None:
 def login():
     auth = AuthService()
     if session.get("user_id"):
+        if is_fps_session():
+            return redirect(url_for("public_report.fps_detail"))
         if session.get("server_user_id"):
             return redirect(url_for("dashboard.index"))
         return redirect(url_for("server_auth.gate"))
@@ -249,6 +252,8 @@ def login():
 def register():
     auth = AuthService()
     if session.get("user_id"):
+        if is_fps_session():
+            return redirect(url_for("public_report.fps_detail"))
         return redirect(url_for("dashboard.index"))
     if not auth.administrator_exists():
         return redirect(url_for("setup.index"))
@@ -374,9 +379,13 @@ def forgot_user_id():
 def logout():
     login_session_id = session.get("login_session_id")
     try:
+        from app.services.server_audit_service import ServerAuditService
         from app.services.server_auth_service import ServerAuthService
 
-        ServerAuthService().log_logout()
+        if is_fps_session():
+            ServerAuditService().log(action="FPS logout", module="FPSLogin")
+        else:
+            ServerAuthService().log_logout()
     except Exception:
         logger.exception("Server logout audit skipped")
     try:
