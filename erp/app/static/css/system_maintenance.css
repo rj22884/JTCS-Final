@@ -1,0 +1,51 @@
+.sm-card .sm-stat {
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+}
+
+.sm-card .sm-stat-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.sm-card .sm-stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e3a5f;
+}
+
+.sm-categories {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.sm-category {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.sm-category input {
+  margin-top: 0.2rem;
+}
+
+.sm-results {
+  border: 1px solid var(--jtcs-border, #e5e7eb);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+}
+
+.sm-card code.small {
+  font-size: 0.78rem;
+}

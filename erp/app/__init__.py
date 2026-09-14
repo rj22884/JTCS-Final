@@ -81,6 +81,7 @@ from app.modules.crm.routes import (
 )
 from app.modules.settings.routes import bp as integration_settings_bp
 from app.modules.system_health.routes import bp as system_health_bp
+from app.modules.system_maintenance.routes import bp as system_maintenance_bp
 from app.services.auth_service import AuthService
 from app.services.menu_service import MenuService
 from app.utils.date_format import (
@@ -203,6 +204,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(public_intake_bp)
     app.register_blueprint(integration_settings_bp)
     app.register_blueprint(system_health_bp)
+    app.register_blueprint(system_maintenance_bp)
     app.register_blueprint(pages_bp)
     app.register_blueprint(runtime_bp)
 
@@ -362,6 +364,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("System Health menus ensure skipped: %s", exc)
+
+        try:
+            from app.modules.system_maintenance.routes import ensure_system_maintenance_menus
+
+            ensure_system_maintenance_menus()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("System Maintenance menus ensure skipped: %s", exc)
 
         try:
             from app.routes.admin_dashboard import ensure_admin_dashboard_menu
