@@ -224,6 +224,21 @@ def docs_for_pan(pan: str) -> list[dict]:
         return []
 
 
+def docs_for_aadhaar(aadhaar: str) -> list[dict]:
+    found = CustomerRepository().find_by_aadhaar(aadhaar)
+    if not found:
+        return []
+    try:
+        return customer_doc_status(int(found["CustomerID"]))
+    except Exception:
+        logger.warning("DSC document status for Aadhaar skipped", exc_info=True)
+        return []
+
+
+def aadhaar_exists(aadhaar: str) -> bool:
+    return bool(CustomerRepository().find_by_aadhaar(aadhaar))
+
+
 def _resolve_stored_path(stored: str) -> Path:
     raw = str(stored or "").replace("\\", "/")
     if raw.startswith("uploads/"):
