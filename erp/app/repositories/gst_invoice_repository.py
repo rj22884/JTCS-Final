@@ -7,15 +7,17 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.gst_billing import GstInvoice, GstInvoiceLine
+from app.utils.db_session import commit_schema
 
 
 class GstInvoiceRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if GstInvoiceRepository._schema_ready:
             return
         # ItemMaster may be created by its own repo; invoice tables here.
         self.session.execute(
@@ -114,7 +116,7 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
         for col, ddl in (
             ("TaxPeriod", "NVARCHAR(20) NULL"),
             ("Quarter", "NVARCHAR(40) NULL"),
@@ -128,8 +130,8 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
-        self._schema_ready = True
+            commit_schema(self.session)
+        GstInvoiceRepository._schema_ready = True
 
     def find_by_tally_bill_no(self, bill_no: str) -> GstInvoice | None:
         self.ensure_schema()

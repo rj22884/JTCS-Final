@@ -413,7 +413,7 @@ class MasterRepository:
         stmt = (
             select(WorkTypeMaster)
             .where(WorkTypeMaster.ActiveStatus == True)  # noqa: E712
-            .where(WorkTypeMaster.WorkTypeName == name)
+            .where(func.lower(func.rtrim(func.ltrim(WorkTypeMaster.WorkTypeName))) == name.lower())
             .order_by(WorkTypeMaster.SubWorkType)
         )
         return list(self.session.scalars(stmt).all())

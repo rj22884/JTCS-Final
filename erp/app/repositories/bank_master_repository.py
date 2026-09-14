@@ -12,12 +12,14 @@ from app.models.transactions import (
     JtcsBankTransaction,
     PaymentModeMaster,
 )
+from app.utils.db_session import commit_schema
 
 
 class BankMasterRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def _column_exists(self, column_name: str) -> bool:
         return (
@@ -37,7 +39,7 @@ class BankMasterRepository:
 
     def ensure_schema(self) -> None:
         if (
-            self._schema_ready
+            BankMasterRepository._schema_ready
             and self._column_exists("QrBillReceived")
             and self._column_exists("ChartGroupID")
             and self._column_exists("OpeningBalanceDrCr")
@@ -57,7 +59,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             self.session.execute(
                 text(
@@ -69,7 +71,7 @@ class BankMasterRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
 
             if not self._column_exists("UpiId"):
                 self.session.execute(
@@ -80,7 +82,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             # SQL Server compiles whole batches — ALTER + UPDATE of new column
             # must be separate statements/commits or it raises invalid column name.
@@ -94,7 +96,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
                 # First-time only: keep existing payment dropdowns working.
                 self.session.execute(
                     text(
@@ -105,7 +107,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             if not self._column_exists("ChartGroupID"):
                 self.session.execute(
@@ -116,7 +118,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             if not self._column_exists("OpeningBalanceDrCr"):
                 self.session.execute(
@@ -127,7 +129,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             if self._column_exists("ChartGroupID"):
                 self.session.execute(
@@ -146,7 +148,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
                 # Defaults: Cash → Cash-in-Hand; others → Bank Accounts
                 self.session.execute(
                     text(
@@ -185,7 +187,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
             if not self._column_exists("PurchaseDate"):
                 self.session.execute(
@@ -196,7 +198,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
             if not self._column_exists("DepreciationRate"):
                 self.session.execute(
                     text(
@@ -207,7 +209,7 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
             if not self._column_exists("AppreciationRate"):
                 self.session.execute(
                     text(
@@ -218,18 +220,18 @@ class BankMasterRepository:
                         """
                     )
                 )
-                self.session.commit()
+                commit_schema(self.session)
 
-            self._schema_ready = self._column_exists("QrBillReceived") and self._column_exists(
+            BankMasterRepository._schema_ready = self._column_exists("QrBillReceived") and self._column_exists(
                 "ChartGroupID"
             ) and self._column_exists("AppreciationRate")
-            if not self._schema_ready:
+            if not BankMasterRepository._schema_ready:
                 raise RuntimeError(
                     "Bank Master schema update failed: required columns are missing."
                 )
         except Exception:
             self.session.rollback()
-            self._schema_ready = False
+            BankMasterRepository._schema_ready = False
             raise
 
     def list_all(self, *, search: str | None = None) -> list[JtcsBankAccountMaster]:

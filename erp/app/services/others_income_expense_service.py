@@ -675,7 +675,7 @@ class OthersIncomeExpenseService:
             work_type_ids.extend([""] * (len(work_ids) - len(work_type_ids)))
 
         lines: list[dict] = []
-        seen: set[int] = set()
+        seen: set[tuple[int, int]] = set()
         for work_id_raw, amount_raw, work_type_raw in zip(work_ids, amounts, work_type_ids):
             try:
                 work_id = int(work_id_raw or 0)
@@ -683,9 +683,6 @@ class OthersIncomeExpenseService:
                 work_id = 0
             if work_id <= 0:
                 raise ValueError("Each category must be selected.")
-            if work_id in seen:
-                raise ValueError("Duplicate categories are not allowed.")
-            seen.add(work_id)
 
             work = self.work_repo.get_by_id(work_id)
             if work is None or not work.ActiveStatus:
@@ -709,13 +706,16 @@ class OthersIncomeExpenseService:
                     if work_type_id <= 0:
                         raise ValueError(f"Sub Work is required for {work.WorkName}.")
                     sub = self.master_repo.get_work_type(work_type_id)
-                    if (
-                        sub is None
-                        or not sub.ActiveStatus
-                        or (sub.WorkTypeName or "").strip() != (work.WorkName or "").strip()
-                    ):
+                    parent_name = (work.WorkName or "").strip().casefold()
+                    sub_parent = (sub.WorkTypeName or "").strip().casefold() if sub else ""
+                    if sub is None or not sub.ActiveStatus or sub_parent != parent_name:
                         raise ValueError(f"Selected Sub Work is not valid for {work.WorkName}.")
-                    sub_work_name = sub.SubWorkType or ""
+                    sub_work_name = (sub.SubWorkType or "").strip()
+
+            line_key = (work_id, work_type_id or 0)
+            if line_key in seen:
+                raise ValueError("Duplicate categories are not allowed.")
+            seen.add(line_key)
 
             lines.append(
                 {
@@ -969,17 +969,10 @@ class OthersIncomeExpenseService:
             )
 
         try:
-            with db.session.begin_nested():
-                result = _write()
-            db.session.commit()
-            return result
+            return persist(_write)
         except IntegrityError as exc:
-            db.session.rollback()
-            if "BillNo" in str(exc.orig):
+            if "BillNo" in str(getattr(exc, "orig", None) or exc):
                 raise ValueError(f"Bill number {bill_no} already exists.") from exc
-            raise
-        except Exception:
-            db.session.rollback()
             raise
 
     def delete_entry(self, entry_id: int) -> str:

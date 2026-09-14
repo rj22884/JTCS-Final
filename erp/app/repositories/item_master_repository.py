@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.gst_billing import ItemMaster
+from app.utils.db_session import commit_schema
 
 
 class ItemMasterRepository:
@@ -46,7 +47,7 @@ class ItemMasterRepository:
                 """
             )
         )
-        self.session.commit()
+        commit_schema(self.session)
         for col, ddl in (
             ("GstApplicable", "BIT NOT NULL CONSTRAINT DF_ItemMaster_GstApplicable DEFAULT (1)"),
             ("OpeningQty", "DECIMAL(18, 3) NOT NULL CONSTRAINT DF_ItemMaster_OpeningQty DEFAULT (0)"),
@@ -66,7 +67,7 @@ class ItemMasterRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
         # Optional FK to Chart of Group Master (same pattern as WorkMaster / Bank).
         self.session.execute(
             text(
@@ -87,7 +88,7 @@ class ItemMasterRepository:
                 """
             )
         )
-        self.session.commit()
+        commit_schema(self.session)
         ItemMasterRepository._schema_ready = True
 
     def list_all(self, *, search: str | None = None, active_only: bool = False) -> list[ItemMaster]:

@@ -160,6 +160,9 @@
     const tally = isTallyChecked();
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
     els.autoBillBtn?.classList.toggle("d-none", !tally);
+    if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
+      els.tallyBillNo.value = (els.billNo.value || "").trim();
+    }
     if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
       els.tallyBillDate.value = window.OIE_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
     }
@@ -506,8 +509,12 @@
       const subSelect = lines[i].querySelector(".oie-category-subwork");
       const amount = lines[i].querySelector(".oie-category-amount");
       if (!select?.value) return "Each category must be selected.";
-      if (seen[select.value]) return "Duplicate categories are not allowed.";
-      seen[select.value] = true;
+      const lineKey =
+        kind === "Misc."
+          ? select.value + ":" + (subSelect?.value || "")
+          : select.value;
+      if (seen[lineKey]) return "Duplicate categories are not allowed.";
+      seen[lineKey] = true;
       if (kind === "Misc." && subSelect && !subSelect.disabled) {
         const hasOptions = Array.from(subSelect.options).some(function (o) { return o.value; });
         if (hasOptions && !subSelect.value) {
