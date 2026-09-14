@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.extensions import db
 from app.models.gst_billing import GstInvoice, GstInvoiceLine
 from app.utils.db_session import commit_schema
+from app.utils.tally_bill import normalize_tally_bill_key, tally_bill_compact
 
 
 class GstInvoiceRepository:
@@ -135,9 +136,10 @@ class GstInvoiceRepository:
 
     def find_by_tally_bill_no(self, bill_no: str) -> GstInvoice | None:
         self.ensure_schema()
-        key = (bill_no or "").strip()
+        key = normalize_tally_bill_key(bill_no)
         if not key:
             return None
+        compact = tally_bill_compact(bill_no)
         invoice_id = self.session.execute(
             text(
                 """
@@ -145,11 +147,19 @@ class GstInvoiceRepository:
                 FROM dbo.GstInvoice
                 WHERE TallyBillNo IS NOT NULL
                   AND LTRIM(RTRIM(TallyBillNo)) <> N''
-                  AND UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_no
+                  AND (
+                        UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_key
+                        OR UPPER(
+                            REPLACE(
+                                REPLACE(LTRIM(RTRIM(TallyBillNo)), N' ', N''),
+                                N'-', N''
+                            )
+                        ) = :bill_compact
+                  )
                 ORDER BY InvoiceID DESC
                 """
             ),
-            {"bill_no": key.upper()},
+            {"bill_key": key, "bill_compact": compact},
         ).scalar()
         if not invoice_id:
             return None

@@ -833,9 +833,8 @@ class GstInvoiceService:
             "PayUpiId": bank_data["upi_id"] or None,
             "PaymentDate": payment_date,
             "AmountPaid": amount_paid,
-            "TallyBillNo": (
-                (payload.get("tally_bill_no") or payload.get("TallyBillNo") or "").strip()[:50]
-                or None
+            "TallyBillNo": self._normalized_tally_bill_no(
+                payload.get("tally_bill_no") or payload.get("TallyBillNo")
             ),
             "BillSource": self.normalize_bill_source(
                 payload.get("bill_source") or payload.get("BillSource")
@@ -878,6 +877,15 @@ class GstInvoiceService:
 
     def _norm_ref(self, value) -> str:
         return str(value or "").strip().upper()
+
+    @staticmethod
+    def _normalized_tally_bill_no(value) -> str | None:
+        from app.utils.tally_bill import normalize_tally_bill_key
+
+        key = normalize_tally_bill_key(str(value or ""))
+        if not key:
+            return None
+        return key[:50]
 
     def _invoice_gst_amount(self, inv: GstInvoice) -> Decimal:
         return _q(
@@ -1116,7 +1124,18 @@ class GstInvoiceService:
             payload, persist_no=True, require_payment_bank=require_payment_bank
         )
         header["BillSource"] = bill_source
-        self._assert_tally_bill_unique(header.get("TallyBillNo"))
+        tally_key = header.get("TallyBillNo")
+        existing = self.repo.find_by_tally_bill_no(tally_key) if tally_key else None
+        if existing is not None:
+            existing_source = self.normalize_bill_source(getattr(existing, "BillSource", None))
+            if existing_source == self.BILL_SOURCE_AUTOMATIC:
+                upgrade_payload = {
+                    **payload,
+                    "tally_bill_no": tally_key,
+                    "bill_source": self.BILL_SOURCE_MANUAL,
+                }
+                return self.update_record(existing.InvoiceID, upgrade_payload)
+            self._assert_tally_bill_unique(tally_key)
 
         def _write() -> dict:
             inv = self.repo.create(header, lines)

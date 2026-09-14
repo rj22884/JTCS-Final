@@ -15,6 +15,7 @@ from app.models.others import (
     PrintingScanMaster,
     WorkMaster,
 )
+from app.utils.tally_bill import normalize_tally_bill_key, tally_bill_compact
 
 BILL_NO_PATTERNS = {
     "Income": re.compile(r"^S-(\d{8})/(\d+)$", re.IGNORECASE),
@@ -528,6 +529,54 @@ class OthersIncomeExpenseRepository:
         normalized = (bill_no or "").strip().upper()
         stmt = select(OthersIncomeExpenseMaster).where(OthersIncomeExpenseMaster.BillNo == normalized)
         return self.session.scalars(stmt).first()
+
+    def find_by_tally_bill_no(self, bill_no: str) -> OthersIncomeExpenseMaster | None:
+        """Active Income/Expense row by TallyBillNo or entry BillNo (Misc. preferred)."""
+        self.ensure_schema()
+        key = normalize_tally_bill_key(bill_no)
+        if not key:
+            return None
+        compact = tally_bill_compact(bill_no)
+        entry_id = self.session.execute(
+            text(
+                """
+                SELECT TOP 1 e.EntryID
+                FROM dbo.OthersIncomeExpenseMaster e
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+                WHERE e.IsActive = 1
+                  AND (
+                        (
+                            e.TallyBillNo IS NOT NULL
+                            AND LTRIM(RTRIM(e.TallyBillNo)) <> N''
+                            AND (
+                                UPPER(LTRIM(RTRIM(e.TallyBillNo))) = :bill_key
+                                OR UPPER(
+                                    REPLACE(
+                                        REPLACE(LTRIM(RTRIM(e.TallyBillNo)), N' ', N''),
+                                        N'-', N''
+                                    )
+                                ) = :bill_compact
+                            )
+                        )
+                     OR UPPER(LTRIM(RTRIM(e.BillNo))) = :bill_key
+                     OR UPPER(
+                            REPLACE(
+                                REPLACE(LTRIM(RTRIM(e.BillNo)), N' ', N''),
+                                N'-', N''
+                            )
+                        ) = :bill_compact
+                  )
+                ORDER BY
+                    CASE WHEN w.LedgerKind = N'Misc.' THEN 0 ELSE 1 END,
+                    CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1 THEN 0 ELSE 1 END,
+                    e.EntryID DESC
+                """
+            ),
+            {"bill_key": key, "bill_compact": compact},
+        ).scalar()
+        if not entry_id:
+            return None
+        return self.get_by_id(int(entry_id))
 
     def update(self, row: OthersIncomeExpenseMaster, data: dict) -> OthersIncomeExpenseMaster:
         self.ensure_schema()

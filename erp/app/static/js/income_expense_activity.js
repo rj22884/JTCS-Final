@@ -1712,6 +1712,12 @@
     params.set("customer_id", customerId);
     const customerName = (els.customerName?.value || "").trim();
     if (customerName) params.set("customer_name", customerName);
+    const tallyNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
+    if (tallyNo) params.set("tally_bill_no", tallyNo);
+    const billAmount = (els.tallyBillAmount?.value || "").trim();
+    if (billAmount) params.set("bill_amount", billAmount);
+    const billDate = (els.tallyBillDate?.value || els.workDate?.value || "").trim();
+    if (billDate) params.set("bill_date", billDate);
     const url = "/accounting/invoice?" + params.toString();
     const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
     const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));

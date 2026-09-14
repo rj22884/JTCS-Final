@@ -93,11 +93,7 @@ def _iso_date(value) -> str | None:
     return text[:10] if text else None
 
 
-def lookup_tally_bill(bill_no: str) -> dict | None:
-    """Resolve a Tally Bill Number from GST / TDS / DSC / ITR Followup."""
-    key = (bill_no or "").strip()
-    if not key:
-        return None
+def _lookup_tally_bill_followup(key: str) -> dict | None:
     repo = FollowupRepository()
     try:
         repo.ensure_billing_columns()
@@ -123,6 +119,7 @@ def lookup_tally_bill(bill_no: str) -> dict | None:
         "entry_id": row.get("EntryID"),
         "module_code": module,
         "module_title": title,
+        "source": "followup",
         "customer_id": row.get("CustomerID"),
         "customer_name": (row.get("CustomerName") or "").strip(),
         "mobile_number": (row.get("MobileNumber") or "").strip(),
@@ -133,7 +130,76 @@ def lookup_tally_bill(bill_no: str) -> dict | None:
         "quarter": (row.get("Quarter") or "").strip(),
         "return_type": return_type,
         "particulars": particulars,
+        "invoice_kind": "GST" if module == "GST" else "NON_GST",
     }
+
+
+def _lookup_tally_bill_income_expense(key: str) -> dict | None:
+    """Resolve from Others Income / Expense (Misc. BillNo or TallyBillNo)."""
+    from app.repositories.others_repository import OthersIncomeExpenseRepository
+
+    repo = OthersIncomeExpenseRepository()
+    try:
+        repo.ensure_schema()
+    except Exception:
+        repo.session.rollback()
+    row = repo.find_by_tally_bill_no(key)
+    if row is None or not row.IsActive:
+        return None
+
+    work = row.work_type
+    ledger_kind = (work.LedgerKind if work else "") or ""
+    details = list(getattr(row, "detail_lines", None) or [])
+    work_labels: list[str] = []
+    for detail in sorted(details, key=lambda item: item.LineSequence or 0):
+        parent = detail.work_type.WorkName if detail.work_type else ""
+        sub = detail.sub_work_type.SubWorkType if detail.sub_work_type else ""
+        if parent and sub:
+            work_labels.append(f"{parent} / {sub}")
+        elif parent:
+            work_labels.append(parent)
+        elif sub:
+            work_labels.append(sub)
+    if not work_labels and work:
+        work_labels.append(work.WorkName or "")
+
+    label = ", ".join(x for x in work_labels if x) or "Others / Misc"
+    title = "Income / Expense (Misc.)" if ledger_kind == "Misc." else "Income / Expense"
+    bill_date = getattr(row, "TallyBillDate", None) or row.WorkDate
+    amount = getattr(row, "TallyBillAmount", None)
+    if amount is None:
+        amount = row.Amount
+    from app.utils.tally_bill import normalize_tally_bill_key
+
+    tally_no = normalize_tally_bill_key(
+        (getattr(row, "TallyBillNo", None) or "").strip() or (row.BillNo or "").strip()
+    )
+    return {
+        "entry_id": row.EntryID,
+        "module_code": "OIE",
+        "module_title": title,
+        "source": "income_expense",
+        "ledger_kind": ledger_kind,
+        "customer_id": getattr(row, "CustomerID", None),
+        "customer_name": (row.CustomerName or "").strip(),
+        "mobile_number": (row.MobileNumber or "").strip(),
+        "bill_no": tally_no,
+        "invoice_date": _iso_date(bill_date),
+        "bill_amount": float(amount) if amount is not None else None,
+        "tax_period": "",
+        "quarter": "",
+        "return_type": "",
+        "particulars": f"Others / Misc — {label}"[:300],
+        "invoice_kind": "NON_GST",
+    }
+
+
+def lookup_tally_bill(bill_no: str) -> dict | None:
+    """Resolve Tally Bill Number from Followup or Others Income/Expense (Misc.)."""
+    key = (bill_no or "").strip()
+    if not key:
+        return None
+    return _lookup_tally_bill_followup(key) or _lookup_tally_bill_income_expense(key)
 
 
 class FollowupService:

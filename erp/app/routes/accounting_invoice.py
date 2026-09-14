@@ -455,7 +455,7 @@ def api_navigate_invoice():
 @bp.route("/api/invoices/tally-bill", methods=["GET"], strict_slashes=False)
 @login_required
 def api_tally_bill_lookup():
-    """Fill invoice customer / date / amount from GST, TDS, DSC, or ITR Followup."""
+    """Fill invoice from Followup (GST/TDS/DSC/ITR) or Others Income/Expense Misc."""
     bill_no = (request.args.get("bill_no") or request.args.get("q") or "").strip()
     if not bill_no:
         return jsonify({"ok": False, "found": False, "error": "Enter Tally Bill Number."}), 400
@@ -466,25 +466,39 @@ def api_tally_bill_lookup():
                 {
                     "ok": False,
                     "found": False,
-                    "error": "Tally Bill Number followup (GST / TDS / DSC / ITR) mein nahi mila.",
+                    "error": (
+                        "Tally Bill Number followup (GST / TDS / DSC / ITR) "
+                        "ya Income/Expense (Misc.) mein nahi mila."
+                    ),
                 }
             ), 404
         existing = GstInvoiceService().find_invoice_for_tally_bill(bill_no)
         if existing:
-            return jsonify(
-                {
-                    "ok": False,
-                    "found": True,
-                    "duplicate": True,
-                    "error": (
-                        f"Tally Bill Number {bill_no} par invoice pehle se hai "
-                        f"({existing.get('invoice_no') or existing.get('invoice_id')}). "
-                        "Duplicate allow nahi hai."
-                    ),
-                    "existing_invoice": existing,
-                    "record": rec,
-                }
-            ), 409
+            inv = GstInvoiceService().repo.get_by_id(int(existing["invoice_id"]))
+            bill_source = GstInvoiceService.normalize_bill_source(
+                getattr(inv, "BillSource", None) if inv is not None else None
+            )
+            if bill_source != GstInvoiceService.BILL_SOURCE_AUTOMATIC:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "found": True,
+                        "duplicate": True,
+                        "error": (
+                            f"Tally Bill Number {bill_no} par invoice pehle se hai "
+                            f"({existing.get('invoice_no') or existing.get('invoice_id')}). "
+                            "Duplicate allow nahi hai."
+                        ),
+                        "existing_invoice": existing,
+                        "record": rec,
+                    }
+                ), 409
+            rec = {
+                **rec,
+                "existing_invoice_id": existing.get("invoice_id"),
+                "existing_invoice_no": existing.get("invoice_no") or "",
+                "bill_source": bill_source,
+            }
         return jsonify({"ok": True, "found": True, "record": rec})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
