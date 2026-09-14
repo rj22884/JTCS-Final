@@ -1398,6 +1398,66 @@ class GstInvoiceService:
                     "notes": "Automatic from Others Income/Expense (payment received).",
                 }
             )
+
+        remaining = max(0, int(limit) - len(rows))
+        if remaining <= 0:
+            return rows
+
+        try:
+            rcf_rows = db.session.execute(
+                text(
+                    """
+                    SELECT TOP (:lim)
+                        e.TallyBillNo AS TallyBillNo,
+                        ISNULL(e.TallyBillAmount, e.Amount) AS BillAmount,
+                        e.TallyBillDate AS BillDate,
+                        e.WorkDate AS WorkDate,
+                        ISNULL(NULLIF(LTRIM(RTRIM(e.DealerName)), N''), e.FpsName) AS CustomerName,
+                        e.FpsCode AS FpsCode
+                    FROM dbo.RationCardFollowupMaster e
+                    WHERE e.IsActive = 1
+                      AND e.PaymentReceived = 1
+                      AND e.TallyBillGenerated = 1
+                      AND e.TallyBillNo IS NOT NULL
+                      AND LTRIM(RTRIM(e.TallyBillNo)) <> N''
+                      AND ISNULL(e.TallyBillAmount, e.Amount) > 0
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.GstInvoice i
+                            WHERE UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                      )
+                    ORDER BY e.EntryID DESC
+                    """
+                ),
+                {"lim": remaining},
+            ).mappings().all()
+        except Exception:
+            rcf_rows = []
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+
+        for r in rcf_rows:
+            bill = (r["TallyBillNo"] or "").strip()
+            if not bill:
+                continue
+            name = (r["CustomerName"] or "").strip() or "Ration Card FPS"
+            fps_code = (r["FpsCode"] or "").strip()
+            label = f"{name}" + (f" ({fps_code})" if fps_code else "")
+            rows.append(
+                {
+                    "tally_bill_no": bill,
+                    "bill_amount": r["BillAmount"],
+                    "invoice_date": r["BillDate"] or r["WorkDate"],
+                    "customer_id": None,
+                    "customer_name": name,
+                    "contact_mobile": None,
+                    "particulars": f"Ration Card Followup — {label}"[:300],
+                    "notes": "Automatic from Ration Card Followup (payment received).",
+                }
+            )
         return rows
 
     def list_ids(self) -> list[int]:

@@ -154,6 +154,13 @@ def _ensure_public_report_bootstrap() -> None:
     db.session.commit()
     _ensure_pds_master_menus()
     try:
+        from app.routes.ration_card_followup import ensure_ration_card_followup_menu
+
+        ensure_ration_card_followup_menu()
+    except Exception:
+        db.session.rollback()
+        logger.exception("Ration Card Followup menu ensure skipped")
+    try:
         PdsMasterService().import_uttarakhand_once()
     except Exception:
         db.session.rollback()

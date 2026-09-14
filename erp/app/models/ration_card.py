@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Unicode
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Unicode
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
@@ -194,4 +195,35 @@ class PdsGeoImport(db.Model):
     ImportRowCount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     Detail: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     ImportedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class RationCardFollowupMaster(db.Model):
+    """Misc-style followup for PDS FPS shops (no categories)."""
+
+    __tablename__ = "RationCardFollowupMaster"
+
+    EntryID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    BillNo: Mapped[str] = mapped_column(Unicode(50), nullable=False, unique=True)
+    WorkDate: Mapped[date] = mapped_column(Date, nullable=False)
+    Amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    FpsRowID: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("PdsFpsMaster.FpsRowID"), nullable=True
+    )
+    FpsCode: Mapped[str | None] = mapped_column(Unicode(80), nullable=True)
+    FpsName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
+    DealerName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
+    StateName: Mapped[str | None] = mapped_column(Unicode(120), nullable=True)
+    DistrictName: Mapped[str | None] = mapped_column(Unicode(120), nullable=True)
+    DsoName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
+    AroName: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
+    WorkDone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    TallyBillGenerated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    PaymentReceived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
+    TallyBillDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    TallyBillAmount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    Remarks: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
+    CreatedBy: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    IsActive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 

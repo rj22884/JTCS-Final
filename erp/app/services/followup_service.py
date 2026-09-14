@@ -194,12 +194,64 @@ def _lookup_tally_bill_income_expense(key: str) -> dict | None:
     }
 
 
+def _lookup_tally_bill_ration_card_followup(key: str) -> dict | None:
+    """Resolve from Ration Card Followup (BillNo or TallyBillNo)."""
+    from app.repositories.ration_card_followup_repository import RationCardFollowupRepository
+    from app.utils.tally_bill import normalize_tally_bill_key
+
+    repo = RationCardFollowupRepository()
+    try:
+        repo.ensure_schema()
+    except Exception:
+        repo.session.rollback()
+    row = repo.find_by_tally_bill_no(key)
+    if row is None or not row.IsActive:
+        return None
+
+    display = (
+        (row.DealerName or "").strip()
+        or (row.FpsName or "").strip()
+        or (row.FpsCode or "").strip()
+        or "Ration Card FPS"
+    )
+    bill_date = getattr(row, "TallyBillDate", None) or row.WorkDate
+    amount = getattr(row, "TallyBillAmount", None)
+    if amount is None:
+        amount = row.Amount
+    tally_no = normalize_tally_bill_key(
+        (getattr(row, "TallyBillNo", None) or "").strip() or (row.BillNo or "").strip()
+    )
+    return {
+        "entry_id": row.EntryID,
+        "module_code": "RCF",
+        "module_title": "Ration Card Followup",
+        "source": "ration_card_followup",
+        "customer_id": None,
+        "customer_name": display,
+        "mobile_number": "",
+        "bill_no": tally_no,
+        "invoice_date": _iso_date(bill_date),
+        "bill_amount": float(amount) if amount is not None else None,
+        "tax_period": "",
+        "quarter": "",
+        "return_type": "",
+        "particulars": f"Ration Card Followup — {display}"[:300],
+        "invoice_kind": "NON_GST",
+        "fps_code": (row.FpsCode or "").strip(),
+        "fps_row_id": row.FpsRowID,
+    }
+
+
 def lookup_tally_bill(bill_no: str) -> dict | None:
-    """Resolve Tally Bill Number from Followup or Others Income/Expense (Misc.)."""
+    """Resolve Tally Bill from Followup, OIE Misc, or Ration Card Followup."""
     key = (bill_no or "").strip()
     if not key:
         return None
-    return _lookup_tally_bill_followup(key) or _lookup_tally_bill_income_expense(key)
+    return (
+        _lookup_tally_bill_followup(key)
+        or _lookup_tally_bill_income_expense(key)
+        or _lookup_tally_bill_ration_card_followup(key)
+    )
 
 
 class FollowupService:

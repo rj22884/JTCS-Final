@@ -162,6 +162,25 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="dashSourceEntryModal" tabindex="-1" aria-labelledby="dashSourceEntryModalTitle"
+     aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <div>
+          <h5 class="modal-title mb-0" id="dashSourceEntryModalTitle">Entry</h5>
+          <div class="small text-muted" id="dashSourceEntryModalSub"></div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0" style="min-height:70vh;">
+        <iframe id="dashSourceEntryFrame" title="Source entry"
+                style="width:100%;height:70vh;border:0;"></iframe>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -189,6 +208,6 @@
     }
   };
 </script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260914edit1"></script>
 <script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260910cb1"></script>
 {% endblock %}

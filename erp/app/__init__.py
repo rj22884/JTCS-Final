@@ -30,6 +30,7 @@ from app.routes.masters_work import (
 )
 from app.routes.printing_scanning import bp as printing_scanning_bp, expense_bp as printing_scan_expense_bp
 from app.routes.others_income_expense import bp as others_income_expense_bp
+from app.routes.ration_card_followup import bp as ration_card_followup_bp
 from app.routes.others_bank_cash import bp as others_bank_cash_bp
 from app.routes.purpose_master import bp as purpose_master_bp
 from app.routes.credentials_master import bp as credentials_master_bp
@@ -139,6 +140,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(printing_scanning_bp)
     app.register_blueprint(printing_scan_expense_bp)
     app.register_blueprint(others_income_expense_bp)
+    app.register_blueprint(ration_card_followup_bp)
     app.register_blueprint(others_bank_cash_bp)
     app.register_blueprint(purpose_master_bp)
     app.register_blueprint(credentials_master_bp)

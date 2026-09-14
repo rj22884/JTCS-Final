@@ -467,8 +467,8 @@ def api_tally_bill_lookup():
                     "ok": False,
                     "found": False,
                     "error": (
-                        "Tally Bill Number followup (GST / TDS / DSC / ITR) "
-                        "ya Income/Expense (Misc.) mein nahi mila."
+                        "Tally Bill Number followup (GST / TDS / DSC / ITR), "
+                        "Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
                     ),
                 }
             ), 404

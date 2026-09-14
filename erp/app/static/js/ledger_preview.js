@@ -366,7 +366,7 @@
 
   function openEdit(row) {
     if (!row || !row.can_edit || !row.source_url) {
-      alert("Edit is not available for this row.");
+      alert("Edit is not available for this row. Source entry could not be resolved.");
       return;
     }
     const frame = document.getElementById("dashSourceEntryFrame");
@@ -376,6 +376,8 @@
       const title = document.getElementById("dashSourceEntryModalTitle");
       if (title) title.textContent = "Edit Entry";
       frame.src = row.source_url;
+      // Stack above ledger preview modal when both are open.
+      modalEl.style.zIndex = "1065";
       sourceModal.show();
       return;
     }

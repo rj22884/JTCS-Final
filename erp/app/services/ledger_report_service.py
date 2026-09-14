@@ -1608,10 +1608,7 @@ class LedgerReportService:
                 [
                     line.get("source_record_id")
                     for line in (data.get("lines") or [])
-                    if (line.get("kind") or "txn") == "txn"
-                    and (line.get("source") or "").strip().lower()
-                    in {"", "jtcsdailytransaction", "shcil"}
-                    and line.get("source_record_id")
+                    if (line.get("kind") or "txn") == "txn" and line.get("source_record_id")
                 ]
             )
         lines: list[dict[str, Any]] = []
@@ -1651,12 +1648,16 @@ class LedgerReportService:
                                 stamp_id=daily.get("StampID"),
                                 reference=daily.get("ReferenceNo"),
                             )
-                        else:
-                            link = dash._source_link_for_bank_leg(
+                        if not link or not link.get("can_open"):
+                            fallback = dash._source_link_for_bank_leg(
                                 source_table=line.get("source"),
                                 source_record_id=rec_int if rec_int else None,
                                 bank_transaction_id=line.get("bank_transaction_id"),
                             )
+                            if fallback and fallback.get("can_open"):
+                                link = fallback
+                            elif not link:
+                                link = fallback
                     elif kind_key == "customer":
                         txn_id = line.get("transaction_id")
                         stamp_id = line.get("stamp_id")

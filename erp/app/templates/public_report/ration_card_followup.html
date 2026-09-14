@@ -1,0 +1,250 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260827misc1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ration_card_followup.css') }}?v=20260914rcf1">
+{% endblock %}
+
+{% block content %}
+<div class="oie-activity-page rcf-activity-page">
+  <div class="jtcs-card mb-2 py-2 px-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <button type="button" class="btn btn-primary btn-sm" id="rcfNewEntryBtn">
+        <i class="bi bi-plus-lg"></i> New Entry
+      </button>
+      <button type="button" class="btn btn-outline-primary btn-sm ms-auto" id="rcfRefreshGridBtn">
+        <i class="bi bi-arrow-clockwise"></i> Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="jtcs-card oie-filter-card mb-2 p-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label mb-1" for="rcfGridSearch">Search</label>
+        <input type="search" class="form-control form-control-sm" id="rcfGridSearch"
+               placeholder="Bill no, FPS name, FPS code...">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="rcfGridDateFrom">Date From</label>
+        <input type="date" class="form-control form-control-sm" id="rcfGridDateFrom">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="rcfGridDateTo">Date To</label>
+        <input type="date" class="form-control form-control-sm" id="rcfGridDateTo">
+      </div>
+      <div class="col-md-4">
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-primary btn-sm" id="rcfApplyFilterBtn">Apply</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="rcfClearFilterBtn">Clear</button>
+          <span class="small text-muted align-self-center ms-auto" id="rcfGridCount"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="jtcs-card oie-grid-panel mb-2">
+    <div class="oie-section-head mb-2">Ration Card Followup Records</div>
+    <div class="table-responsive oie-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="rcfDataGrid">
+        <thead>
+          <tr>
+            <th>Bill No.</th>
+            <th>Work Date</th>
+            <th>FPS Name</th>
+            <th>FPS Code</th>
+            <th class="text-end">Amount</th>
+            <th>Status</th>
+            <th>Remarks</th>
+            <th class="text-end">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rcfDataGridBody"></tbody>
+      </table>
+    </div>
+    <div id="rcfGridEmpty" class="small text-muted py-3 d-none">No ration card followup records yet.</div>
+  </div>
+</div>
+
+<div class="modal fade" id="rcfEntryModal" tabindex="-1" aria-labelledby="rcfEntryModalTitle" aria-hidden="true"
+     data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content oie-entry-modal">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="rcfEntryModalTitle">New Entry</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form method="post" id="rcfEntryForm" class="oie-entry-form" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="EntryID" id="rcfEntryID" value="">
+          <input type="hidden" name="FpsRowID" id="rcfFpsRowID" value="">
+
+          <div class="row g-3 mb-2">
+            <div class="col-md-4">
+              <label class="form-label oie-required" for="rcfWorkDate">Work Date</label>
+              <input type="date" class="form-control" id="rcfWorkDate" name="WorkDate" value="{{ default_date }}" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label oie-required" for="rcfBillNo">Bill Number</label>
+              <input type="text" class="form-control" id="rcfBillNo" name="BillNo" maxlength="50"
+                     placeholder="Auto-generated" autocomplete="off">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label oie-required" for="rcfAmount">Amount (₹)</label>
+              <input type="number" class="form-control" id="rcfAmount" name="Amount" min="0" step="0.01"
+                     placeholder="0.00" required>
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">1</span> PDS FPS
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-md-3">
+                <label class="form-label" for="rcfState">State</label>
+                <select class="form-select form-select-sm" id="rcfState"></select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="rcfDistrict">District</label>
+                <select class="form-select form-select-sm" id="rcfDistrict" disabled></select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="rcfDso">DSO</label>
+                <select class="form-select form-select-sm" id="rcfDso" disabled></select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="rcfAro">ARO</label>
+                <select class="form-select form-select-sm" id="rcfAro" disabled></select>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label oie-required" for="rcfFpsSearch">FPS Search</label>
+                <div class="position-relative">
+                  <input type="text" class="form-control" id="rcfFpsSearch" maxlength="200"
+                         placeholder="Search FPS name / dealer / FPS code (min 2 chars)"
+                         autocomplete="off" disabled>
+                  <div id="rcfFpsResults" class="list-group oie-customer-results d-none"></div>
+                </div>
+                <div id="rcfFpsSelected" class="small text-muted mt-1 d-none"></div>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="rcfDealerName">Name</label>
+                <input type="text" class="form-control" id="rcfDealerName" name="DealerName" readonly
+                       placeholder="FPS / Dealer name">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label" for="rcfFpsCode">FPS Code</label>
+                <input type="text" class="form-control" id="rcfFpsCode" name="FpsCode" readonly
+                       placeholder="FPS code">
+              </div>
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3" id="rcfWorkflowWrap">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">2</span> Workflow
+            </div>
+            <div class="oie-workflow-checks">
+              <div class="form-check form-check-inline oie-stage-item">
+                <input class="form-check-input" type="checkbox" name="WorkDone" value="1" id="rcfWorkDone">
+                <label class="form-check-label" for="rcfWorkDone">Work Done</label>
+              </div>
+              <div class="form-check form-check-inline oie-stage-item">
+                <input class="form-check-input" type="checkbox" name="TallyBillGenerated" value="1"
+                       id="rcfTallyBillGenerated" disabled>
+                <label class="form-check-label" for="rcfTallyBillGenerated">Tally Bill Generated</label>
+                <button type="button" class="btn btn-outline-primary btn-sm ms-1 oie-auto-bill-btn d-none"
+                        id="rcfAutoBillBtn">
+                  Generate Automated Bill
+                </button>
+              </div>
+              <div class="form-check form-check-inline oie-stage-item">
+                <input class="form-check-input" type="checkbox" name="PaymentReceived" value="1"
+                       id="rcfPaymentReceived" disabled>
+                <label class="form-check-label" for="rcfPaymentReceived">Payment Received</label>
+              </div>
+            </div>
+            <div class="oie-tally-bill-wrap d-none mt-2" id="rcfTallyBillWrap">
+              <div class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label" for="rcfTallyBillNo">Tally Bill Number</label>
+                  <input type="text" class="form-control" id="rcfTallyBillNo" name="TallyBillNo"
+                         maxlength="50" placeholder="Bill / invoice number">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="rcfTallyBillDate">Bill Date</label>
+                  <input type="date" class="form-control" id="rcfTallyBillDate" name="TallyBillDate"
+                         value="{{ default_date }}">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="rcfTallyBillAmount">Bill Amount (₹)</label>
+                  <input type="number" class="form-control" id="rcfTallyBillAmount" name="TallyBillAmount"
+                         min="0" step="0.01" placeholder="0.00">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="oie-entry-section mb-3" id="rcfPaymentSection">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">3</span> Payment Details
+            </div>
+            <p class="small text-muted mb-2" id="rcfPaymentLockedHint">
+              Payment Details tab enable hoga jab Workflow mein Payment Received tick hoga.
+            </p>
+            <fieldset id="rcfPaymentFieldset" disabled>
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <label class="form-label oie-required mb-0">Payment Modes</label>
+                <button type="button" class="btn btn-sm oie-entry-add-payment" id="rcfAddPaymentBtn">
+                  <i class="bi bi-plus-lg"></i> Add Payment Mode
+                </button>
+                <span class="small ms-auto" id="rcfPaymentSummary"></span>
+              </div>
+              <div id="rcfPaymentLines" class="oie-payment-lines"></div>
+              {% if not payment_modes %}
+              <div class="small text-danger mt-1">No bank accounts marked QR/Bill Received in Bank Master.</div>
+              {% endif %}
+            </fieldset>
+          </div>
+
+          <div class="oie-entry-section mb-3">
+            <div class="oie-entry-section-title">
+              <span class="oie-entry-section-num">4</span> Remarks
+            </div>
+            <textarea class="form-control" id="rcfRemarks" name="Remarks" rows="2" maxlength="500"
+                      placeholder="Optional remarks"></textarea>
+          </div>
+
+          <div class="d-flex flex-wrap gap-2 oie-form-actions">
+            <button type="submit" class="btn btn-primary" id="rcfSaveBtn">Save</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.RCF_BANK_ACCOUNTS = {{ payment_modes | tojson }};
+  window.RCF_GRID_URL = {{ url_for('ration_card_followup.grid') | tojson }};
+  window.RCF_SAVE_URL = {{ url_for('ration_card_followup.save_record') | tojson }};
+  window.RCF_NEXT_BILL_URL = {{ url_for('ration_card_followup.next_bill_no') | tojson }};
+  window.RCF_RECORD_URL = {{ url_for('ration_card_followup.record', entry_id=0) | tojson }};
+  window.RCF_DELETE_URL = {{ url_for('ration_card_followup.delete_record', entry_id=0) | tojson }};
+  window.RCF_ENSURE_CUSTOMER_URL = {{ url_for('ration_card_followup.ensure_customer') | tojson }};
+  window.RCF_CASCADE_URL = {{ url_for('public_report.ration_card_cascade') | tojson }};
+  window.RCF_FPS_SEARCH_URL = {{ url_for('public_report.search_dealers') | tojson }};
+  window.RCF_CSRF = {{ csrf_token() | tojson }};
+  window.RCF_DEFAULT_DATE = {{ default_date | tojson }};
+  window.RCF_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/ration_card_followup.js') }}?v=20260914rcf3"></script>
+{% endblock %}

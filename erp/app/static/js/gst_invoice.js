@@ -990,7 +990,11 @@
 
   function applyTallyAmount(rec) {
     const moduleCode = String(rec.module_code || "").toUpperCase();
-    const isOie = moduleCode === "OIE" || (rec.source || "") === "income_expense";
+    const isOie =
+      moduleCode === "OIE" ||
+      moduleCode === "RCF" ||
+      (rec.source || "") === "income_expense" ||
+      (rec.source || "") === "ration_card_followup";
     if (isOie) {
       const nonGst = document.getElementById("invKindNonGst");
       if (nonGst) nonGst.checked = true;
@@ -1123,7 +1127,7 @@
     if (!billNo) return;
     if (!force && billNo === lastTallyLookup) return;
     lastTallyLookup = billNo;
-    showStatus("Tally Bill Number followup / Income-Expense mein dhoondh rahe hain…", "info");
+    showStatus("Tally Bill Number followup / Income-Expense / Ration Card mein dhoondh rahe hain…", "info");
     try {
       const url = new URL(api.tallyBill, window.location.origin);
       url.searchParams.set("bill_no", billNo);
@@ -1132,7 +1136,7 @@
       if (!data.ok || !data.record) {
         throw new Error(
           data.error ||
-            "Tally Bill Number followup ya Income/Expense (Misc.) mein nahi mila."
+            "Tally Bill Number followup, Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
         );
       }
       await applyTallyBill(data.record);
@@ -1380,6 +1384,12 @@
       await loadForEdit(editId);
     } else if (deepCustomerId) {
       await pickCustomer(deepCustomerId);
+    } else {
+      const deepCustomerName = (params.get("customer_name") || "").trim();
+      if (deepCustomerName) {
+        if (els.customerName) els.customerName.value = deepCustomerName;
+        if (els.customerSearch) els.customerSearch.value = deepCustomerName;
+      }
     }
     if (!editId && deepTallyBill && els.tallyBillNo) {
       els.tallyBillNo.value = deepTallyBill;
