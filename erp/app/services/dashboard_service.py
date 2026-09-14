@@ -1151,6 +1151,10 @@ class DashboardService:
         if not source_record_id and not bank_transaction_id:
             return self._no_source_link()
 
+        # Purchase Invoice Amount Paid → bank Credit/Out (SourceTable=GstInvoice).
+        if table in {"gstinvoice", "gst_invoice"}:
+            return self._source_link_for_gst_invoice(int(source_record_id))
+
         # Other Bank/Cash contra legs (Cash Deposit Credit/Out, Debit/In, etc.)
         if table in {"othersbankcashtransaction", "others_bank_cash_transaction"} or (
             not table and bank_transaction_id
@@ -1178,6 +1182,11 @@ class DashboardService:
             )
             if entry_id:
                 return self._source_link_for_bank_cash_entry(entry_id)
+            # Purchase payment bank legs may have SourceType=PURCHASE with SourceTable blank.
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
             # Fall through: SourceRecordID may still be JTCSDailyTransaction.TransactionID
             # even when SourceTable/SourceType was stored with an unexpected label.
 
@@ -1194,6 +1203,9 @@ class DashboardService:
         ).mappings().first()
         if not daily:
             if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
                 oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
                 if oie.get("can_open"):
                     return oie
@@ -1215,10 +1227,73 @@ class DashboardService:
         if entry_id:
             return self._source_link_for_bank_cash_entry(entry_id)
         if bank_transaction_id:
+            purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+            if purchase_link.get("can_open"):
+                return purchase_link
             oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
             if oie.get("can_open"):
                 return oie
         return link
+
+    def _source_link_for_gst_invoice(self, invoice_id: int) -> dict:
+        """Deep-link bank legs posted from Purchase (or Sale) GstInvoice."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 InvoiceID, VoucherType, InvoiceNo
+                FROM dbo.GstInvoice
+                WHERE InvoiceID = :iid
+                """
+            ),
+            {"iid": int(invoice_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        voucher = (row["VoucherType"] or "SALE").strip().upper()
+        iid = int(row["InvoiceID"])
+        if voucher == "PURCHASE":
+            endpoint = "accounting_invoice.invoice_purchase"
+            module = "invoice"
+        else:
+            endpoint = "accounting_invoice.invoice_sale"
+            module = "invoice"
+        base.update(
+            {
+                "source_module": module,
+                "source_module_id": iid,
+                "source_url": url_for(endpoint, edit=iid),
+                "can_open": True,
+                "work_type": "Accounting",
+                "sub_work_type": "Purchase Invoice Payment" if voucher == "PURCHASE" else "Sale / Service Invoice",
+            }
+        )
+        return base
+
+    def _source_link_for_purchase_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Purchase Invoice from bank leg SourceTable/SourceType=PURCHASE."""
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 SourceRecordID, SourceTable, SourceType
+                FROM JtcsBankTransaction
+                WHERE JtcsBankTransactionID = :btid
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return self._no_source_link()
+        table = (row["SourceTable"] or "").strip().lower()
+        stype = (row["SourceType"] or "").strip().upper()
+        sid = row["SourceRecordID"]
+        if not sid:
+            return self._no_source_link()
+        if table in {"gstinvoice", "gst_invoice"} or stype == "PURCHASE":
+            return self._source_link_for_gst_invoice(int(sid))
+        return self._no_source_link()
 
     def _source_link_for_oie_bank_txn(self, bank_transaction_id: int) -> dict:
         """Resolve Income/Expense entry from bank leg Remarks / SourceRecordID."""

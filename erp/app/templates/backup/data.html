@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/backup.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/backup.css') }}?v=20260914drive1">
 {% endblock %}
 
 {% block content %}
@@ -42,17 +42,34 @@
       </thead>
       <tbody id="backupGridBody">
         {% for row in backups %}
+        {% set du = row.drive_upload or {} %}
         <tr data-file="{{ row.file_name }}">
           <td><code>{{ row.file_name }}</code></td>
           <td>{{ row.modified_label }}</td>
           <td class="text-end">{{ row.size_label }}</td>
-          <td class="text-end">
+          <td class="text-end backup-actions">
             <a class="btn btn-outline-primary btn-sm" href="{{ url_for('backup.download_backup', kind='database', file_name=row.file_name) }}">
               <i class="bi bi-download"></i> Download
             </a>
+            <button type="button"
+                    class="btn btn-outline-success btn-sm backup-drive-btn"
+                    data-file="{{ row.file_name }}"
+                    data-drive-status="{{ du.upload_status or '' }}">
+              ☁ Upload to Drive
+            </button>
             <button type="button" class="btn btn-outline-danger btn-sm backup-delete-btn" data-file="{{ row.file_name }}">
               <i class="bi bi-trash"></i>
             </button>
+            <div class="backup-drive-status small text-muted mt-1"
+                 data-drive-status-for="{{ row.file_name }}">
+              {% if du.upload_status == 'success' %}
+              Upload successful ✅
+              {% elif du.upload_status == 'failed' %}
+              Upload failed ❌
+              {% elif du.upload_status == 'uploading' %}
+              Uploading… {{ du.progress_percent or 0 }}%
+              {% endif %}
+            </div>
           </td>
         </tr>
         {% else %}
@@ -74,8 +91,13 @@
     listUrl: {{ url_for('backup.list_database_backups') | tojson }},
     downloadBase: {{ url_for('backup.download_backup', kind='database', file_name='__FILE__') | tojson }},
     deleteUrl: {{ url_for('backup.delete_backup', kind='database') | tojson }},
+    driveStatusUrl: {{ url_for('backup.database_drive_status') | tojson }},
+    driveUploadUrl: {{ url_for('backup.upload_database_to_drive') | tojson }},
+    driveJobStatusBase: {{ url_for('backup.upload_database_to_drive_status', job_id='__JOB__') | tojson }},
+    driveConnectUrl: {{ url_for('integration_settings.api_google_drive_connect') | tojson }},
+    returnTo: {{ url_for('backup.data_backup_page') | tojson }},
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/backup.js') }}?v=20260819confirm2"></script>
+<script src="{{ url_for('static', filename='js/backup.js') }}?v=20260914drive1"></script>
 {% endblock %}

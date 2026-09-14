@@ -21,6 +21,7 @@ from app.decorators import (
 )
 from app.extensions import csrf, db
 from app.services.backup_service import BackupService
+from app.services.cloud_backup_upload_service import CloudBackupUploadService
 from app.services.menu_service import MenuService
 
 bp = Blueprint("backup", __name__, url_prefix="/admin/backup")
@@ -365,12 +366,21 @@ def _actor() -> str:
 def data_backup_page():
     service = BackupService()
     menu_service = MenuService()
+    backups = service.list_database_backups()
+    try:
+        uploads = CloudBackupUploadService().latest_upload_map(kind="database", provider="google_drive")
+        for row in backups:
+            row["drive_upload"] = uploads.get(row.get("file_name") or "") or {}
+    except Exception:
+        current_app.logger.exception("Drive upload map skipped on page load")
+        for row in backups:
+            row["drive_upload"] = {}
     return render_template(
         "backup/data.html",
         page_title="Data Backup",
         breadcrumb=menu_service.get_breadcrumb("/admin/backup/data", session.get("role")),
         connection=service.connection_info(),
-        backups=service.list_database_backups(),
+        backups=backups,
     )
 
 
@@ -409,7 +419,17 @@ def restore_backup_page():
 @login_required
 @data_backup_required
 def list_database_backups():
-    rows = BackupService().list_database_backups()
+    service = BackupService()
+    rows = service.list_database_backups()
+    try:
+        uploads = CloudBackupUploadService().latest_upload_map(kind="database", provider="google_drive")
+        for row in rows:
+            meta = uploads.get(row.get("file_name") or "") or {}
+            row["drive_upload"] = meta
+    except Exception:
+        current_app.logger.exception("Drive upload map skipped")
+        for row in rows:
+            row["drive_upload"] = {}
     return jsonify({"ok": True, "rows": rows, "count": len(rows)})
 
 
@@ -478,6 +498,59 @@ def delete_backup(kind: str):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/database/drive-status", methods=["GET"])
+@login_required
+@data_backup_required
+def database_drive_status():
+    return_to = (request.args.get("return_to") or "").strip() or url_for("backup.data_backup_page")
+    try:
+        info = CloudBackupUploadService().provider_status("google_drive", return_to=return_to)
+        return jsonify(info)
+    except Exception as exc:
+        current_app.logger.exception("Drive status failed")
+        return jsonify({"ok": False, "connected": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/database/upload-drive", methods=["POST"])
+@login_required
+@data_backup_required
+def upload_database_to_drive():
+    payload = request.get_json(silent=True) or {}
+    file_name = (payload.get("file_name") or request.form.get("file_name") or "").strip()
+    provider = (payload.get("provider") or "google_drive").strip().lower() or "google_drive"
+    if not file_name:
+        return jsonify({"ok": False, "error": "file_name is required."}), 400
+    return_to = (payload.get("return_to") or "").strip() or url_for("backup.data_backup_page")
+    try:
+        result = CloudBackupUploadService().start_upload(
+            kind="database",
+            file_name=file_name,
+            provider=provider,
+            uploaded_by=_actor(),
+            return_to=return_to,
+        )
+        status = 400 if result.get("needs_oauth") else 200
+        return jsonify(result), status
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        current_app.logger.exception("Drive upload start failed")
+        return jsonify({"ok": False, "error": "Unable to start Google Drive upload."}), 500
+
+
+@bp.route("/api/database/upload-drive/status/<job_id>", methods=["GET"])
+@login_required
+@data_backup_required
+def upload_database_to_drive_status(job_id: str):
+    try:
+        result = CloudBackupUploadService().job_status(job_id)
+        code = 200 if result.get("ok") else 404
+        return jsonify(result), code
+    except Exception as exc:
+        current_app.logger.exception("Drive upload status failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 

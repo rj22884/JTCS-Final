@@ -12,7 +12,11 @@ from app.models.gst_billing import GstInvoice
 from app.models.transactions import JTCSDailyTransaction
 from app.repositories.gst_invoice_repository import GstInvoiceRepository
 from app.repositories.item_master_repository import ItemMasterRepository
-from app.repositories.transaction_repository import DailyTransactionRepository
+from app.repositories.transaction_repository import (
+    BankTransactionRepository,
+    DailyTransactionRepository,
+    MasterRepository,
+)
 from app.services.bank_master_service import BankMasterService
 from app.utils.db_session import persist
 
@@ -316,6 +320,10 @@ class GstInvoiceService:
     BILL_SOURCE_AUTOMATIC = "Automatic"
     BILL_SOURCE_IMPORT = "Import"
     BILL_SOURCES = (BILL_SOURCE_MANUAL, BILL_SOURCE_AUTOMATIC, BILL_SOURCE_IMPORT)
+    # Purchase payment → bank ledger only (never used by Sale / other modules).
+    PURCHASE_BANK_SOURCE_TABLE = "GstInvoice"
+    PURCHASE_BANK_SOURCE_TYPE = "PURCHASE"
+    PURCHASE_BANK_DESCRIPTION = "Purchase Invoice Payment"
 
     @staticmethod
     def normalize_bill_source(value) -> str:
@@ -1105,6 +1113,96 @@ class GstInvoiceService:
             db.session.commit()
         return posted
 
+    def _list_purchase_payment_bank_rows(self, invoice_id: int) -> list:
+        """Bank legs posted only by Purchase Invoice Amount Paid (SourceTable=GstInvoice)."""
+        from app.models.transactions import JtcsBankTransaction
+
+        iid = int(invoice_id)
+        stmt = (
+            select(JtcsBankTransaction)
+            .where(JtcsBankTransaction.SourceTable == self.PURCHASE_BANK_SOURCE_TABLE)
+            .where(JtcsBankTransaction.SourceRecordID == iid)
+            .where(JtcsBankTransaction.SourceType == self.PURCHASE_BANK_SOURCE_TYPE)
+            .order_by(JtcsBankTransaction.JtcsBankTransactionID.asc())
+        )
+        return list(db.session.scalars(stmt).all())
+
+    def _remove_purchase_payment_bank(self, inv: GstInvoice) -> None:
+        """Strict: remove purchase payment bank legs only; never touches Sale / other modules."""
+        voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+        if voucher != self.VOUCHER_PURCHASE:
+            return
+        bank_repo = BankTransactionRepository()
+        for row in self._list_purchase_payment_bank_rows(inv.InvoiceID):
+            bank_repo.delete(row)
+        db.session.flush()
+
+    def _sync_purchase_payment_bank(self, inv: GstInvoice) -> bool:
+        """Post Amount Paid as Credit (Out) on the selected payment bank — PURCHASE only."""
+        voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+        if voucher != self.VOUCHER_PURCHASE:
+            return False
+
+        amount = _q(Decimal(str(getattr(inv, "AmountPaid", None) or 0)))
+        bank_account_id = getattr(inv, "PaymentBankAccountID", None)
+        try:
+            bank_account_id = int(bank_account_id) if bank_account_id not in (None, "") else None
+        except (TypeError, ValueError):
+            bank_account_id = None
+
+        existing = self._list_purchase_payment_bank_rows(inv.InvoiceID)
+        if amount <= 0 or not bank_account_id:
+            if existing:
+                self._remove_purchase_payment_bank(inv)
+                return True
+            return False
+
+        master = MasterRepository()
+        bank_snap = master.resolve_bank_account_by_id(bank_account_id)
+        pay_mode_id = master.resolve_payment_mode_for_bank_account(bank_account_id)
+        txn_date = getattr(inv, "PaymentDate", None) or inv.InvoiceDate
+        supplier = (inv.CustomerName or "").strip() or "Supplier"
+        invoice_no = (inv.InvoiceNo or "").strip()
+        description = self.PURCHASE_BANK_DESCRIPTION
+        remarks = f"{invoice_no} — {supplier}"[:200]
+        created_by = (inv.CreatedBy or "").strip() or "Purchase Invoice"
+        bank_repo = BankTransactionRepository()
+
+        payload = {
+            "JtcsBankAccountID": bank_snap.account_id or 0,
+            "BankName": bank_snap.bank_name,
+            "MaskedAccountNumber": bank_snap.masked_account_number,
+            "TransactionDate": txn_date,
+            "Description": description,
+            "Debit": None,
+            "Credit": amount,
+            "ClosingBalance": Decimal("0"),
+            "ImportedBy": created_by,
+            "ImportedDate": datetime.utcnow(),
+            "Remarks": remarks,
+            "IsLocked": False,
+            "SourceTable": self.PURCHASE_BANK_SOURCE_TABLE,
+            "SourceRecordID": inv.InvoiceID,
+            "SourceType": self.PURCHASE_BANK_SOURCE_TYPE,
+            "SourceID": inv.InvoiceID,
+            "LedgerKind": "PAYMENT",
+            "PaymentModeID": pay_mode_id,
+            "PaymentSequence": 1,
+        }
+
+        if existing:
+            row = existing[0]
+            for key, value in payload.items():
+                if key in {"ImportedBy", "ImportedDate"}:
+                    continue
+                setattr(row, key, value)
+            for extra in existing[1:]:
+                bank_repo.delete(extra)
+            db.session.flush()
+        else:
+            bank_repo.create(payload)
+        return True
+
     def create_record(
         self,
         payload: dict,
@@ -1140,6 +1238,7 @@ class GstInvoiceService:
         def _write() -> dict:
             inv = self.repo.create(header, lines)
             self._sync_sale_daily(inv)
+            self._sync_purchase_payment_bank(inv)
             return self._serialize(inv)
 
         if commit:
@@ -1172,6 +1271,7 @@ class GstInvoiceService:
         def _write() -> dict:
             updated = self.repo.update(inv, header, lines)
             self._sync_sale_daily(updated)
+            self._sync_purchase_payment_bank(updated)
             return self._serialize(updated)
 
         return persist(_write)
@@ -1515,6 +1615,7 @@ class GstInvoiceService:
 
         def _write() -> str:
             self._remove_sale_daily(inv)
+            self._remove_purchase_payment_bank(inv)
             self.repo.delete(inv)
             return "Invoice deleted successfully."
 

@@ -424,6 +424,14 @@
       });
   }
 
+  function bindPreviewReloader() {
+    if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
+      window.JTCSLedgerPreview.setReloader(function () {
+        if (currentKind && currentId) openPreview(currentKind, currentId);
+      });
+    }
+  }
+
   async function openPreview(kind, id) {
     if (!previewModal || !els.previewBody) {
       alert("Preview is not available.");
@@ -436,6 +444,7 @@
     }
     currentKind = kind;
     currentId = String(id);
+    bindPreviewReloader();
     setExportEnabled(false);
     setMaximized(false);
     if (els.previewTitle) els.previewTitle.textContent = "Ledger Preview";
@@ -575,9 +584,5 @@
   loadLedgers();
   loadSummaries();
 
-  if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
-    window.JTCSLedgerPreview.setReloader(function () {
-      if (currentKind && currentId) openPreview(currentKind, currentId);
-    });
-  }
+  bindPreviewReloader();
 })();

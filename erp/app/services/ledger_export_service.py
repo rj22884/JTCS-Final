@@ -626,6 +626,132 @@ class LedgerExportService:
         except Exception:
             db.session.rollback()
 
+    def _ensure_gst_purchase_payment_legs(self, account_id: int) -> None:
+        """Backfill Purchase Invoice Amount Paid as Credit (Out) on this bank only.
+
+        Strict: VoucherType=PURCHASE + PaymentBankAccountID match only.
+        Does not touch Sale invoices or other modules' bank rows.
+        """
+        account_row = db.session.execute(
+            text(
+                """
+                SELECT BankName, AccountNumber, MaskedAccountNumber
+                FROM dbo.JtcsBankAccountMaster
+                WHERE JtcsBankAccountID = :account_id
+                """
+            ),
+            {"account_id": account_id},
+        ).mappings().first()
+        if account_row is None:
+            return
+
+        bank_name = (account_row["BankName"] or "").strip() or "Bank"
+        masked = (
+            (account_row["AccountNumber"] or "").strip()
+            or (account_row["MaskedAccountNumber"] or "").strip()
+            or "NA"
+        )
+        payment_mode = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 PaymentModeID
+                FROM dbo.PaymentModeMaster
+                WHERE BankAccountID = :account_id
+                  AND ISNULL(IsActive, 1) = 1
+                ORDER BY PaymentModeID
+                """
+            ),
+            {"account_id": account_id},
+        ).first()
+        payment_mode_id = int(payment_mode[0]) if payment_mode and payment_mode[0] else None
+
+        try:
+            result = db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.JtcsBankTransaction (
+                        JtcsBankAccountID,
+                        BankName,
+                        MaskedAccountNumber,
+                        TransactionDate,
+                        Description,
+                        Debit,
+                        Credit,
+                        ClosingBalance,
+                        ImportedBy,
+                        ImportedDate,
+                        Remarks,
+                        IsLocked,
+                        SourceTable,
+                        SourceRecordID,
+                        SourceType,
+                        SourceID,
+                        LedgerKind,
+                        PaymentModeID,
+                        PaymentSequence
+                    )
+                    SELECT
+                        :account_id,
+                        :bank_name,
+                        :masked,
+                        ISNULL(i.PaymentDate, i.InvoiceDate),
+                        N'Purchase Invoice Payment',
+                        NULL,
+                        i.AmountPaid,
+                        0,
+                        N'Purchase Invoice',
+                        GETUTCDATE(),
+                        LEFT(
+                            CONCAT(
+                                ISNULL(i.InvoiceNo, N''),
+                                N' — ',
+                                ISNULL(i.CustomerName, N'Supplier')
+                            ),
+                            200
+                        ),
+                        0,
+                        N'GstInvoice',
+                        i.InvoiceID,
+                        N'PURCHASE',
+                        i.InvoiceID,
+                        N'PAYMENT',
+                        :payment_mode_id,
+                        1
+                    FROM dbo.GstInvoice i
+                    WHERE UPPER(LTRIM(RTRIM(ISNULL(i.VoucherType, N'')))) = N'PURCHASE'
+                      AND i.PaymentBankAccountID = :account_id
+                      AND ISNULL(i.AmountPaid, 0) > 0
+                      AND ISNULL(i.PaymentDate, i.InvoiceDate) IS NOT NULL
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.JtcsBankTransaction t
+                            WHERE t.SourceRecordID = i.InvoiceID
+                              AND (
+                                    (
+                                        UPPER(LTRIM(RTRIM(ISNULL(t.SourceTable, N'')))) = N'GSTINVOICE'
+                                        AND UPPER(LTRIM(RTRIM(ISNULL(t.SourceType, N'')))) = N'PURCHASE'
+                                    )
+                                 OR (
+                                        UPPER(LTRIM(RTRIM(ISNULL(t.SourceType, N'')))) = N'PURCHASE'
+                                        AND UPPER(LTRIM(RTRIM(ISNULL(t.Description, N''))))
+                                            = N'PURCHASE INVOICE PAYMENT'
+                                    )
+                              )
+                      )
+                    """
+                ),
+                {
+                    "account_id": account_id,
+                    "bank_name": bank_name[:150],
+                    "masked": masked[:50],
+                    "payment_mode_id": payment_mode_id,
+                },
+            )
+            if result.rowcount:
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     def _append_missing_purpose_purchases(
         self,
         rows: list[dict[str, Any]],
@@ -803,6 +929,7 @@ class LedgerExportService:
             opening = self._money(account["OpeningBalance"])
         wallet = self._wallet_ledger_flags(account_id)
         self._ensure_purpose_purchase_legs(account_id, wallet)
+        self._ensure_gst_purchase_payment_legs(account_id)
         account_where, account_params = self._bank_ledger_account_where(account_id, wallet)
         date_to_next = date_to + timedelta(days=1)
         # Inclusive To Date: datetime rows on date_to itself used to be dropped

@@ -87,6 +87,24 @@ PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
         {"key": "api_key", "label": "API Key", "input": "password"},
         {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
     ],
+    "google_drive": [
+        # OAuth Web Client for Drive backup upload (drive.file scope).
+        # Legacy GENERIC api_key/api_secret remain readable as fallback Client ID/Secret.
+        {"key": "client_id", "label": "OAuth Client ID", "input": "text", "section": "oauth"},
+        {"key": "client_secret", "label": "OAuth Client Secret", "input": "password", "section": "oauth"},
+        {"key": "api_key", "label": "Legacy Client ID / API Key", "input": "password", "hidden": "1"},
+        {"key": "api_secret", "label": "Legacy Client Secret / API Secret", "input": "password", "hidden": "1"},
+        {"key": "oauth_redirect_uri", "label": "OAuth Redirect URI", "input": "readonly", "section": "oauth"},
+        {"key": "connected_email", "label": "Connected Google Account", "input": "readonly", "section": "oauth"},
+        {"key": "refresh_token", "label": "Refresh Token", "input": "password", "hidden": "1"},
+        {"key": "access_token", "label": "Access Token", "input": "password", "hidden": "1"},
+        {"key": "token_expires_at", "label": "Token Expires At (UTC)", "input": "readonly", "hidden": "1"},
+        {"key": "folder_id", "label": "JTCS Backup Folder ID", "input": "readonly", "hidden": "1"},
+        {"key": "folder_name", "label": "Backup Folder Name", "input": "readonly", "hidden": "1"},
+        {"key": "endpoint_url", "label": "Endpoint URL", "input": "text", "hidden": "1"},
+        {"key": "notes", "label": "Notes", "input": "textarea"},
+        {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
+    ],
     "openai": [
         {"key": "api_key", "label": "API Key", "input": "password"},
         {"key": "organization", "label": "Organization", "input": "text"},
