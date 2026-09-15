@@ -19,6 +19,8 @@
     id: document.getElementById("itmId"),
     code: document.getElementById("itmCode"),
     name: document.getElementById("itmName"),
+    subWorkWrap: document.getElementById("itmSubWorkWrap"),
+    subWorkType: document.getElementById("itmSubWorkType"),
     hsn: document.getElementById("itmHsn"),
     hsnSuggest: document.getElementById("itmHsnSuggest"),
     hsnType: document.getElementById("itmHsnType"),
@@ -207,6 +209,13 @@
         escapeHtml(row.item_name) +
         "</td>" +
         "<td>" +
+        (row.sub_work_type
+          ? '<span class="badge text-bg-light border">' +
+            escapeHtml(row.sub_work_type) +
+            "</span>"
+          : "—") +
+        "</td>" +
+        "<td>" +
         escapeHtml(row.chart_group_name || "—") +
         "</td>" +
         "<td>" +
@@ -247,6 +256,18 @@
     });
   }
 
+  function syncSubWorkUi(row) {
+    const fromSub = !!(row && row.from_sub_work && row.sub_work_type);
+    if (els.subWorkWrap) els.subWorkWrap.classList.toggle("d-none", !fromSub);
+    if (els.subWorkType) {
+      els.subWorkType.value = fromSub ? row.sub_work_type || "" : "";
+    }
+    if (els.name) {
+      els.name.readOnly = fromSub;
+      if (fromSub) els.name.value = row.sub_work_type || row.item_name || "";
+    }
+  }
+
   function clearForm() {
     els.form?.reset();
     if (els.id) els.id.value = "";
@@ -265,6 +286,7 @@
     hideHsnSuggest();
     syncGstRateEnabled();
     syncOpeningBalance();
+    syncSubWorkUi(null);
     if (itmDynFields) itmDynFields.apply({});
   }
 
@@ -282,6 +304,7 @@
     if (els.id) els.id.value = String(row.item_id || "");
     if (els.code) els.code.value = row.item_code || "";
     if (els.name) els.name.value = row.item_name || "";
+    syncSubWorkUi(row);
     if (els.hsn) els.hsn.value = row.hsn_sac || "";
     if (els.hsnType) els.hsnType.value = row.hsn_sac_type || "SAC";
     if (els.unit) els.unit.value = row.unit || "NOS";
@@ -438,7 +461,10 @@
     }
     const payload = {
       item_code: els.code?.value || "",
-      item_name: els.name?.value || "",
+      item_name:
+        !(els.subWorkWrap?.classList.contains("d-none")) && (els.subWorkType?.value || "").trim()
+          ? els.subWorkType.value.trim()
+          : els.name?.value || "",
       hsn_sac: hsn,
       hsn_sac_type: els.hsnType?.value || "SAC",
       unit: els.unit?.value || "NOS",

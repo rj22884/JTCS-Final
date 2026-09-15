@@ -12,11 +12,11 @@ from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 bp = Blueprint("masters_work", __name__, url_prefix="/masters/income-expense")
 
 MENU_PATH = "/masters/income-expense"
-MENU_NAME = "Work/Category Master"
+MENU_NAME = "Category Master"
 
 
 def _ensure_menu() -> None:
-    """Ensure one Masters → Work/Category Master row (dedupe legacy duplicates)."""
+    """Ensure one Masters → Category Master row (dedupe legacy duplicates)."""
     from sqlalchemy import text
 
     from app.extensions import db
@@ -39,6 +39,7 @@ def _ensure_menu() -> None:
             WHERE ParentMenuID = @MastersID
               AND (
                     MenuName IN (
+                        N'Category Master',
                         N'Work/Category Master',
                         N'Income/Expense',
                         N'Income Expense',
@@ -47,17 +48,21 @@ def _ensure_menu() -> None:
                     OR MenuURL = N'/masters/income-expense'
                   )
             ORDER BY
-                CASE WHEN MenuName = N'Work/Category Master' THEN 0 ELSE 1 END,
+                CASE
+                    WHEN MenuName = N'Category Master' THEN 0
+                    WHEN MenuName = N'Work/Category Master' THEN 1
+                    ELSE 2
+                END,
                 MenuID;
 
             IF @KeepID IS NOT NULL
             BEGIN
                 UPDATE dbo.MenuMaster
-                SET MenuName = N'Work/Category Master',
+                SET MenuName = N'Category Master',
                     MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-sliders'),
                     MenuURL = N'/masters/income-expense',
                     DisplayOrder = 2,
-                    Description = N'Work / category master (Income, Expense, Misc.)',
+                    Description = N'Category master (Income, Expense, Misc.)',
                     IsActive = 1,
                     RoleName = NULL
                 WHERE MenuID = @KeepID;
@@ -68,6 +73,7 @@ def _ensure_menu() -> None:
                   AND MenuID <> @KeepID
                   AND (
                         MenuName IN (
+                            N'Category Master',
                             N'Work/Category Master',
                             N'Income/Expense',
                             N'Income Expense',
@@ -83,11 +89,11 @@ def _ensure_menu() -> None:
                 )
                 VALUES (
                     @MastersID,
-                    N'Work/Category Master',
+                    N'Category Master',
                     N'bi-sliders',
                     N'/masters/income-expense',
                     2,
-                    N'Work / category master (Income, Expense, Misc.)',
+                    N'Category master (Income, Expense, Misc.)',
                     1,
                     NULL
                 );

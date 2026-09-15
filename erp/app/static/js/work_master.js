@@ -300,7 +300,7 @@
   function openAddModal() {
     clearForm();
     setFormMode("add");
-    if (els.modalTitle) els.modalTitle.textContent = "Add Work / Category";
+    if (els.modalTitle) els.modalTitle.textContent = "Add Category";
     modal?.show();
     els.workName?.focus();
   }
@@ -325,7 +325,7 @@
       fillForm(record);
       setSelected(targetId);
       setFormMode("edit");
-      if (els.modalTitle) els.modalTitle.textContent = "Edit Work / Category";
+      if (els.modalTitle) els.modalTitle.textContent = "Edit Category";
       modal?.show();
       els.workName?.focus();
     } catch (err) {
@@ -467,7 +467,7 @@
 
   els.editModeBtn?.addEventListener("click", function () {
     setFormMode("edit");
-    if (els.modalTitle) els.modalTitle.textContent = "Edit Work / Category";
+    if (els.modalTitle) els.modalTitle.textContent = "Edit Category";
     els.workName?.focus();
   });
 

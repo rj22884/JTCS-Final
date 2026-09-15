@@ -55,13 +55,13 @@
       <i class="bi bi-arrow-clockwise"></i> Refresh
     </button>
     <button type="button" class="btn btn-primary btn-sm" id="workMasterAddCategoryBtn">
-      <i class="bi bi-plus-lg"></i> Add Work / Category
+      <i class="bi bi-plus-lg"></i> Add Category
     </button>
     <span class="small text-muted ms-auto" id="workMasterCount">{{ initial_rows|length }} record{% if initial_rows|length != 1 %}s{% endif %}</span>
   </div>
 
   <p class="small text-muted mb-3">
-    Work/Category Master — manage work heads used in Others activity screens. Each row is marked as <strong>Income</strong>, <strong>Expense</strong>, or <strong>Misc.</strong>.
+    Category Master — manage work heads used in Others activity screens. Each row is marked as <strong>Income</strong>, <strong>Expense</strong>, or <strong>Misc.</strong>.
   </p>
   <div id="workMasterStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
@@ -90,7 +90,7 @@
   <div class="modal-dialog modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title" id="workMasterModalTitle">Work / Category</h5>
+        <h5 class="modal-title" id="workMasterModalTitle">Category</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <form id="workMasterForm" novalidate>

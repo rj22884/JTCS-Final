@@ -42,10 +42,12 @@
   </div>
 
   <p class="small text-muted mb-3">
-    <strong>Work / Category</strong> (jaise <strong>Car</strong>, <strong>NSDL</strong>)
-    <strong>Masters → Work/Category Master</strong> se aate hain — Sub Work na hone par bhi yahan list mein dikhte hain.
-    <strong>New-Pan</strong> / <strong>Pan Correction</strong> unke <strong>Sub Work Type</strong> hain.
-    Misc. entries par Chart of Account Group nahi dikhta.
+    Sub Work Master ab sirf <strong>Misc.</strong> ke liye hai
+    (jaise <strong>NSDL</strong> → <strong>New-Pan</strong>).
+    <strong>Chart of Account Group</strong> Category Master se parent Work pe set value se auto aata hai.
+    Save pe linked <strong>Item</strong> Item Master me banega (invoice ke liye).
+    <strong>Income</strong> / <strong>Expense</strong> heads sirf
+    <strong>Masters → Category Master</strong> me manage hote hain.
   </p>
   <div id="swStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
@@ -111,20 +113,21 @@
             <select class="form-select" id="swWorkId" required>
               <option value="">-- Select Work --</option>
             </select>
-            <div class="form-text">Works come from Masters → Work/Category Master for the selected Ledger Kind.</div>
+            <div class="form-text">Works come from Masters → Category Master (Misc.).</div>
           </div>
 
           <div class="mb-3" id="swUnderGroupWrap">
             <label class="form-label" for="swUnderGroup">Chart of Account Group</label>
             <input type="text" class="form-control" id="swUnderGroup" readonly
-                   placeholder="Set on Work/Category Master">
-            <div class="form-text">Inherited from the selected Work (Chart of Account Group). Not used for Misc.</div>
+                   placeholder="From Category Master (selected Work)">
+            <div class="form-text">Automatically from Category Master for the selected Work — not editable here.</div>
           </div>
 
           <div class="mb-0">
             <label class="form-label" for="swSubWorkType">Sub Work Type *</label>
             <input type="text" class="form-control" id="swSubWorkType" maxlength="100" required
                    placeholder="e.g. New-Pan">
+            <div class="form-text">Unique across all works. Item Master me linked item banega (invoice ke liye).</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -213,7 +216,7 @@
         });
       }
       var wrap = document.getElementById("swUnderGroupWrap");
-      if (wrap) wrap.classList.toggle("d-none", want === "Misc.");
+      if (wrap) wrap.classList.remove("d-none");
       return count;
     };
     document.addEventListener("change", function (event) {
@@ -230,5 +233,5 @@
     }
   })();
 </script>
-<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260906car1"></script>
+<script src="{{ url_for('static', filename='js/sub_work_master.js') }}?v=20260915chart1"></script>
 {% endblock %}

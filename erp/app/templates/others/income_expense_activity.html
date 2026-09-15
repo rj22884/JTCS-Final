@@ -1,5 +1,10 @@
 {% extends 'layouts/base.html' %}
 
+{% set api_bp = api_blueprint|default('others_income_expense') %}
+{% set force_kind = force_ledger_kind|default('') %}
+{% set hide_misc = hide_misc|default(false) %}
+{% set records_title = module_title|default('Income / Expense Records') %}
+
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
@@ -7,7 +12,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="oie-activity-page">
+<div class="oie-activity-page{% if force_kind %} oie-force-kind{% endif %}">
   <div class="jtcs-card mb-2 py-2 px-3">
     <div class="d-flex flex-wrap align-items-center gap-2">
       <button type="button" class="btn btn-primary btn-sm" id="oieNewEntryBtn">
@@ -38,7 +43,7 @@
         <span class="oie-stat-split-item">Bank <strong id="oieStatExpenseBank">0.00</strong></span>
       </div>
     </button>
-    <button type="button" class="oie-stat-card oie-stat-misc" data-kind-filter="Misc." title="Filter Misc.">
+    <button type="button" class="oie-stat-card oie-stat-misc{% if hide_misc and not force_kind %} d-none{% endif %}" data-kind-filter="Misc." title="Filter Misc.">
       <div class="oie-stat-label">Misc.</div>
       <div class="oie-stat-value" id="oieStatMiscAmount">0.00</div>
       <div class="oie-stat-meta"><span id="oieStatMiscCount">0</span> record(s)</div>
@@ -62,7 +67,9 @@
           <option value="">All</option>
           <option value="Income">Income</option>
           <option value="Expense">Expense</option>
+          {% if not hide_misc or force_kind == 'Misc.' %}
           <option value="Misc.">Misc.</option>
+          {% endif %}
         </select>
       </div>
       <div class="col-md-2">
@@ -85,14 +92,14 @@
 
   <div class="jtcs-card oie-grid-panel mb-2">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-      <div class="oie-section-head mb-0">Income / Expense Records</div>
+      <div class="oie-section-head mb-0">{{ records_title }}</div>
     </div>
     <div class="table-responsive oie-grid-wrap">
       <table class="table table-sm table-hover table-striped align-middle mb-0" id="oieDataGrid">
         <thead>
           <tr>
             <th class="oie-sortable" data-sort-key="bill_no">Bill No. <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
-            <th class="oie-sortable" data-sort-key="ledger_kind">Type <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable{% if force_kind == 'Misc.' %} d-none{% endif %}" data-sort-key="ledger_kind">Type <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="work_date">Work Date <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable oie-col-category" data-sort-key="work_name">Category <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable oie-col-account" data-sort-key="account_label">Account <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
@@ -107,7 +114,7 @@
         <tbody id="oieDataGridBody"></tbody>
       </table>
     </div>
-    <div id="oieGridEmpty" class="small text-muted py-3 d-none">No income / expense records yet.</div>
+    <div id="oieGridEmpty" class="small text-muted py-3 d-none">No {{ records_title|lower }} yet.</div>
     <div class="oie-pager d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
       <div class="d-flex align-items-center gap-2">
         <label class="form-label mb-0 small text-muted" for="oiePageSize">Rows</label>
@@ -154,7 +161,7 @@
             </div>
             <div class="col-md-4">
               <fieldset class="oie-entry-type-fieldset">
-                <legend class="oie-required">Income / Expense / Misc.</legend>
+                <legend class="oie-required">{% if hide_misc and not force_kind %}Income / Expense{% else %}Income / Expense / Misc.{% endif %}</legend>
                 <div class="d-flex flex-wrap gap-4">
                   <div class="form-check">
                     <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindIncome"
@@ -166,11 +173,13 @@
                            value="Expense">
                     <label class="form-check-label" for="LedgerKindExpense">Expense</label>
                   </div>
+                  {% if not hide_misc or force_kind == 'Misc.' %}
                   <div class="form-check">
                     <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindMisc"
                            value="Misc.">
                     <label class="form-check-label" for="LedgerKindMisc">Misc.</label>
                   </div>
+                  {% endif %}
                 </div>
               </fieldset>
             </div>
@@ -179,10 +188,10 @@
           <div class="oie-entry-section mb-3">
             <div class="oie-entry-section-title">
               <span class="oie-entry-section-num">2</span>
-              <span id="oieCategoryLabel">Income Categories</span>
+              <span id="oieCategoryLabel">Category Master</span>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <label class="form-label oie-required mb-0">Categories</label>
+              <label class="form-label oie-required mb-0">Category Master</label>
               <button type="button" class="btn btn-sm oie-entry-add-payment" id="oieAddCategoryBtn">
                 <i class="bi bi-plus-lg"></i> Add Category
               </button>
@@ -369,17 +378,19 @@
   window.OIE_EXPENSE_WORK_TYPES = {{ expense_work_types | tojson }};
   window.OIE_MISC_WORK_TYPES = {{ misc_work_types | tojson }};
   window.OIE_BANK_ACCOUNTS = {{ payment_modes | tojson }};
-  window.OIE_GRID_URL = {{ url_for('others_income_expense.grid') | tojson }};
-  window.OIE_SAVE_URL = {{ url_for('others_income_expense.save_record') | tojson }};
-  window.OIE_NEXT_BILL_URL = {{ url_for('others_income_expense.next_bill_no') | tojson }};
-  window.OIE_SUB_WORKS_URL = {{ url_for('others_income_expense.sub_works') | tojson }};
-  window.OIE_RECORD_URL = {{ url_for('others_income_expense.record', entry_id=0) | tojson }};
-  window.OIE_DELETE_URL = {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }};
-  window.OIE_CUSTOMER_SEARCH_URL = {{ url_for('others_income_expense.customer_search') | tojson }};
-  window.OIE_CUSTOMER_CREATE_URL = {{ url_for('others_income_expense.customer_create') | tojson }};
+  window.OIE_GRID_URL = {{ url_for(api_bp ~ '.grid') | tojson }};
+  window.OIE_SAVE_URL = {{ url_for(api_bp ~ '.save_record') | tojson }};
+  window.OIE_NEXT_BILL_URL = {{ url_for(api_bp ~ '.next_bill_no') | tojson }};
+  window.OIE_SUB_WORKS_URL = {{ url_for(api_bp ~ '.sub_works') | tojson }};
+  window.OIE_RECORD_URL = {{ url_for(api_bp ~ '.record', entry_id=0) | tojson }};
+  window.OIE_DELETE_URL = {{ url_for(api_bp ~ '.delete_record', entry_id=0) | tojson }};
+  window.OIE_CUSTOMER_SEARCH_URL = {{ url_for(api_bp ~ '.customer_search') | tojson }};
+  window.OIE_CUSTOMER_CREATE_URL = {{ url_for(api_bp ~ '.customer_create') | tojson }};
   window.OIE_CSRF = {{ csrf_token() | tojson }};
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+  window.OIE_FORCE_LEDGER_KIND = {{ force_kind | tojson }};
+  window.OIE_HIDE_MISC = {{ hide_misc | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260915tally1"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260915notransfer1"></script>
 {% endblock %}

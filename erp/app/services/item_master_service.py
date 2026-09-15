@@ -3,8 +3,11 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.extensions import db
+from app.models.transactions import WorkTypeMaster
 from app.repositories.item_master_repository import ItemMasterRepository
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import (
@@ -116,7 +119,33 @@ class ItemMasterService:
         except ValueError as exc:
             raise ValueError("Opening balance date is invalid.") from exc
 
-    def _serialize(self, row) -> dict:
+    def _sub_work_map_by_item_id(self) -> dict[int, dict]:
+        """Map ItemID → Sub Work Type (from WorkTypeMaster link)."""
+        mapping: dict[int, dict] = {}
+        try:
+            rows = db.session.scalars(
+                select(WorkTypeMaster).where(
+                    WorkTypeMaster.ItemID.is_not(None),
+                    WorkTypeMaster.ActiveStatus == True,  # noqa: E712
+                )
+            ).all()
+        except Exception:
+            return mapping
+        for row in rows:
+            try:
+                item_id = int(row.ItemID)
+            except (TypeError, ValueError):
+                continue
+            if not item_id:
+                continue
+            mapping[item_id] = {
+                "sub_work_type": (row.SubWorkType or "").strip(),
+                "work_name": (row.WorkTypeName or "").strip(),
+                "work_type_id": int(row.WorkTypeID),
+            }
+        return mapping
+
+    def _serialize(self, row, *, sub_work: dict | None = None) -> dict:
         gst_applicable = bool(getattr(row, "GstApplicable", True))
         opening_qty = getattr(row, "OpeningQty", None)
         opening_rate = getattr(row, "OpeningRate", None)
@@ -131,6 +160,8 @@ class ItemMasterService:
         profile = DynamicMasterFieldService().profile_key_for_group(chart_group_id)
         is_fixed_asset = profile == "fixed_assets"
         is_investment = profile == "investments"
+        linked = sub_work or {}
+        sub_work_type = linked.get("sub_work_type") or ""
         return {
             "item_id": row.ItemID,
             "item_code": row.ItemCode or "",
@@ -157,11 +188,26 @@ class ItemMasterService:
             "is_active": bool(row.IsActive),
             "created_at": row.CreatedAt.isoformat() if row.CreatedAt else "",
             "updated_at": row.UpdatedAt.isoformat() if row.UpdatedAt else "",
+            "sub_work_type": sub_work_type,
+            "from_sub_work": bool(sub_work_type),
+            "sub_work_name": linked.get("work_name") or "",
+            "work_type_id": linked.get("work_type_id"),
         }
 
     def list_records(self, *, search: str | None = None, active_only: bool = False) -> list[dict]:
+        # Item Master = standalone items + Sub Work Master (auto-linked for invoices).
+        try:
+            from app.services.sub_work_master_service import SubWorkMasterService
+
+            SubWorkMasterService().ensure_item_links()
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+        sub_map = self._sub_work_map_by_item_id()
         return [
-            self._serialize(row)
+            self._serialize(row, sub_work=sub_map.get(int(row.ItemID)))
             for row in self.repo.list_all(search=search, active_only=active_only)
         ]
 
@@ -186,7 +232,8 @@ class ItemMasterService:
         row = self.repo.get_by_id(item_id)
         if row is None:
             raise ValueError("Item not found.")
-        return self._serialize(row)
+        sub_map = self._sub_work_map_by_item_id()
+        return self._serialize(row, sub_work=sub_map.get(int(row.ItemID)))
 
     def _parse(self, payload: dict, *, existing=None) -> dict:
         code = (payload.get("item_code") or payload.get("ItemCode") or "").strip().upper()
@@ -337,6 +384,11 @@ class ItemMasterService:
         if row is None:
             raise ValueError("Item not found.")
         data = self._parse(payload, existing=row)
+        # Sub Work linked items: Item Name stays locked to Sub Work Type.
+        sub_map = self._sub_work_map_by_item_id()
+        linked = sub_map.get(int(item_id))
+        if linked and linked.get("sub_work_type"):
+            data["ItemName"] = linked["sub_work_type"][:200]
         other = self.repo.find_by_code(data["ItemCode"])
         if other and other.ItemID != row.ItemID:
             raise ValueError(f"Item Code '{data['ItemCode']}' already exists.")
@@ -344,7 +396,7 @@ class ItemMasterService:
         def _write() -> dict:
             updated = self.repo.update(row, {**data, "UpdatedAt": datetime.utcnow()})
             self._sync_fixed_asset(updated)
-            return self._serialize(updated)
+            return self._serialize(updated, sub_work=linked)
 
         try:
             return persist(_write)

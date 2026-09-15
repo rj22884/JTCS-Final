@@ -161,9 +161,9 @@
   }
 
   function syncChartGroupVisibility() {
-    const misc = isMiscKind(selectedLedgerKind());
-    els.underGroupWrap?.classList.toggle("d-none", misc);
-    if (misc && els.underGroup) els.underGroup.value = "";
+    // Chart of Account always comes from Category Master (parent Work) — show for Misc too.
+    els.underGroupWrap?.classList.remove("d-none");
+    syncUnderGroupFromWork();
   }
 
   function setLedgerKind(kind) {
@@ -183,12 +183,8 @@
 
   function syncUnderGroupFromWork() {
     if (!els.underGroup || !els.workId) return;
-    if (isMiscKind(selectedLedgerKind())) {
-      els.underGroup.value = "";
-      return;
-    }
     const opt = els.workId.selectedOptions && els.workId.selectedOptions[0];
-    const label = (opt && opt.dataset.underGroup) || "";
+    const label = (opt && (opt.dataset.underGroup || opt.getAttribute("data-under-group"))) || "";
     els.underGroup.value = label || "";
   }
 
@@ -266,9 +262,8 @@
     if (!els.body) return;
     cachedRows = rows || [];
     els.body.innerHTML = "";
-    const hideChart = isMiscKind(els.filterKind?.value);
     document.querySelectorAll(".sw-col-chart").forEach(function (el) {
-      el.classList.toggle("d-none", hideChart);
+      el.classList.remove("d-none");
     });
     if (!cachedRows.length) {
       els.empty?.classList.remove("d-none");
@@ -309,7 +304,7 @@
         escapeHtml(row.work_name || row.work_type_name) +
         "</td>" +
         '<td class="sw-col-chart">' +
-        escapeHtml(isMiscKind(row.ledger_kind) ? "—" : row.under_group || "—") +
+        escapeHtml(row.under_group || "—") +
         "</td>" +
         "<td>" +
         escapeHtml(row.sub_work_type || "—") +
@@ -326,15 +321,15 @@
     });
   }
 
-  function isDuplicateSubWork(workName, subWorkType, excludeId) {
-    const name = String(workName || "").trim().toLowerCase();
+  function isDuplicateSubWork(subWorkType, excludeId) {
     const sub = String(subWorkType || "").trim().toLowerCase();
-    if (!name || !sub) return false;
+    if (!sub) return false;
     return cachedRows.some(function (row) {
+      if (!row.work_type_id) return false;
+      if (row.active_status === false) return false;
       if (excludeId && String(row.work_type_id) === String(excludeId)) return false;
-      const rowName = String(row.work_name || row.work_type_name || "").trim().toLowerCase();
       const rowSub = String(row.sub_work_type || "").trim().toLowerCase();
-      return rowName === name && rowSub === sub;
+      return rowSub === sub;
     });
   }
 
@@ -417,7 +412,7 @@
       sub_work_type: (els.subWorkType?.value || "").trim(),
     };
     if (!payload.work_id) {
-      alert("Select Work Name (from Work Master).");
+      alert("Select Work Name (from Category Master).");
       els.workId?.focus();
       return;
     }
@@ -426,9 +421,11 @@
       els.subWorkType?.focus();
       return;
     }
-    if (isDuplicateSubWork(payload.work_name, payload.sub_work_type, id)) {
+    if (isDuplicateSubWork(payload.sub_work_type, id)) {
       alert(
-        "'" + payload.sub_work_type + "' already exists under '" + payload.work_name + "'."
+        "Sub Work Type '" +
+          payload.sub_work_type +
+          "' already exists. Duplicate Sub Work Type is not allowed."
       );
       els.subWorkType?.focus();
       return;

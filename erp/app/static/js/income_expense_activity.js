@@ -122,9 +122,55 @@
   }
 
   function currentLedgerKind() {
+    if (window.OIE_FORCE_LEDGER_KIND) {
+      return String(window.OIE_FORCE_LEDGER_KIND);
+    }
     if (els.ledgerExpense && els.ledgerExpense.checked) return "Expense";
     if (els.ledgerMisc && els.ledgerMisc.checked) return "Misc.";
     return "Income";
+  }
+
+  function applyForcedLedgerKindUi() {
+    const forced = window.OIE_FORCE_LEDGER_KIND ? String(window.OIE_FORCE_LEDGER_KIND) : "";
+    if (window.OIE_HIDE_MISC && !forced) {
+      els.statsRow?.querySelectorAll(".oie-stat-misc").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+      if (els.gridFilterKind) {
+        Array.from(els.gridFilterKind.options).forEach(function (opt) {
+          if (opt.value === "Misc.") opt.hidden = true;
+        });
+        if (els.gridFilterKind.value === "Misc.") els.gridFilterKind.value = "";
+      }
+      if (els.ledgerMisc) {
+        els.ledgerMisc.closest(".form-check")?.classList.add("d-none");
+        if (els.ledgerMisc.checked && els.ledgerIncome) els.ledgerIncome.checked = true;
+      }
+      const legend = form.querySelector(".oie-entry-type-fieldset legend");
+      if (legend) legend.textContent = "Income / Expense";
+    }
+    if (!forced) return;
+    if (forced === "Misc." && els.ledgerMisc) {
+      els.ledgerMisc.checked = true;
+    } else if (forced === "Expense" && els.ledgerExpense) {
+      els.ledgerExpense.checked = true;
+    } else if (els.ledgerIncome) {
+      els.ledgerIncome.checked = true;
+    }
+    const typeFieldset = form.querySelector(".oie-entry-type-fieldset");
+    if (typeFieldset) typeFieldset.classList.add("d-none");
+    if (els.statsRow && forced === "Misc.") {
+      els.statsRow.querySelectorAll(".oie-stat-income, .oie-stat-expense").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+    }
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = forced;
+      Array.from(els.gridFilterKind.options).forEach(function (opt) {
+        if (opt.value && opt.value !== forced) opt.hidden = true;
+      });
+      els.gridFilterKind.closest(".col-md-2")?.classList.add("d-none");
+    }
   }
 
   function isMiscKind() {
@@ -198,15 +244,15 @@
   }
 
   function categoryLabelText(kind) {
-    if (kind === "Expense") return "Expense Categories";
-    if (kind === "Misc.") return "Misc. Categories";
-    return "Income Categories";
+    if (kind === "Expense") return "Category Master (Expense)";
+    if (kind === "Misc.") return "Category Master (Misc.)";
+    return "Category Master (Income)";
   }
 
   function categorySelectLabelText(kind) {
-    if (kind === "Expense") return "Expense Category *";
-    if (kind === "Misc.") return "Work / Category *";
-    return "Income Category *";
+    if (kind === "Expense") return "Category *";
+    if (kind === "Misc.") return "Category *";
+    return "Category *";
   }
 
   function syncLedgerLabels() {
@@ -246,7 +292,7 @@
     select.required = true;
     const optEmpty = document.createElement("option");
     optEmpty.value = "";
-    optEmpty.textContent = "-- Select --";
+    optEmpty.textContent = "-- Select Category --";
     select.appendChild(optEmpty);
 
     const types = workTypesForKind(currentLedgerKind());
@@ -1471,19 +1517,21 @@
           "<td>" +
           escapeHtml(row.bill_no) +
           "</td>" +
-          "<td>" +
-          ledgerBadge(row.ledger_kind) +
-          (row.ledger_kind === "Misc."
-            ? (row.work_done
-                ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? '<td class="d-none"></td>'
+            : "<td>" +
+              ledgerBadge(row.ledger_kind) +
+              (row.ledger_kind === "Misc."
+                ? (row.work_done
+                    ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                    : "") +
+                  (row.tally_bill_generated
+                    ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                    : row.work_done
+                      ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                      : "")
                 : "") +
-              (row.tally_bill_generated
-                ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
-                : row.work_done
-                  ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
-                  : "")
-            : "") +
-          "</td>" +
+              "</td>") +
           "<td>" +
           escapeHtml(formatDisplayDate(row.work_date)) +
           "</td>" +
@@ -1491,6 +1539,16 @@
           escapeHtml(category) +
           '">' +
           escapeHtml(category) +
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? (row.work_done
+                ? ' <span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                : "") +
+              (row.tally_bill_generated
+                ? ' <span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                : row.work_done
+                  ? ' <span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                  : "")
+            : "") +
           "</td>" +
           '<td class="oie-account-cell">' +
           escapeHtml(row.account_label || "—") +
@@ -1535,7 +1593,11 @@
 
   function clearGridFilters() {
     if (els.gridSearch) els.gridSearch.value = "";
-    if (els.gridFilterKind) els.gridFilterKind.value = "";
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = window.OIE_FORCE_LEDGER_KIND
+        ? String(window.OIE_FORCE_LEDGER_KIND)
+        : "";
+    }
     if (els.gridDateFrom) els.gridDateFrom.value = "";
     if (els.gridDateTo) els.gridDateTo.value = "";
     sortState = { key: "work_date", dir: "desc" };
@@ -1548,7 +1610,13 @@
     return fetch(url, { headers: { Accept: "application/json" } })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
-        allGridRows = data.rows || [];
+        let rows = data.rows || [];
+        if (window.OIE_HIDE_MISC && !window.OIE_FORCE_LEDGER_KIND) {
+          rows = rows.filter(function (row) {
+            return row.ledger_kind !== "Misc.";
+          });
+        }
+        allGridRows = rows;
         renderGridFromStart();
       })
       .catch(function (err) {
@@ -1939,6 +2007,8 @@
 
   resetCategoryLines([{}]);
   resetPaymentLines([{}]);
+  applyForcedLedgerKindUi();
+  syncLedgerLabels();
   loadGrid();
   if (window.OIE_AUTO_LOAD_ENTRY_ID) {
     var autoId = parseInt(window.OIE_AUTO_LOAD_ENTRY_ID, 10);

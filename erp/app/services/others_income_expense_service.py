@@ -582,9 +582,14 @@ class OthersIncomeExpenseService:
             labels[bill_no] = ", ".join(seen) if seen else "—"
         return labels
 
-    def list_entries(self, *, ledger_kind: str | None = None) -> list[dict]:
+    def list_entries(
+        self,
+        *,
+        ledger_kind: str | None = None,
+        ledger_kinds: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict]:
         self.entry_repo.ensure_schema()
-        rows = self.entry_repo.list_recent(ledger_kind=ledger_kind)
+        rows = self.entry_repo.list_recent(ledger_kind=ledger_kind, ledger_kinds=ledger_kinds)
         entries = [self._entry_dict(row) for row in rows]
         account_map = self._account_labels_by_bill([item.get("bill_no") or "" for item in entries])
         for item in entries:

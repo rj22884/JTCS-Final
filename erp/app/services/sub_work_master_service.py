@@ -17,7 +17,10 @@ from app.utils.master_delete_guard import (
 
 
 class SubWorkMasterService:
-    LEDGER_KINDS = ("Income", "Expense", "Misc.")
+    # Income / Expense heads belong only in Category Master.
+    # Sub Work Master is Misc. (e.g. NSDL → New-Pan) only, linked to Item Master.
+    LEDGER_KINDS = ("Misc.",)
+    ALLOWED_KINDS = ("Misc.",)
 
     def __init__(self):
         self._entry_repo = OthersIncomeExpenseRepository()
@@ -26,8 +29,44 @@ class SubWorkMasterService:
 
     def _ensure(self) -> None:
         self._entry_repo.ensure_schema()
+        self._ensure_item_link_column()
         self._seed_misc_defaults()
         self._ensure_unique_name_sub()
+        self._backfill_linked_items()
+
+    def ensure_item_links(self) -> None:
+        """Public entry: Item Master list also syncs Sub Work → Item rows."""
+        self._ensure_item_link_column()
+        self._backfill_linked_items()
+
+    def _ensure_item_link_column(self) -> None:
+        try:
+            db.session.execute(
+                text(
+                    """
+                    IF COL_LENGTH(N'dbo.WorkTypeMaster', N'ItemID') IS NULL
+                        ALTER TABLE dbo.WorkTypeMaster ADD ItemID INT NULL;
+                    """
+                )
+            )
+            db.session.execute(
+                text(
+                    """
+                    IF COL_LENGTH(N'dbo.WorkTypeMaster', N'ItemID') IS NOT NULL
+                       AND OBJECT_ID(N'dbo.ItemMaster', N'U') IS NOT NULL
+                       AND NOT EXISTS (
+                            SELECT 1 FROM sys.foreign_keys
+                            WHERE name = N'FK_WorkTypeMaster_Item'
+                       )
+                        ALTER TABLE dbo.WorkTypeMaster
+                        ADD CONSTRAINT FK_WorkTypeMaster_Item
+                            FOREIGN KEY (ItemID) REFERENCES dbo.ItemMaster (ItemID);
+                    """
+                )
+            )
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
 
     def _group_name_map(self) -> dict[int, str]:
         if self._group_name_cache is not None:
@@ -36,17 +75,41 @@ class SubWorkMasterService:
         try:
             from app.services.chart_group_service import ChartGroupService
 
-            for item in ChartGroupService().list_active_for_dropdown():
+            svc = ChartGroupService()
+            for item in svc.list_active_for_dropdown() or []:
                 try:
                     gid = int(item.get("group_id") or 0)
                 except (TypeError, ValueError):
                     continue
                 if gid:
+                    mapping[gid] = (
+                        item.get("group_name") or item.get("label") or mapping.get(gid) or ""
+                    )
+            # Include inactive/all groups so inherited Category Master values still resolve.
+            for item in svc.list_records() or []:
+                try:
+                    gid = int(item.get("group_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if gid and gid not in mapping:
                     mapping[gid] = item.get("group_name") or item.get("label") or ""
         except Exception:
-            mapping = {}
+            pass
         self._group_name_cache = mapping
         return mapping
+
+    def _under_group_for_work(self, work: WorkMaster | None) -> tuple[int | None, str | None]:
+        if work is None:
+            return None, None
+        gid = getattr(work, "ChartGroupID", None)
+        try:
+            gid = int(gid) if gid is not None else None
+        except (TypeError, ValueError):
+            gid = None
+        if not gid:
+            return None, None
+        name = (self._group_name_map().get(gid) or "").strip()
+        return gid, name or None
 
     def _seed_misc_defaults(self) -> None:
         seeds = (
@@ -163,23 +226,15 @@ class SubWorkMasterService:
             "is_work_only": True,
         }
 
-    def _under_group_for_work(self, work: WorkMaster | None) -> tuple[int | None, str | None]:
-        if work is None:
-            return None, None
-        gid = getattr(work, "ChartGroupID", None)
-        try:
-            gid = int(gid) if gid is not None else None
-        except (TypeError, ValueError):
-            gid = None
-        if not gid:
-            return None, None
-        name = self._group_name_map().get(gid)
-        return gid, name or None
-
     def _row_dict(self, row: WorkTypeMaster, work_lookup: dict[str, WorkMaster] | None = None) -> dict:
         lookup = work_lookup if work_lookup is not None else self._work_lookup()
         parent = lookup.get((row.WorkTypeName or "").strip())
         chart_group_id, under_group = self._under_group_for_work(parent)
+        item_id = getattr(row, "ItemID", None)
+        try:
+            item_id = int(item_id) if item_id is not None else None
+        except (TypeError, ValueError):
+            item_id = None
         return {
             "work_type_id": row.WorkTypeID,
             "work_id": parent.WorkID if parent else None,
@@ -190,6 +245,7 @@ class SubWorkMasterService:
             "chart_group_id": chart_group_id,
             "under_group": under_group,
             "active_status": bool(row.ActiveStatus),
+            "item_id": item_id,
         }
 
     def list_ledger_kinds(self) -> list[str]:
@@ -209,17 +265,17 @@ class SubWorkMasterService:
         """Active WorkMaster rows for a LedgerKind (for cascading dropdown)."""
         self._ensure()
         kind = self._kind_of(ledger_kind)
-        if not kind:
+        if kind not in self.ALLOWED_KINDS:
             return []
         return [self._serialize_work(row) for row in self._works_for_kind(kind)]
 
     def list_work_groups(self) -> dict[str, list[dict]]:
-        """WorkMaster grouped by LedgerKind for the form/filter."""
+        """WorkMaster grouped by LedgerKind for the form/filter (Misc. only)."""
         self._ensure()
         groups = {kind: [] for kind in self.LEDGER_KINDS}
         for row in self._work_repo.list_active():
             kind = self._kind_of(row.LedgerKind)
-            if not kind:
+            if kind not in self.ALLOWED_KINDS:
                 continue
             groups[kind].append(self._serialize_work(row))
         return groups
@@ -243,7 +299,10 @@ class SubWorkMasterService:
         needle = (search or "").strip().lower()
         for row in rows:
             item = self._row_dict(row, lookup)
-            if kind and self._kind_of(item["ledger_kind"]) != kind:
+            item_kind = self._kind_of(item["ledger_kind"])
+            if item_kind not in self.ALLOWED_KINDS:
+                continue
+            if kind and item_kind != kind:
                 # Keep orphans only when no ledger filter
                 continue
             if kind is None and not item["ledger_kind"]:
@@ -270,7 +329,7 @@ class SubWorkMasterService:
         }
         for work in self._work_repo.list_records():
             work_kind = self._kind_of(work.LedgerKind)
-            if not work_kind:
+            if work_kind not in self.ALLOWED_KINDS:
                 continue
             if kind and work_kind != kind:
                 continue
@@ -361,6 +420,11 @@ class SubWorkMasterService:
             raise ValueError("Select Ledger Kind and Work from Work Master.")
 
         parent_kind = self._kind_of(parent.LedgerKind)
+        if parent_kind not in self.ALLOWED_KINDS:
+            raise ValueError(
+                "Sub Work Master only allows Misc. works. "
+                "Income / Expense heads belong in Masters → Category Master."
+            )
         if ledger_kind and parent_kind != ledger_kind:
             raise ValueError(
                 f"Work '{parent.WorkName}' belongs to '{parent_kind}', not '{ledger_kind}'."
@@ -386,28 +450,320 @@ class SubWorkMasterService:
             stmt = stmt.where(WorkTypeMaster.WorkTypeID != exclude_id)
         return db.session.scalars(stmt).first()
 
+    def _find_by_sub_work_type(
+        self,
+        sub_work_type: str,
+        *,
+        exclude_id: int | None = None,
+        active_only: bool = True,
+    ) -> WorkTypeMaster | None:
+        """Sub Work Type must be unique across all works (case-insensitive)."""
+        sub = (sub_work_type or "").strip()
+        if not sub:
+            return None
+        stmt = select(WorkTypeMaster).where(
+            func.lower(WorkTypeMaster.SubWorkType) == sub.lower()
+        )
+        if active_only:
+            stmt = stmt.where(WorkTypeMaster.ActiveStatus == True)  # noqa: E712
+        if exclude_id is not None:
+            stmt = stmt.where(WorkTypeMaster.WorkTypeID != exclude_id)
+        return db.session.scalars(stmt).first()
+
+    def _assert_sub_work_type_unique(
+        self,
+        sub_work_type: str,
+        *,
+        exclude_id: int | None = None,
+    ) -> None:
+        other = self._find_by_sub_work_type(sub_work_type, exclude_id=exclude_id, active_only=True)
+        if other is None:
+            return
+        parent = (other.WorkTypeName or "").strip() or "another work"
+        raise ValueError(
+            f"Sub Work Type '{sub_work_type}' already exists under '{parent}'. "
+            "Duplicate Sub Work Type is not allowed."
+        )
+
+    @staticmethod
+    def _suggest_item_code(work_name: str, sub_work_type: str) -> str:
+        import re
+
+        from app.repositories.item_master_repository import ItemMasterRepository
+
+        raw = f"{work_name}-{sub_work_type}".upper()
+        base = re.sub(r"[^A-Z0-9]+", "-", raw).strip("-")[:36] or "SW-ITEM"
+        repo = ItemMasterRepository()
+        if not repo.find_by_code(base):
+            return base
+        for idx in range(2, 1000):
+            suffix = f"-{idx}"
+            candidate = (base[: 40 - len(suffix)] + suffix)[:40]
+            if not repo.find_by_code(candidate):
+                return candidate
+        return (base[:36] + "-X")[:40]
+
+    def _default_item_chart_group_id(self, preferred_id: int | None = None) -> int:
+        from app.services.chart_group_service import ChartGroupService
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        groups = ChartGroupService().list_active_for_dropdown() or []
+        dyn = DynamicMasterFieldService()
+        try:
+            dyn.annotate_groups(groups)
+        except Exception:
+            pass
+
+        if preferred_id:
+            for g in groups:
+                try:
+                    if int(g.get("group_id") or 0) == int(preferred_id):
+                        return int(preferred_id)
+                except (TypeError, ValueError):
+                    pass
+
+        # Prefer a simple income/service-style group (not fixed asset / investment).
+        for g in groups:
+            profile = (g.get("dyn_profile") or "").strip().lower()
+            if profile in {"fixed_assets", "investments"}:
+                continue
+            try:
+                gid = int(g.get("group_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if gid > 0:
+                return gid
+
+        for g in groups:
+            try:
+                gid = int(g.get("group_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if gid > 0:
+                return gid
+        raise ValueError(
+            "Cannot create linked Item: add at least one active Chart of Account Group in Chart of Group Master."
+        )
+
+    def _upsert_linked_item(
+        self,
+        *,
+        sub_work_type: str,
+        work_name: str,
+        preferred_chart_group_id: int | None = None,
+        existing_item_id: int | None = None,
+    ) -> dict:
+        """Create/update Item Master silently for invoice use — no Sub Work UI fields."""
+        from app.models.gst_billing import ItemMaster
+        from app.services.item_master_service import ItemMasterService
+
+        item_svc = ItemMasterService()
+        item_name = (sub_work_type or "").strip()
+        if not item_name:
+            raise ValueError("Sub Work Type is required.")
+
+        if existing_item_id:
+            try:
+                existing = item_svc.get_record(existing_item_id)
+            except ValueError:
+                existing = None
+            if existing:
+                sync = dict(existing)
+                sync["item_name"] = item_name[:200]
+                sync["is_active"] = "1"
+                # Keep code / rates / HSN as already set in Item Master.
+                return item_svc.update_record(existing_item_id, sync)
+
+        # Reuse an existing Item with the same name (case-insensitive) when possible.
+        matched = db.session.scalars(
+            select(ItemMaster).where(func.lower(ItemMaster.ItemName) == item_name.lower())
+        ).first()
+        if matched is not None:
+            sync = item_svc._serialize(matched)
+            sync["item_name"] = item_name[:200]
+            sync["is_active"] = "1"
+            return item_svc.update_record(int(matched.ItemID), sync)
+
+        item_code = self._suggest_item_code(work_name, item_name)
+        chart_group_id = self._default_item_chart_group_id(preferred_chart_group_id)
+        return item_svc.create_record(
+            {
+                "item_code": item_code,
+                "item_name": item_name[:200],
+                "hsn_sac": "9983",
+                "hsn_sac_type": "SAC",
+                "unit": "NOS",
+                "chart_group_id": chart_group_id,
+                "default_rate": "0",
+                "gst_applicable": "1",
+                "gst_rate_percent": "18",
+                "opening_qty": "0",
+                "opening_rate": "0",
+                "opening_balance_date": "",
+                "order_no": "100",
+                "description": f"Sub Work: {work_name} / {item_name}"[:500],
+                "is_active": "1",
+            }
+        )
+
+    def _unlinked_sub_work_ids(self) -> list[int]:
+        """Active Misc. Sub Works that still need an ItemMaster link."""
+        from app.models.gst_billing import ItemMaster
+
+        lookup = self._work_lookup()
+        rows = list(
+            db.session.scalars(
+                select(WorkTypeMaster).where(
+                    WorkTypeMaster.ActiveStatus == True,  # noqa: E712
+                )
+            ).all()
+        )
+        need: list[int] = []
+        for row in rows:
+            sub = (row.SubWorkType or "").strip()
+            if not sub:
+                continue
+            parent = lookup.get((row.WorkTypeName or "").strip())
+            kind = self._kind_of(parent.LedgerKind) if parent else None
+            if kind not in self.ALLOWED_KINDS:
+                continue
+            raw_id = getattr(row, "ItemID", None)
+            try:
+                item_id = int(raw_id) if raw_id not in (None, "") else None
+            except (TypeError, ValueError):
+                item_id = None
+            if item_id:
+                linked = db.session.get(ItemMaster, item_id)
+                if linked is not None:
+                    continue
+            need.append(int(row.WorkTypeID))
+        return need
+
+    def _link_one_sub_work_item(self, work_type_id: int) -> None:
+        """Create/link ItemMaster for one Sub Work and store ItemID (fresh session each call)."""
+        row = db.session.get(WorkTypeMaster, work_type_id)
+        if row is None or not row.ActiveStatus:
+            return
+        sub = (row.SubWorkType or "").strip()
+        if not sub:
+            return
+        work_name = (row.WorkTypeName or "").strip()
+        lookup = self._work_lookup()
+        parent = lookup.get(work_name)
+        preferred_chart = None
+        if parent is not None:
+            try:
+                preferred_chart = int(getattr(parent, "ChartGroupID", None) or 0) or None
+            except (TypeError, ValueError):
+                preferred_chart = None
+
+        existing_item_id = None
+        raw_id = getattr(row, "ItemID", None)
+        try:
+            existing_item_id = int(raw_id) if raw_id not in (None, "") else None
+        except (TypeError, ValueError):
+            existing_item_id = None
+
+        item = self._upsert_linked_item(
+            sub_work_type=sub,
+            work_name=work_name,
+            preferred_chart_group_id=preferred_chart,
+            existing_item_id=existing_item_id,
+        )
+        item_id = int(item["item_id"])
+
+        def _write() -> None:
+            fresh = db.session.get(WorkTypeMaster, work_type_id)
+            if fresh is None:
+                return
+            fresh.ItemID = item_id
+            db.session.flush()
+
+        persist(_write)
+
+    def _backfill_linked_items(self) -> None:
+        """One-time-style sync: every Misc. Sub Work gets a row in Item Master."""
+        try:
+            ids = self._unlinked_sub_work_ids()
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            return
+        if not ids:
+            return
+        for work_type_id in ids:
+            try:
+                self._link_one_sub_work_item(work_type_id)
+            except Exception:
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
+
     def create_record(self, payload: dict) -> dict:
         self._ensure()
         parent = self._resolve_parent_work(payload)
         sub_work_type = (payload.get("sub_work_type") or payload.get("SubWorkType") or "").strip()
         if not sub_work_type:
+            # Allow Item Name to drive Sub Work Type
+            sub_work_type = (payload.get("item_name") or payload.get("ItemName") or "").strip()
+        if not sub_work_type:
             raise ValueError("Sub Work Type is required (e.g. New-Pan).")
 
         work_type_name = (parent.WorkName or "").strip()
+        self._assert_sub_work_type_unique(sub_work_type)
         existing = self._find_by_name_sub(work_type_name, sub_work_type)
         if existing and existing.ActiveStatus:
             raise ValueError(
-                f"'{sub_work_type}' already exists under '{work_type_name}' ({parent.LedgerKind})."
+                f"Sub Work Type '{sub_work_type}' already exists under '{work_type_name}'. "
+                "Duplicate Sub Work Type is not allowed."
             )
+        # Prefer reactivating the same Sub Work Type row if it was soft-deleted elsewhere.
+        if existing is None:
+            existing = self._find_by_sub_work_type(
+                sub_work_type, active_only=False
+            )
+            if existing and existing.ActiveStatus:
+                existing = None
+
+        preferred_chart = None
+        try:
+            preferred_chart = int(getattr(parent, "ChartGroupID", None) or 0) or None
+        except (TypeError, ValueError):
+            preferred_chart = None
+
+        existing_id = int(existing.WorkTypeID) if existing is not None else None
+        existing_item_id = None
+        if existing is not None and getattr(existing, "ItemID", None):
+            try:
+                existing_item_id = int(existing.ItemID)
+            except (TypeError, ValueError):
+                existing_item_id = None
+
+        item = self._upsert_linked_item(
+            sub_work_type=sub_work_type,
+            work_name=work_type_name,
+            preferred_chart_group_id=preferred_chart,
+            existing_item_id=existing_item_id,
+        )
+        item_id = int(item["item_id"])
 
         def _write() -> dict:
-            if existing:
-                existing.ActiveStatus = True
-                db.session.flush()
-                return self._row_dict(existing)
+            if existing_id:
+                fresh = db.session.get(WorkTypeMaster, existing_id)
+                if fresh is not None:
+                    fresh.ActiveStatus = True
+                    fresh.ItemID = item_id
+                    fresh.SubWorkType = sub_work_type
+                    fresh.WorkTypeName = work_type_name
+                    db.session.flush()
+                    return self._row_dict(fresh)
             row = WorkTypeMaster(
                 WorkTypeName=work_type_name,
                 SubWorkType=sub_work_type,
+                ItemID=item_id,
                 ActiveStatus=True,
             )
             db.session.add(row)
@@ -437,23 +793,54 @@ class SubWorkMasterService:
             }
         )
         sub_work_type = (
-            payload.get("sub_work_type") or payload.get("SubWorkType") or row.SubWorkType
+            payload.get("sub_work_type")
+            or payload.get("SubWorkType")
+            or payload.get("item_name")
+            or payload.get("ItemName")
+            or row.SubWorkType
         ).strip()
         if not sub_work_type:
             raise ValueError("Sub Work Type is required.")
 
         work_type_name = (parent.WorkName or "").strip()
+        self._assert_sub_work_type_unique(sub_work_type, exclude_id=work_type_id)
         other = self._find_by_name_sub(work_type_name, sub_work_type, exclude_id=work_type_id)
         if other and other.ActiveStatus:
             raise ValueError(
-                f"'{sub_work_type}' already exists under '{work_type_name}' ({parent.LedgerKind})."
+                f"Sub Work Type '{sub_work_type}' already exists under '{work_type_name}'. "
+                "Duplicate Sub Work Type is not allowed."
             )
 
+        existing_item_id = None
+        raw_item_id = getattr(row, "ItemID", None)
+        try:
+            existing_item_id = int(raw_item_id) if raw_item_id not in (None, "") else None
+        except (TypeError, ValueError):
+            existing_item_id = None
+
+        preferred_chart = None
+        try:
+            preferred_chart = int(getattr(parent, "ChartGroupID", None) or 0) or None
+        except (TypeError, ValueError):
+            preferred_chart = None
+
+        item = self._upsert_linked_item(
+            sub_work_type=sub_work_type,
+            work_name=work_type_name,
+            preferred_chart_group_id=preferred_chart,
+            existing_item_id=existing_item_id,
+        )
+        item_id = int(item["item_id"])
+
         def _write() -> dict:
-            row.WorkTypeName = work_type_name
-            row.SubWorkType = sub_work_type
+            fresh = db.session.get(WorkTypeMaster, work_type_id)
+            if fresh is None or not fresh.ActiveStatus:
+                raise ValueError("Sub work not found.")
+            fresh.WorkTypeName = work_type_name
+            fresh.SubWorkType = sub_work_type
+            fresh.ItemID = item_id
             db.session.flush()
-            return self._row_dict(row)
+            return self._row_dict(fresh)
 
         try:
             return persist(_write)
@@ -487,6 +874,7 @@ class SubWorkMasterService:
                 },
             ],
         )
+        linked_item_id = getattr(row, "ItemID", None)
 
         def _write() -> str:
             row.ActiveStatus = False
@@ -494,7 +882,19 @@ class SubWorkMasterService:
             return "Sub work deleted successfully."
 
         try:
-            return persist(_write)
+            message = persist(_write)
         except IntegrityError as exc:
             raise_if_integrity_in_use(exc, label)
             raise
+
+        if linked_item_id:
+            try:
+                from app.services.item_master_service import ItemMasterService
+
+                item_svc = ItemMasterService()
+                existing_item = item_svc.get_record(int(linked_item_id))
+                existing_item["is_active"] = "0"
+                item_svc.update_record(int(linked_item_id), existing_item)
+            except Exception:
+                pass
+        return message

@@ -23,11 +23,27 @@ RESERVED_PATHS = {
     "resume",
     "other-login",
     "fps-login",
+    "activities",
 }
 
 
 def _render_builtin_module(page_path: str):
     normalized = (page_path or "").strip().strip("/").lower()
+    if normalized in {
+        "activities/income_expense_new",
+        "activities/income-expense-new",
+    }:
+        from app.routes.income_expense_new import index as income_expense_new_index
+
+        return income_expense_new_index()
+    if normalized in {
+        "activities/miscellaneous",
+        "activities/misc_new",
+        "activities/misc-new",
+    }:
+        from app.routes.miscellaneous import index as miscellaneous_index
+
+        return miscellaneous_index()
     if normalized == "masters/bank":
         from app.routes.bank_master import index as bank_master_index
 

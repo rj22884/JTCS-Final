@@ -497,6 +497,31 @@ class OthersIncomeExpenseRepository:
                 """
             )
         )
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'Transferred') IS NOT NULL
+                BEGIN
+                    DECLARE @df_oie_xfer sysname;
+                    DECLARE @sql_oie_xfer nvarchar(400);
+                    SELECT @df_oie_xfer = dc.name
+                    FROM sys.default_constraints dc
+                    INNER JOIN sys.columns c
+                        ON c.default_object_id = dc.object_id
+                       AND c.object_id = dc.parent_object_id
+                    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.OthersIncomeExpenseMaster')
+                      AND c.name = N'Transferred';
+                    IF @df_oie_xfer IS NOT NULL
+                    BEGIN
+                        SET @sql_oie_xfer = N'ALTER TABLE dbo.OthersIncomeExpenseMaster DROP CONSTRAINT '
+                            + QUOTENAME(@df_oie_xfer);
+                        EXEC sys.sp_executesql @sql_oie_xfer;
+                    END
+                    ALTER TABLE dbo.OthersIncomeExpenseMaster DROP COLUMN Transferred;
+                END
+                """
+            )
+        )
         self.session.commit()
         self._schema_ready = True
 
@@ -671,7 +696,13 @@ class OthersIncomeExpenseRepository:
         seq = int(match.group(2)) + 1
         return f"{prefix}-{date_part}/{seq:03d}"
 
-    def list_recent(self, *, ledger_kind: str | None = None, limit: int | None = None) -> list[OthersIncomeExpenseMaster]:
+    def list_recent(
+        self,
+        *,
+        ledger_kind: str | None = None,
+        ledger_kinds: list[str] | tuple[str, ...] | None = None,
+        limit: int | None = None,
+    ) -> list[OthersIncomeExpenseMaster]:
         self.ensure_schema()
         stmt = (
             select(OthersIncomeExpenseMaster)
@@ -686,6 +717,8 @@ class OthersIncomeExpenseRepository:
         )
         if ledger_kind:
             stmt = stmt.where(WorkMaster.LedgerKind == ledger_kind)
+        elif ledger_kinds:
+            stmt = stmt.where(WorkMaster.LedgerKind.in_(list(ledger_kinds)))
         stmt = stmt.order_by(
             OthersIncomeExpenseMaster.WorkDate.desc(),
             OthersIncomeExpenseMaster.EntryID.desc(),

@@ -149,4 +149,5 @@ class WorkTypeMaster(db.Model):
     WorkTypeID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     WorkTypeName: Mapped[str] = mapped_column(Unicode(100), nullable=False)
     SubWorkType: Mapped[str] = mapped_column(Unicode(100), nullable=False)
+    ItemID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ActiveStatus: Mapped[bool] = mapped_column(nullable=False, default=True)

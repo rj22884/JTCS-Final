@@ -26,7 +26,7 @@ _TABLE_LABELS = {
     "FollowupWorkflowStage": "Follow-up Stage Master",
     "GstInvoice": "GST Invoice",
     "GstInvoiceLine": "GST Invoice Line",
-    "WorkMaster": "Work / Category Master",
+    "WorkMaster": "Category Master",
     "WorkTypeMaster": "Sub Work Master",
     "PrintingScanMaster": "Printing & Scanning",
     "OthersIncomeExpenseMaster": "Income / Expense",
