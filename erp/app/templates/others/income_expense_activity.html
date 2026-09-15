@@ -227,28 +227,14 @@
                 <input class="form-check-input" type="checkbox" name="TallyBillGenerated" value="1"
                        id="oieTallyBillGenerated" disabled>
                 <label class="form-check-label" for="oieTallyBillGenerated">Tally Bill Generated</label>
-                <button type="button" class="btn btn-outline-primary btn-sm ms-1 oie-auto-bill-btn d-none"
-                        id="oieAutoBillBtn">
-                  Generate Automated Bill
-                </button>
               </div>
             </div>
             <div class="oie-tally-bill-wrap d-none mt-2" id="oieTallyBillWrap">
               <div class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-6">
                   <label class="form-label" for="oieTallyBillNo">Tally Bill Number</label>
                   <input type="text" class="form-control" id="oieTallyBillNo" name="TallyBillNo"
                          maxlength="50" placeholder="Bill / invoice number">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="oieTallyBillDate">Bill Date</label>
-                  <input type="date" class="form-control" id="oieTallyBillDate" name="TallyBillDate"
-                         value="{{ default_date }}">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="oieTallyBillAmount">Bill Amount (₹)</label>
-                  <input type="number" class="form-control" id="oieTallyBillAmount" name="TallyBillAmount"
-                         min="0" step="0.01" placeholder="0.00">
                 </div>
               </div>
             </div>
@@ -395,5 +381,5 @@
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260914oie1"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260915tally1"></script>
 {% endblock %}

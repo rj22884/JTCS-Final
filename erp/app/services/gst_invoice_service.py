@@ -503,13 +503,8 @@ class GstInvoiceService:
         date_to: date | None = None,
         voucher_type: str | None = None,
     ) -> list[dict]:
-        try:
-            self.backfill_automatic_invoices(limit=25)
-        except Exception:
-            try:
-                current_app.logger.exception("Automatic invoice backfill skipped")
-            except Exception:
-                pass
+        # Automatic invoice backfill disabled — Sales Invoice is a separate module;
+        # followup/OIE/ration no longer auto-create Sale / Service Invoice rows.
         vt = self.normalize_voucher_type(voucher_type) if voucher_type else None
         return [
             self._serialize(inv, lines=[])

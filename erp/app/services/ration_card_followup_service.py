@@ -586,10 +586,9 @@ class RationCardFollowupService:
         if tally_bill:
             if not tally_bill_no:
                 raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
-            if not tally_bill_amount or tally_bill_amount <= 0:
-                raise ValueError("Bill amount is required when Tally Bill Generated is checked.")
-            if not tally_bill_date:
-                tally_bill_date = work_date
+            # Date / Amount removed from UI — Sales module will own billing later.
+            tally_bill_date = None
+            tally_bill_amount = None
         else:
             tally_bill_no = None
             tally_bill_date = None
@@ -681,25 +680,6 @@ class RationCardFollowupService:
                 )
             elif existing_daily is not None:
                 self._remove_daily_transaction(existing_daily)
-
-            if payment_received and tally_bill and tally_bill_no:
-                from app.services.gst_invoice_service import GstInvoiceService
-
-                inv_customer_name = (
-                    (fps_customer or {}).get("customer_name") or fps_label
-                )
-                GstInvoiceService().ensure_automatic_invoice(
-                    tally_bill_no=tally_bill_no,
-                    customer_name=inv_customer_name,
-                    bill_amount=tally_bill_amount or amount,
-                    invoice_date=tally_bill_date or work_date,
-                    customer_id=(fps_customer or {}).get("customer_id"),
-                    contact_mobile=None,
-                    particulars=f"Ration Card Followup — {fps_label}"[:300],
-                    notes="Automatic from Ration Card Followup (payment received).",
-                    created_by=created_by or "Automatic",
-                    commit=False,
-                )
 
             if daily is not None:
                 message = (

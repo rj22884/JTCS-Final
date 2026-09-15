@@ -113,16 +113,8 @@
       if (!tally) els.paymentReceived.checked = false;
     }
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
-    els.autoBillBtn?.classList.toggle("d-none", !tally);
     if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
       els.tallyBillNo.value = (els.billNo.value || "").trim();
-    }
-    if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
-      els.tallyBillDate.value = window.RCF_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
-    }
-    if (tally && els.tallyBillAmount && !(els.tallyBillAmount.value || "").trim()) {
-      const amt = parseFloat(els.amount?.value || "0");
-      if (amt > 0) els.tallyBillAmount.value = amt.toFixed(2);
     }
     const paymentOn = isPaymentReceivedChecked();
     if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
@@ -134,7 +126,7 @@
       const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
       if (lines.length === 1 && getPaymentTotal() <= 0) {
         const amtInput = lines[0].querySelector(".oie-payment-amount");
-        const amt = parseFloat(els.amount?.value || els.tallyBillAmount?.value || "0");
+        const amt = parseFloat(els.amount?.value || "0");
         if (amtInput && amt > 0) amtInput.value = amt.toFixed(2);
       }
       updatePaymentSummary();
@@ -561,52 +553,8 @@
       if (!(els.tallyBillNo?.value || "").trim()) {
         return "Tally bill number is required when Tally Bill Generated is checked.";
       }
-      if (!(parseFloat(els.tallyBillAmount?.value || "0") > 0)) {
-        return "Bill amount is required when Tally Bill Generated is checked.";
-      }
     }
     return validatePaymentLines();
-  }
-
-  function openAutomatedBill() {
-    const params = new URLSearchParams();
-    const customerName = (els.dealerName?.value || "").trim();
-    if (customerName) {
-      params.set("customer_name", customerName);
-    }
-    const tallyNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
-    if (tallyNo) params.set("tally_bill_no", tallyNo);
-    const billAmount = (els.tallyBillAmount?.value || els.amount?.value || "").trim();
-    if (billAmount) params.set("bill_amount", billAmount);
-    const billDate = (els.tallyBillDate?.value || els.workDate?.value || "").trim();
-    if (billDate) params.set("bill_date", billDate);
-    const url = "/accounting/invoice?" + params.toString();
-    const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
-    const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));
-    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
-    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
-    const features = [
-      "width=" + width,
-      "height=" + height,
-      "left=" + left,
-      "top=" + top,
-      "menubar=yes",
-      "toolbar=yes",
-      "location=yes",
-      "status=yes",
-      "resizable=yes",
-      "scrollbars=yes",
-    ].join(",");
-    const win = window.open(url, "jtcsAccountingInvoiceWindow", features);
-    if (!win) {
-      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
-      return;
-    }
-    try {
-      win.focus();
-    } catch (e) {
-      /* ignore */
-    }
   }
 
   function saveEntry() {
@@ -984,7 +932,7 @@
   els.addPaymentBtn?.addEventListener("click", function () {
     addPaymentLine({});
   });
-  els.autoBillBtn?.addEventListener("click", openAutomatedBill);
+  // Automated bill generation removed — Sales Invoice module is separate.
   els.billNo?.addEventListener("input", function () {
     billNoTouched = true;
   });

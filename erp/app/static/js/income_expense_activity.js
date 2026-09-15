@@ -159,16 +159,8 @@
     }
     const tally = isTallyChecked();
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
-    els.autoBillBtn?.classList.toggle("d-none", !tally);
     if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
       els.tallyBillNo.value = (els.billNo.value || "").trim();
-    }
-    if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
-      els.tallyBillDate.value = window.OIE_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
-    }
-    if (tally && els.tallyBillAmount && !(els.tallyBillAmount.value || "").trim()) {
-      const cat = getCategoryTotal();
-      if (cat > 0) els.tallyBillAmount.value = cat.toFixed(2);
     }
     const paymentOn = isPaymentActive();
     if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
@@ -1692,69 +1684,11 @@
     if (!(els.tallyBillNo?.value || "").trim()) {
       return "Tally bill number is required when Tally Bill Generated is checked.";
     }
-    const billAmount = parseFloat(els.tallyBillAmount?.value || "0");
-    if (!billAmount || billAmount <= 0) {
-      return "Bill amount is required when Tally Bill Generated is checked.";
-    }
     if (!(els.customerName?.value || "").trim()) {
       return "Customer name is required when Tally Bill Generated is checked.";
     }
     return null;
   }
-
-  function openAutomatedBill() {
-    const customerId = (els.customerId?.value || "").trim();
-    if (!customerId) {
-      alert("Please select a customer first.");
-      return;
-    }
-    const params = new URLSearchParams();
-    params.set("customer_id", customerId);
-    const customerName = (els.customerName?.value || "").trim();
-    if (customerName) params.set("customer_name", customerName);
-    const tallyNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
-    if (tallyNo) params.set("tally_bill_no", tallyNo);
-    const billAmount = (els.tallyBillAmount?.value || "").trim();
-    if (billAmount) params.set("bill_amount", billAmount);
-    const billDate = (els.tallyBillDate?.value || els.workDate?.value || "").trim();
-    if (billDate) params.set("bill_date", billDate);
-    const url = "/accounting/invoice?" + params.toString();
-    const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
-    const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));
-    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
-    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
-    const features = [
-      "width=" + width,
-      "height=" + height,
-      "left=" + left,
-      "top=" + top,
-      "menubar=yes",
-      "toolbar=yes",
-      "location=yes",
-      "status=yes",
-      "resizable=yes",
-      "scrollbars=yes",
-    ].join(",");
-    const win = window.open(url, "jtcsAccountingInvoiceWindow", features);
-    if (!win) {
-      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
-      return;
-    }
-    try {
-      win.focus();
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  window.OIE_applyBillingResult = function (data) {
-    if (!data) return;
-    if (els.tallyBillNo && data.bill_no) els.tallyBillNo.value = data.bill_no;
-    if (els.tallyBillAmount && data.bill_amount != null) els.tallyBillAmount.value = data.bill_amount;
-    if (els.tallyBillDate && data.bill_date) els.tallyBillDate.value = data.bill_date;
-    if (els.tallyBill) els.tallyBill.checked = true;
-    syncMiscWorkflow();
-  };
 
   function saveEntry() {
     const categoryError = validateCategoryLines();
@@ -1981,7 +1915,6 @@
 
   els.workDone?.addEventListener("change", syncMiscWorkflow);
   els.tallyBill?.addEventListener("change", syncMiscWorkflow);
-  els.autoBillBtn?.addEventListener("click", openAutomatedBill);
 
   if (els.gridBody) {
     els.gridBody.addEventListener("click", function (event) {

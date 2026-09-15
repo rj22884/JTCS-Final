@@ -1669,10 +1669,20 @@ class LedgerReportService:
                             stamp_id=int(stamp_id) if stamp_id else None,
                             reference=line.get("bill") or line.get("reference"),
                         )
-                        if not link.get("can_open") and line.get("obc_entry_id"):
+                        # Sales Invoice module is separate going forward — never deep-link it.
+                        if (link or {}).get("source_module") in {"invoice", "gst_invoice"}:
+                            link = None
+                        wt = (line.get("work_type") or "").strip().upper()
+                        sw = (line.get("sub_work_type") or "").strip()
+                        if wt == "ACCOUNTING" and sw == "Sale / Service Invoice":
+                            link = None
+                        if not (link and link.get("can_open")) and line.get("obc_entry_id"):
                             link = dash._source_link_for_bank_cash_entry(int(line["obc_entry_id"]))
                 except Exception:
                     link = None
+            # Final guard: never expose Sales Invoice edit links from ledger preview.
+            if link and (link.get("source_module") or "") in {"invoice", "gst_invoice"}:
+                link = None
             lines.append(self._decorate_line(out, link=link))
         period = self._period_fields(data.get("date_from"), data.get("date_to"))
         return {

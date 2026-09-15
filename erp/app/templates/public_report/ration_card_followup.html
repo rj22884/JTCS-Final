@@ -158,10 +158,6 @@
                 <input class="form-check-input" type="checkbox" name="TallyBillGenerated" value="1"
                        id="rcfTallyBillGenerated" disabled>
                 <label class="form-check-label" for="rcfTallyBillGenerated">Tally Bill Generated</label>
-                <button type="button" class="btn btn-outline-primary btn-sm ms-1 oie-auto-bill-btn d-none"
-                        id="rcfAutoBillBtn">
-                  Generate Automated Bill
-                </button>
               </div>
               <div class="form-check form-check-inline oie-stage-item">
                 <input class="form-check-input" type="checkbox" name="PaymentReceived" value="1"
@@ -171,20 +167,10 @@
             </div>
             <div class="oie-tally-bill-wrap d-none mt-2" id="rcfTallyBillWrap">
               <div class="row g-3">
-                <div class="col-md-4">
+                <div class="col-md-6">
                   <label class="form-label" for="rcfTallyBillNo">Tally Bill Number</label>
                   <input type="text" class="form-control" id="rcfTallyBillNo" name="TallyBillNo"
                          maxlength="50" placeholder="Bill / invoice number">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="rcfTallyBillDate">Bill Date</label>
-                  <input type="date" class="form-control" id="rcfTallyBillDate" name="TallyBillDate"
-                         value="{{ default_date }}">
-                </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="rcfTallyBillAmount">Bill Amount (₹)</label>
-                  <input type="number" class="form-control" id="rcfTallyBillAmount" name="TallyBillAmount"
-                         min="0" step="0.01" placeholder="0.00">
                 </div>
               </div>
             </div>
@@ -246,5 +232,5 @@
   window.RCF_DEFAULT_DATE = {{ default_date | tojson }};
   window.RCF_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ration_card_followup.js') }}?v=20260914rcf3"></script>
+<script src="{{ url_for('static', filename='js/ration_card_followup.js') }}?v=20260915tally1"></script>
 {% endblock %}

@@ -834,13 +834,12 @@ class OthersIncomeExpenseService:
         if str(tally_bill_amount_raw).strip():
             tally_bill_amount = self._decimal(tally_bill_amount_raw)
 
-        if tally_bill:
+        if (tally_bill):
             if not tally_bill_no:
                 raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
-            if not tally_bill_amount or tally_bill_amount <= 0:
-                raise ValueError("Bill amount is required when Tally Bill Generated is checked.")
-            if not tally_bill_date:
-                tally_bill_date = work_date
+            # Date / Amount fields removed from UI — keep null (Sales module will own billing).
+            tally_bill_date = None
+            tally_bill_amount = None
         else:
             tally_bill_no = None
             tally_bill_date = None
@@ -945,33 +944,7 @@ class OthersIncomeExpenseService:
 
             daily = None
             bank_ids: list[int] = []
-            # Misc + Tally Bill: Automatic GST invoice owns customer SaleAmount.
-            # Create it before payment posting, and keep OIE daily receipt-only so
-            # invoice reconcile does not rename/delete the payment link.
-            post_sale_on_daily = not (
-                ledger_kind == self.LEDGER_MISC and tally_bill and bool(tally_bill_no)
-            )
-            if (
-                payment_received
-                and tally_bill
-                and tally_bill_no
-                and ledger_kind == self.LEDGER_MISC
-            ):
-                from app.services.gst_invoice_service import GstInvoiceService
-
-                GstInvoiceService().ensure_automatic_invoice(
-                    tally_bill_no=tally_bill_no,
-                    customer_name=(customer_name or "").strip() or "Customer",
-                    bill_amount=tally_bill_amount or amount,
-                    invoice_date=tally_bill_date or work_date,
-                    customer_id=customer_id,
-                    contact_mobile=(mobile_number or "").strip() or None,
-                    particulars=f"Others / Misc — {work_label}"[:300],
-                    notes="Automatic from Others Income/Expense (payment received).",
-                    created_by=created_by or "Automatic",
-                    commit=False,
-                )
-
+            # Sales Invoice module is separate — do not create Automatic GST invoices from OIE.
             if payment_lines:
                 daily, bank_ids = self._repost_transactions(
                     bill_no=row.BillNo,
@@ -984,9 +957,8 @@ class OthersIncomeExpenseService:
                     created_by=created_by,
                     existing_daily=existing_daily,
                     ledger_kind=ledger_kind,
-                    post_sale_on_daily=post_sale_on_daily,
+                    post_sale_on_daily=True,
                 )
-                # Keep canonical SubWorkType so Bank Received / Edit / search stay linked.
                 if daily is not None:
                     daily.WorkType = self.WORK_TYPE
                     daily.SubWorkType = f"{self.SUB_WORK_TYPE} - {work_label}"

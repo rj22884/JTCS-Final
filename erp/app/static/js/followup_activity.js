@@ -912,18 +912,14 @@
       if (!(els.billNo?.value || "").trim()) {
         return "Tally bill number is required when Tally Bill Generated is checked.";
       }
-      const billAmount = parseFloat(els.billAmount?.value || "0");
-      if (!billAmount || billAmount <= 0) {
-        return "Bill amount is required when Tally Bill Generated is checked.";
-      }
     }
     if (isStageChecked("payment_received")) {
       if (!(els.billNo?.value || "").trim()) {
         return "Tally bill number is required before marking Payment Received.";
       }
-      const billAmount = parseFloat(els.billAmount?.value || "0");
-      if (!billAmount || billAmount <= 0) {
-        return "Bill amount is required for Payment Received.";
+      const payTotal = getPaymentTotal();
+      if (!payTotal || payTotal <= 0) {
+        return "Add at least one payment amount for Payment Received.";
       }
     }
     return null;
@@ -935,7 +931,6 @@
     const paymentChecked = isStageChecked("payment_received");
     els.itrFiledWrap?.classList.toggle("d-none", !itrChecked);
     els.tallyBillWrap?.classList.toggle("d-none", !tallyChecked);
-    els.autoBillBtn?.classList.toggle("d-none", !tallyChecked);
     els.paymentWrap?.classList.toggle("d-none", !paymentChecked);
     if (paymentChecked && !els.paymentLines?.querySelector(".fu-payment-line")) {
       resetPaymentLines([]);
@@ -2188,7 +2183,7 @@
     if (event.target.classList.contains("fu-stage-check")) syncWorkflowPanels();
   });
 
-  els.autoBillBtn?.addEventListener("click", openBillingPage);
+  // Automated bill generation removed — Sales Invoice module is separate.
   els.addPaymentBtn?.addEventListener("click", function () { addPaymentLine({}); });
   els.billAmount?.addEventListener("input", updatePaymentSummary);
 

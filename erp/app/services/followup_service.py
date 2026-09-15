@@ -1296,21 +1296,18 @@ class FollowupService:
         if self.module_code == "DSC" and "tally_bill_generated" in stage_codes:
             if not bill_no:
                 raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
-            if bill_amount is None or float(bill_amount) <= 0:
-                raise ValueError("Bill amount is required when Tally Bill Generated is checked.")
 
-        if self.module_code == "ITR" and "payment_received" in stage_codes:
-            if bill_amount is None or float(bill_amount) <= 0:
-                payment_service = FollowupPaymentService(self.module_code)
-                try:
-                    preview_lines = payment_service.parse_payment_lines(payload, Decimal("0"))
-                    derived = sum((line["amount"] for line in preview_lines), Decimal("0"))
-                    if derived > 0:
-                        bill_amount = float(derived)
-                except ValueError:
-                    pass
+        if "payment_received" in stage_codes and (bill_amount is None or float(bill_amount) <= 0):
+            payment_service = FollowupPaymentService(self.module_code)
+            try:
+                preview_lines = payment_service.parse_payment_lines(payload, Decimal("0"))
+                derived = sum((line["amount"] for line in preview_lines), Decimal("0"))
+                if derived > 0:
+                    bill_amount = float(derived)
+            except ValueError:
+                pass
 
-        bill_date = self._parse_optional_date(payload, "bill_date", "BillDate")
+        bill_date = self._parse_optional_date(payload, "bill_date", "BillDate") or work_date
         itr_filed_date = self._parse_optional_date(payload, "itr_filed_date", "ITRFiledDate")
 
         self._assert_itr_entry_not_duplicate(
@@ -1392,24 +1389,7 @@ class FollowupService:
                 payment_service.remove_followup_accounting(old_bill)
 
             amount_value = data.get("BillAmount")
-            if new_bill and "payment_received" in stage_codes:
-                from app.services.gst_invoice_service import GstInvoiceService
-
-                cust_name = (customer.get("CustomerName") or "").strip()
-                GstInvoiceService().ensure_automatic_invoice(
-                    tally_bill_no=new_bill,
-                    customer_name=cust_name,
-                    bill_amount=amount_value,
-                    invoice_date=bill_date or work_date,
-                    customer_id=customer_id,
-                    contact_mobile=(customer.get("MobileNumber") or "").strip() or None,
-                    particulars=f"{self.module_code} Followup — auto bill",
-                    notes=f"Automatic from {self.module_code} follow-up (payment received).",
-                    created_by=created_by or "Automatic",
-                    commit=False,
-                )
             if new_bill:
-                payment_service.accounting.ensure_gst_invoice_posted(new_bill)
                 payment_service.accounting.reconcile_reference(new_bill)
             if new_bill and "tally_bill_generated" not in stage_codes and "payment_received" not in stage_codes:
                 payment_service.accounting.remove_followup_sale(new_bill)
@@ -1417,11 +1397,19 @@ class FollowupService:
             if "payment_received" in stage_codes:
                 if not new_bill:
                     raise ValueError("Tally bill number is required before marking Payment Received.")
-                if amount_value is None or float(amount_value) <= 0:
-                    raise ValueError("Bill amount is required for Payment Received.")
-                payment_lines = payment_service.parse_payment_lines(payload, Decimal(str(amount_value)))
+                payment_lines = payment_service.parse_payment_lines(
+                    payload, Decimal(str(amount_value or 0))
+                )
                 if not payment_lines:
                     raise ValueError("Add at least one payment mode with amount.")
+                received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
+                if amount_value is None or float(amount_value) <= 0:
+                    amount_value = float(received_total)
+                    data["BillAmount"] = amount_value
+                    if row is not None:
+                        row.BillAmount = Decimal(str(amount_value))
+                if amount_value is None or float(amount_value) <= 0:
+                    raise ValueError("Payment amount must be greater than zero.")
                 if self.module_code in ("ITR", "DSC", "GST", "TDS"):
                     for line in payment_lines:
                         if not line.get("payment_date"):

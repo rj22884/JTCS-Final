@@ -34,8 +34,9 @@ from sqlalchemy import text
 from app.extensions import db
 from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 from app.services.payment_accounting_service import (
+    sql_customer_ledger_exclude_sale_invoice,
     sql_customer_receipt_expr,
-    sql_unpaid_followup_exclusion,
+    sql_unpaid_followup_exclusion_for_customer_ledger,
 )
 
 # Brand palette (professional, colourful — not purple/glow AI defaults)
@@ -1629,6 +1630,7 @@ class LedgerExportService:
                     WHERE d.CustomerID = :customer_id
                       AND d.Status = N'Posted'
                       {prior_date_sql}
+                      {sql_customer_ledger_exclude_sale_invoice("d")}
                 ) x
                 """
             ),
@@ -1640,6 +1642,7 @@ class LedgerExportService:
         # Unpaid Followup Tally bills (ITR/GST/etc.) live on FollowupEntryMaster
         # until Payment Received creates JTCSDailyTransaction — include them so
         # Ledger Report matches Followup billing.
+        # Sales Invoice module is detached: do not hide these when GstInvoice exists.
         prior_followup_billed = Decimal("0.00")
         followup_rows: list[Any] = []
         try:
@@ -1665,7 +1668,7 @@ class LedgerExportService:
                           AND LTRIM(RTRIM(f.BillNo)) <> N''
                           AND ISNULL(f.BillAmount, 0) > 0
                           {fu_prior_sql}
-                          {sql_unpaid_followup_exclusion()}
+                          {sql_unpaid_followup_exclusion_for_customer_ledger()}
                         """
                     ),
                     fu_prior_params,
@@ -1700,7 +1703,7 @@ class LedgerExportService:
                           AND ISNULL(f.BillAmount, 0) > 0
                           AND ISNULL(f.BillDate, f.WorkDate) >= :date_from
                           AND ISNULL(f.BillDate, f.WorkDate) <= :date_to
-                          {sql_unpaid_followup_exclusion()}
+                          {sql_unpaid_followup_exclusion_for_customer_ledger()}
                         """
                     ),
                     {
@@ -1764,6 +1767,7 @@ class LedgerExportService:
                       AND d.Status = N'Posted'
                       AND d.TransactionDate >= :date_from
                       AND d.TransactionDate <= :date_to
+                      {sql_customer_ledger_exclude_sale_invoice("d")}
                     ORDER BY d.TransactionDate ASC, d.TransactionID ASC
                     """
                 ),
