@@ -681,3 +681,48 @@
   .inv-html-right { text-align: left; margin-top: 8px; }
   .inv-party-row-2 { grid-template-columns: 1fr; }
 }
+
+/* Automatic / Import temporary bills in Saved Invoices grid */
+.inv-grid-card table tbody tr.inv-row-automatic,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-automatic:nth-of-type(odd) > *,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-automatic:nth-of-type(even) > * {
+  --bs-table-bg: #fff4d6;
+  --bs-table-striped-bg: #fff4d6;
+  --bs-table-hover-bg: #ffe9a8;
+  background-color: #fff4d6 !important;
+}
+
+.inv-grid-card table tbody tr.inv-row-import,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-import:nth-of-type(odd) > *,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-import:nth-of-type(even) > * {
+  --bs-table-bg: #e8f4ff;
+  --bs-table-striped-bg: #e8f4ff;
+  --bs-table-hover-bg: #d4ebff;
+  background-color: #e8f4ff !important;
+}
+
+.inv-bill-source {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.25rem;
+  background: #eef2f6;
+  color: #3d4f63;
+}
+
+.inv-bill-source-automatic {
+  background: #ffe08a;
+  color: #6b4e00;
+}
+
+.inv-bill-source-import {
+  background: #cfe8ff;
+  color: #0b4f86;
+}
+
+.inv-bill-source-manual {
+  background: #e8edf2;
+  color: #445566;
+}

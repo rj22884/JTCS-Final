@@ -1,5 +1,5 @@
 """
-Customer Master — field groups, tabs per customer group, form/DB mapping.
+Customer Master — field mapping, tabs, and form/DB keys.
 """
 
 from app.customer_master.countries import COUNTRIES
@@ -104,6 +104,9 @@ FORM_TO_DB = {
     "opening_balance": "OpeningBalance",
     "opening_balance_date": "OpeningBalanceDate",
     "opening_balance_dr_cr": "OpeningBalanceDrCr",
+    "purchase_date": "PurchaseDate",
+    "depreciation_rate": "DepreciationRate",
+    "appreciation_rate": "AppreciationRate",
 }
 
 DB_TO_FORM = {db: form for form, db in FORM_TO_DB.items()}

@@ -730,6 +730,9 @@
     } else {
       el.classList.remove("is-negative");
     }
+    if (window.JTCSCurrencyNotesMatch && typeof window.JTCSCurrencyNotesMatch.sync === "function") {
+      window.JTCSCurrencyNotesMatch.sync();
+    }
   }
 
   function resetFilters() {

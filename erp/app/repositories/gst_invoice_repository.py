@@ -7,15 +7,18 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.gst_billing import GstInvoice, GstInvoiceLine
+from app.utils.db_session import commit_schema
+from app.utils.tally_bill import normalize_tally_bill_key, tally_bill_compact
 
 
 class GstInvoiceRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if GstInvoiceRepository._schema_ready:
             return
         # ItemMaster may be created by its own repo; invoice tables here.
         self.session.execute(
@@ -101,6 +104,10 @@ class GstInvoiceRepository:
             ("TallyBillNo", "NVARCHAR(50) NULL"),
             ("DailyTransactionID", "INT NULL"),
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
+            (
+                "BillSource",
+                "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_BillSource DEFAULT (N'Manual')",
+            ),
         ):
             self.session.execute(
                 text(
@@ -110,7 +117,7 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
         for col, ddl in (
             ("TaxPeriod", "NVARCHAR(20) NULL"),
             ("Quarter", "NVARCHAR(40) NULL"),
@@ -124,14 +131,15 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
-        self._schema_ready = True
+            commit_schema(self.session)
+        GstInvoiceRepository._schema_ready = True
 
     def find_by_tally_bill_no(self, bill_no: str) -> GstInvoice | None:
         self.ensure_schema()
-        key = (bill_no or "").strip()
+        key = normalize_tally_bill_key(bill_no)
         if not key:
             return None
+        compact = tally_bill_compact(bill_no)
         invoice_id = self.session.execute(
             text(
                 """
@@ -139,11 +147,19 @@ class GstInvoiceRepository:
                 FROM dbo.GstInvoice
                 WHERE TallyBillNo IS NOT NULL
                   AND LTRIM(RTRIM(TallyBillNo)) <> N''
-                  AND UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_no
+                  AND (
+                        UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_key
+                        OR UPPER(
+                            REPLACE(
+                                REPLACE(LTRIM(RTRIM(TallyBillNo)), N' ', N''),
+                                N'-', N''
+                            )
+                        ) = :bill_compact
+                  )
                 ORDER BY InvoiceID DESC
                 """
             ),
-            {"bill_no": key.upper()},
+            {"bill_key": key, "bill_compact": compact},
         ).scalar()
         if not invoice_id:
             return None

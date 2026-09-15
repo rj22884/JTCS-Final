@@ -520,6 +520,7 @@
     [/invoice|sale|purchase|voucher/, "invoice"],
     [/dashboard/, "dashboard"],
     [/crm|lead|follow/, "crm"],
+    [/ration|fps|public report/, "reports"],
     [/report|analys/, "reports"],
     [/master/, "folder"],
     [/account/, "ledger"],

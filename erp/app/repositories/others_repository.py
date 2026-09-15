@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from calendar import monthrange
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from sqlalchemy import text
@@ -15,6 +15,7 @@ from app.models.others import (
     PrintingScanMaster,
     WorkMaster,
 )
+from app.utils.tally_bill import normalize_tally_bill_key, tally_bill_compact
 
 BILL_NO_PATTERNS = {
     "Income": re.compile(r"^S-(\d{8})/(\d+)$", re.IGNORECASE),
@@ -74,6 +75,20 @@ class WorkMasterRepository:
             IF COL_LENGTH(N'dbo.WorkMaster', N'OpeningBalanceDrCr') IS NULL
                 ALTER TABLE dbo.WorkMaster ADD OpeningBalanceDrCr NVARCHAR(2) NULL;
             """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'PurchaseDate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD PurchaseDate DATE NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'DepreciationRate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD DepreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_WorkMaster_DepreciationRate DEFAULT (0);
+            """,
+            """
+            IF COL_LENGTH(N'dbo.WorkMaster', N'AppreciationRate') IS NULL
+                ALTER TABLE dbo.WorkMaster ADD AppreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_WorkMaster_AppreciationRate DEFAULT (0);
+            """,
         ):
             self.session.execute(text(col_sql))
         self.session.execute(
@@ -109,7 +124,9 @@ class WorkMasterRepository:
         self.ensure_schema()
         stmt = select(WorkMaster)
         if active_only is True:
-            stmt = stmt.where(WorkMaster.ActiveStatus == True)  # noqa: E712
+            stmt = stmt.where(
+                or_(WorkMaster.ActiveStatus == True, WorkMaster.ActiveStatus.is_(None))  # noqa: E712
+            )
         elif active_only is False:
             stmt = stmt.where(WorkMaster.ActiveStatus == False)  # noqa: E712
         stmt = stmt.order_by(
@@ -450,6 +467,15 @@ class OthersIncomeExpenseRepository:
         self.session.execute(
             text(
                 """
+                IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'PaymentReceived') IS NULL
+                    ALTER TABLE dbo.OthersIncomeExpenseMaster ADD PaymentReceived BIT NOT NULL
+                        CONSTRAINT DF_OIE_PaymentReceived DEFAULT (0);
+                """
+            )
+        )
+        self.session.execute(
+            text(
+                """
                 IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'TallyBillNo') IS NULL
                     ALTER TABLE dbo.OthersIncomeExpenseMaster ADD TallyBillNo NVARCHAR(50) NULL;
                 """
@@ -468,6 +494,31 @@ class OthersIncomeExpenseRepository:
                 """
                 IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'TallyBillAmount') IS NULL
                     ALTER TABLE dbo.OthersIncomeExpenseMaster ADD TallyBillAmount DECIMAL(18, 2) NULL;
+                """
+            )
+        )
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.OthersIncomeExpenseMaster', N'Transferred') IS NOT NULL
+                BEGIN
+                    DECLARE @df_oie_xfer sysname;
+                    DECLARE @sql_oie_xfer nvarchar(400);
+                    SELECT @df_oie_xfer = dc.name
+                    FROM sys.default_constraints dc
+                    INNER JOIN sys.columns c
+                        ON c.default_object_id = dc.object_id
+                       AND c.object_id = dc.parent_object_id
+                    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.OthersIncomeExpenseMaster')
+                      AND c.name = N'Transferred';
+                    IF @df_oie_xfer IS NOT NULL
+                    BEGIN
+                        SET @sql_oie_xfer = N'ALTER TABLE dbo.OthersIncomeExpenseMaster DROP CONSTRAINT '
+                            + QUOTENAME(@df_oie_xfer);
+                        EXEC sys.sp_executesql @sql_oie_xfer;
+                    END
+                    ALTER TABLE dbo.OthersIncomeExpenseMaster DROP COLUMN Transferred;
+                END
                 """
             )
         )
@@ -503,6 +554,54 @@ class OthersIncomeExpenseRepository:
         normalized = (bill_no or "").strip().upper()
         stmt = select(OthersIncomeExpenseMaster).where(OthersIncomeExpenseMaster.BillNo == normalized)
         return self.session.scalars(stmt).first()
+
+    def find_by_tally_bill_no(self, bill_no: str) -> OthersIncomeExpenseMaster | None:
+        """Active Income/Expense row by TallyBillNo or entry BillNo (Misc. preferred)."""
+        self.ensure_schema()
+        key = normalize_tally_bill_key(bill_no)
+        if not key:
+            return None
+        compact = tally_bill_compact(bill_no)
+        entry_id = self.session.execute(
+            text(
+                """
+                SELECT TOP 1 e.EntryID
+                FROM dbo.OthersIncomeExpenseMaster e
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+                WHERE e.IsActive = 1
+                  AND (
+                        (
+                            e.TallyBillNo IS NOT NULL
+                            AND LTRIM(RTRIM(e.TallyBillNo)) <> N''
+                            AND (
+                                UPPER(LTRIM(RTRIM(e.TallyBillNo))) = :bill_key
+                                OR UPPER(
+                                    REPLACE(
+                                        REPLACE(LTRIM(RTRIM(e.TallyBillNo)), N' ', N''),
+                                        N'-', N''
+                                    )
+                                ) = :bill_compact
+                            )
+                        )
+                     OR UPPER(LTRIM(RTRIM(e.BillNo))) = :bill_key
+                     OR UPPER(
+                            REPLACE(
+                                REPLACE(LTRIM(RTRIM(e.BillNo)), N' ', N''),
+                                N'-', N''
+                            )
+                        ) = :bill_compact
+                  )
+                ORDER BY
+                    CASE WHEN w.LedgerKind = N'Misc.' THEN 0 ELSE 1 END,
+                    CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1 THEN 0 ELSE 1 END,
+                    e.EntryID DESC
+                """
+            ),
+            {"bill_key": key, "bill_compact": compact},
+        ).scalar()
+        if not entry_id:
+            return None
+        return self.get_by_id(int(entry_id))
 
     def update(self, row: OthersIncomeExpenseMaster, data: dict) -> OthersIncomeExpenseMaster:
         self.ensure_schema()
@@ -597,7 +696,13 @@ class OthersIncomeExpenseRepository:
         seq = int(match.group(2)) + 1
         return f"{prefix}-{date_part}/{seq:03d}"
 
-    def list_recent(self, *, ledger_kind: str | None = None, limit: int | None = None) -> list[OthersIncomeExpenseMaster]:
+    def list_recent(
+        self,
+        *,
+        ledger_kind: str | None = None,
+        ledger_kinds: list[str] | tuple[str, ...] | None = None,
+        limit: int | None = None,
+    ) -> list[OthersIncomeExpenseMaster]:
         self.ensure_schema()
         stmt = (
             select(OthersIncomeExpenseMaster)
@@ -612,6 +717,8 @@ class OthersIncomeExpenseRepository:
         )
         if ledger_kind:
             stmt = stmt.where(WorkMaster.LedgerKind == ledger_kind)
+        elif ledger_kinds:
+            stmt = stmt.where(WorkMaster.LedgerKind.in_(list(ledger_kinds)))
         stmt = stmt.order_by(
             OthersIncomeExpenseMaster.WorkDate.desc(),
             OthersIncomeExpenseMaster.EntryID.desc(),

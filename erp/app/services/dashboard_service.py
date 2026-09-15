@@ -844,20 +844,66 @@ class DashboardService:
                     )
                 return base
 
-            if wt_u == "OTHERS" and sw.lower().startswith("income / expense") and ref:
-                row = db.session.execute(
-                    text(
-                        """
-                        SELECT TOP 1 EntryID
-                        FROM OthersIncomeExpenseMaster
-                        WHERE BillNo = :bill_no AND IsActive = 1
-                        ORDER BY EntryID DESC
-                        """
-                    ),
-                    {"bill_no": ref},
-                ).first()
-                if row:
-                    eid = int(row[0])
+            is_oie_sub = "income" in sw_l and "expense" in sw_l
+            looks_like_oie_bill = bool(
+                ref
+                and re.match(r"^[SEM][\s\-]?\d{8}/\d+", (ref or "").strip().upper())
+            )
+            if wt_u == "OTHERS" and (is_oie_sub or looks_like_oie_bill or not sw_l):
+                eid = None
+                bill_key = (ref or "").strip()
+                if bill_key:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 EntryID
+                            FROM OthersIncomeExpenseMaster
+                            WHERE IsActive = 1
+                              AND UPPER(LTRIM(RTRIM(BillNo))) = UPPER(LTRIM(RTRIM(:bill_no)))
+                            ORDER BY EntryID DESC
+                            """
+                        ),
+                        {"bill_no": bill_key},
+                    ).first()
+                    if row:
+                        eid = int(row[0])
+                if eid is None and transaction_id:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID
+                            FROM JTCSDailyTransaction d
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(d.ReferenceNo)))
+                               AND e.IsActive = 1
+                            WHERE d.TransactionID = :tid
+                            ORDER BY e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).first()
+                    if row:
+                        eid = int(row[0])
+                if eid is None and transaction_id:
+                    # Bank Remarks often stores BillNo for OIE payment legs.
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID
+                            FROM JtcsBankTransaction b
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                               AND e.IsActive = 1
+                            WHERE b.SourceRecordID = :tid
+                               OR b.SourceID = :tid
+                            ORDER BY e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).first()
+                    if row:
+                        eid = int(row[0])
+                if eid is not None:
                     base.update(
                         {
                             "source_module": "income_expense",
@@ -868,7 +914,10 @@ class DashboardService:
                             "can_open": True,
                         }
                     )
-                return base
+                    return base
+                # Known OIE shape but master row missing — stop here.
+                if is_oie_sub or looks_like_oie_bill:
+                    return base
 
             if wt_u == "OTHERS" and sw.lower().startswith("other bank/cash") and ref:
                 row = db.session.execute(
@@ -1082,8 +1131,29 @@ class DashboardService:
         bank_transaction_id: int | None = None,
     ) -> dict:
         table = (source_table or "").strip().lower()
+        # SourceType values (e.g. "Others") are not real table names — treat as daily.
+        if table in {
+            "others",
+            "other",
+            "income",
+            "expense",
+            "misc",
+            "misc.",
+            "itr",
+            "dsc",
+            "tds",
+            "gst",
+            "accounting",
+            "shcil",
+        }:
+            table = "jtcsdailytransaction"
+
         if not source_record_id and not bank_transaction_id:
             return self._no_source_link()
+
+        # Purchase Invoice Amount Paid → bank Credit/Out (SourceTable=GstInvoice).
+        if table in {"gstinvoice", "gst_invoice"}:
+            return self._source_link_for_gst_invoice(int(source_record_id))
 
         # Other Bank/Cash contra legs (Cash Deposit Credit/Out, Debit/In, etc.)
         if table in {"othersbankcashtransaction", "others_bank_cash_transaction"} or (
@@ -1099,6 +1169,10 @@ class DashboardService:
                 return self._no_source_link()
 
         if not source_record_id:
+            if bank_transaction_id:
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("can_open"):
+                    return oie
             return self._no_source_link()
         if table and table != "jtcsdailytransaction":
             # Still try OBC resolve when SourceType/table naming varies.
@@ -1108,7 +1182,13 @@ class DashboardService:
             )
             if entry_id:
                 return self._source_link_for_bank_cash_entry(entry_id)
-            return self._no_source_link()
+            # Purchase payment bank legs may have SourceType=PURCHASE with SourceTable blank.
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+            # Fall through: SourceRecordID may still be JTCSDailyTransaction.TransactionID
+            # even when SourceTable/SourceType was stored with an unexpected label.
 
         daily = db.session.execute(
             text(
@@ -1122,6 +1202,13 @@ class DashboardService:
             {"tid": int(source_record_id)},
         ).mappings().first()
         if not daily:
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("can_open"):
+                    return oie
             return self._no_source_link()
         link = self._source_link_for_daily(
             transaction_id=daily["TransactionID"],
@@ -1139,7 +1226,120 @@ class DashboardService:
         )
         if entry_id:
             return self._source_link_for_bank_cash_entry(entry_id)
+        if bank_transaction_id:
+            purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+            if purchase_link.get("can_open"):
+                return purchase_link
+            oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+            if oie.get("can_open"):
+                return oie
         return link
+
+    def _source_link_for_gst_invoice(self, invoice_id: int) -> dict:
+        """Deep-link bank legs posted from Purchase (or Sale) GstInvoice."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 InvoiceID, VoucherType, InvoiceNo
+                FROM dbo.GstInvoice
+                WHERE InvoiceID = :iid
+                """
+            ),
+            {"iid": int(invoice_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        voucher = (row["VoucherType"] or "SALE").strip().upper()
+        iid = int(row["InvoiceID"])
+        if voucher == "PURCHASE":
+            endpoint = "accounting_invoice.invoice_purchase"
+            module = "invoice"
+        else:
+            endpoint = "accounting_invoice.invoice_sale"
+            module = "invoice"
+        base.update(
+            {
+                "source_module": module,
+                "source_module_id": iid,
+                "source_url": url_for(endpoint, edit=iid),
+                "can_open": True,
+                "work_type": "Accounting",
+                "sub_work_type": "Purchase Invoice Payment" if voucher == "PURCHASE" else "Sale / Service Invoice",
+            }
+        )
+        return base
+
+    def _source_link_for_purchase_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Purchase Invoice from bank leg SourceTable/SourceType=PURCHASE."""
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 SourceRecordID, SourceTable, SourceType
+                FROM JtcsBankTransaction
+                WHERE JtcsBankTransactionID = :btid
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return self._no_source_link()
+        table = (row["SourceTable"] or "").strip().lower()
+        stype = (row["SourceType"] or "").strip().upper()
+        sid = row["SourceRecordID"]
+        if not sid:
+            return self._no_source_link()
+        if table in {"gstinvoice", "gst_invoice"} or stype == "PURCHASE":
+            return self._source_link_for_gst_invoice(int(sid))
+        return self._no_source_link()
+
+    def _source_link_for_oie_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Income/Expense entry from bank leg Remarks / SourceRecordID."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 e.EntryID
+                FROM JtcsBankTransaction b
+                INNER JOIN OthersIncomeExpenseMaster e
+                    ON e.IsActive = 1
+                   AND (
+                        UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                     OR (
+                            b.SourceRecordID IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM JTCSDailyTransaction d
+                            WHERE d.TransactionID = b.SourceRecordID
+                              AND UPPER(LTRIM(RTRIM(e.BillNo))) =
+                                  UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                        )
+                     )
+                   )
+                WHERE b.JtcsBankTransactionID = :btid
+                ORDER BY e.EntryID DESC
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).first()
+        if not row:
+            return base
+        eid = int(row[0])
+        base.update(
+            {
+                "source_module": "income_expense",
+                "source_module_id": eid,
+                "source_url": url_for("others_income_expense.index", load_entry=eid),
+                "can_open": True,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
 
     def _today_payment_detail_rows(
         self,

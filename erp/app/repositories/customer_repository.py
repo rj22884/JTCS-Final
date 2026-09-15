@@ -195,6 +195,20 @@ class CustomerRepository:
                 ALTER TABLE dbo.CustomerMaster ADD Logged BIT NOT NULL
                     CONSTRAINT DF_CustomerMaster_Logged DEFAULT (0);
             """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PurchaseDate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PurchaseDate DATE NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'DepreciationRate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD DepreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_CustomerMaster_DepreciationRate DEFAULT (0);
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'AppreciationRate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD AppreciationRate DECIMAL(9, 4) NOT NULL
+                    CONSTRAINT DF_CustomerMaster_AppreciationRate DEFAULT (0);
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()
@@ -374,6 +388,7 @@ class CustomerRepository:
                        FilingFrequency, CustomerStatus
                 FROM CustomerMaster
                 WHERE ({where_sql})
+                  AND ISNULL(CustomerStatus, N'Active') NOT IN (N'Inactive', N'Rejected', N'Deleted')
                 ORDER BY
                   CASE
                     WHEN UPPER(LTRIM(RTRIM(CustomerName))) LIKE UPPER(:like_prefix) THEN 0
@@ -488,6 +503,15 @@ class CustomerRepository:
                 OR PANNumber LIKE :search_upper
                 OR EmailID LIKE :search
                 OR AadhaarNumber LIKE :search
+                OR EXISTS (
+                    SELECT 1
+                    FROM dbo.ChartOfAccountMaster a
+                    LEFT JOIN dbo.ChartOfAccountGroupLink l ON l.AccountID = a.AccountID
+                    LEFT JOIN dbo.ChartOfGroupMaster g
+                      ON g.GroupID = COALESCE(l.GroupID, a.GroupID)
+                    WHERE a.CustomerID = CustomerMaster.CustomerID
+                      AND g.GroupName LIKE :search
+                )
               )
             """
             params["search"] = f"%{search.strip()}%"
@@ -644,7 +668,12 @@ class CustomerRepository:
                 raw = payload.get(form_key.replace("_", ""))
             if raw is None:
                 continue
-            if form_key in {"date_of_birth", "date_of_incorporation", "opening_balance_date"}:
+            if form_key in {
+                "date_of_birth",
+                "date_of_incorporation",
+                "opening_balance_date",
+                "purchase_date",
+            }:
                 text_val = str(raw).strip()
                 if not text_val:
                     values[db_col] = None
@@ -662,6 +691,28 @@ class CustomerRepository:
                     if amount < 0:
                         raise ValueError("Opening Balance cannot be negative. Use Dr / Cr.")
                     values[db_col] = amount.quantize(Decimal("0.01"))
+            elif form_key in {"depreciation_rate", "appreciation_rate"}:
+                text_val = str(raw).strip().replace(",", "")
+                if not text_val:
+                    values[db_col] = Decimal("0.00")
+                else:
+                    try:
+                        rate = Decimal(text_val)
+                    except (InvalidOperation, ValueError) as exc:
+                        label = (
+                            "Depreciation Rate"
+                            if form_key == "depreciation_rate"
+                            else "Appreciation Rate"
+                        )
+                        raise ValueError(f"{label} must be a valid number.") from exc
+                    if rate < 0 or rate > 100:
+                        label = (
+                            "Depreciation Rate"
+                            if form_key == "depreciation_rate"
+                            else "Appreciation Rate"
+                        )
+                        raise ValueError(f"{label} must be between 0 and 100.")
+                    values[db_col] = rate.quantize(Decimal("0.0001"))
             elif form_key == "opening_balance_dr_cr":
                 token = str(raw).strip().upper()
                 if not token:
@@ -778,7 +829,11 @@ class CustomerRepository:
     def purge(self, customer_id: int) -> None:
         """Hard-delete a customer row. Call only after usage checks. Not recoverable."""
         cid = int(customer_id)
-        for table in ("CustomerIncomeExpenseWorkLink", "CustomerPortalLoginLog"):
+        for table in (
+            "CustomerIncomeExpenseWorkLink",
+            "CustomerPortalLoginLog",
+            "CustomerDynFieldValue",
+        ):
             safe = self._safe_table_name(table)
             if not safe:
                 continue

@@ -135,6 +135,14 @@ def dashboard():
         followups = CrmFollowUpService().list_followups(status="Pending", page=1)
     except Exception:
         followups = {"total": 0}
+    whatsapp_meta = {}
+    try:
+        from app.modules.settings.services import IntegrationSettingsService
+
+        whatsapp_meta = IntegrationSettingsService().get_provider_settings_masked("whatsapp_meta")
+    except Exception:
+        current_app.logger.exception("WhatsApp Meta settings load failed for CRM dashboard")
+        whatsapp_meta = {}
     return render_template(
         "crm/dashboard.html",
         page_title="Communication Center Dashboard",
@@ -145,6 +153,7 @@ def dashboard():
         unread_notif=unread_notif,
         pending_tasks=tasks.get("total", 0),
         pending_followups=followups.get("total", 0),
+        whatsapp_meta=whatsapp_meta,
         poll_seconds=current_app.config.get("NOTIFICATION_POLL_SECONDS", 15),
         api={"dashboard_stats": url_for("crm_api.dashboard_stats")},
     )

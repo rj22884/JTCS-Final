@@ -12,6 +12,8 @@ class ExistingStampRecord:
     customer_name: str | None
     transaction_date: str
     certificate_number: str
+    website_reference: str | None = None
+    kind: str = "certificate"
 
 
 class StampDuplicateError(ValueError):
@@ -21,6 +23,12 @@ class StampDuplicateError(ValueError):
             detail = f"already sold in full (Transaction #{existing.transaction_id})"
         else:
             detail = f"already registered (Stamp Record #{existing.stamp_id}, no transaction posted)"
+        if existing.kind == "reference":
+            ref = existing.website_reference or existing.certificate_number
+            super().__init__(
+                f"e-Stamp reference '{ref}' {detail} as certificate '{existing.certificate_number}'."
+            )
+            return
         super().__init__(
             f"Certificate Number '{existing.certificate_number}' {detail}."
         )

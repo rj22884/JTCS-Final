@@ -36,7 +36,11 @@
     };
   }
 
-  function dateQuery() {
+  function readDateValue(el) {
+    return el ? String(el.value || "").trim() : "";
+  }
+
+  function resolvePreviewDates() {
     const els = toolbar();
     const pageFrom = document.getElementById("ledgerDateFrom");
     const pageTo = document.getElementById("ledgerDateTo");
@@ -44,25 +48,64 @@
     const fsTo = document.getElementById("fsDateTo");
     const dashFrom = document.getElementById("dashDateFrom");
     const dashTo = document.getElementById("dashDateTo");
+    const onLedgerReport = !!pageFrom;
     const from =
-      (els.from && els.from.value) ||
-      (pageFrom && pageFrom.value) ||
-      (fsFrom && fsFrom.value) ||
-      (dashFrom && dashFrom.value) ||
-      cfg.fyStart ||
+      readDateValue(els.from) ||
+      readDateValue(pageFrom) ||
+      readDateValue(fsFrom) ||
+      readDateValue(dashFrom) ||
+      (onLedgerReport ? "" : String(cfg.fyStart || "").trim()) ||
       "";
     const to =
-      (els.to && els.to.value) ||
-      (pageTo && pageTo.value) ||
-      (fsTo && fsTo.value) ||
-      (dashTo && dashTo.value) ||
-      cfg.today ||
+      readDateValue(els.to) ||
+      readDateValue(pageTo) ||
+      readDateValue(fsTo) ||
+      readDateValue(dashTo) ||
+      (onLedgerReport ? "" : String(cfg.today || "").trim()) ||
       "";
+    return { from: from, to: to };
+  }
+
+  function dateQuery() {
+    const dates = resolvePreviewDates();
     const params = new URLSearchParams();
-    if (from) params.set("date_from", from);
-    if (to) params.set("date_to", to);
+    if (dates.from) params.set("date_from", dates.from);
+    if (dates.to) params.set("date_to", dates.to);
     const q = params.toString();
     return q ? "?" + q : "";
+  }
+
+  function ensurePreviewDatesFilled() {
+    const els = toolbar();
+    if (!els.from || !els.to) return;
+    const pageFrom = document.getElementById("ledgerDateFrom");
+    const pageTo = document.getElementById("ledgerDateTo");
+    if (!readDateValue(els.from)) {
+      els.from.value =
+        readDateValue(pageFrom) || String(cfg.fyStart || "").trim() || "";
+    }
+    if (!readDateValue(els.to)) {
+      els.to.value = readDateValue(pageTo) || String(cfg.today || "").trim() || "";
+    }
+  }
+
+  function applyPreviewDates() {
+    ensurePreviewDatesFilled();
+    const dates = resolvePreviewDates();
+    if (!dates.from || !dates.to) {
+      alert("Enter both From Date and To Date, then click Apply.");
+      return false;
+    }
+    const pageFrom = document.getElementById("ledgerDateFrom");
+    const pageTo = document.getElementById("ledgerDateTo");
+    if (pageFrom && !readDateValue(pageFrom)) pageFrom.value = dates.from;
+    if (pageTo && !readDateValue(pageTo)) pageTo.value = dates.to;
+    if (typeof reloadPreview === "function") {
+      reloadPreview();
+      return true;
+    }
+    alert("Preview reload is not ready. Close the preview and open it again.");
+    return false;
   }
 
   function parseMoney(text) {
@@ -341,7 +384,9 @@
       return apiUrl(urls.income_expense, id);
     }
     if (mod === "bank_cash" && urls.bank_cash) return apiUrl(urls.bank_cash, id);
-    if (mod === "invoice" && urls.invoice) return apiUrl(urls.invoice, id);
+    if ((mod === "invoice" || mod === "gst_invoice") && urls.invoice) {
+      return apiUrl(urls.invoice, id);
+    }
     if (mod === "printing_scanning") {
       const src = String(row.source_url || "");
       const tpl =
@@ -365,7 +410,7 @@
 
   function openEdit(row) {
     if (!row || !row.can_edit || !row.source_url) {
-      alert("Edit is not available for this row.");
+      alert("Edit is not available for this row. Source entry could not be resolved.");
       return;
     }
     const frame = document.getElementById("dashSourceEntryFrame");
@@ -375,6 +420,8 @@
       const title = document.getElementById("dashSourceEntryModalTitle");
       if (title) title.textContent = "Edit Entry";
       frame.src = row.source_url;
+      // Stack above ledger preview modal when both are open.
+      modalEl.style.zIndex = "1065";
       sourceModal.show();
       return;
     }
@@ -428,7 +475,7 @@
   modal.addEventListener("click", function (event) {
     if (event.target.closest("#ledgerPreviewApplyDates")) {
       event.preventDefault();
-      if (typeof reloadPreview === "function") reloadPreview();
+      applyPreviewDates();
       return;
     }
     const groupOpt = event.target.closest(".ledger-group-by-opt");
@@ -472,13 +519,13 @@
   });
   modal.addEventListener("keydown", function (event) {
     if (event.key !== "Enter") return;
-    if (event.target && event.target.id === "ledgerPreviewDateFrom") {
+    if (
+      event.target &&
+      (event.target.id === "ledgerPreviewDateFrom" ||
+        event.target.id === "ledgerPreviewDateTo")
+    ) {
       event.preventDefault();
-      if (typeof reloadPreview === "function") reloadPreview();
-    }
-    if (event.target && event.target.id === "ledgerPreviewDateTo") {
-      event.preventDefault();
-      if (typeof reloadPreview === "function") reloadPreview();
+      applyPreviewDates();
     }
   });
 
@@ -501,6 +548,7 @@
       reloadPreview = fn;
     },
     afterRender: function () {
+      ensurePreviewDatesFilled();
       const els = toolbar();
       if (els.grid && els.grid.tBodies[0]) {
         markOriginalOrder(els.grid.tBodies[0]);

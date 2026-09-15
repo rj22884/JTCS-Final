@@ -37,7 +37,7 @@
         <label class="form-label">Customer ID</label>
         <input type="text" class="form-control" id="cm_display_customer_id" readonly placeholder="Auto">
       </div>
-      <div class="col-md-3">
+      <div class="col-md-3 cm-field-wrap" data-field="customer_type">
         <label class="form-label" for="cm_customer_type">Customer Type</label>
         <select class="form-select" id="cm_customer_type" name="customer_type" data-cm-field="customer_type">
           <option value="">-- Select --</option>
@@ -45,7 +45,7 @@
         </select>
       </div>
       {{ cm_field('customer_name', 'Customer Name', master_required=true, col='col-md-4', maxlength='200') }}
-      <div class="col-md-3">
+      <div class="col-md-3 cm-field-wrap" data-field="customer_status">
         <label class="form-label" for="cm_customer_status">Status</label>
         <select class="form-select" id="cm_customer_status" name="customer_status" data-cm-field="customer_status">
           {% for s in customer_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
@@ -55,7 +55,7 @@
       {{ cm_field('company_firm_name', 'Company / Firm Name', col='col-md-4', maxlength='200') }}
       {{ cm_field('date_of_birth', 'Date of Birth', 'date', col='col-md-2') }}
       {{ cm_field('date_of_incorporation', 'Date of Incorporation', 'date', col='col-md-2') }}
-      <div class="col-md-2">
+      <div class="col-md-2 cm-field-wrap" data-field="gender">
         <label class="form-label" for="cm_gender">Gender</label>
         <select class="form-select" id="cm_gender" name="gender" data-cm-field="gender">
           <option value=""></option>

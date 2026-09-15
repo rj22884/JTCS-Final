@@ -31,6 +31,25 @@ def map_db_exception(exc: Exception) -> str:
     return "An unexpected database error occurred. Please try again."
 
 
+def commit_schema(session=None) -> None:
+    """Commit DDL only when it will not close a caller transaction.
+
+    Schema helpers historically called session.commit() after ALTER TABLE.
+    That is fatal inside begin_nested() / persist() (SQLAlchemy:
+    "Can't operate on closed transaction inside context manager").
+    """
+    sess = session if session is not None else db.session
+    try:
+        if sess.in_nested_transaction():
+            return
+    except Exception:
+        logger.exception("Failed to inspect nested transaction state")
+        return
+    if sess.new or sess.dirty or sess.deleted:
+        return
+    sess.commit()
+
+
 def persist(callable_write):
     """
     Single transaction per write: flush, commit, rollback on error, always close session.

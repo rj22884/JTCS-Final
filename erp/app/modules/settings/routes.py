@@ -26,6 +26,7 @@ from app.modules.settings.controllers import IntegrationSettingsController
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
 from app.modules.settings.whatsapp_meta_client import MetaGraphError
+from app.modules.settings.google_drive_oauth_service import GoogleDriveOAuthService
 from app.services.menu_service import MenuService
 
 bp = Blueprint("integration_settings", __name__, url_prefix="/admin/integrations")
@@ -340,6 +341,65 @@ def api_whatsapp_oauth_callback():
             "danger",
         )
         return _back(error=True)
+
+
+@bp.route("/api/google-drive/connect", methods=["GET"])
+@login_required
+def api_google_drive_connect():
+    return_to = (request.args.get("return_to") or "").strip() or None
+    try:
+        result = GoogleDriveOAuthService().start_connect(return_to=return_to)
+        wants_json = "application/json" in (request.headers.get("Accept") or "")
+        if wants_json or request.args.get("format") == "json":
+            return jsonify(result)
+        return redirect(result["authorize_url"])
+    except ValueError as exc:
+        if request.args.get("format") == "json" or "application/json" in (
+            request.headers.get("Accept") or ""
+        ):
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        flash(str(exc), "danger")
+        return redirect(url_for("integration_settings.index"))
+    except Exception:
+        logger.exception("Google Drive connect failed")
+        return jsonify({"ok": False, "error": "Unable to start Google Drive connect."}), 500
+
+
+@bp.route("/api/google-drive/oauth/callback", methods=["GET"])
+@csrf.exempt
+@login_required
+def api_google_drive_oauth_callback():
+    try:
+        result = GoogleDriveOAuthService().handle_callback(
+            code=request.args.get("code"),
+            state=request.args.get("state"),
+            error=request.args.get("error_description") or request.args.get("error"),
+        )
+        flash(result.get("message") or "Google Drive connected.", "success")
+        return_to = (result.get("return_to") or "").strip()
+        if return_to.startswith("/") and not return_to.startswith("//"):
+            sep = "&" if "?" in return_to else "?"
+            return redirect(return_to + sep + "drive_connected=1")
+        return redirect(url_for("integration_settings.index") + "?gdrive_connect=1")
+    except ValueError as exc:
+        logger.warning("Google Drive OAuth callback rejected: %s", exc)
+        flash(str(exc), "danger")
+        return_to = GoogleDriveOAuthService().pop_return_to()
+        if return_to.startswith("/") and not return_to.startswith("//"):
+            sep = "&" if "?" in return_to else "?"
+            return redirect(return_to + sep + "drive_oauth_error=1")
+        return redirect(url_for("integration_settings.index") + "?gdrive_oauth_error=1")
+    except Exception:
+        logger.exception("Google Drive OAuth callback failed")
+        flash("Google Drive OAuth failed. Connect again within 15 minutes.", "danger")
+        return redirect(url_for("integration_settings.index") + "?gdrive_oauth_error=1")
+
+
+@bp.route("/api/google-drive/status", methods=["GET"])
+@login_required
+def api_google_drive_status():
+    return_to = (request.args.get("return_to") or "").strip() or None
+    return jsonify(GoogleDriveOAuthService().connection_info(return_to=return_to))
 
 
 @bp.route("/api/whatsapp/pending-step", methods=["GET"])

@@ -270,6 +270,7 @@
             <th>{{ party_label }}</th>
             <th>Mobile</th>
             <th>Tax</th>
+            <th>Bill source</th>
             <th class="text-end">Invoice Value</th>
             <th class="text-end">Actions</th>
           </tr>
@@ -328,5 +329,5 @@
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260826round2"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260914rcf1"></script>
 {% endblock %}

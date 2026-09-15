@@ -50,14 +50,34 @@ class StampRepository:
         global _STAMP_SCHEMA_READY
         if _STAMP_SCHEMA_READY:
             return
-        self.session.execute(
-            text(
-                """
-                IF COL_LENGTH(N'dbo.StampMaster', N'MobileNumber') IS NULL
-                    ALTER TABLE dbo.StampMaster ADD MobileNumber NVARCHAR(15) NULL;
-                """
-            )
+        statements = (
+            """
+            IF COL_LENGTH(N'dbo.StampMaster', N'MobileNumber') IS NULL
+                ALTER TABLE dbo.StampMaster ADD MobileNumber NVARCHAR(15) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.StampMaster', N'EntrySource') IS NULL
+                ALTER TABLE dbo.StampMaster ADD EntrySource NVARCHAR(20) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.StampMaster', N'WebsiteReference') IS NULL
+                ALTER TABLE dbo.StampMaster ADD WebsiteReference NVARCHAR(40) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.StampMaster', N'WebsiteReference') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_StampMaster_WebsiteReference'
+                      AND object_id = OBJECT_ID(N'dbo.StampMaster')
+               )
+                CREATE UNIQUE INDEX UX_StampMaster_WebsiteReference
+                    ON dbo.StampMaster (WebsiteReference)
+                    WHERE WebsiteReference IS NOT NULL AND IsActive = 1;
+            """,
         )
+        for sql in statements:
+            self.session.execute(text(sql))
         self.session.commit()
         _STAMP_SCHEMA_READY = True
 
@@ -93,7 +113,33 @@ class StampRepository:
             .where(JTCSDailyTransaction.StampID == stamp.StampID)
             .order_by(JTCSDailyTransaction.TransactionID.desc())
         ).first()
+        return self._existing_record(stamp, daily, kind="certificate")
 
+    def find_existing_by_website_reference(
+        self, website_reference: str, *, exclude_id: int | None = None
+    ) -> ExistingStampRecord | None:
+        ref = (website_reference or "").strip().upper()
+        if not ref:
+            return None
+        stamp = self.session.scalars(
+            select(StampMaster)
+            .where(StampMaster.IsActive == True)  # noqa: E712
+            .where(func.upper(func.ltrim(func.rtrim(StampMaster.WebsiteReference))) == ref)
+        ).first()
+        if stamp is None:
+            return None
+        if exclude_id is not None and stamp.StampID == exclude_id:
+            return None
+        daily = self.get_daily_for_stamp(stamp.StampID)
+        return self._existing_record(stamp, daily, kind="reference")
+
+    def _existing_record(
+        self,
+        stamp: StampMaster,
+        daily: JTCSDailyTransaction | None,
+        *,
+        kind: str,
+    ) -> ExistingStampRecord:
         txn_date = daily.TransactionDate if daily else stamp.CreatedDate.date()
         return ExistingStampRecord(
             stamp_id=stamp.StampID,
@@ -101,7 +147,49 @@ class StampRepository:
             customer_name=daily.CustomerName if daily else None,
             transaction_date=txn_date.isoformat() if isinstance(txn_date, date) else str(txn_date)[:10],
             certificate_number=stamp.CertificateNumber,
+            website_reference=(getattr(stamp, "WebsiteReference", None) or "").strip() or None,
+            kind=kind,
         )
+
+    @staticmethod
+    def resolve_entry_source(
+        stamp: StampMaster,
+        *,
+        is_ocr: bool = False,
+        daily: JTCSDailyTransaction | None = None,
+    ) -> tuple[str, str]:
+        stored = (getattr(stamp, "EntrySource", None) or "").strip().lower()
+        web_ref = (getattr(stamp, "WebsiteReference", None) or "").strip().upper()
+        daily_ref = ((daily.ReferenceNo if daily else "") or "").strip().upper()
+        if stored == "online" or web_ref.startswith("EST-") or daily_ref.startswith("EST-"):
+            return "online", web_ref or (daily_ref if daily_ref.startswith("EST-") else "")
+        if stored == "integration" or is_ocr:
+            return "integration", web_ref
+        if stored == "manual":
+            return "manual", web_ref
+        return "manual", web_ref
+
+    @staticmethod
+    def mode_payload(
+        stamp: StampMaster,
+        *,
+        is_ocr: bool = False,
+        daily: JTCSDailyTransaction | None = None,
+    ) -> dict:
+        source, web_ref = StampRepository.resolve_entry_source(
+            stamp, is_ocr=is_ocr, daily=daily
+        )
+        if source == "online":
+            label = f"Online · {web_ref}" if web_ref else "Online"
+        elif source == "integration":
+            label = "Integration"
+        else:
+            label = "Manual"
+        return {
+            "entry_source": source,
+            "website_reference": web_ref,
+            "entry_mode": label,
+        }
 
     def update_stamp(self, stamp: StampMaster, data: dict, *, modified_by: str) -> StampMaster:
         preserve = {"CreatedBy", "CreatedDate"}
@@ -179,7 +267,14 @@ class StampRepository:
             )
             .where(StampMaster.IsActive == True)  # noqa: E712
             .where(
-                func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{normalized}%")
+                or_(
+                    func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{normalized}%"),
+                    func.replace(
+                        func.upper(func.coalesce(StampMaster.WebsiteReference, "")),
+                        " ",
+                        "",
+                    ).like(f"%{normalized}%"),
+                )
             )
             .order_by(StampMaster.CreatedDate.desc(), JTCSDailyTransaction.TransactionID.desc())
             .limit(limit)
@@ -237,6 +332,7 @@ class StampRepository:
                         stamp.FirstPartyName,
                     ),
                     "created_by": stamp.CreatedBy,
+                    **self.mode_payload(stamp, is_ocr=False, daily=daily),
                 }
             )
         return rows
@@ -260,7 +356,14 @@ class StampRepository:
         # (period must not hide an integrated stamp).
         if cert:
             stmt = stmt.where(
-                func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{cert}%")
+                or_(
+                    func.replace(func.upper(StampMaster.CertificateNumber), " ", "").like(f"%{cert}%"),
+                    func.replace(
+                        func.upper(func.coalesce(StampMaster.WebsiteReference, "")),
+                        " ",
+                        "",
+                    ).like(f"%{cert}%"),
+                )
             )
         elif apply_dates and not customer and not mobile:
             if filters.date_from:
@@ -785,6 +888,11 @@ class StampRepository:
                     "is_ocr_entry": stamp.StampID in ocr_stamp_ids,
                     "has_cash": has_cash,
                     "has_non_cash": has_non_cash,
+                    **self.mode_payload(
+                        stamp,
+                        is_ocr=stamp.StampID in ocr_stamp_ids,
+                        daily=daily,
+                    ),
                 }
             )
         return rows
@@ -801,7 +909,11 @@ class StampRepository:
             StampMaster.CertificateIssuedDate,
         )
         base = (
-            select(StampMaster.StampID, StampMaster.StampDutyAmount)
+            select(
+                StampMaster.StampID,
+                StampMaster.StampDutyAmount,
+                func.coalesce(func.max(JTCSDailyTransaction.SaleAmount), 0).label("SaleAmount"),
+            )
             .select_from(StampMaster)
             .outerjoin(JTCSDailyTransaction, JTCSDailyTransaction.StampID == StampMaster.StampID)
             .where(StampMaster.IsActive == True)  # noqa: E712
@@ -812,26 +924,39 @@ class StampRepository:
             base = base.where(work_date >= date_from)
         if date_to:
             base = base.where(work_date <= date_to)
-        subq = base.distinct().subquery()
+        subq = base.group_by(StampMaster.StampID, StampMaster.StampDutyAmount).subquery()
         stmt = (
-            select(subq.c.StampDutyAmount, func.count())
+            select(
+                subq.c.StampDutyAmount,
+                func.count(),
+                func.coalesce(func.sum(subq.c.SaleAmount), 0),
+            )
             .group_by(subq.c.StampDutyAmount)
             .order_by(subq.c.StampDutyAmount.asc())
         )
         rows: list[dict] = []
         total_nos = 0
         total_amount = Decimal("0.00")
-        for value, nos in self.session.execute(stmt).all():
+        total_sale = Decimal("0.00")
+        for value, nos, sale in self.session.execute(stmt).all():
             duty = Decimal(str(value or 0)).quantize(Decimal("0.01"))
             count = int(nos or 0)
             amount = (duty * Decimal(count)).quantize(Decimal("0.01"))
-            rows.append({"value": str(duty), "nos": count, "amount": str(amount)})
+            sale_amt = Decimal(str(sale or 0)).quantize(Decimal("0.01"))
+            rows.append({
+                "value": str(duty),
+                "nos": count,
+                "amount": str(amount),
+                "sale": str(sale_amt),
+            })
             total_nos += count
             total_amount += amount
+            total_sale += sale_amt
         return {
             "rows": rows,
             "total_nos": total_nos,
             "total_amount": str(total_amount.quantize(Decimal("0.01"))),
+            "total_sale": str(total_sale.quantize(Decimal("0.01"))),
             "date_from": date_from.isoformat() if date_from else "",
             "date_to": date_to.isoformat() if date_to else "",
         }
