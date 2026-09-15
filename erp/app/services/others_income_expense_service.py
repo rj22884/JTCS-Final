@@ -271,30 +271,42 @@ class OthersIncomeExpenseService:
         return lines
 
     def _find_daily_for_bill(self, bill_no: str) -> JTCSDailyTransaction | None:
-        normalized = (bill_no or "").strip().upper()
-        stmt = (
-            select(JTCSDailyTransaction)
-            .where(
-                JTCSDailyTransaction.ReferenceNo == normalized,
-                JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
-            )
-            .order_by(JTCSDailyTransaction.TransactionID.desc())
-        )
-        return db.session.scalars(stmt).first()
+        rows = self._list_dailies_for_bill(bill_no)
+        if not rows:
+            return None
+        for row in reversed(rows):
+            sub = (row.SubWorkType or "").strip()
+            if sub.startswith(self.SUB_WORK_TYPE):
+                return row
+        return rows[-1]
 
     def _list_dailies_for_bill(self, bill_no: str) -> list[JTCSDailyTransaction]:
         normalized = (bill_no or "").strip().upper()
+        if not normalized:
+            return []
+        # Match by WorkType + BillNo only. After automatic invoice reconcile, SubWorkType
+        # may be renamed to "OTHERS Followup Receipt" — still the same OIE payment daily.
         stmt = (
             select(JTCSDailyTransaction)
             .where(
-                JTCSDailyTransaction.ReferenceNo == normalized,
                 JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
+                JTCSDailyTransaction.ReferenceNo == normalized,
             )
             .order_by(JTCSDailyTransaction.TransactionID.asc())
         )
-        return list(db.session.scalars(stmt).all())
+        rows = list(db.session.scalars(stmt).all())
+        if rows:
+            return rows
+        # Fallback when collation / stored case differs
+        return [
+            row
+            for row in db.session.scalars(
+                select(JTCSDailyTransaction)
+                .where(JTCSDailyTransaction.WorkType == self.WORK_TYPE)
+                .order_by(JTCSDailyTransaction.TransactionID.asc())
+            ).all()
+            if (row.ReferenceNo or "").strip().upper() == normalized
+        ]
 
     def _remove_daily_transaction(self, daily: JTCSDailyTransaction) -> None:
         payment_rows = self.payment_repo.list_by_transaction(daily.TransactionID)
@@ -323,12 +335,18 @@ class OthersIncomeExpenseService:
         created_by: str,
         existing_daily: JTCSDailyTransaction | None = None,
         ledger_kind: str = LEDGER_INCOME,
+        post_sale_on_daily: bool = True,
     ) -> tuple[JTCSDailyTransaction, list[int]]:
         if ledger_kind == self.LEDGER_MISC:
             description = f"Misc. — {work_name} — {bill_no}"
         else:
             description = f"Income / Expense — {work_name} — {bill_no}"
         is_expense = ledger_kind == self.LEDGER_EXPENSE
+        # When Misc + Tally Bill creates an Automatic GST invoice, that invoice owns
+        # the customer SaleAmount. Post this daily as receipt-only so reconcile does
+        # not rename/strip the OIE payment row (breaks Bank Received → Edit link).
+        sale_amount = Decimal("0") if (is_expense or not post_sale_on_daily) else entry_amount
+        expense_amount = entry_amount if is_expense else Decimal("0")
 
         if existing_daily is not None:
             bank_rows = self._collect_bank_rows_for_daily(existing_daily)
@@ -343,13 +361,17 @@ class OthersIncomeExpenseService:
             existing_daily.ReferenceNo = bill_no
             existing_daily.Description = description
             existing_daily.IncomeAmount = Decimal("0")
-            existing_daily.ExpenseAmount = entry_amount if is_expense else Decimal("0")
-            existing_daily.SaleAmount = Decimal("0") if is_expense else entry_amount
-            existing_daily.TotalAmount = entry_amount
+            existing_daily.ExpenseAmount = expense_amount
+            existing_daily.SaleAmount = sale_amount
+            existing_daily.TotalAmount = entry_amount if post_sale_on_daily or is_expense else sum(
+                (line["amount"] for line in payment_lines), Decimal("0")
+            )
             existing_daily.PaymentModeID = payment_lines[0]["payment_mode_id"]
             existing_daily.PaymentSplitCount = len(payment_lines)
             existing_daily.Remarks = remarks
             existing_daily.SubWorkType = f"{self.SUB_WORK_TYPE} - {work_name}"
+            existing_daily.WorkType = self.WORK_TYPE
+            existing_daily.Status = "Posted"
             existing_daily.ModifiedDate = datetime.utcnow()
             db.session.flush()
             daily = existing_daily
@@ -363,12 +385,16 @@ class OthersIncomeExpenseService:
                     "ReferenceNo": bill_no,
                     "Description": description,
                     "IncomeAmount": Decimal("0"),
-                    "ExpenseAmount": entry_amount if is_expense else Decimal("0"),
-                    "SaleAmount": Decimal("0") if is_expense else entry_amount,
+                    "ExpenseAmount": expense_amount,
+                    "SaleAmount": sale_amount,
                     "PurchaseAmount": Decimal("0"),
                     "GSTAmount": Decimal("0"),
                     "TDSAmount": Decimal("0"),
-                    "TotalAmount": entry_amount,
+                    "TotalAmount": (
+                        entry_amount
+                        if post_sale_on_daily or is_expense
+                        else sum((line["amount"] for line in payment_lines), Decimal("0"))
+                    ),
                     "PaymentModeID": payment_lines[0]["payment_mode_id"],
                     "PaymentSplitCount": len(payment_lines),
                     "Status": "Posted",
@@ -499,7 +525,6 @@ class OthersIncomeExpenseService:
                     .where(
                         JTCSDailyTransaction.ReferenceNo.in_(chunk),
                         JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                        JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
                     )
                     .order_by(JTCSDailyTransaction.TransactionID.asc())
                 ).all()
@@ -576,6 +601,20 @@ class OthersIncomeExpenseService:
         data = self._entry_dict(row)
         daily = self._find_daily_for_bill(row.BillNo)
         if daily:
+            work_label = (data.get("work_name") or "").strip()
+            expected_sub = (
+                f"{self.SUB_WORK_TYPE} - {work_label}" if work_label else self.SUB_WORK_TYPE
+            )
+            sub = (daily.SubWorkType or "").strip()
+            if daily.WorkType != self.WORK_TYPE or not sub.startswith(self.SUB_WORK_TYPE):
+                daily.WorkType = self.WORK_TYPE
+                daily.SubWorkType = expected_sub
+                daily.ReferenceNo = row.BillNo
+                db.session.flush()
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
             data["daily_transaction_id"] = daily.TransactionID
             data["payments"] = self._load_payment_lines(daily)
         else:
@@ -906,22 +945,12 @@ class OthersIncomeExpenseService:
 
             daily = None
             bank_ids: list[int] = []
-            if payment_lines:
-                daily, bank_ids = self._repost_transactions(
-                    bill_no=row.BillNo,
-                    work_date=work_date,
-                    work_name=work_label,
-                    entry_amount=amount,
-                    payment_lines=payment_lines,
-                    customer_name=customer_name,
-                    remarks=remarks,
-                    created_by=created_by,
-                    existing_daily=existing_daily,
-                    ledger_kind=ledger_kind,
-                )
-            elif existing_daily is not None:
-                self._remove_daily_transaction(existing_daily)
-
+            # Misc + Tally Bill: Automatic GST invoice owns customer SaleAmount.
+            # Create it before payment posting, and keep OIE daily receipt-only so
+            # invoice reconcile does not rename/delete the payment link.
+            post_sale_on_daily = not (
+                ledger_kind == self.LEDGER_MISC and tally_bill and bool(tally_bill_no)
+            )
             if (
                 payment_received
                 and tally_bill
@@ -942,6 +971,29 @@ class OthersIncomeExpenseService:
                     created_by=created_by or "Automatic",
                     commit=False,
                 )
+
+            if payment_lines:
+                daily, bank_ids = self._repost_transactions(
+                    bill_no=row.BillNo,
+                    work_date=work_date,
+                    work_name=work_label,
+                    entry_amount=amount,
+                    payment_lines=payment_lines,
+                    customer_name=customer_name,
+                    remarks=remarks,
+                    created_by=created_by,
+                    existing_daily=existing_daily,
+                    ledger_kind=ledger_kind,
+                    post_sale_on_daily=post_sale_on_daily,
+                )
+                # Keep canonical SubWorkType so Bank Received / Edit / search stay linked.
+                if daily is not None:
+                    daily.WorkType = self.WORK_TYPE
+                    daily.SubWorkType = f"{self.SUB_WORK_TYPE} - {work_label}"
+                    daily.ReferenceNo = row.BillNo
+                    db.session.flush()
+            elif existing_daily is not None:
+                self._remove_daily_transaction(existing_daily)
 
             if daily is not None:
                 message = (

@@ -384,7 +384,7 @@
       return apiUrl(urls.income_expense, id);
     }
     if (mod === "bank_cash" && urls.bank_cash) return apiUrl(urls.bank_cash, id);
-    if (mod === "invoice" || mod === "gst_invoice") && urls.invoice) {
+    if ((mod === "invoice" || mod === "gst_invoice") && urls.invoice) {
       return apiUrl(urls.invoice, id);
     }
     if (mod === "printing_scanning") {

@@ -1232,7 +1232,10 @@ class GstInvoiceService:
                     "tally_bill_no": tally_key,
                     "bill_source": self.BILL_SOURCE_MANUAL,
                 }
-                return self.update_record(existing.InvoiceID, upgrade_payload)
+                # Keep outer caller transaction (e.g. OIE save) — never nested persist.
+                return self.update_record(
+                    existing.InvoiceID, upgrade_payload, commit=commit
+                )
             self._assert_tally_bill_unique(tally_key)
 
         def _write() -> dict:
@@ -1245,7 +1248,9 @@ class GstInvoiceService:
             return persist(_write)
         return _write()
 
-    def update_record(self, invoice_id: int, payload: dict) -> dict:
+    def update_record(
+        self, invoice_id: int, payload: dict, *, commit: bool = True
+    ) -> dict:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
@@ -1274,7 +1279,9 @@ class GstInvoiceService:
             self._sync_purchase_payment_bank(updated)
             return self._serialize(updated)
 
-        return persist(_write)
+        if commit:
+            return persist(_write)
+        return _write()
 
     def ensure_automatic_invoice(
         self,
