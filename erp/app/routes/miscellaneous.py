@@ -8,6 +8,8 @@ from werkzeug.datastructures import MultiDict
 from app.customer_master.constants import CUSTOMER_TYPES
 from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
+from app.services.followup_service import default_tax_period, tax_period_options
+from app.services.gst_invoice_service import STATE_CODES, GstInvoiceService
 from app.services.menu_service import MenuService
 from app.services.others_income_expense_service import OthersIncomeExpenseService
 
@@ -47,6 +49,7 @@ def _index_response():
         force_ledger_kind=FORCE_KIND,
         module_title="Miscellaneous Records",
         api_blueprint="miscellaneous",
+        company=GstInvoiceService.company_profile(),
     )
 
 
@@ -126,6 +129,33 @@ def sub_works():
     return jsonify({"ok": True, "rows": OthersIncomeExpenseService().list_sub_works(work_name)})
 
 
+@bp.route("/generate-bill", methods=["GET"], strict_slashes=False)
+@bp_alias.route("/generate-bill", methods=["GET"], strict_slashes=False)
+@login_required
+def generate_bill_page():
+    """Compact Misc sales-invoice bill popup (9in × 4in window)."""
+    company = GstInvoiceService.company_profile()
+    states = [
+        {
+            "name": " ".join(part.capitalize() for part in name.split()),
+            "code": code,
+        }
+        for name, code in sorted(STATE_CODES.items(), key=lambda item: item[0])
+    ]
+    return render_template(
+        "others/misc_generate_bill.html",
+        page_title="Generate Bill",
+        company=company,
+        states=states,
+        tax_periods=tax_period_options(),
+        default_tax_period=default_tax_period(),
+        preview_pdf_url=url_for("accounting_invoice.api_preview_pdf"),
+        create_url=url_for("accounting_invoice.api_create_invoice"),
+        update_url=url_for("accounting_invoice.api_update_invoice", invoice_id=0),
+        customer_url=url_for("accounting_invoice.api_customer_detail", customer_id=0),
+    )
+
+
 @bp.route("/next-bill-no", methods=["GET"], strict_slashes=False)
 @bp_alias.route("/next-bill-no", methods=["GET"], strict_slashes=False)
 @login_required
@@ -183,10 +213,14 @@ def record(entry_id: int):
 @require_delete_reauth
 def delete_record(entry_id: int):
     try:
-        existing = OthersIncomeExpenseService().get_entry(entry_id)
+        service = OthersIncomeExpenseService()
+        row = service.entry_repo.get_by_id(entry_id)
+        if row is None:
+            return jsonify({"ok": False, "error": "Income / expense record not found."}), 404
+        existing = service._entry_dict(row)
         if (existing.get("ledger_kind") or "") != FORCE_KIND:
             return jsonify({"ok": False, "error": "Record is not a Miscellaneous entry."}), 404
-        message = OthersIncomeExpenseService().delete_entry(entry_id)
+        message = service.delete_entry(entry_id)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

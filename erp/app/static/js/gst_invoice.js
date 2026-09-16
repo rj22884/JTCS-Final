@@ -754,12 +754,6 @@
       showStatus("Add at least one line item.", "danger");
       return;
     }
-    const source = (payload.bill_source || currentBillSource || "Manual").toString();
-    if (!payload.payment_bank_account_id && source === "Manual" && voucherType !== "PURCHASE") {
-      showStatus("Payment Bank Account is required.", "danger");
-      els.payBank?.focus();
-      return;
-    }
     if (!(await servicePeriodReviewWarning())) {
       showStatus("Save cancelled. Select Tax Year / Quarter / Month for service item review.", "warning");
       return;
@@ -873,6 +867,8 @@
         tr.className = "inv-row-automatic";
       } else if (billSource.toLowerCase() === "import") {
         tr.className = "inv-row-import";
+      } else if (billSource.toLowerCase() === "miscellaneous") {
+        tr.className = "inv-row-miscellaneous";
       }
       tr.innerHTML =
         "<td><code>" +

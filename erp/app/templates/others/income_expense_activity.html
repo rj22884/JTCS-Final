@@ -8,7 +8,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260827misc1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260916miscbill1">
 {% endblock %}
 
 {% block content %}
@@ -246,6 +246,21 @@
                          maxlength="50" placeholder="Bill / invoice number">
                 </div>
               </div>
+              <div class="oie-generate-bill-wrap mt-3" id="oieGenerateBillWrap">
+                <div class="oie-generate-bill-label mb-1">Do you want generate bill here?</div>
+                <div class="oie-generate-bill-radios" role="radiogroup" aria-label="Generate bill here">
+                  <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="oieGenerateBillHere"
+                           id="oieGenerateBillYes" value="yes">
+                    <label class="form-check-label" for="oieGenerateBillYes">YES</label>
+                  </div>
+                  <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="radio" name="oieGenerateBillHere"
+                           id="oieGenerateBillNo" value="no" checked>
+                    <label class="form-check-label" for="oieGenerateBillNo">NO</label>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -386,11 +401,17 @@
   window.OIE_DELETE_URL = {{ url_for(api_bp ~ '.delete_record', entry_id=0) | tojson }};
   window.OIE_CUSTOMER_SEARCH_URL = {{ url_for(api_bp ~ '.customer_search') | tojson }};
   window.OIE_CUSTOMER_CREATE_URL = {{ url_for(api_bp ~ '.customer_create') | tojson }};
+  {% if force_kind == 'Misc.' %}
+  window.OIE_GENERATE_BILL_URL = {{ url_for('miscellaneous.generate_bill_page') | tojson }};
+  {% else %}
+  window.OIE_GENERATE_BILL_URL = "";
+  {% endif %}
+  window.OIE_COMPANY_STATE_CODE = {{ (company.state_code if company is defined and company else '05') | tojson }};
   window.OIE_CSRF = {{ csrf_token() | tojson }};
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
   window.OIE_FORCE_LEDGER_KIND = {{ force_kind | tojson }};
   window.OIE_HIDE_MISC = {{ hide_misc | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260915notransfer1"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260916miscbill1"></script>
 {% endblock %}

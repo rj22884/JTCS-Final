@@ -106,7 +106,7 @@ class GstInvoiceRepository:
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
             (
                 "BillSource",
-                "NVARCHAR(20) NOT NULL CONSTRAINT DF_GstInvoice_BillSource DEFAULT (N'Manual')",
+                "NVARCHAR(40) NOT NULL CONSTRAINT DF_GstInvoice_BillSource DEFAULT (N'Manual')",
             ),
         ):
             self.session.execute(
@@ -118,6 +118,25 @@ class GstInvoiceRepository:
                 )
             )
             commit_schema(self.session)
+        # Widen BillSource for values like "Miscellaneous"
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.GstInvoice', N'BillSource') IS NOT NULL
+                   AND (
+                        SELECT CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = N'dbo'
+                          AND TABLE_NAME = N'GstInvoice'
+                          AND COLUMN_NAME = N'BillSource'
+                   ) < 40
+                BEGIN
+                    ALTER TABLE dbo.GstInvoice ALTER COLUMN BillSource NVARCHAR(40) NOT NULL;
+                END
+                """
+            )
+        )
+        commit_schema(self.session)
         for col, ddl in (
             ("TaxPeriod", "NVARCHAR(20) NULL"),
             ("Quarter", "NVARCHAR(40) NULL"),

@@ -726,3 +726,17 @@
   background: #e8edf2;
   color: #445566;
 }
+
+.inv-bill-source-miscellaneous {
+  background: #e8dff8;
+  color: #5b2d8e;
+}
+
+.inv-grid-card table tbody tr.inv-row-miscellaneous,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-miscellaneous:nth-of-type(odd) > *,
+.inv-grid-card table.table-striped > tbody > tr.inv-row-miscellaneous:nth-of-type(even) > * {
+  --bs-table-bg: #f6f1fc;
+  --bs-table-striped-bg: #f0e8fa;
+  --bs-table-hover-bg: #e9def7;
+  background-color: #f6f1fc !important;
+}

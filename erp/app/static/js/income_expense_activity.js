@@ -63,6 +63,9 @@
     tallyBillNo: document.getElementById("oieTallyBillNo"),
     tallyBillDate: document.getElementById("oieTallyBillDate"),
     tallyBillAmount: document.getElementById("oieTallyBillAmount"),
+    generateBillWrap: document.getElementById("oieGenerateBillWrap"),
+    generateBillYes: document.getElementById("oieGenerateBillYes"),
+    generateBillNo: document.getElementById("oieGenerateBillNo"),
     paymentSection: document.getElementById("oiePaymentSection"),
     paymentFieldset: document.getElementById("oiePaymentFieldset"),
     paymentLockedHint: document.getElementById("oiePaymentLockedHint"),
@@ -189,6 +192,115 @@
     return !isMiscKind() || isTallyChecked();
   }
 
+  function resetGenerateBillChoice() {
+    if (els.generateBillYes) els.generateBillYes.checked = false;
+    if (els.generateBillNo) els.generateBillNo.checked = true;
+  }
+
+  function firstCategoryLineData() {
+    const line = els.categoryLines?.querySelector(".oie-category-line");
+    if (!line) {
+      return {
+        item: "",
+        item_id: "",
+        gst_rate_percent: "18",
+        hsn_sac: "",
+        unit: "NOS",
+        rate: "",
+      };
+    }
+    const sub = line.querySelector(".oie-category-subwork");
+    const amount = line.querySelector(".oie-category-amount");
+    const opt = sub && sub.selectedIndex >= 0 ? sub.options[sub.selectedIndex] : null;
+    return {
+      item: opt && opt.value ? (opt.textContent || "").trim() : "",
+      item_id: opt ? opt.getAttribute("data-item-id") || "" : "",
+      gst_rate_percent: opt ? opt.getAttribute("data-gst-rate") || "18" : "18",
+      hsn_sac: opt ? opt.getAttribute("data-hsn") || "" : "",
+      unit: opt ? opt.getAttribute("data-unit") || "NOS" : "NOS",
+      rate: amount && amount.value !== "" ? amount.value : "",
+    };
+  }
+
+  function collectGenerateBillSeed() {
+    const line = firstCategoryLineData();
+    return {
+      date: (els.workDate?.value || "").trim(),
+      invoice_no: (els.billNo?.value || "").trim(),
+      bill_no: (els.billNo?.value || "").trim(),
+      tally_bill_no: (els.tallyBillNo?.value || els.billNo?.value || "").trim(),
+      customer_id: (els.customerId?.value || "").trim(),
+      customer_name: (els.customerName?.value || "").trim(),
+      mobile: (els.mobileNumber?.value || "").trim(),
+      item: line.item,
+      sub_work: line.item,
+      item_id: line.item_id,
+      gst_rate_percent: line.gst_rate_percent,
+      hsn_sac: line.hsn_sac,
+      unit: line.unit,
+      rate: line.rate,
+      state_code: (window.OIE_COMPANY_STATE_CODE || "05").trim(),
+    };
+  }
+
+  function openGenerateBillPopup() {
+    if (!isMiscKind() || !isTallyChecked()) return;
+    const seed = collectGenerateBillSeed();
+    if (!seed.invoice_no) {
+      alert("Bill Number is required before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    if (!seed.item) {
+      alert("Please select Sub Work (item) before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    if (!seed.customer_name) {
+      alert("Please enter Customer Name before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
+    } catch (_err) {
+      /* ignore quota errors */
+    }
+    const url = window.OIE_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
+    if (!url) {
+      alert("Generate bill is available only for Miscellaneous.");
+      resetGenerateBillChoice();
+      return;
+    }
+    const width = Math.round(9 * 96);
+    const height = Math.round(4 * 96);
+    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
+    const features = [
+      "width=" + width,
+      "height=" + height,
+      "left=" + left,
+      "top=" + top,
+      "menubar=no",
+      "toolbar=no",
+      "location=no",
+      "status=no",
+      "resizable=yes",
+      "scrollbars=yes",
+    ].join(",");
+    const win = window.open(url, "oieMiscGenerateBillWindow", features);
+    if (!win) {
+      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      win.focus();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
   function syncMiscWorkflow() {
     const misc = isMiscKind();
     els.miscWorkflowWrap?.classList.toggle("d-none", !misc);
@@ -198,13 +310,20 @@
         els.tallyBill.checked = false;
         els.tallyBill.disabled = true;
       }
+      resetGenerateBillChoice();
     } else if (els.tallyBill) {
       const workDone = isWorkDoneChecked();
       els.tallyBill.disabled = !workDone;
-      if (!workDone) els.tallyBill.checked = false;
+      if (!workDone) {
+        els.tallyBill.checked = false;
+        resetGenerateBillChoice();
+      }
     }
     const tally = isTallyChecked();
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
+    if (!tally) {
+      resetGenerateBillChoice();
+    }
     if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
       els.tallyBillNo.value = (els.billNo.value || "").trim();
     }
@@ -421,6 +540,12 @@
           const opt = document.createElement("option");
           opt.value = String(row.work_type_id);
           opt.textContent = row.sub_work_type;
+          if (row.item_id) opt.setAttribute("data-item-id", String(row.item_id));
+          if (row.gst_rate_percent != null) {
+            opt.setAttribute("data-gst-rate", String(row.gst_rate_percent));
+          }
+          if (row.hsn_sac) opt.setAttribute("data-hsn", String(row.hsn_sac));
+          if (row.unit) opt.setAttribute("data-unit", String(row.unit));
           select.appendChild(opt);
         });
         const want = selectedId || select.dataset.pendingValue || "";
@@ -1983,6 +2108,11 @@
 
   els.workDone?.addEventListener("change", syncMiscWorkflow);
   els.tallyBill?.addEventListener("change", syncMiscWorkflow);
+  els.generateBillYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (els.generateBillYes && els.generateBillYes.checked) openGenerateBillPopup();
+    }, 0);
+  });
 
   if (els.gridBody) {
     els.gridBody.addEventListener("click", function (event) {

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
+from app.models.gst_billing import ItemMaster
 from app.models.transactions import (
     JTCSDailyTransaction,
     JTCSDailyTransactionPayment,
@@ -321,6 +322,102 @@ class OthersIncomeExpenseService:
     def _remove_linked_transactions(self, bill_no: str) -> None:
         for daily in self._list_dailies_for_bill(bill_no):
             self._remove_daily_transaction(daily)
+        # Leftover bank legs (OIE soft-deleted / daily already gone) still store BillNo in Remarks.
+        self._remove_orphan_bank_legs_for_bill(bill_no)
+
+    def _remove_orphan_bank_legs_for_bill(self, bill_no: str) -> None:
+        normalized = (bill_no or "").strip().upper()
+        if not normalized:
+            return
+        from app.models.transactions import JtcsBankTransaction
+        from sqlalchemy import func
+
+        orphans = list(
+            db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.Description == self.SUB_WORK_TYPE,
+                    func.upper(func.ltrim(func.rtrim(JtcsBankTransaction.Remarks)))
+                    == normalized,
+                )
+            ).all()
+        )
+        for bank_row in orphans:
+            for pay in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.BankTransactionID
+                    == bank_row.JtcsBankTransactionID
+                )
+            ).all():
+                pay.BankTransactionID = None
+            db.session.flush()
+            self.bank_repo.delete(bank_row)
+        db.session.flush()
+
+    def delete_orphan_bank_transaction(self, bank_transaction_id: int) -> str:
+        """Delete an Income/Expense bank leg that has no live dashboard source link."""
+        self.entry_repo.ensure_schema()
+        bank = self.bank_repo.get_by_id(int(bank_transaction_id))
+        if bank is None:
+            raise ValueError("Bank transaction not found.")
+
+        bill_no = (bank.Remarks or "").strip()
+        if not bill_no and bank.SourceRecordID:
+            daily = self.daily_repo.get_by_id(int(bank.SourceRecordID))
+            if daily is not None:
+                bill_no = (daily.ReferenceNo or "").strip()
+
+        def _write() -> str:
+            if bill_no:
+                entry = self.entry_repo.find_by_bill_no(bill_no)
+                if entry is not None:
+                    self._remove_linked_transactions(bill_no)
+                    if entry.IsActive:
+                        self.entry_repo.deactivate(entry)
+                    return (
+                        f"Deleted Income/Expense bill {bill_no} "
+                        f"and bank BT-{bank_transaction_id}."
+                    )
+
+                self._remove_linked_transactions(bill_no)
+                fresh = self.bank_repo.get_by_id(int(bank_transaction_id))
+                if fresh is not None:
+                    for pay in db.session.scalars(
+                        select(JTCSDailyTransactionPayment).where(
+                            JTCSDailyTransactionPayment.BankTransactionID
+                            == fresh.JtcsBankTransactionID
+                        )
+                    ).all():
+                        pay.BankTransactionID = None
+                    db.session.flush()
+                    if fresh.SourceRecordID:
+                        daily = self.daily_repo.get_by_id(int(fresh.SourceRecordID))
+                        if daily is not None and (daily.ReferenceNo or "").strip().upper() == bill_no.upper():
+                            self._remove_daily_transaction(daily)
+                        else:
+                            self.bank_repo.delete(fresh)
+                    else:
+                        self.bank_repo.delete(fresh)
+                return f"Deleted orphan bank BT-{bank_transaction_id} (bill {bill_no})."
+
+            for pay in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.BankTransactionID
+                    == bank.JtcsBankTransactionID
+                )
+            ).all():
+                pay.BankTransactionID = None
+            db.session.flush()
+            if bank.SourceRecordID:
+                daily = self.daily_repo.get_by_id(int(bank.SourceRecordID))
+                if daily is not None:
+                    self._remove_daily_transaction(daily)
+                else:
+                    self.bank_repo.delete(bank)
+            else:
+                self.bank_repo.delete(bank)
+            return f"Deleted orphan bank BT-{bank_transaction_id}."
+
+        return persist(_write)
 
     def _repost_transactions(
         self,
@@ -484,14 +581,38 @@ class OthersIncomeExpenseService:
         """Sub works from WorkTypeMaster where WorkTypeName matches WorkMaster.WorkName."""
         self.entry_repo.ensure_schema()
         rows = self.master_repo.list_sub_works_for_parent(work_name)
-        return [
-            {
-                "work_type_id": row.WorkTypeID,
-                "work_type_name": row.WorkTypeName,
-                "sub_work_type": row.SubWorkType,
-            }
-            for row in rows
-        ]
+        out: list[dict] = []
+        for row in rows:
+            item_id = None
+            gst_rate = 18.0
+            hsn_sac = ""
+            unit = "NOS"
+            try:
+                raw_item_id = getattr(row, "ItemID", None)
+                item_id = int(raw_item_id) if raw_item_id not in (None, "") else None
+            except (TypeError, ValueError):
+                item_id = None
+            if item_id:
+                item = self.master_repo.session.get(ItemMaster, item_id)
+                if item is not None:
+                    try:
+                        gst_rate = float(item.GstRatePercent or 0)
+                    except (TypeError, ValueError):
+                        gst_rate = 18.0
+                    hsn_sac = (item.HsnSac or "").strip()
+                    unit = (item.Unit or "NOS").strip() or "NOS"
+            out.append(
+                {
+                    "work_type_id": row.WorkTypeID,
+                    "work_type_name": row.WorkTypeName,
+                    "sub_work_type": row.SubWorkType,
+                    "item_id": item_id,
+                    "gst_rate_percent": gst_rate,
+                    "hsn_sac": hsn_sac,
+                    "unit": unit,
+                }
+            )
+        return out
 
     @staticmethod
     def _account_label(bank_name: str | None, account_number: str | None) -> str:
@@ -1007,14 +1128,15 @@ class OthersIncomeExpenseService:
     def delete_entry(self, entry_id: int) -> str:
         self.entry_repo.ensure_schema()
         row = self.entry_repo.get_by_id(entry_id)
-        if row is None or not row.IsActive:
+        if row is None:
             raise ValueError("Income / expense record not found.")
 
         bill_no = row.BillNo
         try:
             with db.session.begin_nested():
                 self._remove_linked_transactions(bill_no)
-                self.entry_repo.deactivate(row)
+                if row.IsActive:
+                    self.entry_repo.deactivate(row)
             db.session.commit()
         except Exception:
             db.session.rollback()

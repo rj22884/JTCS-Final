@@ -778,6 +778,8 @@
       stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
       ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
       income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      miscellaneous: {{ url_for('miscellaneous.delete_record', entry_id=0) | tojson }},
+      bank_orphan: {{ url_for('dashboard.bank_orphan_source_delete', bank_transaction_id=0) | tojson }},
       bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
       printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
       printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
@@ -798,6 +800,8 @@
       stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
       ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
       income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      miscellaneous: {{ url_for('miscellaneous.delete_record', entry_id=0) | tojson }},
+      bank_orphan: {{ url_for('dashboard.bank_orphan_source_delete', bank_transaction_id=0) | tojson }},
       bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
       printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
       printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
@@ -810,7 +814,7 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260911bankbar1"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260916orphan2"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>

@@ -851,66 +851,83 @@ class DashboardService:
             )
             if wt_u == "OTHERS" and (is_oie_sub or looks_like_oie_bill or not sw_l):
                 eid = None
+                ledger_kind = ""
+                is_active = True
                 bill_key = (ref or "").strip()
                 if bill_key:
                     row = db.session.execute(
                         text(
                             """
-                            SELECT TOP 1 EntryID
-                            FROM OthersIncomeExpenseMaster
-                            WHERE IsActive = 1
-                              AND UPPER(LTRIM(RTRIM(BillNo))) = UPPER(LTRIM(RTRIM(:bill_no)))
-                            ORDER BY EntryID DESC
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM OthersIncomeExpenseMaster e
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(:bill_no)))
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
                             """
                         ),
                         {"bill_no": bill_key},
-                    ).first()
+                    ).mappings().first()
                     if row:
-                        eid = int(row[0])
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
                 if eid is None and transaction_id:
                     row = db.session.execute(
                         text(
                             """
-                            SELECT TOP 1 e.EntryID
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
                             FROM JTCSDailyTransaction d
                             INNER JOIN OthersIncomeExpenseMaster e
                                 ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(d.ReferenceNo)))
-                               AND e.IsActive = 1
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
                             WHERE d.TransactionID = :tid
-                            ORDER BY e.EntryID DESC
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
                             """
                         ),
                         {"tid": int(transaction_id)},
-                    ).first()
+                    ).mappings().first()
                     if row:
-                        eid = int(row[0])
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
                 if eid is None and transaction_id:
                     # Bank Remarks often stores BillNo for OIE payment legs.
                     row = db.session.execute(
                         text(
                             """
-                            SELECT TOP 1 e.EntryID
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
                             FROM JtcsBankTransaction b
                             INNER JOIN OthersIncomeExpenseMaster e
                                 ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
-                               AND e.IsActive = 1
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
                             WHERE b.SourceRecordID = :tid
                                OR b.SourceID = :tid
-                            ORDER BY e.EntryID DESC
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
                             """
                         ),
                         {"tid": int(transaction_id)},
-                    ).first()
+                    ).mappings().first()
                     if row:
-                        eid = int(row[0])
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
                 if eid is not None:
+                    is_misc = ledger_kind in {"Misc.", "Misc"}
+                    module = "miscellaneous" if is_misc else "income_expense"
+                    open_url = (
+                        url_for("miscellaneous.index", load_entry=eid)
+                        if is_misc
+                        else url_for("others_income_expense.index", load_entry=eid)
+                    )
+                    if not is_active:
+                        # Soft-deleted: do not deep-link (get_entry fails). Fall through
+                        # so bank-leg resolve can attach bank_orphan delete.
+                        return base
                     base.update(
                         {
-                            "source_module": "income_expense",
+                            "source_module": module,
                             "source_module_id": eid,
-                            "source_url": url_for(
-                                "others_income_expense.index", load_entry=eid
-                            ),
+                            "source_url": open_url,
                             "can_open": True,
                         }
                     )
@@ -1171,7 +1188,7 @@ class DashboardService:
         if not source_record_id:
             if bank_transaction_id:
                 oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
-                if oie.get("can_open"):
+                if oie.get("source_module"):
                     return oie
             return self._no_source_link()
         if table and table != "jtcsdailytransaction":
@@ -1207,8 +1224,21 @@ class DashboardService:
                 if purchase_link.get("can_open"):
                     return purchase_link
                 oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
-                if oie.get("can_open"):
+                if oie.get("source_module"):
                     return oie
+                desc_row = db.session.execute(
+                    text(
+                        """
+                        SELECT TOP 1 Description
+                        FROM JtcsBankTransaction
+                        WHERE JtcsBankTransactionID = :btid
+                        """
+                    ),
+                    {"btid": int(bank_transaction_id)},
+                ).first()
+                desc = ((desc_row[0] if desc_row else "") or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    return self._bank_orphan_source_link(int(bank_transaction_id))
             return self._no_source_link()
         link = self._source_link_for_daily(
             transaction_id=daily["TransactionID"],
@@ -1231,8 +1261,14 @@ class DashboardService:
             if purchase_link.get("can_open"):
                 return purchase_link
             oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
-            if oie.get("can_open"):
+            # Prefer orphan/bank delete link over a dead (inactive) daily OIE deep-link.
+            if oie.get("source_module"):
                 return oie
+            if link.get("source_module") and not link.get("can_open"):
+                return self._bank_orphan_source_link(int(bank_transaction_id))
+        elif link.get("source_module") and not link.get("can_open"):
+            # No bank id — strip open URL so UI does not offer a broken "more" link.
+            link = {**link, "source_url": None, "can_open": False}
         return link
 
     def _source_link_for_gst_invoice(self, invoice_id: int) -> dict:
@@ -1296,18 +1332,17 @@ class DashboardService:
         return self._no_source_link()
 
     def _source_link_for_oie_bank_txn(self, bank_transaction_id: int) -> dict:
-        """Resolve Income/Expense entry from bank leg Remarks / SourceRecordID."""
+        """Resolve Income/Expense/Misc entry from bank leg Remarks / SourceRecordID."""
         from flask import url_for
 
         base = self._no_source_link()
         row = db.session.execute(
             text(
                 """
-                SELECT TOP 1 e.EntryID
+                SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
                 FROM JtcsBankTransaction b
                 INNER JOIN OthersIncomeExpenseMaster e
-                    ON e.IsActive = 1
-                   AND (
+                    ON (
                         UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
                      OR (
                             b.SourceRecordID IS NOT NULL
@@ -1320,21 +1355,48 @@ class DashboardService:
                         )
                      )
                    )
+                LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
                 WHERE b.JtcsBankTransactionID = :btid
-                ORDER BY e.EntryID DESC
+                ORDER BY e.IsActive DESC, e.EntryID DESC
                 """
             ),
             {"btid": int(bank_transaction_id)},
-        ).first()
+        ).mappings().first()
         if not row:
             return base
-        eid = int(row[0])
+        if not row["IsActive"]:
+            # Soft-deleted OIE — open/delete via entry APIs fail; treat as orphan bank leg.
+            return self._bank_orphan_source_link(int(bank_transaction_id))
+        eid = int(row["EntryID"])
+        ledger = (row["LedgerKind"] or "").strip()
+        is_misc = ledger in {"Misc.", "Misc"}
+        module = "miscellaneous" if is_misc else "income_expense"
+        open_url = (
+            url_for("miscellaneous.index", load_entry=eid)
+            if is_misc
+            else url_for("others_income_expense.index", load_entry=eid)
+        )
         base.update(
             {
-                "source_module": "income_expense",
+                "source_module": module,
                 "source_module_id": eid,
-                "source_url": url_for("others_income_expense.index", load_entry=eid),
+                "source_url": open_url,
                 "can_open": True,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
+
+    def _bank_orphan_source_link(self, bank_transaction_id: int) -> dict:
+        """Allow Bank Received Delete when Income/Expense master link is missing."""
+        base = self._no_source_link()
+        base.update(
+            {
+                "source_module": "bank_orphan",
+                "source_module_id": int(bank_transaction_id),
+                "source_url": None,
+                "can_open": False,
                 "work_type": "Others",
                 "sub_work_type": "Income / Expense",
             }
@@ -1902,6 +1964,13 @@ class DashboardService:
                     bank_transaction_id=row["JtcsBankTransactionID"],
                 )
             )
+            # Orphan Income/Expense bank legs: no master link → still allow Delete.
+            if not item.get("source_module"):
+                desc = (row["Description"] or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    item.update(
+                        self._bank_orphan_source_link(int(row["JtcsBankTransactionID"]))
+                    )
             result.append(item)
         return result
 

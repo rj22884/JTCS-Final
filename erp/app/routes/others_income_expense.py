@@ -186,7 +186,10 @@ def record(entry_id: int):
 def delete_record(entry_id: int):
     service = OthersIncomeExpenseService()
     try:
-        data = service.get_entry(entry_id)
+        row = service.entry_repo.get_by_id(entry_id)
+        if row is None:
+            return jsonify({"ok": False, "error": "Income / expense record not found."}), 404
+        data = service._entry_dict(row)
         if (data.get("ledger_kind") or "") == OthersIncomeExpenseService.LEDGER_MISC:
             return jsonify(
                 {

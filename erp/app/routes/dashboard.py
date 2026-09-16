@@ -301,6 +301,24 @@ def ecourt_source_delete(sale_id: int):
         return jsonify({"ok": False, "error": f"Unable to delete e-Court sale: {exc}"}), 500
 
 
+@bp.route("/dashboard/api/source/bank-orphan/<int:bank_transaction_id>/delete", methods=["POST"])
+@login_required
+@require_delete_reauth
+def bank_orphan_source_delete(bank_transaction_id: int):
+    """Delete orphan Income/Expense bank legs that no longer open in OIE."""
+    from app.services.others_income_expense_service import OthersIncomeExpenseService
+
+    try:
+        message = OthersIncomeExpenseService().delete_orphan_bank_transaction(
+            bank_transaction_id
+        )
+        return jsonify({"ok": True, "message": message})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to delete bank transaction: {exc}"}), 500
+
+
 def _notes_counts_from_payload(payload: dict) -> dict[int, int]:
     from app.services.currency_notes_service import DENOMS
 

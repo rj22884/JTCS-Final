@@ -70,7 +70,7 @@ class GstInvoicePdfService:
     def build_pdf_from_payload(self, payload: dict) -> tuple[bytes, str]:
         """Build preview PDF from form payload without requiring a saved invoice."""
         header, lines, preview = self.invoice_service._build_header_and_lines(
-            payload, persist_no=False
+            payload, persist_no=False, require_payment_bank=False
         )
         data = {
             "invoice_id": 0,
@@ -88,6 +88,9 @@ class GstInvoicePdfService:
             "reverse_charge": bool(header.get("ReverseCharge")),
             "invoice_kind": header.get("InvoiceKind") or "NON_GST",
             "tax_type": header.get("TaxType") or "IGST",
+            "bill_source": self.invoice_service.normalize_bill_source(
+                payload.get("bill_source") or header.get("BillSource")
+            ),
             "list_price": float(header.get("ListPrice") or 0),
             "discount_amount": float(header.get("DiscountAmount") or 0),
             "taxable_value": float(header.get("TaxableValue") or 0),
@@ -148,7 +151,12 @@ class GstInvoicePdfService:
             .replace(">", "&gt;")
         )
 
-    def _particulars_paragraph(self, line: dict, cell: ParagraphStyle) -> Paragraph:
+    def _particulars_paragraph(self, line: dict, cell: ParagraphStyle, *, bill_source: str = "") -> Paragraph:
+        source = (bill_source or "").strip()
+        if source == GstInvoiceService.BILL_SOURCE_MISCELLANEOUS:
+            # Misc bills: particulars already = Item (description); never print tax year.
+            text = (line.get("particulars") or line.get("item_name") or "—").strip() or "—"
+            return Paragraph(self._pdf_escape(text), cell)
         main, extra = GstInvoiceService.line_particulars_parts(line)
         html = self._pdf_escape(main or "—")
         if extra:
@@ -458,7 +466,9 @@ class GstInvoicePdfService:
             table_data.append(
                 [
                     Paragraph(str(line.get("sr_no") or ""), cell),
-                    self._particulars_paragraph(line, cell),
+                    self._particulars_paragraph(
+                        line, cell, bill_source=data.get("bill_source") or ""
+                    ),
                     Paragraph(hsn, cell),
                     Paragraph(f"{self._fmt(line.get('qty'))} {line.get('unit') or ''}", cell),
                     Paragraph(self._fmt(line.get("rate")), cell),
