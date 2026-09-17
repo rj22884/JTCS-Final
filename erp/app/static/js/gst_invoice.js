@@ -70,6 +70,7 @@
   let searchTimer = null;
   let gridTimer = null;
   let editingId = null;
+  let currentBillSource = "Manual";
   let lastTallyLookup = "";
 
   function apiUrl(template, id) {
@@ -518,6 +519,7 @@
       amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
         ? ""
         : els.amountPaid.value,
+      bill_source: currentBillSource || "Manual",
       lines: lines,
     };
   }
@@ -573,6 +575,7 @@
 
   function fillRecord(record) {
     editingId = record.invoice_id || null;
+    currentBillSource = record.bill_source || "Manual";
     if (els.id) els.id.value = String(record.invoice_id || "");
     if (els.no) els.no.value = record.invoice_no || "";
     setInvoiceKind(record.invoice_kind || "NON_GST", true);
@@ -659,6 +662,7 @@
 
   async function startNew() {
     editingId = null;
+    currentBillSource = "Manual";
     if (els.id) els.id.value = "";
     setInvoiceKind("NON_GST", false);
     if (els.customerId) els.customerId.value = "";
@@ -748,11 +752,6 @@
     }
     if (!payload.lines.length) {
       showStatus("Add at least one line item.", "danger");
-      return;
-    }
-    if (!payload.payment_bank_account_id) {
-      showStatus("Payment Bank Account is required.", "danger");
-      els.payBank?.focus();
       return;
     }
     if (!(await servicePeriodReviewWarning())) {
@@ -862,7 +861,15 @@
         row.tax_type === "CGST_SGST"
           ? "CGST+SGST"
           : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
+      const billSource = (row.bill_source || "Manual").toString();
       const tr = document.createElement("tr");
+      if (billSource.toLowerCase() === "automatic") {
+        tr.className = "inv-row-automatic";
+      } else if (billSource.toLowerCase() === "import") {
+        tr.className = "inv-row-import";
+      } else if (billSource.toLowerCase() === "miscellaneous") {
+        tr.className = "inv-row-miscellaneous";
+      }
       tr.innerHTML =
         "<td><code>" +
         escapeHtml(row.invoice_no) +
@@ -879,6 +886,11 @@
         "<td>" +
         escapeHtml(taxLabel) +
         "</td>" +
+        "<td><span class=\"inv-bill-source inv-bill-source-" +
+        escapeHtml(billSource.toLowerCase()) +
+        '">' +
+        escapeHtml(billSource) +
+        "</span></td>" +
         '<td class="text-end fw-semibold">' +
         money(row.invoice_value) +
         "</td>" +
@@ -973,8 +985,23 @@
   }
 
   function applyTallyAmount(rec) {
-    const item = findItemForModule(rec.module_code);
-    const gst = item && item.gst_rate_percent != null ? item.gst_rate_percent : 18;
+    const moduleCode = String(rec.module_code || "").toUpperCase();
+    const isOie =
+      moduleCode === "OIE" ||
+      moduleCode === "RCF" ||
+      (rec.source || "") === "income_expense" ||
+      (rec.source || "") === "ration_card_followup";
+    if (isOie) {
+      const nonGst = document.getElementById("invKindNonGst");
+      if (nonGst) nonGst.checked = true;
+    }
+    const item = isOie ? null : findItemForModule(rec.module_code);
+    const gst =
+      isOie
+        ? 0
+        : item && item.gst_rate_percent != null
+          ? item.gst_rate_percent
+          : 18;
     const split = splitGstInclusive(rec.bill_amount != null ? rec.bill_amount : 0, gst);
     clearLines();
     addLine({
@@ -1026,6 +1053,20 @@
 
   async function applyTallyBill(rec) {
     if (!rec) return;
+    if (rec.bill_no && els.tallyBillNo) {
+      els.tallyBillNo.value = rec.bill_no;
+      lastTallyLookup = String(rec.bill_no).trim();
+    }
+    if (rec.existing_invoice_id) {
+      editingId = parseInt(rec.existing_invoice_id, 10) || null;
+      currentBillSource = rec.bill_source || "Automatic";
+      if (editingId) {
+        setModeBadge(true);
+        if (els.saveBtn) {
+          els.saveBtn.innerHTML = '<i class="bi bi-save"></i> Update Invoice';
+        }
+      }
+    }
     if (rec.invoice_date && els.date) {
       els.date.value = String(rec.invoice_date).slice(0, 10);
       await refreshInvoiceNo().catch(function () {});
@@ -1041,6 +1082,20 @@
     } else if (rec.customer_name) {
       if (els.customerName) els.customerName.value = rec.customer_name;
       if (els.customerSearch) els.customerSearch.value = rec.customer_name;
+      if (els.mobile && rec.mobile_number) els.mobile.value = rec.mobile_number;
+    }
+    if (rec.invoice_kind === "NON_GST") {
+      const nonGst = document.getElementById("invKindNonGst");
+      if (nonGst) {
+        nonGst.checked = true;
+        await refreshInvoiceNo().catch(function () {});
+      }
+    } else if (rec.invoice_kind === "GST") {
+      const gstKind = document.getElementById("invKindGst");
+      if (gstKind) {
+        gstKind.checked = true;
+        await refreshInvoiceNo().catch(function () {});
+      }
     }
     applyTallyAmount(rec);
     const amt =
@@ -1068,14 +1123,17 @@
     if (!billNo) return;
     if (!force && billNo === lastTallyLookup) return;
     lastTallyLookup = billNo;
-    showStatus("Tally Bill Number followup mein dhoondh rahe hain…", "info");
+    showStatus("Tally Bill Number followup / Income-Expense / Ration Card mein dhoondh rahe hain…", "info");
     try {
       const url = new URL(api.tallyBill, window.location.origin);
       url.searchParams.set("bill_no", billNo);
       const res = await fetch(url.toString(), { credentials: "same-origin" });
       const data = await res.json();
       if (!data.ok || !data.record) {
-        throw new Error(data.error || "Tally Bill Number nahi mila.");
+        throw new Error(
+          data.error ||
+            "Tally Bill Number followup, Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
+        );
       }
       await applyTallyBill(data.record);
     } catch (err) {
@@ -1313,10 +1371,25 @@
     const params = new URLSearchParams(window.location.search || "");
     const editId = (params.get("edit") || "").trim();
     const deepCustomerId = (params.get("customer_id") || "").trim();
+    const deepTallyBill = (
+      params.get("tally_bill_no") ||
+      params.get("bill_no") ||
+      ""
+    ).trim();
     if (editId) {
       await loadForEdit(editId);
     } else if (deepCustomerId) {
       await pickCustomer(deepCustomerId);
+    } else {
+      const deepCustomerName = (params.get("customer_name") || "").trim();
+      if (deepCustomerName) {
+        if (els.customerName) els.customerName.value = deepCustomerName;
+        if (els.customerSearch) els.customerSearch.value = deepCustomerName;
+      }
+    }
+    if (!editId && deepTallyBill && els.tallyBillNo) {
+      els.tallyBillNo.value = deepTallyBill;
+      await lookupTallyBill(true);
     }
   })().catch(function (err) {
     showStatus(err.message || String(err), "danger");

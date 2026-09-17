@@ -1,7 +1,7 @@
 <header class="jtcs-app-header"
-        data-poll-url="/api/notifications/unread"
+        data-poll-url="{% if is_fps_user %}{% else %}/api/notifications/unread{% endif %}"
         data-poll-seconds="{{ notification_poll_seconds|default(15) }}"
-        data-search-url="/api/search"
+        data-search-url="{% if is_fps_user %}{% else %}/api/search{% endif %}"
         data-pending-user-count="{{ pending_user_count|default(0) }}">
   <div class="jtcs-header-brand">
     {% if company_logo %}
@@ -15,6 +15,7 @@
     </div>
   </div>
 
+  {% if not is_fps_user %}
   <div class="jtcs-market-ticker" id="jtcsMarketTicker" data-quotes-url="{{ url_for('market_quotes.quotes') }}" hidden>
     <button type="button" class="jtcs-market-live" id="jtcsMarketLive" title="Market feed status" disabled>
       <span class="jtcs-market-live-dot" aria-hidden="true"></span>
@@ -22,8 +23,10 @@
     </button>
     <div class="jtcs-market-items" id="jtcsMarketItems" role="list"></div>
   </div>
+  {% endif %}
 
   <div class="jtcs-header-meta">
+    {% if not is_fps_user %}
     <div class="jtcs-global-search-wrap hide-sm">
       <div class="jtcs-global-search">
         <i class="bi bi-search jtcs-global-search-icon" aria-hidden="true"></i>
@@ -41,12 +44,14 @@
              aria-label="Search results"></div>
       </div>
     </div>
+    {% endif %}
 
     <span class="jtcs-header-pill jtcs-header-user hide-sm">
       <i class="bi bi-person-circle"></i>
       {{ session.user_name }}
     </span>
 
+    {% if not is_fps_user %}
     {% set notify_badge = (crm_unread_count|default(0)) + (pending_user_count|default(0)) %}
     <div class="dropdown jtcs-header-notify hide-sm">
       <button type="button"
@@ -112,6 +117,7 @@
         </a>
       </div>
     </div>
+    {% endif %}
 
     <span class="jtcs-header-pill hide-sm">
       <i class="bi bi-calendar3"></i>
@@ -121,10 +127,12 @@
       <i class="bi bi-clock"></i>
       <span class="jtcs-live-clock" data-server-iso="{{ server_time_iso }}">{{ server_time }}</span>
     </span>
+    {% if not is_fps_user %}
     <a href="{{ url_for('dashboard.index') }}" class="jtcs-header-btn" title="Profile">
       <i class="bi bi-person-gear"></i>
       <span class="d-none d-md-inline">Profile</span>
     </a>
+    {% endif %}
     <a href="{{ url_for('auth.logout') }}" class="jtcs-header-btn jtcs-header-btn-danger" title="Logout">
       <i class="bi bi-box-arrow-right"></i>
       <span class="d-none d-md-inline">Logout</span>

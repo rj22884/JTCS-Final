@@ -12,7 +12,11 @@ from app.models.gst_billing import GstInvoice
 from app.models.transactions import JTCSDailyTransaction
 from app.repositories.gst_invoice_repository import GstInvoiceRepository
 from app.repositories.item_master_repository import ItemMasterRepository
-from app.repositories.transaction_repository import DailyTransactionRepository
+from app.repositories.transaction_repository import (
+    BankTransactionRepository,
+    DailyTransactionRepository,
+    MasterRepository,
+)
 from app.services.bank_master_service import BankMasterService
 from app.utils.db_session import persist
 
@@ -171,7 +175,9 @@ class GstInvoiceService:
         return ""
 
     @classmethod
-    def line_particulars_parts(cls, line: dict) -> tuple[str, str]:
+    def line_particulars_parts(
+        cls, line: dict, *, include_tax_period: bool = True
+    ) -> tuple[str, str]:
         """Item name on the first line; tax year / quarter / month / notes in brackets."""
         item_name = cls._line_text(line.get("item_name"), line.get("ItemName"))
         particulars = cls._line_text(line.get("particulars"), line.get("Particulars"))
@@ -180,7 +186,7 @@ class GstInvoiceService:
         month = cls._line_text(line.get("month"), line.get("Month"))
         main = item_name or particulars or "—"
         extras: list[str] = []
-        if tax_period:
+        if include_tax_period and tax_period:
             extras.append(tax_period)
         if quarter:
             extras.append(quarter)
@@ -193,6 +199,15 @@ class GstInvoiceService:
         ):
             extras.append(particulars)
         return main, ", ".join(extras)
+
+    @classmethod
+    def misc_particulars(cls, item_name: str, item_description: str | None = None) -> str:
+        """Particulars for Misc-generated bills: Item (description)."""
+        name = (item_name or "").strip()
+        desc = (item_description or "").strip()
+        if name and desc:
+            return f"{name} ({desc})"[:300]
+        return (name or desc or "")[:300]
 
     @staticmethod
     def company_profile() -> dict[str, str]:
@@ -312,6 +327,31 @@ class GstInvoiceService:
     VOUCHER_PURCHASE = "PURCHASE"
     DAILY_WORK_TYPE = "Accounting"
     DAILY_SUB_WORK_TYPE = "Sale / Service Invoice"
+    BILL_SOURCE_MANUAL = "Manual"
+    BILL_SOURCE_AUTOMATIC = "Automatic"
+    BILL_SOURCE_IMPORT = "Import"
+    BILL_SOURCE_MISCELLANEOUS = "Miscellaneous"
+    BILL_SOURCES = (
+        BILL_SOURCE_MANUAL,
+        BILL_SOURCE_AUTOMATIC,
+        BILL_SOURCE_IMPORT,
+        BILL_SOURCE_MISCELLANEOUS,
+    )
+    # Purchase payment → bank ledger only (never used by Sale / other modules).
+    PURCHASE_BANK_SOURCE_TABLE = "GstInvoice"
+    PURCHASE_BANK_SOURCE_TYPE = "PURCHASE"
+    PURCHASE_BANK_DESCRIPTION = "Purchase Invoice Payment"
+
+    @staticmethod
+    def normalize_bill_source(value) -> str:
+        raw = (str(value or "")).strip().lower().replace(" ", "_").replace("-", "_")
+        if raw in {"automatic", "auto", "temp", "temporary"}:
+            return GstInvoiceService.BILL_SOURCE_AUTOMATIC
+        if raw in {"import", "imported", "daybook"}:
+            return GstInvoiceService.BILL_SOURCE_IMPORT
+        if raw in {"miscellaneous", "misc", "oie_misc", "others_misc"}:
+            return GstInvoiceService.BILL_SOURCE_MISCELLANEOUS
+        return GstInvoiceService.BILL_SOURCE_MANUAL
 
     @staticmethod
     def normalize_voucher_type(value) -> str:
@@ -378,7 +418,7 @@ class GstInvoiceService:
     def _serialize(self, inv, lines: list | None = None) -> dict:
         if lines is None:
             lines = self.repo.list_lines(inv.InvoiceID)
-        return {
+        data = {
             "invoice_id": inv.InvoiceID,
             "invoice_no": inv.InvoiceNo,
             "invoice_date": inv.InvoiceDate.isoformat() if inv.InvoiceDate else "",
@@ -430,9 +470,18 @@ class GstInvoiceService:
                 else None
             ),
             "tally_bill_no": (getattr(inv, "TallyBillNo", None) or "").strip(),
+            "bill_source": self.normalize_bill_source(
+                getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
+            ),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
             "lines": self._serialize_lines(lines),
         }
+        if data["bill_source"] == self.BILL_SOURCE_MISCELLANEOUS:
+            for line in data["lines"]:
+                # PDF / HTML preview: Item (description) only — no tax year brackets.
+                line["particulars_display"] = (line.get("particulars") or "").strip() or "—"
+                line["particulars_extra"] = ""
+        return data
 
     def _item_names_by_id(self, item_ids: list) -> dict[int, str]:
         names: dict[int, str] = {}
@@ -479,6 +528,8 @@ class GstInvoiceService:
         date_to: date | None = None,
         voucher_type: str | None = None,
     ) -> list[dict]:
+        # Automatic invoice backfill disabled — Sales Invoice is a separate module;
+        # followup/OIE/ration no longer auto-create Sale / Service Invoice rows.
         vt = self.normalize_voucher_type(voucher_type) if voucher_type else None
         return [
             self._serialize(inv, lines=[])
@@ -810,9 +861,11 @@ class GstInvoiceService:
             "PayUpiId": bank_data["upi_id"] or None,
             "PaymentDate": payment_date,
             "AmountPaid": amount_paid,
-            "TallyBillNo": (
-                (payload.get("tally_bill_no") or payload.get("TallyBillNo") or "").strip()[:50]
-                or None
+            "TallyBillNo": self._normalized_tally_bill_no(
+                payload.get("tally_bill_no") or payload.get("TallyBillNo")
+            ),
+            "BillSource": self.normalize_bill_source(
+                payload.get("bill_source") or payload.get("BillSource")
             ),
             "CreatedBy": (payload.get("created_by") or None),
             "CreatedAt": datetime.utcnow(),
@@ -852,6 +905,15 @@ class GstInvoiceService:
 
     def _norm_ref(self, value) -> str:
         return str(value or "").strip().upper()
+
+    @staticmethod
+    def _normalized_tally_bill_no(value) -> str | None:
+        from app.utils.tally_bill import normalize_tally_bill_key
+
+        key = normalize_tally_bill_key(str(value or ""))
+        if not key:
+            return None
+        return key[:50]
 
     def _invoice_gst_amount(self, inv: GstInvoice) -> Decimal:
         return _q(
@@ -1071,25 +1133,171 @@ class GstInvoiceService:
             db.session.commit()
         return posted
 
-    def create_record(self, payload: dict, *, created_by: str | None = None) -> dict:
+    def _list_purchase_payment_bank_rows(self, invoice_id: int) -> list:
+        """Bank legs posted only by Purchase Invoice Amount Paid (SourceTable=GstInvoice)."""
+        from app.models.transactions import JtcsBankTransaction
+
+        iid = int(invoice_id)
+        stmt = (
+            select(JtcsBankTransaction)
+            .where(JtcsBankTransaction.SourceTable == self.PURCHASE_BANK_SOURCE_TABLE)
+            .where(JtcsBankTransaction.SourceRecordID == iid)
+            .where(JtcsBankTransaction.SourceType == self.PURCHASE_BANK_SOURCE_TYPE)
+            .order_by(JtcsBankTransaction.JtcsBankTransactionID.asc())
+        )
+        return list(db.session.scalars(stmt).all())
+
+    def _remove_purchase_payment_bank(self, inv: GstInvoice) -> None:
+        """Strict: remove purchase payment bank legs only; never touches Sale / other modules."""
+        voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+        if voucher != self.VOUCHER_PURCHASE:
+            return
+        bank_repo = BankTransactionRepository()
+        for row in self._list_purchase_payment_bank_rows(inv.InvoiceID):
+            bank_repo.delete(row)
+        db.session.flush()
+
+    def _sync_purchase_payment_bank(self, inv: GstInvoice) -> bool:
+        """Post Amount Paid as Credit (Out) on the selected payment bank — PURCHASE only."""
+        voucher = self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+        if voucher != self.VOUCHER_PURCHASE:
+            return False
+
+        amount = _q(Decimal(str(getattr(inv, "AmountPaid", None) or 0)))
+        bank_account_id = getattr(inv, "PaymentBankAccountID", None)
+        try:
+            bank_account_id = int(bank_account_id) if bank_account_id not in (None, "") else None
+        except (TypeError, ValueError):
+            bank_account_id = None
+
+        existing = self._list_purchase_payment_bank_rows(inv.InvoiceID)
+        if amount <= 0 or not bank_account_id:
+            if existing:
+                self._remove_purchase_payment_bank(inv)
+                return True
+            return False
+
+        master = MasterRepository()
+        bank_snap = master.resolve_bank_account_by_id(bank_account_id)
+        pay_mode_id = master.resolve_payment_mode_for_bank_account(bank_account_id)
+        txn_date = getattr(inv, "PaymentDate", None) or inv.InvoiceDate
+        supplier = (inv.CustomerName or "").strip() or "Supplier"
+        invoice_no = (inv.InvoiceNo or "").strip()
+        description = self.PURCHASE_BANK_DESCRIPTION
+        remarks = f"{invoice_no} — {supplier}"[:200]
+        created_by = (inv.CreatedBy or "").strip() or "Purchase Invoice"
+        bank_repo = BankTransactionRepository()
+
+        payload = {
+            "JtcsBankAccountID": bank_snap.account_id or 0,
+            "BankName": bank_snap.bank_name,
+            "MaskedAccountNumber": bank_snap.masked_account_number,
+            "TransactionDate": txn_date,
+            "Description": description,
+            "Debit": None,
+            "Credit": amount,
+            "ClosingBalance": Decimal("0"),
+            "ImportedBy": created_by,
+            "ImportedDate": datetime.utcnow(),
+            "Remarks": remarks,
+            "IsLocked": False,
+            "SourceTable": self.PURCHASE_BANK_SOURCE_TABLE,
+            "SourceRecordID": inv.InvoiceID,
+            "SourceType": self.PURCHASE_BANK_SOURCE_TYPE,
+            "SourceID": inv.InvoiceID,
+            "LedgerKind": "PAYMENT",
+            "PaymentModeID": pay_mode_id,
+            "PaymentSequence": 1,
+        }
+
+        if existing:
+            row = existing[0]
+            for key, value in payload.items():
+                if key in {"ImportedBy", "ImportedDate"}:
+                    continue
+                setattr(row, key, value)
+            for extra in existing[1:]:
+                bank_repo.delete(extra)
+            db.session.flush()
+        else:
+            bank_repo.create(payload)
+        return True
+
+    def create_record(
+        self,
+        payload: dict,
+        *,
+        created_by: str | None = None,
+        commit: bool = True,
+        require_payment_bank: bool | None = None,
+    ) -> dict:
         if created_by:
             payload = {**payload, "created_by": created_by}
-        header, lines, _ = self._build_header_and_lines(payload, persist_no=True)
-        self._assert_tally_bill_unique(header.get("TallyBillNo"))
+        bill_source = self.normalize_bill_source(
+            payload.get("bill_source") or payload.get("BillSource")
+        )
+        if require_payment_bank is None:
+            # Sale invoices (incl. Misc / Manual) no longer require payment bank.
+            # Purchase still opts in via caller when needed.
+            require_payment_bank = False
+        header, lines, _ = self._build_header_and_lines(
+            payload, persist_no=True, require_payment_bank=require_payment_bank
+        )
+        header["BillSource"] = bill_source
+        tally_key = header.get("TallyBillNo")
+        existing = self.repo.find_by_tally_bill_no(tally_key) if tally_key else None
+        if existing is not None:
+            existing_source = self.normalize_bill_source(getattr(existing, "BillSource", None))
+            if existing_source in {
+                self.BILL_SOURCE_AUTOMATIC,
+                self.BILL_SOURCE_MISCELLANEOUS,
+            }:
+                upgrade_payload = {
+                    **payload,
+                    "tally_bill_no": tally_key,
+                    "bill_source": bill_source
+                    if bill_source != self.BILL_SOURCE_MANUAL
+                    else (
+                        self.BILL_SOURCE_MISCELLANEOUS
+                        if existing_source == self.BILL_SOURCE_MISCELLANEOUS
+                        else self.BILL_SOURCE_MANUAL
+                    ),
+                }
+                # Keep outer caller transaction (e.g. OIE save) — never nested persist.
+                return self.update_record(
+                    existing.InvoiceID, upgrade_payload, commit=commit
+                )
+            self._assert_tally_bill_unique(tally_key)
 
         def _write() -> dict:
             inv = self.repo.create(header, lines)
             self._sync_sale_daily(inv)
+            self._sync_purchase_payment_bank(inv)
             return self._serialize(inv)
 
-        return persist(_write)
+        if commit:
+            return persist(_write)
+        return _write()
 
-    def update_record(self, invoice_id: int, payload: dict) -> dict:
+    def update_record(
+        self, invoice_id: int, payload: dict, *, commit: bool = True
+    ) -> dict:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
-        payload = {**payload, "invoice_no": inv.InvoiceNo}
-        header, lines, _ = self._build_header_and_lines(payload, persist_no=False)
+        existing_source = self.normalize_bill_source(
+            getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
+        )
+        if "bill_source" not in payload and "BillSource" not in payload:
+            payload = {**payload, "bill_source": existing_source}
+        bill_source = self.normalize_bill_source(
+            payload.get("bill_source") or payload.get("BillSource")
+        )
+        payload = {**payload, "invoice_no": inv.InvoiceNo, "bill_source": bill_source}
+        # Sale invoices do not require payment bank (legacy Manual bank rule removed).
+        header, lines, _ = self._build_header_and_lines(
+            payload, persist_no=False, require_payment_bank=False
+        )
         self._assert_tally_bill_unique(header.get("TallyBillNo"), exclude_invoice_id=invoice_id)
         header["UpdatedAt"] = datetime.utcnow()
         header.pop("CreatedAt", None)
@@ -1098,9 +1306,38 @@ class GstInvoiceService:
         def _write() -> dict:
             updated = self.repo.update(inv, header, lines)
             self._sync_sale_daily(updated)
+            self._sync_purchase_payment_bank(updated)
             return self._serialize(updated)
 
-        return persist(_write)
+        if commit:
+            return persist(_write)
+        return _write()
+
+    def ensure_automatic_invoice(
+        self,
+        *,
+        tally_bill_no: str,
+        customer_name: str,
+        bill_amount,
+        invoice_date: date | None = None,
+        customer_id: int | None = None,
+        contact_mobile: str | None = None,
+        place_of_supply: str | None = None,
+        notes: str | None = None,
+        particulars: str | None = None,
+        created_by: str | None = None,
+        commit: bool = True,
+    ) -> dict | None:
+        """Deprecated no-op — Sale invoices are created from Miscellaneous Generate Bill."""
+        return None
+
+    def backfill_automatic_invoices(self, *, limit: int = 40) -> int:
+        """Deprecated no-op — Automatic backfill disabled."""
+        return 0
+
+    def _list_paid_bills_missing_invoice(self, *, limit: int = 40) -> list[dict]:
+        """Legacy helper (unused). Kept for reference only."""
+        return []
 
     def list_ids(self) -> list[int]:
         return self.repo.list_ids()
@@ -1157,6 +1394,7 @@ class GstInvoiceService:
 
         def _write() -> str:
             self._remove_sale_daily(inv)
+            self._remove_purchase_payment_bank(inv)
             self.repo.delete(inv)
             return "Invoice deleted successfully."
 

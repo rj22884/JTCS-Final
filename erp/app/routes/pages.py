@@ -19,11 +19,31 @@ RESERVED_PATHS = {
     "others",
     "masters",
     "exceptional-report",
+    "public-report",
+    "resume",
+    "other-login",
+    "fps-login",
+    "activities",
 }
 
 
 def _render_builtin_module(page_path: str):
     normalized = (page_path or "").strip().strip("/").lower()
+    if normalized in {
+        "activities/income_expense_new",
+        "activities/income-expense-new",
+    }:
+        from app.routes.income_expense_new import index as income_expense_new_index
+
+        return income_expense_new_index()
+    if normalized in {
+        "activities/miscellaneous",
+        "activities/misc_new",
+        "activities/misc-new",
+    }:
+        from app.routes.miscellaneous import index as miscellaneous_index
+
+        return miscellaneous_index()
     if normalized == "masters/bank":
         from app.routes.bank_master import index as bank_master_index
 
@@ -55,6 +75,13 @@ def _render_builtin_module(page_path: str):
     return None
 
 
+@bp.route("/resume", methods=["GET"], strict_slashes=False)
+def public_dsc_resume():
+    from app.routes.public_resume import index as resume_index
+
+    return resume_index()
+
+
 @bp.route("/<path:page_path>")
 @login_required
 def render_page(page_path: str):
@@ -73,10 +100,12 @@ def render_page(page_path: str):
     if menu is None:
         abort(404)
 
-    if not menu_service.can_access_menu(menu, session.get("role")):
+    if not menu_service.can_access_menu(menu, session.get("role"), session.get("user_id")):
         abort(403)
 
-    breadcrumb = menu_service.get_breadcrumb(menu_url, session.get("role"))
+    breadcrumb = menu_service.get_breadcrumb(
+        menu_url, session.get("role"), session.get("user_id")
+    )
     return render_template(
         "pages/placeholder.html",
         page_title=menu.MenuName,

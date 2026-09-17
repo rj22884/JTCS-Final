@@ -63,6 +63,9 @@
     tallyBillNo: document.getElementById("oieTallyBillNo"),
     tallyBillDate: document.getElementById("oieTallyBillDate"),
     tallyBillAmount: document.getElementById("oieTallyBillAmount"),
+    generateBillWrap: document.getElementById("oieGenerateBillWrap"),
+    generateBillYes: document.getElementById("oieGenerateBillYes"),
+    generateBillNo: document.getElementById("oieGenerateBillNo"),
     paymentSection: document.getElementById("oiePaymentSection"),
     paymentFieldset: document.getElementById("oiePaymentFieldset"),
     paymentLockedHint: document.getElementById("oiePaymentLockedHint"),
@@ -122,9 +125,55 @@
   }
 
   function currentLedgerKind() {
+    if (window.OIE_FORCE_LEDGER_KIND) {
+      return String(window.OIE_FORCE_LEDGER_KIND);
+    }
     if (els.ledgerExpense && els.ledgerExpense.checked) return "Expense";
     if (els.ledgerMisc && els.ledgerMisc.checked) return "Misc.";
     return "Income";
+  }
+
+  function applyForcedLedgerKindUi() {
+    const forced = window.OIE_FORCE_LEDGER_KIND ? String(window.OIE_FORCE_LEDGER_KIND) : "";
+    if (window.OIE_HIDE_MISC && !forced) {
+      els.statsRow?.querySelectorAll(".oie-stat-misc").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+      if (els.gridFilterKind) {
+        Array.from(els.gridFilterKind.options).forEach(function (opt) {
+          if (opt.value === "Misc.") opt.hidden = true;
+        });
+        if (els.gridFilterKind.value === "Misc.") els.gridFilterKind.value = "";
+      }
+      if (els.ledgerMisc) {
+        els.ledgerMisc.closest(".form-check")?.classList.add("d-none");
+        if (els.ledgerMisc.checked && els.ledgerIncome) els.ledgerIncome.checked = true;
+      }
+      const legend = form.querySelector(".oie-entry-type-fieldset legend");
+      if (legend) legend.textContent = "Income / Expense";
+    }
+    if (!forced) return;
+    if (forced === "Misc." && els.ledgerMisc) {
+      els.ledgerMisc.checked = true;
+    } else if (forced === "Expense" && els.ledgerExpense) {
+      els.ledgerExpense.checked = true;
+    } else if (els.ledgerIncome) {
+      els.ledgerIncome.checked = true;
+    }
+    const typeFieldset = form.querySelector(".oie-entry-type-fieldset");
+    if (typeFieldset) typeFieldset.classList.add("d-none");
+    if (els.statsRow && forced === "Misc.") {
+      els.statsRow.querySelectorAll(".oie-stat-income, .oie-stat-expense").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+    }
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = forced;
+      Array.from(els.gridFilterKind.options).forEach(function (opt) {
+        if (opt.value && opt.value !== forced) opt.hidden = true;
+      });
+      els.gridFilterKind.closest(".col-md-2")?.classList.add("d-none");
+    }
   }
 
   function isMiscKind() {
@@ -143,6 +192,115 @@
     return !isMiscKind() || isTallyChecked();
   }
 
+  function resetGenerateBillChoice() {
+    if (els.generateBillYes) els.generateBillYes.checked = false;
+    if (els.generateBillNo) els.generateBillNo.checked = true;
+  }
+
+  function firstCategoryLineData() {
+    const line = els.categoryLines?.querySelector(".oie-category-line");
+    if (!line) {
+      return {
+        item: "",
+        item_id: "",
+        gst_rate_percent: "18",
+        hsn_sac: "",
+        unit: "NOS",
+        rate: "",
+      };
+    }
+    const sub = line.querySelector(".oie-category-subwork");
+    const amount = line.querySelector(".oie-category-amount");
+    const opt = sub && sub.selectedIndex >= 0 ? sub.options[sub.selectedIndex] : null;
+    return {
+      item: opt && opt.value ? (opt.textContent || "").trim() : "",
+      item_id: opt ? opt.getAttribute("data-item-id") || "" : "",
+      gst_rate_percent: opt ? opt.getAttribute("data-gst-rate") || "18" : "18",
+      hsn_sac: opt ? opt.getAttribute("data-hsn") || "" : "",
+      unit: opt ? opt.getAttribute("data-unit") || "NOS" : "NOS",
+      rate: amount && amount.value !== "" ? amount.value : "",
+    };
+  }
+
+  function collectGenerateBillSeed() {
+    const line = firstCategoryLineData();
+    return {
+      date: (els.workDate?.value || "").trim(),
+      invoice_no: (els.billNo?.value || "").trim(),
+      bill_no: (els.billNo?.value || "").trim(),
+      tally_bill_no: (els.tallyBillNo?.value || els.billNo?.value || "").trim(),
+      customer_id: (els.customerId?.value || "").trim(),
+      customer_name: (els.customerName?.value || "").trim(),
+      mobile: (els.mobileNumber?.value || "").trim(),
+      item: line.item,
+      sub_work: line.item,
+      item_id: line.item_id,
+      gst_rate_percent: line.gst_rate_percent,
+      hsn_sac: line.hsn_sac,
+      unit: line.unit,
+      rate: line.rate,
+      state_code: (window.OIE_COMPANY_STATE_CODE || "05").trim(),
+    };
+  }
+
+  function openGenerateBillPopup() {
+    if (!isMiscKind() || !isTallyChecked()) return;
+    const seed = collectGenerateBillSeed();
+    if (!seed.invoice_no) {
+      alert("Bill Number is required before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    if (!seed.item) {
+      alert("Please select Sub Work (item) before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    if (!seed.customer_name) {
+      alert("Please enter Customer Name before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
+    } catch (_err) {
+      /* ignore quota errors */
+    }
+    const url = window.OIE_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
+    if (!url) {
+      alert("Generate bill is available only for Miscellaneous.");
+      resetGenerateBillChoice();
+      return;
+    }
+    const width = Math.round(9 * 96);
+    const height = Math.round(4 * 96);
+    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
+    const features = [
+      "width=" + width,
+      "height=" + height,
+      "left=" + left,
+      "top=" + top,
+      "menubar=no",
+      "toolbar=no",
+      "location=no",
+      "status=no",
+      "resizable=yes",
+      "scrollbars=yes",
+    ].join(",");
+    const win = window.open(url, "oieMiscGenerateBillWindow", features);
+    if (!win) {
+      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      win.focus();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
   function syncMiscWorkflow() {
     const misc = isMiscKind();
     els.miscWorkflowWrap?.classList.toggle("d-none", !misc);
@@ -152,20 +310,22 @@
         els.tallyBill.checked = false;
         els.tallyBill.disabled = true;
       }
+      resetGenerateBillChoice();
     } else if (els.tallyBill) {
       const workDone = isWorkDoneChecked();
       els.tallyBill.disabled = !workDone;
-      if (!workDone) els.tallyBill.checked = false;
+      if (!workDone) {
+        els.tallyBill.checked = false;
+        resetGenerateBillChoice();
+      }
     }
     const tally = isTallyChecked();
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
-    els.autoBillBtn?.classList.toggle("d-none", !tally);
-    if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
-      els.tallyBillDate.value = window.OIE_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
+    if (!tally) {
+      resetGenerateBillChoice();
     }
-    if (tally && els.tallyBillAmount && !(els.tallyBillAmount.value || "").trim()) {
-      const cat = getCategoryTotal();
-      if (cat > 0) els.tallyBillAmount.value = cat.toFixed(2);
+    if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
+      els.tallyBillNo.value = (els.billNo.value || "").trim();
     }
     const paymentOn = isPaymentActive();
     if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
@@ -173,7 +333,13 @@
     els.paymentLockedHint?.classList.toggle("d-none", paymentOn);
     if (els.paymentSectionNum) els.paymentSectionNum.textContent = misc ? "4" : "3";
     if (els.remarksSectionNum) els.remarksSectionNum.textContent = misc ? "5" : "4";
-    if (paymentOn) ensurePaymentLines();
+    if (paymentOn) {
+      ensurePaymentLines();
+      const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length === 1 && getPaymentTotal() <= 0) {
+        syncFirstPaymentFromCategories();
+      }
+    }
   }
 
   function isEditMode() {
@@ -197,15 +363,15 @@
   }
 
   function categoryLabelText(kind) {
-    if (kind === "Expense") return "Expense Categories";
-    if (kind === "Misc.") return "Misc. Categories";
-    return "Income Categories";
+    if (kind === "Expense") return "Category Master (Expense)";
+    if (kind === "Misc.") return "Category Master (Misc.)";
+    return "Category Master (Income)";
   }
 
   function categorySelectLabelText(kind) {
-    if (kind === "Expense") return "Expense Category *";
-    if (kind === "Misc.") return "Work / Category *";
-    return "Income Category *";
+    if (kind === "Expense") return "Category *";
+    if (kind === "Misc.") return "Category *";
+    return "Category *";
   }
 
   function syncLedgerLabels() {
@@ -245,7 +411,7 @@
     select.required = true;
     const optEmpty = document.createElement("option");
     optEmpty.value = "";
-    optEmpty.textContent = "-- Select --";
+    optEmpty.textContent = "-- Select Category --";
     select.appendChild(optEmpty);
 
     const types = workTypesForKind(currentLedgerKind());
@@ -374,6 +540,12 @@
           const opt = document.createElement("option");
           opt.value = String(row.work_type_id);
           opt.textContent = row.sub_work_type;
+          if (row.item_id) opt.setAttribute("data-item-id", String(row.item_id));
+          if (row.gst_rate_percent != null) {
+            opt.setAttribute("data-gst-rate", String(row.gst_rate_percent));
+          }
+          if (row.hsn_sac) opt.setAttribute("data-hsn", String(row.hsn_sac));
+          if (row.unit) opt.setAttribute("data-unit", String(row.unit));
           select.appendChild(opt);
         });
         const want = selectedId || select.dataset.pendingValue || "";
@@ -500,8 +672,12 @@
       const subSelect = lines[i].querySelector(".oie-category-subwork");
       const amount = lines[i].querySelector(".oie-category-amount");
       if (!select?.value) return "Each category must be selected.";
-      if (seen[select.value]) return "Duplicate categories are not allowed.";
-      seen[select.value] = true;
+      const lineKey =
+        kind === "Misc."
+          ? select.value + ":" + (subSelect?.value || "")
+          : select.value;
+      if (seen[lineKey]) return "Duplicate categories are not allowed.";
+      seen[lineKey] = true;
       if (kind === "Misc." && subSelect && !subSelect.disabled) {
         const hasOptions = Array.from(subSelect.options).some(function (o) { return o.value; });
         if (hasOptions && !subSelect.value) {
@@ -572,11 +748,20 @@
     return String(item.bank_account_id || "");
   }
 
+  function isQrBillReceivedAccount(item) {
+    const flag = item && item.qr_bill_received;
+    return flag === true || flag === 1 || flag === "1";
+  }
+
+  function paymentReceivedAccounts() {
+    return (window.OIE_BANK_ACCOUNTS || []).filter(isQrBillReceivedAccount);
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select oie-payment-bank";
     select.required = true;
-    const accounts = window.OIE_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -591,6 +776,20 @@
       opt.textContent = paymentModeLabel(item);
       select.appendChild(opt);
     });
+    if (
+      selectedValue &&
+      !Array.from(select.options).some(function (opt) {
+        return opt.value === String(selectedValue);
+      })
+    ) {
+      const current = (window.OIE_BANK_ACCOUNTS || []).find(function (item) {
+        return paymentModeValue(item) === String(selectedValue);
+      });
+      const opt = document.createElement("option");
+      opt.value = String(selectedValue);
+      opt.textContent = current ? paymentModeLabel(current) : "Current account";
+      select.appendChild(opt);
+    }
     autoSelectPaymentBank(select, selectedValue);
     return select;
   }
@@ -661,6 +860,11 @@
     updatePaymentSummary();
   }
 
+  function remainingPaymentAmount() {
+    const rem = Math.round((getCategoryTotal() - getPaymentTotal()) * 100) / 100;
+    return rem > 0 ? rem : 0;
+  }
+
   function defaultPaymentDate() {
     return (
       els.workDate?.value ||
@@ -691,6 +895,7 @@
     bankLabel.className = "form-label";
     bankLabel.textContent = "Payment Mode *";
     const select = buildPaymentSelect(options.bank_account_id || options.bankAccountId);
+    select.name = "PaymentBankAccountID[]";
     bankWrap.appendChild(bankLabel);
     bankWrap.appendChild(select);
 
@@ -703,6 +908,7 @@
     dateInput.type = "date";
     dateInput.className = "form-control oie-payment-date";
     dateInput.required = true;
+    dateInput.name = "PaymentDate[]";
     dateInput.value = options.payment_date || defaultPaymentDate();
     dateInput.addEventListener("change", function () {
       dateInput.dataset.userEdited = "1";
@@ -721,6 +927,7 @@
     amount.min = "0";
     amount.className = "form-control oie-payment-amount";
     amount.required = true;
+    amount.name = "PaymentAmount[]";
     amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
     amount.addEventListener("input", updatePaymentSummary);
     amountWrap.appendChild(amountLabel);
@@ -763,9 +970,11 @@
 
   function validatePaymentLines() {
     if (!isPaymentActive()) return null;
-    const paymentTotal = getPaymentTotal();
-    if (isMiscKind() && paymentTotal <= 0) return null;
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+    const paymentTotal = getPaymentTotal();
+    const extraLines = lines.length > 1;
+    const mustValidate = !isMiscKind() || paymentTotal > 0 || extraLines;
+    if (!mustValidate) return null;
     if (!lines.length) return "At least one payment mode is required.";
     for (let i = 0; i < lines.length; i++) {
       const bank = lines[i].querySelector(".oie-payment-bank");
@@ -790,36 +999,63 @@
       el.remove();
     });
     if (!isPaymentActive()) return;
+    if (els.paymentFieldset) els.paymentFieldset.disabled = false;
     const lines = els.paymentLines.querySelectorAll(".oie-payment-line");
-    lines.forEach(function (line) {
+    lines.forEach(function (line, index) {
       const bank = line.querySelector(".oie-payment-bank");
       const amount = line.querySelector(".oie-payment-amount");
       const paymentDate = line.querySelector(".oie-payment-date");
       if (!bank || !amount) return;
 
+      bank.disabled = false;
+      amount.disabled = false;
+      if (paymentDate) paymentDate.disabled = false;
+      bank.removeAttribute("name");
+      amount.removeAttribute("name");
+      if (paymentDate) paymentDate.removeAttribute("name");
+
       const wrap = document.createElement("div");
       wrap.className = "oie-payment-sync d-none";
+      wrap.setAttribute("aria-hidden", "true");
 
       const bankHidden = document.createElement("input");
       bankHidden.type = "hidden";
       bankHidden.name = "PaymentBankAccountID[]";
       bankHidden.value = bank.value || "";
+      bankHidden.className = "oie-payment-sync";
 
       const amountHidden = document.createElement("input");
       amountHidden.type = "hidden";
       amountHidden.name = "PaymentAmount[]";
       amountHidden.value = amount.value || "0";
+      amountHidden.className = "oie-payment-sync";
 
       const dateHidden = document.createElement("input");
       dateHidden.type = "hidden";
       dateHidden.name = "PaymentDate[]";
       dateHidden.value = paymentDate?.value || defaultPaymentDate();
+      dateHidden.className = "oie-payment-sync";
+
+      const indexHidden = document.createElement("input");
+      indexHidden.type = "hidden";
+      indexHidden.name = "PaymentLineIndex[]";
+      indexHidden.value = String(index);
+      indexHidden.className = "oie-payment-sync";
 
       wrap.appendChild(bankHidden);
       wrap.appendChild(amountHidden);
       wrap.appendChild(dateHidden);
+      wrap.appendChild(indexHidden);
       form.appendChild(wrap);
     });
+    if (getPaymentTotal() > 0) {
+      const flag = document.createElement("input");
+      flag.type = "hidden";
+      flag.name = "PaymentReceived";
+      flag.value = "1";
+      flag.className = "oie-payment-sync";
+      form.appendChild(flag);
+    }
   }
 
   function fetchNextBillNo() {
@@ -1406,19 +1642,21 @@
           "<td>" +
           escapeHtml(row.bill_no) +
           "</td>" +
-          "<td>" +
-          ledgerBadge(row.ledger_kind) +
-          (row.ledger_kind === "Misc."
-            ? (row.work_done
-                ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? '<td class="d-none"></td>'
+            : "<td>" +
+              ledgerBadge(row.ledger_kind) +
+              (row.ledger_kind === "Misc."
+                ? (row.work_done
+                    ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                    : "") +
+                  (row.tally_bill_generated
+                    ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                    : row.work_done
+                      ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                      : "")
                 : "") +
-              (row.tally_bill_generated
-                ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
-                : row.work_done
-                  ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
-                  : "")
-            : "") +
-          "</td>" +
+              "</td>") +
           "<td>" +
           escapeHtml(formatDisplayDate(row.work_date)) +
           "</td>" +
@@ -1426,6 +1664,16 @@
           escapeHtml(category) +
           '">' +
           escapeHtml(category) +
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? (row.work_done
+                ? ' <span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                : "") +
+              (row.tally_bill_generated
+                ? ' <span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                : row.work_done
+                  ? ' <span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                  : "")
+            : "") +
           "</td>" +
           '<td class="oie-account-cell">' +
           escapeHtml(row.account_label || "—") +
@@ -1470,7 +1718,11 @@
 
   function clearGridFilters() {
     if (els.gridSearch) els.gridSearch.value = "";
-    if (els.gridFilterKind) els.gridFilterKind.value = "";
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = window.OIE_FORCE_LEDGER_KIND
+        ? String(window.OIE_FORCE_LEDGER_KIND)
+        : "";
+    }
     if (els.gridDateFrom) els.gridDateFrom.value = "";
     if (els.gridDateTo) els.gridDateTo.value = "";
     sortState = { key: "work_date", dir: "desc" };
@@ -1483,7 +1735,13 @@
     return fetch(url, { headers: { Accept: "application/json" } })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
-        allGridRows = data.rows || [];
+        let rows = data.rows || [];
+        if (window.OIE_HIDE_MISC && !window.OIE_FORCE_LEDGER_KIND) {
+          rows = rows.filter(function (row) {
+            return row.ledger_kind !== "Misc.";
+          });
+        }
+        allGridRows = rows;
         renderGridFromStart();
       })
       .catch(function (err) {
@@ -1619,63 +1877,11 @@
     if (!(els.tallyBillNo?.value || "").trim()) {
       return "Tally bill number is required when Tally Bill Generated is checked.";
     }
-    const billAmount = parseFloat(els.tallyBillAmount?.value || "0");
-    if (!billAmount || billAmount <= 0) {
-      return "Bill amount is required when Tally Bill Generated is checked.";
-    }
     if (!(els.customerName?.value || "").trim()) {
       return "Customer name is required when Tally Bill Generated is checked.";
     }
     return null;
   }
-
-  function openAutomatedBill() {
-    const customerId = (els.customerId?.value || "").trim();
-    if (!customerId) {
-      alert("Please select a customer first.");
-      return;
-    }
-    const params = new URLSearchParams();
-    params.set("customer_id", customerId);
-    const customerName = (els.customerName?.value || "").trim();
-    if (customerName) params.set("customer_name", customerName);
-    const url = "/accounting/invoice?" + params.toString();
-    const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
-    const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));
-    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
-    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
-    const features = [
-      "width=" + width,
-      "height=" + height,
-      "left=" + left,
-      "top=" + top,
-      "menubar=yes",
-      "toolbar=yes",
-      "location=yes",
-      "status=yes",
-      "resizable=yes",
-      "scrollbars=yes",
-    ].join(",");
-    const win = window.open(url, "jtcsAccountingInvoiceWindow", features);
-    if (!win) {
-      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
-      return;
-    }
-    try {
-      win.focus();
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  window.OIE_applyBillingResult = function (data) {
-    if (!data) return;
-    if (els.tallyBillNo && data.bill_no) els.tallyBillNo.value = data.bill_no;
-    if (els.tallyBillAmount && data.bill_amount != null) els.tallyBillAmount.value = data.bill_amount;
-    if (els.tallyBillDate && data.bill_date) els.tallyBillDate.value = data.bill_date;
-    if (els.tallyBill) els.tallyBill.checked = true;
-    syncMiscWorkflow();
-  };
 
   function saveEntry() {
     const categoryError = validateCategoryLines();
@@ -1829,7 +2035,8 @@
   }
   if (els.addPaymentBtn) {
     els.addPaymentBtn.addEventListener("click", function () {
-      addPaymentLine({});
+      const rem = remainingPaymentAmount();
+      addPaymentLine({ amount: rem > 0 ? rem.toFixed(2) : "" });
     });
   }
   if (els.addCategoryBtn) {
@@ -1901,7 +2108,11 @@
 
   els.workDone?.addEventListener("change", syncMiscWorkflow);
   els.tallyBill?.addEventListener("change", syncMiscWorkflow);
-  els.autoBillBtn?.addEventListener("click", openAutomatedBill);
+  els.generateBillYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (els.generateBillYes && els.generateBillYes.checked) openGenerateBillPopup();
+    }, 0);
+  });
 
   if (els.gridBody) {
     els.gridBody.addEventListener("click", function (event) {
@@ -1926,6 +2137,8 @@
 
   resetCategoryLines([{}]);
   resetPaymentLines([{}]);
+  applyForcedLedgerKindUi();
+  syncLedgerLabels();
   loadGrid();
   if (window.OIE_AUTO_LOAD_ENTRY_ID) {
     var autoId = parseInt(window.OIE_AUTO_LOAD_ENTRY_ID, 10);

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 ADMIN_ROLES = frozenset({"Administrator", "Admin"})
+DATA_BACKUP_STAFF_ROLES = frozenset({"Manager", "Operator", "Viewer"})
+DATA_BACKUP_ROLES = ADMIN_ROLES | DATA_BACKUP_STAFF_ROLES
+FPS_USER_ROLE = "FPS_USER"
 ASSIGNABLE_ROLES = (
     "Operator",
     "Viewer",
@@ -40,6 +43,15 @@ def join_roles(roles) -> str | None:
 
 def has_admin_role(value: str | None) -> bool:
     return bool(parse_roles(value) & ADMIN_ROLES)
+
+
+def has_data_backup_role(value: str | None) -> bool:
+    """Administrator/Admin plus Manager, Operator, and Viewer (Data Backup only)."""
+    return bool(parse_roles(value) & DATA_BACKUP_ROLES)
+
+
+def has_fps_user_role(value: str | None) -> bool:
+    return FPS_USER_ROLE in parse_roles(value)
 
 
 def roles_intersect(user_roles_value: str | None, allowed_roles_value: str | None) -> bool:

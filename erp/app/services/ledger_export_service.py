@@ -34,8 +34,9 @@ from sqlalchemy import text
 from app.extensions import db
 from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 from app.services.payment_accounting_service import (
+    sql_customer_ledger_exclude_sale_invoice,
     sql_customer_receipt_expr,
-    sql_unpaid_followup_exclusion,
+    sql_unpaid_followup_exclusion_for_customer_ledger,
 )
 
 # Brand palette (professional, colourful — not purple/glow AI defaults)
@@ -58,6 +59,23 @@ class LedgerExportService:
     @staticmethod
     def _money(value) -> Decimal:
         return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+    def _sum_debit_credit(
+        self,
+        rows: list[Any],
+        debit_key: str = "debit",
+        credit_key: str = "credit",
+        *,
+        txn_only: bool = False,
+    ) -> tuple[Decimal, Decimal]:
+        debit = Decimal("0.00")
+        credit = Decimal("0.00")
+        for row in rows or []:
+            if txn_only and (row.get("kind") or "txn") != "txn":
+                continue
+            debit += self._money(row.get(debit_key))
+            credit += self._money(row.get(credit_key))
+        return self._money(debit), self._money(credit)
 
     @staticmethod
     def _parse_date(raw: str | None, fallback: date) -> date:
@@ -169,7 +187,7 @@ class LedgerExportService:
         return result
 
     def list_customers(self, *, search: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"lim": max(1, min(int(limit or 200), 500))}
+        params: dict[str, Any] = {"lim": max(1, min(int(limit or 200), 10000))}
         search_sql = ""
         needle = (search or "").strip()
         if needle:
@@ -609,6 +627,132 @@ class LedgerExportService:
         except Exception:
             db.session.rollback()
 
+    def _ensure_gst_purchase_payment_legs(self, account_id: int) -> None:
+        """Backfill Purchase Invoice Amount Paid as Credit (Out) on this bank only.
+
+        Strict: VoucherType=PURCHASE + PaymentBankAccountID match only.
+        Does not touch Sale invoices or other modules' bank rows.
+        """
+        account_row = db.session.execute(
+            text(
+                """
+                SELECT BankName, AccountNumber, MaskedAccountNumber
+                FROM dbo.JtcsBankAccountMaster
+                WHERE JtcsBankAccountID = :account_id
+                """
+            ),
+            {"account_id": account_id},
+        ).mappings().first()
+        if account_row is None:
+            return
+
+        bank_name = (account_row["BankName"] or "").strip() or "Bank"
+        masked = (
+            (account_row["AccountNumber"] or "").strip()
+            or (account_row["MaskedAccountNumber"] or "").strip()
+            or "NA"
+        )
+        payment_mode = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 PaymentModeID
+                FROM dbo.PaymentModeMaster
+                WHERE BankAccountID = :account_id
+                  AND ISNULL(IsActive, 1) = 1
+                ORDER BY PaymentModeID
+                """
+            ),
+            {"account_id": account_id},
+        ).first()
+        payment_mode_id = int(payment_mode[0]) if payment_mode and payment_mode[0] else None
+
+        try:
+            result = db.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.JtcsBankTransaction (
+                        JtcsBankAccountID,
+                        BankName,
+                        MaskedAccountNumber,
+                        TransactionDate,
+                        Description,
+                        Debit,
+                        Credit,
+                        ClosingBalance,
+                        ImportedBy,
+                        ImportedDate,
+                        Remarks,
+                        IsLocked,
+                        SourceTable,
+                        SourceRecordID,
+                        SourceType,
+                        SourceID,
+                        LedgerKind,
+                        PaymentModeID,
+                        PaymentSequence
+                    )
+                    SELECT
+                        :account_id,
+                        :bank_name,
+                        :masked,
+                        ISNULL(i.PaymentDate, i.InvoiceDate),
+                        N'Purchase Invoice Payment',
+                        NULL,
+                        i.AmountPaid,
+                        0,
+                        N'Purchase Invoice',
+                        GETUTCDATE(),
+                        LEFT(
+                            CONCAT(
+                                ISNULL(i.InvoiceNo, N''),
+                                N' — ',
+                                ISNULL(i.CustomerName, N'Supplier')
+                            ),
+                            200
+                        ),
+                        0,
+                        N'GstInvoice',
+                        i.InvoiceID,
+                        N'PURCHASE',
+                        i.InvoiceID,
+                        N'PAYMENT',
+                        :payment_mode_id,
+                        1
+                    FROM dbo.GstInvoice i
+                    WHERE UPPER(LTRIM(RTRIM(ISNULL(i.VoucherType, N'')))) = N'PURCHASE'
+                      AND i.PaymentBankAccountID = :account_id
+                      AND ISNULL(i.AmountPaid, 0) > 0
+                      AND ISNULL(i.PaymentDate, i.InvoiceDate) IS NOT NULL
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.JtcsBankTransaction t
+                            WHERE t.SourceRecordID = i.InvoiceID
+                              AND (
+                                    (
+                                        UPPER(LTRIM(RTRIM(ISNULL(t.SourceTable, N'')))) = N'GSTINVOICE'
+                                        AND UPPER(LTRIM(RTRIM(ISNULL(t.SourceType, N'')))) = N'PURCHASE'
+                                    )
+                                 OR (
+                                        UPPER(LTRIM(RTRIM(ISNULL(t.SourceType, N'')))) = N'PURCHASE'
+                                        AND UPPER(LTRIM(RTRIM(ISNULL(t.Description, N''))))
+                                            = N'PURCHASE INVOICE PAYMENT'
+                                    )
+                              )
+                      )
+                    """
+                ),
+                {
+                    "account_id": account_id,
+                    "bank_name": bank_name[:150],
+                    "masked": masked[:50],
+                    "payment_mode_id": payment_mode_id,
+                },
+            )
+            if result.rowcount:
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
     def _append_missing_purpose_purchases(
         self,
         rows: list[dict[str, Any]],
@@ -786,6 +930,7 @@ class LedgerExportService:
             opening = self._money(account["OpeningBalance"])
         wallet = self._wallet_ledger_flags(account_id)
         self._ensure_purpose_purchase_legs(account_id, wallet)
+        self._ensure_gst_purchase_payment_legs(account_id)
         account_where, account_params = self._bank_ledger_account_where(account_id, wallet)
         date_to_next = date_to + timedelta(days=1)
         # Inclusive To Date: datetime rows on date_to itself used to be dropped
@@ -1036,6 +1181,10 @@ class LedgerExportService:
             credit_normal=credit_normal,
         )
         pivot = self._bank_pivot_matrix(txn_rows)
+        total_debit, total_credit = self._sum_debit_credit(
+            txn_rows, "DebitValue", "CreditValue"
+        )
+        as_of = date_to.strftime("%d/%m/%Y")
 
         return {
             "kind": "bank",
@@ -1047,8 +1196,10 @@ class LedgerExportService:
                 ("Account", label),
                 ("Account Holder", (account["AccountHolderName"] or "").strip() or "—"),
                 ("Chart of Account Group", (account.get("GroupName") or "").strip() or "—"),
-                ("Ledger Balance", f"{running:,.2f}"),
+                ("Closing Balance as of " + as_of, f"{running:,.2f}"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),
+                ("Total Credit", f"{total_credit:,.2f}"),
+                ("Total Debit", f"{total_debit:,.2f}"),
             ],
             "headers": [
                 "Date",
@@ -1479,6 +1630,7 @@ class LedgerExportService:
                     WHERE d.CustomerID = :customer_id
                       AND d.Status = N'Posted'
                       {prior_date_sql}
+                      {sql_customer_ledger_exclude_sale_invoice("d")}
                 ) x
                 """
             ),
@@ -1490,6 +1642,7 @@ class LedgerExportService:
         # Unpaid Followup Tally bills (ITR/GST/etc.) live on FollowupEntryMaster
         # until Payment Received creates JTCSDailyTransaction — include them so
         # Ledger Report matches Followup billing.
+        # Sales Invoice module is detached: do not hide these when GstInvoice exists.
         prior_followup_billed = Decimal("0.00")
         followup_rows: list[Any] = []
         try:
@@ -1515,7 +1668,7 @@ class LedgerExportService:
                           AND LTRIM(RTRIM(f.BillNo)) <> N''
                           AND ISNULL(f.BillAmount, 0) > 0
                           {fu_prior_sql}
-                          {sql_unpaid_followup_exclusion()}
+                          {sql_unpaid_followup_exclusion_for_customer_ledger()}
                         """
                     ),
                     fu_prior_params,
@@ -1550,7 +1703,7 @@ class LedgerExportService:
                           AND ISNULL(f.BillAmount, 0) > 0
                           AND ISNULL(f.BillDate, f.WorkDate) >= :date_from
                           AND ISNULL(f.BillDate, f.WorkDate) <= :date_to
-                          {sql_unpaid_followup_exclusion()}
+                          {sql_unpaid_followup_exclusion_for_customer_ledger()}
                         """
                     ),
                     {
@@ -1614,6 +1767,7 @@ class LedgerExportService:
                       AND d.Status = N'Posted'
                       AND d.TransactionDate >= :date_from
                       AND d.TransactionDate <= :date_to
+                      {sql_customer_ledger_exclude_sale_invoice("d")}
                     ORDER BY d.TransactionDate ASC, d.TransactionID ASC
                     """
                 ),
@@ -1729,6 +1883,9 @@ class LedgerExportService:
                     desc = raw_desc or (f"Payment Received — {ref}" if ref else "Payment Received")
                 lines.append({**base, "description": desc, "debit": Decimal("0.00"), "credit": receipt, "balance": running})
 
+        total_debit, total_credit = self._sum_debit_credit(lines, txn_only=True)
+        as_of = date_to.strftime("%d/%m/%Y")
+
         return {
             "kind": "customer",
             "title": "Customer Ledger",
@@ -1740,7 +1897,9 @@ class LedgerExportService:
                 ("Customer ID", str(customer_id)),
                 ("Chart of Account Group", chart_group_name or "—"),
                 ("Customer Group", customer_group or "—"),
-                ("Ledger Balance", f"{running:,.2f}"),
+                ("Closing Balance as of " + as_of, f"{running:,.2f}"),
+                ("Total Credit", f"{total_credit:,.2f}"),
+                ("Total Debit", f"{total_debit:,.2f}"),
                 ("Mobile", (customer["MobileNumber"] or "").strip() or "—"),
                 ("PAN", (customer["PANNumber"] or "").strip() or "—"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),

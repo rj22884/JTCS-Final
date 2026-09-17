@@ -9,10 +9,88 @@ from app.extensions import db
 from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
 
 
+_DSC_SETTING_SCHEMA_READY = False
+
+
 class FollowupRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
         self._entry_master_columns: set[str] | None = None
+
+    def ensure_dsc_setting_schema(self) -> None:
+        global _DSC_SETTING_SCHEMA_READY
+        if _DSC_SETTING_SCHEMA_READY:
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.DscFollowupSetting', N'U') IS NULL
+                BEGIN
+                    CREATE TABLE dbo.DscFollowupSetting (
+                        SettingKey NVARCHAR(40) NOT NULL,
+                        SettingValue NVARCHAR(500) NULL,
+                        ModifiedBy NVARCHAR(150) NULL,
+                        ModifiedDate DATETIME NULL,
+                        CONSTRAINT PK_DscFollowupSetting PRIMARY KEY (SettingKey)
+                    );
+                END
+                """
+            )
+        )
+        self.session.commit()
+        _DSC_SETTING_SCHEMA_READY = True
+
+    def list_dsc_settings(self) -> dict[str, str]:
+        self.ensure_dsc_setting_schema()
+        rows = self.session.execute(
+            text("SELECT SettingKey, SettingValue FROM dbo.DscFollowupSetting")
+        ).all()
+        return {str(key): (value or "").strip() for key, value in rows}
+
+    def upsert_dsc_setting(self, key: str, value: str | None, *, modified_by: str) -> str:
+        self.ensure_dsc_setting_schema()
+        cleaned = (value or "").strip()
+        existing = self.session.execute(
+            text("SELECT SettingKey FROM dbo.DscFollowupSetting WHERE SettingKey = :key"),
+            {"key": key},
+        ).scalar()
+        if existing:
+            self.session.execute(
+                text(
+                    """
+                    UPDATE dbo.DscFollowupSetting
+                    SET SettingValue = :value,
+                        ModifiedBy = :modified_by,
+                        ModifiedDate = :now
+                    WHERE SettingKey = :key
+                    """
+                ),
+                {
+                    "key": key,
+                    "value": cleaned or None,
+                    "modified_by": modified_by[:150],
+                    "now": datetime.utcnow(),
+                },
+            )
+        else:
+            self.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.DscFollowupSetting
+                        (SettingKey, SettingValue, ModifiedBy, ModifiedDate)
+                    VALUES
+                        (:key, :value, :modified_by, :now)
+                    """
+                ),
+                {
+                    "key": key,
+                    "value": cleaned or None,
+                    "modified_by": modified_by[:150],
+                    "now": datetime.utcnow(),
+                },
+            )
+        self.session.flush()
+        return cleaned
 
     def _entry_master_columns_set(self) -> set[str]:
         if self._entry_master_columns is None:

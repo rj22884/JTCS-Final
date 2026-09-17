@@ -22,17 +22,21 @@ def index():
     master_repo = MasterRepository()
 
     if request.method == "POST":
-        try:
-            result = service.save_entry(
-                request.form,
-                created_by=session.get("user_name", "System"),
-            )
-            flash(result.message, "success")
-            return redirect(url_for("others_income_expense.index"))
-        except ValueError as exc:
-            flash(str(exc), "danger")
-        except Exception as exc:
-            flash(f"Unable to save entry: {exc}", "danger")
+        kind = (request.form.get("LedgerKind") or "").strip()
+        if kind in ("Misc.", "Misc", "m", "M"):
+            flash("Miscellaneous entries belong in Activities → Miscellaneous.", "danger")
+        else:
+            try:
+                result = service.save_entry(
+                    request.form,
+                    created_by=session.get("user_name", "System"),
+                )
+                flash(result.message, "success")
+                return redirect(url_for("others_income_expense.index"))
+            except ValueError as exc:
+                flash(str(exc), "danger")
+            except Exception as exc:
+                flash(f"Unable to save entry: {exc}", "danger")
 
     return render_template(
         "others/income_expense_activity.html",
@@ -41,11 +45,12 @@ def index():
         default_date=date.today().isoformat(),
         income_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_INCOME),
         expense_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_EXPENSE),
-        misc_work_types=service.list_work_types(ledger_kind=OthersIncomeExpenseService.LEDGER_MISC),
-        payment_modes=master_repo.list_stamp_bank_payment_modes(qr_bill_received_only=False),
+        misc_work_types=[],
+        payment_modes=master_repo.list_stamp_bank_payment_modes(),
         customer_groups=service.list_customer_groups(),
         customer_types=CUSTOMER_TYPES,
         load_entry_id=request.args.get("load_entry", type=int),
+        hide_misc=True,
     )
 
 
@@ -53,6 +58,14 @@ def index():
 @login_required
 def save_record():
     service = OthersIncomeExpenseService()
+    kind = (request.form.get("LedgerKind") or request.form.get("ledger_kind") or "").strip()
+    if kind in ("Misc.", "Misc", "m", "M"):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Miscellaneous entries belong in Activities → Miscellaneous.",
+            }
+        ), 400
     try:
         result = service.save_entry(
             request.form,
@@ -76,10 +89,16 @@ def save_record():
 @login_required
 def grid():
     service = OthersIncomeExpenseService()
+    income = OthersIncomeExpenseService.LEDGER_INCOME
+    expense = OthersIncomeExpenseService.LEDGER_EXPENSE
     ledger_kind = (request.args.get("ledger_kind") or "").strip() or None
-    if ledger_kind not in OthersIncomeExpenseService.LEDGER_KINDS:
-        ledger_kind = None
-    return jsonify({"ok": True, "rows": service.list_entries(ledger_kind=ledger_kind)})
+    if ledger_kind == OthersIncomeExpenseService.LEDGER_MISC:
+        return jsonify({"ok": True, "rows": []})
+    if ledger_kind in (income, expense):
+        rows = service.list_entries(ledger_kind=ledger_kind)
+    else:
+        rows = service.list_entries(ledger_kinds=(income, expense))
+    return jsonify({"ok": True, "rows": rows})
 
 
 @bp.route("/work-types", methods=["GET"], strict_slashes=False)
@@ -87,8 +106,11 @@ def grid():
 def work_types():
     service = OthersIncomeExpenseService()
     ledger_kind = (request.args.get("ledger_kind") or "").strip()
-    if ledger_kind not in OthersIncomeExpenseService.LEDGER_KINDS:
-        return jsonify({"ok": False, "error": "ledger_kind must be Income, Expense, or Misc."}), 400
+    if ledger_kind not in (
+        OthersIncomeExpenseService.LEDGER_INCOME,
+        OthersIncomeExpenseService.LEDGER_EXPENSE,
+    ):
+        return jsonify({"ok": False, "error": "ledger_kind must be Income or Expense."}), 400
     return jsonify({"ok": True, "rows": service.list_work_types(ledger_kind=ledger_kind)})
 
 
@@ -143,7 +165,15 @@ def customer_create():
 def record(entry_id: int):
     service = OthersIncomeExpenseService()
     try:
-        return jsonify({"ok": True, "record": service.get_entry(entry_id)})
+        data = service.get_entry(entry_id)
+        if (data.get("ledger_kind") or "") == OthersIncomeExpenseService.LEDGER_MISC:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "This is a Miscellaneous entry. Open it from Activities → Miscellaneous.",
+                }
+            ), 404
+        return jsonify({"ok": True, "record": data})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 404
     except Exception as exc:
@@ -156,6 +186,17 @@ def record(entry_id: int):
 def delete_record(entry_id: int):
     service = OthersIncomeExpenseService()
     try:
+        row = service.entry_repo.get_by_id(entry_id)
+        if row is None:
+            return jsonify({"ok": False, "error": "Income / expense record not found."}), 404
+        data = service._entry_dict(row)
+        if (data.get("ledger_kind") or "") == OthersIncomeExpenseService.LEDGER_MISC:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Miscellaneous entries can only be deleted from Activities → Miscellaneous.",
+                }
+            ), 400
         message = service.delete_entry(entry_id)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:

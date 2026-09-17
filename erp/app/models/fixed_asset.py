@@ -14,6 +14,7 @@ class FixedAssetMaster(db.Model):
 
     AssetID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     AssetName: Mapped[str] = mapped_column(Unicode(200), nullable=False)
+    ItemID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     AccountID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     GroupID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     PurchaseDate: Mapped[date] = mapped_column(Date, nullable=False)

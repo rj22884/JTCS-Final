@@ -336,10 +336,17 @@
     return false;
   }
 
+  function rowHasOpenableSource(row) {
+    if (!row || row.source === "opening") return false;
+    if (String(row.source_module || "") === "bank_orphan") return false;
+    return !!(row.source_url && (row.can_open === true || row.can_open === 1 || row.can_open === "1" || row.source_url));
+  }
+
   function rowCanEdit(row) {
     if (!row || todayActivityMode) return false;
     if (row.source === "opening") return false;
-    return !!(rowHasSourceLink(row) || (row.source === "manual" && row.can_edit));
+    if (String(row.source_module || "") === "bank_orphan") return false;
+    return !!(rowHasOpenableSource(row) || (row.source === "manual" && row.can_edit));
   }
 
   function resolveDeleteUrl(row) {
@@ -355,6 +362,12 @@
     if (mod === "ecourt" && urls.ecourt) return apiUrl(urls.ecourt, id);
     if (mod === "income_expense" && urls.income_expense) {
       return apiUrl(urls.income_expense, id);
+    }
+    if (mod === "miscellaneous" && urls.miscellaneous) {
+      return apiUrl(urls.miscellaneous, id);
+    }
+    if (mod === "bank_orphan" && urls.bank_orphan) {
+      return apiUrl(urls.bank_orphan, id);
     }
     if (mod === "bank_cash" && urls.bank_cash) return apiUrl(urls.bank_cash, id);
     if (mod === "printing_scanning") {
@@ -414,8 +427,12 @@
         running_balance: null,
         running_balance_num: null,
       });
-      // Keep "click here for more" when module link is present (e.g. Cash Deposit / OBC).
-      if (rowHasSourceLink(prepared)) prepared.can_open = true;
+      // Keep "click here for more" when a real module URL is present.
+      if (prepared.source_url) prepared.can_open = true;
+      if (String(prepared.source_module || "") === "bank_orphan") {
+        prepared.can_open = false;
+        prepared.source_url = "";
+      }
       return prepared;
     });
 
@@ -650,7 +667,7 @@
             escapeHtml(formatMoney(row.running_balance)) +
             "</td>"
           : "";
-        const moreCell = rowHasSourceLink(row)
+        const moreCell = rowHasOpenableSource(row)
           ? '<td><button type="button" class="btn btn-link btn-sm p-0 dash-open-source">click here for more</button></td>'
           : '<td class="text-muted small">—</td>';
         const canDel = rowCanDelete(row);
@@ -729,6 +746,9 @@
       el.classList.add("is-negative");
     } else {
       el.classList.remove("is-negative");
+    }
+    if (window.JTCSCurrencyNotesMatch && typeof window.JTCSCurrencyNotesMatch.sync === "function") {
+      window.JTCSCurrencyNotesMatch.sync();
     }
   }
 
