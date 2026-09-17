@@ -1228,6 +1228,13 @@
         "<td class=\"text-center\">" + parentCheckbox + "</td>" +
         "<td><button type=\"button\" class=\"btn btn-link btn-sm p-0 ecourt-tree-toggle\" data-group=\"" + gi + "\">" +
         (expanded ? "−" : "+") + "</button></td>" +
+        "<td><span class=\"badge " + badgeClass + "\">" + escapeHtml(summary) + "</span></td>" +
+        "<td class=\"text-end ecourt-actions-cell\">" +
+        (sellAllBtn ? sellAllBtn + " " : "") +
+        editParentBtn + " " +
+        (unsellParentBtn ? unsellParentBtn + " " : "") +
+        deleteParentBtn +
+        "</td>" +
         "<td><strong>" + escapeHtml(group.stationerynumber) + "</strong> " +
         "<span class=\"text-muted\">(" + group.total_receipts + " receipts)</span></td>" +
         "<td>" + parentDateCell + "</td>" +
@@ -1235,14 +1242,7 @@
         "<td class=\"text-end\"><strong>" + buyValueCell + "</strong></td>" +
         "<td class=\"text-end\"><strong>" + sellValueCell + "</strong></td>" +
         "<td class=\"text-center\">" + soldRemainingCell + "</td>" +
-        "<td>" + parentAccountCell + "</td>" +
-        "<td><span class=\"badge " + badgeClass + "\">" + escapeHtml(summary) + "</span></td>" +
-        "<td class=\"text-end ecourt-actions-cell\">" +
-        (sellAllBtn ? sellAllBtn + " " : "") +
-        editParentBtn + " " +
-        (unsellParentBtn ? unsellParentBtn + " " : "") +
-        deleteParentBtn +
-        "</td>";
+        "<td>" + parentAccountCell + "</td>";
       els.gridBody.appendChild(parentTr);
 
       receipts.forEach(function (row) {
@@ -1308,16 +1308,16 @@
         childTr.innerHTML =
           selectCell +
           "<td></td>" +
+          "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
+          escapeHtml(row.sale_status) + "</span></td>" +
+          actionCell +
           "<td>" + escapeHtml(row.receipt_no) + "</td>" +
           "<td>" + escapeHtml(displayDate(row.receipt_date || "")) + "</td>" +
           "<td>" + childSoldDate + "</td>" +
           "<td class=\"text-end\">" + escapeHtml(row.amount) + "</td>" +
           "<td></td>" +
           "<td></td>" +
-          "<td>" + childAccountCell + "</td>" +
-          "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
-          escapeHtml(row.sale_status) + "</span></td>" +
-          actionCell;
+          "<td>" + childAccountCell + "</td>";
         els.gridBody.appendChild(childTr);
       });
 

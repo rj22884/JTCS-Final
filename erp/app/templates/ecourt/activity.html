@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260911sum1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ecourt_activity.css') }}?v=20260917col1">
 {% endblock %}
 
 {% block content %}
@@ -57,6 +57,10 @@
           <tr>
             <th class="ecourt-col-select"></th>
             <th class="ecourt-col-toggle"></th>
+            <th class="ecourt-sortable ecourt-col-status" data-sort-key="sale_status" role="button" tabindex="0">
+              Sale Status <span class="ecourt-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="ecourt-col-actions">Actions</th>
             <th class="ecourt-sortable ecourt-col-name" data-sort-key="name" role="button" tabindex="0">
               Stationery / Receipt No. <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
@@ -78,14 +82,12 @@
             <th class="ecourt-sortable ecourt-col-account" data-sort-key="account" role="button" tabindex="0">
               Account Number <span class="ecourt-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="ecourt-sortable ecourt-col-status" data-sort-key="sale_status" role="button" tabindex="0">
-              Sale Status <span class="ecourt-sort-icon" aria-hidden="true"></span>
-            </th>
-            <th class="ecourt-col-actions">Actions</th>
           </tr>
           <tr class="ecourt-filter-row">
             <th class="ecourt-col-select"></th>
             <th class="ecourt-col-toggle"></th>
+            <th class="ecourt-col-status"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sale_status" placeholder="Filter…" aria-label="Filter sale status"></th>
+            <th class="ecourt-col-actions"></th>
             <th class="ecourt-col-name"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="name" placeholder="Filter…" aria-label="Filter stationery / receipt"></th>
             <th class="ecourt-col-date"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="date" placeholder="Filter…" aria-label="Filter date"></th>
             <th class="ecourt-col-date"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_date" placeholder="Filter…" aria-label="Filter sold date"></th>
@@ -93,8 +95,6 @@
             <th class="ecourt-col-num"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sell" placeholder="Filter…" aria-label="Filter sell value"></th>
             <th class="ecourt-col-soldrem"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sold_remaining" placeholder="Filter…" aria-label="Filter sold remaining"></th>
             <th class="ecourt-col-account"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="account" placeholder="Filter…" aria-label="Filter account number"></th>
-            <th class="ecourt-col-status"><input type="text" class="form-control form-control-sm ecourt-col-filter" data-filter-key="sale_status" placeholder="Filter…" aria-label="Filter sale status"></th>
-            <th class="ecourt-col-actions"></th>
           </tr>
         </thead>
         <tbody id="ecourtGridBody"></tbody>
@@ -394,5 +394,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260911sum1"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260917col1"></script>
 {% endblock %}
