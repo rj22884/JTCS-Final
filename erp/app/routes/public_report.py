@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 
-from flask import Blueprint, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from sqlalchemy import text
 
 from app.decorators import login_required, require_delete_reauth
@@ -558,10 +558,11 @@ def fps_detail_pdf():
         if result is None:
             return jsonify({"ok": False, "error": "Import the CSV onto the grid first."}), 400
         company = AuthService().get_company()
-        company_name = (
-            (company.CompanyName if company and company.CompanyName else None)
-            or "Joshi Tax Consultancy & Services"
-        )
+        company_name = (company.CompanyName if company and company.CompanyName else "") or ""
+        if company_name in {"", "JTCS", "JTCS ERP"}:
+            company_name = current_app.config.get(
+                "COMPANY_DISPLAY_NAME", "Joshi Tax Consultancy & Services"
+            )
         layout = (request.args.get("layout") or request.args.get("device") or "").strip().lower()
         if layout not in {"mobile", "desktop"}:
             ua = (request.user_agent.string or "").lower()

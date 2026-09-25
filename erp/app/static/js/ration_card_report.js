@@ -702,6 +702,32 @@
     return escapeHtml(english || hindi);
   }
 
+  function idWithOld(current, oldValue, oldLabel) {
+    const currentText = String(current || "").trim();
+    const oldText = String(oldValue || "").trim();
+    if (currentText && oldText) return currentText + " (" + oldLabel + ": " + oldText + ")";
+    return currentText || oldText;
+  }
+
+  function fpsLine(dealer, data) {
+    const row = (data.grid_rows && data.grid_rows[0]) || {};
+    const fpsId = dealer.fps_id || row.fps_id || "";
+    const oldFps = dealer.existing_fps_id || row.existing_fps_id || "";
+    const label = idWithOld(fpsId, oldFps, "Old FPS ID");
+    return label ? "FPS ID: " + label : "";
+  }
+
+  function rcWithOld(member) {
+    return idWithOld(member.rc_number || member.group_rc, member.group_existing_rc || member.existing_rc_number, "Old RC Number");
+  }
+
+  function memberIdLabel(member) {
+    const memberId = String(member.member_id || "").trim();
+    const existing = String(member.existing_member_id || "").trim();
+    if (memberId && existing) return memberId + " (" + existing + ")";
+    return memberId || existing;
+  }
+
   function enableExport(enabled) {
     if (els.printBtn) els.printBtn.disabled = !enabled;
     if (els.pdfBtn) els.pdfBtn.disabled = !enabled;
@@ -716,8 +742,7 @@
     if (els.reportSub) {
       const bits = [
         dealer.dealer_name ? "Dealer: " + dealer.dealer_name : "",
-        dealer.fps_id ? "FPS ID: " + dealer.fps_id : "",
-        dealer.existing_fps_id ? "Existing FPS: " + dealer.existing_fps_id : "",
+        fpsLine(dealer, data),
         (data.districts && data.districts[0]) ? "District: " + data.districts[0] : "",
         data.generated_at ? "Generated: " + data.generated_at : "",
       ].filter(Boolean);
@@ -754,7 +779,7 @@
           ? '<tr class="rc-grid-group ' + schemeClass(member.group_scheme || member.scheme_name) + '">' +
               '<td colspan="5">' +
                 "<strong>Scheme Name:</strong> " + escapeHtml(member.scheme_name) +
-                " &nbsp;|&nbsp; <strong>RC Number:</strong> " + escapeHtml(member.rc_number) +
+                " &nbsp;|&nbsp; <strong>RC Number:</strong> " + escapeHtml(rcWithOld(member)) +
                 " &nbsp;|&nbsp; <strong>Members:</strong> " + escapeHtml(member.group_member_count) +
                 " &nbsp;|&nbsp; <strong>Male:</strong> " + escapeHtml(member.group_male_count) +
                 " &nbsp;|&nbsp; <strong>Female:</strong> " + escapeHtml(member.group_female_count) +
@@ -772,7 +797,7 @@
           "<td>" + (index + 1) + "</td>" +
           "<td class=\"" + (member.is_hof ? "rc-hof" : "") + "\">" + nameBits + detail + "</td>" +
           "<td>" + escapeHtml(member.scheme_name) + "</td>" +
-          "<td>" + escapeHtml(member.rc_number) + "</td>" +
+          "<td>" + escapeHtml(memberIdLabel(member)) + "</td>" +
           "<td class=\"rc-change-cell\">" + escapeHtml(changeLabel(status)) + "</td>" +
         "</tr>";
       }).join("");
@@ -786,7 +811,7 @@
             '<col class="rc-col-change">' +
           "</colgroup>" +
           "<thead><tr>" +
-            "<th>#</th><th>Full Name</th><th>Scheme Name</th><th>RC Number</th><th>Change</th>" +
+            "<th>#</th><th>Full Name</th><th>Scheme Name</th><th>Member ID</th><th>Change</th>" +
           "</tr></thead>" +
           "<tbody>" + (body || '<tr><td colspan="5" class="text-muted">No rows imported.</td></tr>') + "</tbody>" +
         "</table>";

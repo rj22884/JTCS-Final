@@ -229,7 +229,7 @@ TOPICS: tuple[HelpTopic, ...] = (
         steps=(
             _s("Read Today's Activity", "The top card shows today's transaction count with Cash and Bank figures from recent daily transactions."),
             _s("Open a metric", "Click Cash or Bank on the today card to inspect the underlying rows."),
-            _s("Watch health banners", "System Health or Integration Health banners appear only when a check fails. Administrators follow the link to Mission Control or Integration Settings."),
+            _s("Watch health banners", "System Health banners appear only when a check fails. Administrators follow the link to Mission Control."),
         ),
         shots=(
             _shot(

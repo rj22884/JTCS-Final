@@ -99,25 +99,24 @@ class CurrencyNotesService:
             "entry_id": None,
         }
 
-    def get_for_date(self, entry_date: date | None = None) -> dict[str, Any]:
-        self.ensure_schema()
-        day = entry_date or today_app()
-        row = db.session.execute(
+    def _select_notes(self, where_sql: str, params: dict[str, Any]):
+        return db.session.execute(
             text(
-                """
+                f"""
                 SELECT TOP 1
                     EntryID, EntryDate,
                     Note500, Note200, Note100, Note50, Note20, Note10, Note5, Note2, Note1,
                     TotalNotes, TotalAmount
                 FROM dbo.CurrencyNotesClosing
-                WHERE EntryDate = :d AND ISNULL(IsActive, 1) = 1
-                ORDER BY EntryID DESC
+                WHERE {where_sql}
+                ORDER BY EntryDate DESC, EntryID DESC
                 """
             ),
-            {"d": day},
+            params,
         ).mappings().first()
-        if not row:
-            return self.empty_payload(day)
+
+    @staticmethod
+    def _payload_from_row(day: date, row, *, entry_id: int | None) -> dict[str, Any]:
         lines = []
         total_notes = 0
         total_amount = Decimal("0.00")
@@ -138,8 +137,35 @@ class CurrencyNotesService:
             "lines": lines,
             "total_notes": total_notes,
             "total_amount": float(total_amount.quantize(Decimal("0.01"))),
-            "entry_id": int(row["EntryID"]),
+            "entry_id": entry_id,
         }
+
+    def get_for_date(self, entry_date: date | None = None) -> dict[str, Any]:
+        self.ensure_schema()
+        day = entry_date or today_app()
+        row = self._select_notes(
+            "EntryDate = :d AND ISNULL(IsActive, 1) = 1",
+            {"d": day},
+        )
+        if row:
+            return self._payload_from_row(day, row, entry_id=int(row["EntryID"]))
+        # No row for this date: repeat the latest earlier date that has note counts.
+        # Counts stay on the requested date and are not saved until the user clicks Save.
+        prior = self._select_notes(
+            """
+            EntryDate < :d
+            AND ISNULL(IsActive, 1) = 1
+            AND (
+                ISNULL(Note500, 0) + ISNULL(Note200, 0) + ISNULL(Note100, 0)
+                + ISNULL(Note50, 0) + ISNULL(Note20, 0) + ISNULL(Note10, 0)
+                + ISNULL(Note5, 0) + ISNULL(Note2, 0) + ISNULL(Note1, 0)
+            ) > 0
+            """,
+            {"d": day},
+        )
+        if not prior:
+            return self.empty_payload(day)
+        return self._payload_from_row(day, prior, entry_id=None)
 
     def save(
         self,

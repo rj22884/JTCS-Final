@@ -558,7 +558,7 @@ body.stamp-col-resizing iframe {
   flex-shrink: 0;
 }
 .stamp-entry-modal-header .modal-title {
-  font-size: 0.95rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #fff;
 }
@@ -573,8 +573,8 @@ body.stamp-col-resizing iframe {
 }
 .stamp-entry-modal-body {
   background: #f8f7fc;
-  padding: 0.35rem 0.55rem 0.4rem !important;
-  overflow: hidden;
+  padding: 0.7rem 0.9rem 0.85rem !important;
+  overflow: auto;
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -583,62 +583,63 @@ body.stamp-col-resizing iframe {
 #stampMainWorkspace {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   display: flex;
   flex-direction: column;
 }
 #stampActivityForm {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
 #stampFormLayout {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   margin: 0 !important;
 }
 #stampFormContent {
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
+  gap: 0.55rem;
 }
 .stamp-entry-section {
   background: #fff;
   border: 1px solid #e9e4f5;
-  border-radius: 6px;
-  padding: 0.35rem 0.5rem;
-  margin-bottom: 0.3rem;
+  border-radius: 8px;
+  padding: 0.7rem 0.85rem 0.85rem;
+  margin-bottom: 0;
   flex-shrink: 0;
 }
 .stamp-entry-section-title {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.78rem;
+  gap: 0.5rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #1e1b4b;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.55rem;
 }
 .stamp-entry-section-num {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.45rem;
+  height: 1.45rem;
   border-radius: 50%;
   background: #4361ee;
   color: #fff;
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   font-weight: 700;
   flex-shrink: 0;
 }
 .stamp-entry-field-row {
-  --bs-gutter-x: 0.35rem;
-  --bs-gutter-y: 0.2rem;
+  --bs-gutter-x: 0.85rem;
+  --bs-gutter-y: 0.65rem;
 }
 .stamp-section-locked {
   background: #f3f0fa;
@@ -682,7 +683,7 @@ body.stamp-col-resizing iframe {
   border-color: #7c3aed;
 }
 
-.stamp-mode-bar .form-check-label { font-weight: 600; font-size: 13px; }
+.stamp-mode-bar .form-check-label { font-weight: 600; font-size: 15px; }
 .stamp-mobile-info { text-align: right; font-size: 12px; color: #6c757d; max-width: 320px; }
 .stamp-mobile-count { color: #dc3545; font-weight: 700; margin-right: 0.25rem; }
 .stamp-mobile-label { color: #6c757d; }
@@ -692,17 +693,17 @@ body.stamp-col-resizing iframe {
 .stamp-payment-lines { display: flex; flex-direction: column; gap: 0.45rem; }
 .stamp-payment-line {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(120px, 180px) auto;
-  gap: 0.5rem;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 220px) auto;
+  gap: 0.75rem;
   align-items: end;
 }
-.stamp-payment-line .form-label { font-size: 11px; margin-bottom: 0.1rem; }
+.stamp-payment-line .form-label { font-size: 13px; margin-bottom: 0.2rem; }
 @media (max-width: 768px) {
   .stamp-payment-line { grid-template-columns: 1fr; }
   .stamp-shcil-logins .btn { min-height: 40px; }
 }
 .stamp-page-toolbar { flex-shrink: 0; background: #fff; border-radius: 6px; border: 1px solid #e9e4f5; }
-.stamp-page-toolbar .btn { min-width: 3.5rem; font-size: 12px; padding: 0.2rem 0.45rem; }
+.stamp-page-toolbar .btn { min-width: 5rem; font-size: 14px; padding: 0.35rem 0.75rem; }
 .stamp-form-footer {
   display: flex;
   flex-wrap: wrap;
@@ -744,9 +745,9 @@ body.stamp-col-resizing iframe {
   margin-bottom: 0.55rem;
 }
 .stamp-erp-form .form-label {
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 0.05rem;
+  margin-bottom: 0.25rem;
   color: #1a1f36;
 }
 .stamp-search-grid-wrap { max-height: 120px; overflow: auto; flex-shrink: 0; }
@@ -754,9 +755,9 @@ body.stamp-col-resizing iframe {
 .stamp-search-grid-wrap tbody tr.table-active { background: #ede9fe; }
 .stamp-erp-form .form-control,
 .stamp-erp-form .form-select {
-  min-height: 1.65rem;
-  font-size: 12px;
-  padding: 0.15rem 0.35rem;
+  min-height: 2.4rem;
+  font-size: 15px;
+  padding: 0.4rem 0.65rem;
   border-color: #d8d2e9;
 }
 .stamp-erp-form .form-control:focus,
@@ -764,10 +765,10 @@ body.stamp-col-resizing iframe {
   border-color: #7c3aed;
   box-shadow: 0 0 0 0.15rem rgba(124, 58, 237, 0.15);
 }
-.stamp-image-panel { width: 140px; flex-shrink: 0; }
+.stamp-image-panel { width: 220px; flex-shrink: 0; }
 .stamp-photo-box {
-  width: 140px;
-  height: 160px;
+  width: 220px;
+  height: 260px;
   border: 2px dashed #7c3aed;
   background: #fafafa;
   border-radius: 4px;
@@ -783,7 +784,7 @@ body.stamp-col-resizing iframe {
 .stamp-photo-box.dragover { border-color: #7c3aed; background: #f5f3ff; }
 .stamp-photo-placeholder {
   text-align: center;
-  font-size: 10px;
+  font-size: 13px;
   color: #5c667a;
   pointer-events: none;
 }
@@ -809,15 +810,15 @@ body.stamp-col-resizing iframe {
   gap: 4px;
   margin-top: 6px;
 }
-.stamp-image-actions .btn { font-size: 11px; padding: 4px 6px; }
+.stamp-image-actions .btn { font-size: 13px; padding: 6px 8px; }
 .stamp-ocr-panel {
   border: 1px solid #e9e4f5;
   border-radius: 4px;
   padding: 6px 8px;
   background: #fff;
 }
-.stamp-ocr-label { font-size: 10px; font-weight: 700; color: #7c3aed; text-transform: uppercase; }
-.stamp-ocr-status-text { font-size: 11px; color: #5c667a; margin-top: 2px; }
+.stamp-ocr-label { font-size: 12px; font-weight: 700; color: #7c3aed; text-transform: uppercase; }
+.stamp-ocr-status-text { font-size: 13px; color: #5c667a; margin-top: 2px; }
 .stamp-ocr-status-text.is-reading { color: #7c3aed; font-weight: 600; }
 .stamp-ocr-status-text.is-completed { color: #198754; font-weight: 600; }
 .stamp-ocr-status-text.is-failed { color: #dc3545; font-weight: 600; }
@@ -838,4 +839,19 @@ body.stamp-col-resizing iframe {
   max-width: 100%;
   max-height: 100%;
   transform-origin: center center;
+}
+
+.stamp-sale-qr-wrap {
+  display: flex;
+  align-items: flex-start;
+}
+.stamp-sale-qr-img {
+  width: 2in;
+  height: 2in;
+  max-width: 2in;
+  max-height: 2in;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #d7dce3;
+  padding: 4px;
 }

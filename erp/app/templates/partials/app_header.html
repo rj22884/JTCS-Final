@@ -15,16 +15,6 @@
     </div>
   </div>
 
-  {% if not is_fps_user %}
-  <div class="jtcs-market-ticker" id="jtcsMarketTicker" data-quotes-url="{{ url_for('market_quotes.quotes') }}" hidden>
-    <button type="button" class="jtcs-market-live" id="jtcsMarketLive" title="Market feed status" disabled>
-      <span class="jtcs-market-live-dot" aria-hidden="true"></span>
-      LIVE
-    </button>
-    <div class="jtcs-market-items" id="jtcsMarketItems" role="list"></div>
-  </div>
-  {% endif %}
-
   <div class="jtcs-header-meta">
     {% if not is_fps_user %}
     <div class="jtcs-global-search-wrap hide-sm">

@@ -869,6 +869,7 @@ class RationCardReportService:
                         "full_name_hi": hindi_name,
                         "group_scheme": group["scheme_name"],
                         "group_rc": group["rc_number"],
+                        "group_existing_rc": group.get("existing_rc_number") or "",
                         "group_first": index == 0,
                         "group_member_count": group["member_count"],
                         "group_male_count": group["male_count"],
@@ -925,6 +926,22 @@ class RationCardReportService:
     @staticmethod
     def _pdf_text(value) -> str:
         return xml_escape(str(value if value is not None else "").strip())
+
+    @staticmethod
+    def _id_with_old(current, old, old_label: str) -> str:
+        current_text = str(current or "").strip()
+        old_text = str(old or "").strip()
+        if current_text and old_text:
+            return f"{current_text} ({old_label}: {old_text})"
+        return current_text or old_text
+
+    @classmethod
+    def _member_id_label(cls, member: dict) -> str:
+        member_id = str(member.get("member_id") or "").strip()
+        existing = str(member.get("existing_member_id") or "").strip()
+        if member_id and existing:
+            return f"{member_id} ({existing})"
+        return member_id or existing
 
     @classmethod
     def _pdf_member_name_html(cls, member: dict, _scheme_key: str = "") -> str:
@@ -1001,7 +1018,7 @@ class RationCardReportService:
             fontSize=cell_size,
             leading=cell_size + 2,
             alignment=TA_CENTER,
-            textColor=colors.white,
+            textColor=colors.HexColor("#1f3b63"),
             fontName=hindi_bold,
         )
         group_style = ParagraphStyle(
@@ -1039,6 +1056,12 @@ class RationCardReportService:
         dealer_name = dealer.get("dealer_name") or ""
         fps_id = dealer.get("fps_id") or (report.get("fps_ids") or [""])[0]
         existing_fps = dealer.get("existing_fps_id") or ""
+        if not existing_fps:
+            for group in groups:
+                if group.get("existing_fps_id"):
+                    existing_fps = group.get("existing_fps_id") or ""
+                    break
+        fps_label = cls._id_with_old(fps_id, existing_fps, "Old FPS ID")
         district = (report.get("districts") or [dealer.get("district_name") or ""])[0]
         generated = report.get("generated_at") or ""
         import_mode = (report.get("import_mode") or "").title()
@@ -1046,8 +1069,7 @@ class RationCardReportService:
             part
             for part in (
                 f"Dealer: {dealer_name}" if dealer_name else "",
-                f"FPS ID: {fps_id}" if fps_id else "",
-                f"Existing FPS: {existing_fps}" if existing_fps else "",
+                f"FPS ID: {fps_label}" if fps_label else "",
                 f"District: {district}" if district else "",
                 f"Mode: {import_mode}" if import_mode else "",
                 f"Generated: {generated}" if generated else "",
@@ -1075,30 +1097,30 @@ class RationCardReportService:
 
         usable = page[0] - (side_margin * 2)
         if mobile:
-            col_keys = ("sr", "name", "rc", "change")
-            col_widths = [usable * 0.07, usable * 0.50, usable * 0.31, usable * 0.12]
+            col_keys = ("sr", "name", "member", "change")
+            col_widths = [usable * 0.07, usable * 0.38, usable * 0.43, usable * 0.12]
             headers = [
-                Paragraph("Sr", head_style),
+                Paragraph("#", head_style),
                 Paragraph("Full Name", head_style),
-                Paragraph("RC Number", head_style),
+                Paragraph("Member ID", head_style),
                 Paragraph("Change", head_style),
             ]
         else:
-            col_keys = ("sr", "name", "scheme", "rc", "change")
-            col_widths = [usable * 0.05, usable * 0.38, usable * 0.09, usable * 0.36, usable * 0.12]
+            col_keys = ("sr", "name", "scheme", "member", "change")
+            col_widths = [usable * 0.05, usable * 0.32, usable * 0.08, usable * 0.43, usable * 0.12]
             headers = [
-                Paragraph("Sr", head_style),
+                Paragraph("#", head_style),
                 Paragraph("Full Name", head_style),
-                Paragraph("Scheme", head_style),
-                Paragraph("RC Number", head_style),
+                Paragraph("Scheme Name", head_style),
+                Paragraph("Member ID", head_style),
                 Paragraph("Change", head_style),
             ]
         extra_blanks = [""] * (len(col_keys) - 1)
 
         table_data: list[list] = []
         style_commands = [
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0e7490")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f4f7")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#1f3b63")),
             ("FONTNAME", (0, 0), (-1, 0), hindi_bold),
             ("FONTSIZE", (0, 0), (-1, -1), cell_size),
             ("ALIGN", (0, 0), (0, -1), "CENTER"),
@@ -1114,9 +1136,10 @@ class RationCardReportService:
         serial = 0
         for group in groups:
             counts = group_member_counts(group.get("members") or [])
+            rc_label = cls._id_with_old(group.get("rc_number"), group.get("existing_rc_number"), "Old RC Number")
             group_bits = [
-                f"Scheme: {cls._pdf_text(group.get('scheme_label') or group.get('scheme_name'))}",
-                f"RC: {cls._pdf_text(group.get('rc_number'))}",
+                f"Scheme Name: {cls._pdf_text(group.get('scheme_name'))}",
+                f"RC Number: {cls._pdf_text(rc_label)}",
                 f"Members: {group.get('member_count') or 0}",
                 f"Male: {counts['male_count']}",
                 f"Female: {counts['female_count']}",
@@ -1166,7 +1189,7 @@ class RationCardReportService:
                     "sr": Paragraph(str(serial), row_style),
                     "name": Paragraph(name_html, row_style),
                     "scheme": Paragraph(cls._pdf_text(member.get("scheme_name")), row_style),
-                    "rc": Paragraph(cls._pdf_text(member.get("rc_number")), row_style),
+                    "member": Paragraph(cls._pdf_text(cls._member_id_label(member)), row_style),
                     "change": Paragraph(change_label, row_style),
                 }
                 table_data.append([cells[key] for key in col_keys])

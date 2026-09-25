@@ -46,6 +46,9 @@
     certIssuedDate: document.getElementById("CertificateIssuedDate"),
     transactionDate: document.getElementById("TransactionDate"),
     saleAmount: document.getElementById("SaleAmount"),
+    generateQrBtn: document.getElementById("stampGenerateQrBtn"),
+    saleQrWrap: document.getElementById("stampSaleQrWrap"),
+    saleQrImg: document.getElementById("stampSaleQrImg"),
     paymentLines: document.getElementById("stampPaymentLines"),
     paymentAddBtn: document.getElementById("stampAddPaymentBtn"),
     paymentSummary: document.getElementById("stampPaymentSummary"),
@@ -147,6 +150,7 @@
   let blockedDuplicateCert = null;
   let searchResults = [];
   let ocrImportedLock = false;
+  let saleQrPaymentLocked = false;
   let txnDateManualOverride = false;
 
   function defaultTransactionDateToday() {
@@ -323,6 +327,7 @@
       els.transactionDate.readOnly = false;
       els.transactionDate.classList.remove("stamp-field-readonly", "stamp-field-manual-disabled");
     }
+    refreshSaleQrPaymentLock();
   }
 
   function ensureTransactionDateEditable() {
@@ -347,6 +352,7 @@
     els.paymentLines?.querySelectorAll("input, select, button").forEach(function (el) {
       el.disabled = false;
     });
+    refreshSaleQrPaymentLock();
   }
 
   function currentWebsiteRef() {
@@ -1411,6 +1417,7 @@
   }
 
   function populateRecord(record) {
+    hideSaleQr();
     populateFields(record, { preserveSale: true, preserveTransactionDate: true });
     const optionalMap = {
       AccountReference: "AccountReference",
@@ -1958,6 +1965,7 @@
       els.saleAmount?.focus();
     }
     ensureTransactionDateEditable();
+    refreshSaleQrPaymentLock();
   }
 
   function clearEntryFields() {
@@ -1985,6 +1993,7 @@
     setOcrReason("");
     clearImage();
     resetPaymentLines();
+    hideSaleQr();
     setOcrFieldLock(false);
     setManualFieldLock(true);
     setReferenceLocked(false);
@@ -2425,6 +2434,7 @@
     els.paymentLines?.querySelectorAll(".stamp-payment-amount").forEach(function (input) {
       input.value = "";
     });
+    hideSaleQr();
     updatePaymentSummary();
   }
 
@@ -2868,15 +2878,109 @@
     }
   });
 
+  function disablePaymentUiForQr() {
+    if (els.paymentAddBtn) els.paymentAddBtn.disabled = true;
+    els.paymentLines?.querySelectorAll("input, select, button").forEach(function (el) {
+      el.disabled = true;
+    });
+  }
+
+  function refreshSaleQrPaymentLock() {
+    if (saleQrPaymentLocked) disablePaymentUiForQr();
+  }
+
+  function lockPaymentForSaleQr(saleAmount) {
+    const amount = Number(saleAmount);
+    if (Number.isNaN(amount) || amount <= 0) return;
+    saleQrPaymentLocked = false;
+    resetPaymentLines([
+      {
+        bankAccountId: defaultStampAccountId(),
+        amount: amount.toFixed(2),
+      },
+    ]);
+    const select = els.paymentLines?.querySelector(".stamp-payment-bank");
+    if (select) {
+      const defaultId = defaultStampAccountId();
+      if (
+        defaultId &&
+        Array.from(select.options).some(function (opt) {
+          return opt.value === defaultId;
+        })
+      ) {
+        select.value = defaultId;
+      } else {
+        const match = Array.from(select.options).find(function (opt) {
+          const digits = String(opt.textContent || "").replace(/\D/g, "");
+          return digits === "58250200000396" || digits.endsWith("0396");
+        });
+        if (match) select.value = match.value;
+      }
+    }
+    saleQrPaymentLocked = true;
+    disablePaymentUiForQr();
+    updatePaymentSummary();
+  }
+
+  function unlockPaymentForSaleQr() {
+    if (!saleQrPaymentLocked) return;
+    saleQrPaymentLocked = false;
+    if (ocrImportedLock || isManualEntry() || isOnlineEntry() || editingStampId) {
+      enablePaymentLines();
+      updatePaymentRemoveButtons();
+      return;
+    }
+    if (els.paymentAddBtn) els.paymentAddBtn.disabled = true;
+    els.paymentLines?.querySelectorAll("input, select, button").forEach(function (el) {
+      el.disabled = true;
+    });
+  }
+
+  function hideSaleQr() {
+    if (els.saleQrWrap) els.saleQrWrap.classList.add("d-none");
+    if (els.saleQrImg) {
+      els.saleQrImg.removeAttribute("src");
+      els.saleQrImg.alt = "Sale amount UPI QR";
+    }
+    unlockPaymentForSaleQr();
+  }
+
+  function generateSaleQr() {
+    const raw = (els.saleAmount?.value || "").trim();
+    const amount = parseFloat(raw);
+    if (!raw || Number.isNaN(amount) || amount <= 0) {
+      alert("Enter Sale Amount first.");
+      els.saleAmount?.focus();
+      return;
+    }
+    const base = window.STAMP_SALE_QR_URL || "/api/sale-upi-qr";
+    const url = base + (base.indexOf("?") >= 0 ? "&" : "?") + "amount=" + encodeURIComponent(amount.toFixed(2));
+    if (els.saleQrImg) {
+      els.saleQrImg.src = url;
+      els.saleQrImg.alt = "UPI QR for ₹" + amount.toFixed(2);
+    }
+    if (els.saleQrWrap) els.saleQrWrap.classList.remove("d-none");
+    lockPaymentForSaleQr(amount);
+  }
+
   els.paymentAddBtn?.addEventListener("click", function (e) {
     e.preventDefault();
     addPaymentLine();
   });
 
-  els.saleAmount?.addEventListener("input", updatePaymentSummary);
+  els.generateQrBtn?.addEventListener("click", function (e) {
+    e.preventDefault();
+    generateSaleQr();
+  });
+
+  els.saleAmount?.addEventListener("input", function () {
+    hideSaleQr();
+    updatePaymentSummary();
+  });
   els.saleAmount?.addEventListener("change", function () {
     const raw = (els.saleAmount?.value || "").trim();
     if (!raw) {
+      hideSaleQr();
       updatePaymentSummary();
       return;
     }
@@ -2884,6 +2988,7 @@
     const sale = parseFloat(raw);
     if (Number.isNaN(sale) || sale <= 0 || (!Number.isNaN(stampDuty) && stampDuty > 0 && sale <= stampDuty)) {
       els.saleAmount.value = "";
+      hideSaleQr();
       alert("Sale Amount must be greater than Stamp Duty Amount.");
       els.saleAmount?.focus();
       updatePaymentSummary();
@@ -2897,6 +3002,7 @@
     const sale = parseFloat(saleRaw);
     if (saleRaw && sale > 0 && !Number.isNaN(stampDuty) && sale <= stampDuty) {
       if (els.saleAmount) els.saleAmount.value = "";
+      hideSaleQr();
       updatePaymentSummary();
     }
   });
@@ -2986,6 +3092,7 @@
       if (isOnlineEntry()) {
         setReferenceLocked(true);
         enablePaymentLines();
+        refreshSaleQrPaymentLock();
       }
     }
   });

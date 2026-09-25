@@ -9,6 +9,7 @@ from flask import (
     Blueprint,
     Flask,
     Response,
+    abort,
     current_app,
     flash,
     jsonify,
@@ -35,11 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_integration_settings_bootstrap() -> None:
-    repo = IntegrationSettingsRepository()
-    repo.ensure_schema()
-    repo.ensure_audit_schema()
-    repo.ensure_health_schema()
-    repo.ensure_menu()
+    """Permanently hide Integration Settings from menus. Do not recreate the page."""
+    IntegrationSettingsRepository().deactivate_menu()
 
 
 def register_integration_csrf_json_handler(app: Flask) -> None:
@@ -76,17 +74,7 @@ def register_integration_csrf_json_handler(app: Flask) -> None:
 @login_required
 @admin_required
 def index():
-    ctrl = IntegrationSettingsController()
-    ctx = ctrl.page_context()
-    return render_template(
-        "settings/integration_settings.html",
-        page_title="Integration Settings",
-        breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
-        providers=ctx["providers"],
-        catalog=ctx["catalog"],
-        whatsapp_card=ctx.get("whatsapp_card"),
-        testable_fields=ctx.get("testable_fields") or {},
-    )
+    abort(404)
 
 
 @bp.route("/api/settings", methods=["GET"])

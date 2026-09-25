@@ -78,7 +78,7 @@ from app.routes.property_listings import bp as property_listings_bp
 from app.routes.hr import bp as hr_bp
 from app.routes.public_report import bp as public_report_bp
 from app.routes.other_login import bp as other_login_bp
-from app.routes.market_quotes import bp as market_quotes_bp
+from app.routes.sale_upi_qr import bp as sale_upi_qr_bp
 from app.routes.runtime import bp as runtime_bp
 from app.modules.crm.routes import (
     crm_api_bp,
@@ -208,7 +208,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(property_listings_bp)
     app.register_blueprint(hr_bp)
     app.register_blueprint(public_report_bp)
-    app.register_blueprint(market_quotes_bp)
+    app.register_blueprint(sale_upi_qr_bp)
     app.register_blueprint(crm_bp)
     app.register_blueprint(crm_api_bp)
     app.register_blueprint(notification_api_bp)

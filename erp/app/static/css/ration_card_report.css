@@ -231,13 +231,13 @@
 .rc-import-grid td:nth-child(1) { width: 4%; }
 .rc-import-grid .rc-col-name,
 .rc-import-grid th:nth-child(2),
-.rc-import-grid td:nth-child(2) { width: 36%; }
+.rc-import-grid td:nth-child(2) { width: 28%; }
 .rc-import-grid .rc-col-scheme,
 .rc-import-grid th:nth-child(3),
-.rc-import-grid td:nth-child(3) { width: 10%; }
+.rc-import-grid td:nth-child(3) { width: 8%; }
 .rc-import-grid .rc-col-rc,
 .rc-import-grid th:nth-child(4),
-.rc-import-grid td:nth-child(4) { width: 38%; }
+.rc-import-grid td:nth-child(4) { width: 48%; }
 .rc-import-grid .rc-col-change,
 .rc-import-grid th:nth-child(5),
 .rc-import-grid td:nth-child(5) { width: 12%; }
@@ -246,15 +246,14 @@
 .rc-import-grid td:nth-child(1),
 .rc-import-grid th:nth-child(3),
 .rc-import-grid td:nth-child(3),
-.rc-import-grid th:nth-child(4),
-.rc-import-grid td:nth-child(4),
 .rc-import-grid th:nth-child(5),
 .rc-import-grid td:nth-child(5) {
   white-space: nowrap;
 }
 
-.rc-import-grid td:nth-child(2) {
-  overflow-wrap: break-word;
+.rc-import-grid td:nth-child(2),
+.rc-import-grid td:nth-child(4) {
+  overflow-wrap: anywhere;
 }
 
 .rc-import-grid thead th {

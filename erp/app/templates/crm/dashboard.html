@@ -71,11 +71,7 @@
     </div>
 
     <div class="crm-dash-col crm-dash-col--right"
-         id="crmWaCredsBlock"
-         data-csrf="{{ csrf_token() }}"
-         data-api-save="{{ url_for('integration_settings.api_save_settings') }}"
-         data-api-test="{{ url_for('integration_settings.api_test_whatsapp_connection') }}"
-         data-secret-mask="*********************">
+         id="crmWaCredsBlock">
       <div class="crm-dash-widgets crm-dash-widgets-5">
         <a href="{{ url_for('crm.inbox_page') }}" class="crm-widget">
           <span class="crm-widget-icon"><i class="bi bi-chat-square-dots"></i></span>
@@ -103,105 +99,7 @@
           <span class="crm-widget-value">{{ comm_stats.failed_messages|default(0) }}</span>
         </div>
       </div>
-
-      <div class="crm-wa-creds-card">
-        <form id="crmWaCredsForm" autocomplete="off">
-          <div class="crm-wa-creds-head">
-            <div class="crm-wa-creds-title">
-              <i class="bi bi-whatsapp"></i>
-              <span>WhatsApp Business — Meta Credentials</span>
-            </div>
-            <div class="crm-wa-creds-actions">
-              <a href="{{ url_for('integration_settings.index') }}" class="btn btn-outline-secondary btn-sm crm-wa-creds-btn" title="Full Integration Settings">
-                <i class="bi bi-box-arrow-up-right"></i>
-              </a>
-              <button type="submit" class="btn btn-success btn-sm crm-wa-creds-btn" id="crmWaCredsSaveBtn">
-                <i class="bi bi-save"></i> Save
-              </button>
-              <button type="button"
-                      class="btn btn-sm crm-wa-creds-btn crm-wa-connect-btn {% if wa_connected %}is-connected{% else %}is-disconnected{% endif %}"
-                      id="crmWaConnectBtn"
-                      data-connected="{{ '1' if wa_connected else '0' }}"
-                      title="Test / refresh WhatsApp connection">
-                {% if wa_connected %}
-                <span class="crm-wa-connect-dot" aria-hidden="true">🟢</span> Connected
-                {% else %}
-                <span class="crm-wa-connect-dot" aria-hidden="true">🔴</span> Disconnected
-                {% endif %}
-              </button>
-            </div>
-          </div>
-          <div class="crm-wa-creds-grid">
-            <div class="crm-wa-field">
-              <label for="crmWaAppId">App ID</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaAppId" name="app_id"
-                     value="{{ wa_vals.app_id or '' }}" placeholder="e.g. 123456789012345" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaAppSecret">App Secret</label>
-              <input type="password" class="form-control form-control-sm" id="crmWaAppSecret" name="app_secret"
-                     value="{{ wa_vals.app_secret or '' }}"
-                     data-has-secret="{{ '1' if wa_secrets.app_secret else '0' }}"
-                     placeholder="{{ 'Saved (encrypted)' if wa_secrets.app_secret else 'e.g. ab12cd34ef56gh78ij90kl' }}"
-                     spellcheck="false">
-            </div>
-            <div class="crm-wa-field crm-wa-field--wide">
-              <label for="crmWaAccessToken">Access Token</label>
-              <input type="password" class="form-control form-control-sm" id="crmWaAccessToken" name="access_token"
-                     value="{{ wa_vals.access_token or '' }}"
-                     data-has-secret="{{ '1' if wa_secrets.access_token else '0' }}"
-                     placeholder="{{ wa.access_token_display or ('Saved (encrypted)' if wa_secrets.access_token else 'e.g. EAAG… permanent / system user token') }}"
-                     spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaBusinessId">Business ID</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaBusinessId" name="business_id"
-                     value="{{ wa_vals.business_id or '' }}" placeholder="e.g. 987654321098765" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaWabaId">WABA ID</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaWabaId" name="waba_id"
-                     value="{{ wa_vals.waba_id or '' }}" placeholder="e.g. 102938475610293" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaPhoneNumberId">Phone Number ID</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaPhoneNumberId" name="phone_number_id"
-                     value="{{ wa_vals.phone_number_id or '' }}" placeholder="e.g. 109876543210987" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaPhoneNumber">Phone Number</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaPhoneNumber" name="phone_number"
-                     value="{{ wa_vals.phone_number or '' }}" placeholder="e.g. +91 98765 43210" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaGraphVer">Graph API Ver.</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaGraphVer" name="graph_api_version"
-                     value="{{ wa_vals.graph_api_version or 'v21.0' }}" placeholder="e.g. v21.0" spellcheck="false">
-            </div>
-            <div class="crm-wa-field">
-              <label for="crmWaVerifyToken">Webhook Verify Token</label>
-              <input type="password" class="form-control form-control-sm" id="crmWaVerifyToken" name="webhook_verify_token"
-                     value="{{ wa_vals.webhook_verify_token or '' }}"
-                     data-has-secret="{{ '1' if wa_secrets.webhook_verify_token else '0' }}"
-                     placeholder="{{ 'Saved (encrypted)' if wa_secrets.webhook_verify_token else 'e.g. my_verify_token_2026' }}"
-                     spellcheck="false">
-            </div>
-            <div class="crm-wa-field crm-wa-field--full">
-              <label for="crmWaWebhookUrl">Webhook URL</label>
-              <input type="text" class="form-control form-control-sm" id="crmWaWebhookUrl" name="webhook_url"
-                     value="{{ wa_vals.webhook_url or '' }}" readonly
-                     placeholder="e.g. https://your-domain/webhooks/whatsapp">
-            </div>
-          </div>
-          <div class="crm-wa-creds-hint" id="crmWaCredsHint" aria-live="polite">
-            {% if wa.missing_labels %}
-            Missing: {{ wa.missing_labels | join(', ') }}
-            {% endif %}
-          </div>
-        </form>
-      </div>
     </div>
-  </div>
 
   <div class="crm-dash-bottom">
     <div class="jtcs-card crm-dash-panel">

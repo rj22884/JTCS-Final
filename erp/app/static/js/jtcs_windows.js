@@ -53,23 +53,56 @@
     return false;
   }
 
-  function setMaximized(dialog, modal, maximized) {
-    dialog.classList.toggle("jtcs-win-maximized", maximized);
-    if (modal) modal.classList.toggle("jtcs-win-maximized", maximized);
-    dialog.classList.toggle("jtcs-win-dragged", false);
+  function setWindowState(dialog, modal, state) {
+    if (!dialog) return;
+    dialog.dataset.jtcsWinState = state;
+    dialog.classList.remove("jtcs-win-maximized", "jtcs-win-minimized", "jtcs-win-dragged");
+    if (modal) modal.classList.remove("jtcs-win-maximized", "jtcs-win-minimized");
     dialog.style.left = "";
     dialog.style.top = "";
+    dialog.style.width = "";
+    dialog.style.height = "";
     dialog.style.margin = "";
     dialog.style.transform = "";
-    var btn = dialog.querySelector(".jtcs-win-max-btn");
-    if (btn) {
-      var icon = btn.querySelector("i");
-      btn.title = maximized ? "Restore" : "Maximize";
-      btn.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
-      if (icon) {
-        icon.className = maximized ? "bi bi-fullscreen-exit" : "bi bi-arrows-fullscreen";
-      }
+    dialog.style.maxWidth = "";
+    dialog.style.bottom = "";
+
+    if (state === "max") {
+      dialog.classList.add("jtcs-win-maximized");
+      if (modal) modal.classList.add("jtcs-win-maximized");
+      dialog.style.position = "fixed";
+      dialog.style.left = "8px";
+      dialog.style.top = "8px";
+      dialog.style.width = Math.max(320, window.innerWidth - 16) + "px";
+      dialog.style.height = Math.max(240, window.innerHeight - 16) + "px";
+      dialog.style.margin = "0";
+      dialog.style.maxWidth = "none";
+      dialog.style.transform = "none";
+    } else if (state === "min") {
+      dialog.classList.add("jtcs-win-minimized");
+      if (modal) modal.classList.add("jtcs-win-minimized");
+      dialog.style.position = "fixed";
+      dialog.style.left = "12px";
+      dialog.style.top = "auto";
+      dialog.style.bottom = "12px";
+      dialog.style.width = "300px";
+      dialog.style.height = "46px";
+      dialog.style.margin = "0";
+      dialog.style.maxWidth = "none";
+      dialog.style.transform = "none";
     }
+
+    var maxBtn = dialog.querySelector(".jtcs-win-max-btn");
+    if (maxBtn) {
+      var icon = maxBtn.querySelector("i");
+      maxBtn.title = "Maximize";
+      maxBtn.setAttribute("aria-label", "Maximize");
+      if (icon) icon.className = "bi bi-arrows-fullscreen";
+    }
+  }
+
+  function setMaximized(dialog, modal, maximized) {
+    setWindowState(dialog, modal, maximized ? "max" : "restored");
   }
 
   function enableDrag(header, dialog, modal) {
@@ -79,6 +112,7 @@
     header.addEventListener("mousedown", function (ev) {
       if (ev.button !== 0) return;
       if (isInteractive(ev.target)) return;
+      if ((dialog.dataset.jtcsWinState || "") === "min") return;
       if (isMaximizedLook(dialog, modal)) return;
       var rect = dialog.getBoundingClientRect();
       dialog.classList.add("jtcs-win-dragged");
@@ -139,19 +173,37 @@
 
     var host = toolsHost(header);
     var isFull = dialog.classList.contains("modal-fullscreen");
-    if (!isFull && !hasExistingMaximize(header)) {
-      var maxBtn = document.createElement("button");
-      maxBtn.type = "button";
-      maxBtn.className = "btn btn-outline-secondary btn-sm jtcs-win-max-btn";
-      maxBtn.title = "Maximize";
-      maxBtn.setAttribute("aria-label", "Maximize");
-      maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
-      maxBtn.addEventListener("click", function (ev) {
+    function addChromeBtn(cls, title, icon, onClick) {
+      if (header.querySelector("." + cls)) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-outline-secondary btn-sm " + cls;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.innerHTML = '<i class="bi ' + icon + '"></i>';
+      btn.addEventListener("mousedown", function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        setMaximized(dialog, modal, !dialog.classList.contains("jtcs-win-maximized"));
       });
-      host.appendChild(maxBtn);
+      btn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        onClick();
+      });
+      host.appendChild(btn);
+    }
+    if (!isFull) {
+      addChromeBtn("jtcs-win-min-btn", "Minimize", "bi-dash-lg", function () {
+        setWindowState(dialog, modal, "min");
+      });
+      addChromeBtn("jtcs-win-restore-btn", "Restore", "bi-copy", function () {
+        setWindowState(dialog, modal, "restored");
+      });
+      if (!hasExistingMaximize(header)) {
+        addChromeBtn("jtcs-win-max-btn", "Maximize", "bi-arrows-fullscreen", function () {
+          setWindowState(dialog, modal, "max");
+        });
+      }
     }
     if (!hasClose(header, modal)) {
       var closeBtn = document.createElement("button");
@@ -163,7 +215,7 @@
     }
 
     modal.addEventListener("hidden.bs.modal", function () {
-      setMaximized(dialog, modal, false);
+      setWindowState(dialog, modal, "restored");
     });
   }
 
@@ -177,22 +229,31 @@
     enableDrag(header, dialog, overlay);
 
     var host = toolsHost(header);
-    if (!header.querySelector(".jtcs-win-max-btn")) {
-      var maxBtn = document.createElement("button");
-      maxBtn.type = "button";
-      maxBtn.className = "btn btn-outline-secondary btn-sm jtcs-win-max-btn";
-      maxBtn.title = "Maximize";
-      maxBtn.setAttribute("aria-label", "Maximize");
-      maxBtn.innerHTML = '<i class="bi bi-arrows-fullscreen"></i>';
-      maxBtn.addEventListener("click", function (ev) {
+    function addDlgBtn(cls, title, icon, onClick) {
+      if (header.querySelector("." + cls)) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-outline-secondary btn-sm " + cls;
+      btn.title = title;
+      btn.setAttribute("aria-label", title);
+      btn.innerHTML = '<i class="bi ' + icon + '"></i>';
+      btn.addEventListener("click", function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        var next = !dialog.classList.contains("jtcs-win-maximized");
-        setMaximized(dialog, overlay, next);
-        overlay.classList.toggle("jtcs-win-maximized", next);
+        onClick();
       });
-      host.appendChild(maxBtn);
+      host.appendChild(btn);
     }
+    addDlgBtn("jtcs-win-min-btn", "Minimize", "bi-dash-lg", function () {
+      setWindowState(dialog, overlay, "min");
+    });
+    addDlgBtn("jtcs-win-restore-btn", "Restore", "bi-copy", function () {
+      setWindowState(dialog, overlay, "restored");
+    });
+    addDlgBtn("jtcs-win-max-btn", "Maximize", "bi-arrows-fullscreen", function () {
+      setWindowState(dialog, overlay, "max");
+      overlay.classList.add("jtcs-win-maximized");
+    });
     if (!header.querySelector(".jtcs-win-close-btn")) {
       var closeBtn = document.createElement("button");
       closeBtn.type = "button";

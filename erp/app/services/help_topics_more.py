@@ -677,18 +677,6 @@ MORE_TOPICS: tuple[HelpTopic, ...] = (
         keywords="property listings",
     ),
     _t(
-        "integration-settings",
-        "Integration Settings",
-        "bi-plug",
-        "admin",
-        "Admin Role → Integration Settings",
-        "SMTP, WhatsApp, and other connectors. Health tab explains failed Dashboard banners.",
-        url="/admin/integrations",
-        audience="Administrator",
-        related=("communication-center", "dashboard"),
-        keywords="smtp whatsapp integration settings",
-    ),
-    _t(
         "dynamic-fields",
         "Dynamic master fields",
         "bi-ui-checks-grid",

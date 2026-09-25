@@ -118,6 +118,11 @@ def test_pdf_layouts() -> None:
     if sample_en:
         assert sample_en in pages_text, sample_en
         assert sample_en == to_proper_case(sample_en)
+    assert "Old RC Number" in pages_text
+    assert "Old FPS ID" in pages_text
+    first_member = report["grid_rows"][0]
+    member_label = f"{first_member.get('member_id')} ({first_member.get('existing_member_id')})"
+    assert member_label in pages_text, member_label
     print("PDF LAYOUTS OK")
 
 
