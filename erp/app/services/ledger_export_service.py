@@ -34,8 +34,10 @@ from sqlalchemy import text
 from app.extensions import db
 from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 from app.services.payment_accounting_service import (
+    FOLLOWUP_MODULES,
     sql_customer_ledger_exclude_sale_invoice,
     sql_customer_receipt_expr,
+    sql_not_udhaar_payment,
     sql_unpaid_followup_exclusion_for_customer_ledger,
 )
 
@@ -1553,6 +1555,277 @@ class LedgerExportService:
             return (row.get("AccountName") or "").strip() or key
         return key
 
+    @staticmethod
+    def _individual_client_name_sql(alias: str = "g") -> str:
+        return (
+            f"LOWER(LTRIM(RTRIM(ISNULL({alias}.GroupName, N'')))) = N'individual client'"
+        )
+
+    def individual_client_ids(self, customer_ids: list[int]) -> set[int]:
+        """Customers whose Chart of Account group is Individual Client."""
+        clean: list[int] = []
+        seen: set[int] = set()
+        for raw in customer_ids:
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if n > 0 and n not in seen:
+                seen.add(n)
+                clean.append(n)
+        if not clean:
+            return set()
+        id_sql = ", ".join(str(n) for n in clean)
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT DISTINCT a.CustomerID
+                    FROM dbo.ChartOfAccountMaster a
+                    INNER JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                    WHERE a.CustomerID IN ({id_sql})
+                      AND ISNULL(a.IsActive, 1) = 1
+                      AND {self._individual_client_name_sql("g")}
+                    """
+                )
+            ).scalars().all()
+        except Exception:
+            db.session.rollback()
+            return set()
+        return {int(cid) for cid in rows if cid}
+
+    def _is_individual_client(self, customer_id: int) -> bool:
+        return customer_id in self.individual_client_ids([customer_id])
+
+    def _individual_client_movement_sql(self, *, customer_pred: str) -> str:
+        """Misc sale + misc payment, and followup sale + followup payment.
+
+        Sales invoices (Accounting Sale / Service Invoice) are not included.
+        """
+        modules = ", ".join(f"N'{code}'" for code in FOLLOWUP_MODULES)
+        not_udhaar = sql_not_udhaar_payment("ba", "pm")
+        misc_kind = """
+            (
+                w.LedgerKind = N'Misc.'
+                OR LOWER(LTRIM(RTRIM(ISNULL(w.LedgerKind, N'')))) IN (N'misc', N'm')
+            )
+        """
+        return f"""
+            SELECT
+                e.CustomerID,
+                e.WorkDate AS TransactionDate,
+                CAST(NULL AS INT) AS TransactionID,
+                N'Misc.' AS WorkType,
+                ISNULL(w.WorkName, N'') AS SubWorkType,
+                e.BillNo AS ReferenceNo,
+                CONCAT(N'Misc. — ', ISNULL(w.WorkName, N''), N' — ', e.BillNo) AS Description,
+                e.Amount AS SaleAmount,
+                CAST(0 AS DECIMAL(18, 2)) AS ReceiptAmount
+            FROM dbo.OthersIncomeExpenseMaster e
+            INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+            WHERE {customer_pred}
+              AND ISNULL(e.IsActive, 1) = 1
+              AND ISNULL(e.Amount, 0) > 0
+              AND {misc_kind}
+
+            UNION ALL
+
+            SELECT
+                e.CustomerID,
+                ISNULL(bt.TransactionDate, d.TransactionDate) AS TransactionDate,
+                d.TransactionID,
+                N'Misc.' AS WorkType,
+                N'Payment Received' AS SubWorkType,
+                e.BillNo AS ReferenceNo,
+                CONCAT(N'Payment Received — ', e.BillNo) AS Description,
+                CAST(0 AS DECIMAL(18, 2)) AS SaleAmount,
+                p.Amount AS ReceiptAmount
+            FROM dbo.OthersIncomeExpenseMaster e
+            INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+            INNER JOIN dbo.JTCSDailyTransaction d
+                ON d.Status = N'Posted'
+               AND d.WorkType = N'Others'
+               AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                   = UPPER(LTRIM(RTRIM(e.BillNo)))
+            INNER JOIN dbo.JTCSDailyTransactionPayment p
+                ON p.TransactionID = d.TransactionID
+            INNER JOIN dbo.JtcsBankAccountMaster ba
+                ON ba.JtcsBankAccountID = p.BankAccountID
+            LEFT JOIN dbo.PaymentModeMaster pm
+                ON pm.PaymentModeID = p.PaymentModeID
+            LEFT JOIN dbo.JtcsBankTransaction bt
+                ON bt.JtcsBankTransactionID = p.BankTransactionID
+            WHERE {customer_pred}
+              AND ISNULL(e.IsActive, 1) = 1
+              AND {misc_kind}
+              AND ISNULL(p.Amount, 0) > 0
+              AND {not_udhaar}
+
+            UNION ALL
+
+            SELECT
+                f.CustomerID,
+                ISNULL(f.BillDate, f.WorkDate) AS TransactionDate,
+                CAST(NULL AS INT) AS TransactionID,
+                f.ModuleCode AS WorkType,
+                CONCAT(f.ModuleCode, N' Followup') AS SubWorkType,
+                f.BillNo AS ReferenceNo,
+                CONCAT(f.ModuleCode, N' Followup — ', LTRIM(RTRIM(f.BillNo))) AS Description,
+                ISNULL(f.BillAmount, 0) AS SaleAmount,
+                CAST(0 AS DECIMAL(18, 2)) AS ReceiptAmount
+            FROM dbo.FollowupEntryMaster f
+            WHERE {customer_pred.replace("e.CustomerID", "f.CustomerID")}
+              AND ISNULL(f.IsActive, 1) = 1
+              AND f.BillNo IS NOT NULL
+              AND LTRIM(RTRIM(f.BillNo)) <> N''
+              AND ISNULL(f.BillAmount, 0) > 0
+
+            UNION ALL
+
+            SELECT
+                d.CustomerID,
+                ISNULL(bt.TransactionDate, d.TransactionDate) AS TransactionDate,
+                d.TransactionID,
+                d.WorkType,
+                N'Payment Received' AS SubWorkType,
+                d.ReferenceNo,
+                CONCAT(N'Payment Received — ', ISNULL(d.ReferenceNo, N'')) AS Description,
+                CAST(0 AS DECIMAL(18, 2)) AS SaleAmount,
+                p.Amount AS ReceiptAmount
+            FROM dbo.JTCSDailyTransaction d
+            INNER JOIN dbo.JTCSDailyTransactionPayment p
+                ON p.TransactionID = d.TransactionID
+            INNER JOIN dbo.JtcsBankAccountMaster ba
+                ON ba.JtcsBankAccountID = p.BankAccountID
+            LEFT JOIN dbo.PaymentModeMaster pm
+                ON pm.PaymentModeID = p.PaymentModeID
+            LEFT JOIN dbo.JtcsBankTransaction bt
+                ON bt.JtcsBankTransactionID = p.BankTransactionID
+            WHERE {customer_pred.replace("e.CustomerID", "d.CustomerID")}
+              AND d.Status = N'Posted'
+              AND d.WorkType IN ({modules})
+              AND ISNULL(p.Amount, 0) > 0
+              AND {not_udhaar}
+        """
+
+    def _individual_client_activity_parts(
+        self,
+        customer_id: int,
+        *,
+        date_from: date,
+        date_to: date,
+        ob_date: date | None,
+    ) -> tuple[Decimal, Decimal, list[dict[str, Any]]]:
+        """Period lines plus prior billed/received for one Individual Client."""
+        sql = self._individual_client_movement_sql(customer_pred="e.CustomerID = :customer_id")
+        try:
+            raw_rows = db.session.execute(
+                text(sql),
+                {"customer_id": customer_id},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return Decimal("0.00"), Decimal("0.00"), []
+
+        prior_billed = Decimal("0.00")
+        prior_received = Decimal("0.00")
+        period: list[dict[str, Any]] = []
+        for row in raw_rows:
+            txn_date = row["TransactionDate"]
+            if isinstance(txn_date, datetime):
+                txn_date = txn_date.date()
+            if txn_date is None or txn_date > date_to:
+                continue
+            sale = self._money(row["SaleAmount"])
+            receipt = self._money(row["ReceiptAmount"])
+            if ob_date is not None and txn_date <= ob_date and txn_date < date_from:
+                continue
+            if txn_date < date_from:
+                if ob_date is not None and txn_date <= ob_date:
+                    continue
+                prior_billed += sale
+                prior_received += receipt
+                continue
+            period.append(
+                {
+                    "TransactionID": row["TransactionID"],
+                    "TransactionDate": txn_date,
+                    "WorkType": row["WorkType"],
+                    "SubWorkType": row["SubWorkType"],
+                    "StampID": None,
+                    "ReferenceNo": row["ReferenceNo"],
+                    "Description": row["Description"],
+                    "Remarks": None,
+                    "SaleAmount": sale,
+                    "IncomeAmount": Decimal("0.00"),
+                    "BankDebit": Decimal("0.00"),
+                    "PaymentTotal": receipt,
+                    "ReceiptAmount": receipt,
+                }
+            )
+        period.sort(
+            key=lambda r: (
+                r.get("TransactionDate") or date.min,
+                int(r.get("TransactionID") or 0),
+                0 if self._money(r.get("SaleAmount")) > 0 else 1,
+            )
+        )
+        return self._money(prior_billed), self._money(prior_received), period
+
+    def individual_client_closing_totals(
+        self,
+        customer_ids: list[int],
+        as_of: date,
+        *,
+        has_opening_cols: bool,
+    ) -> dict[int, dict[str, Any]]:
+        """As-of billed, received, and movement count for Individual Client customers."""
+        if not customer_ids:
+            return {}
+        id_sql = ", ".join(str(int(n)) for n in customer_ids)
+        movement_sql = self._individual_client_movement_sql(
+            customer_pred=f"e.CustomerID IN ({id_sql})"
+        )
+        date_sql = "AND m.TransactionDate <= :date_to"
+        if has_opening_cols:
+            date_sql += """
+              AND (
+                    c.OpeningBalanceDate IS NULL
+                    OR m.TransactionDate >= c.OpeningBalanceDate
+              )
+            """
+        try:
+            rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT
+                        m.CustomerID,
+                        ISNULL(SUM(m.SaleAmount), 0) AS billed,
+                        ISNULL(SUM(m.ReceiptAmount), 0) AS received,
+                        COUNT(1) AS txn_count
+                    FROM (
+                        {movement_sql}
+                    ) m
+                    INNER JOIN dbo.CustomerMaster c ON c.CustomerID = m.CustomerID
+                    WHERE 1 = 1
+                      {date_sql}
+                    GROUP BY m.CustomerID
+                    """
+                ),
+                {"date_to": as_of},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return {}
+        out: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            out[int(row["CustomerID"])] = {
+                "billed": self._money(row["billed"]),
+                "received": self._money(row["received"]),
+                "txn_count": int(row["txn_count"] or 0),
+            }
+        return out
+
     def _customer_ledger_data(
         self,
         customer_id: int,
@@ -1785,6 +2058,25 @@ class LedgerExportService:
                     int(r.get("TransactionID") or 0),
                 )
             )
+
+        # Individual Client: sale and payment come from Misc activity and
+        # Followup only. Accounting sale invoices are not part of this ledger.
+        if self._is_individual_client(customer_id):
+            ic_prior_billed, ic_prior_received, rows = self._individual_client_activity_parts(
+                customer_id,
+                date_from=date_from,
+                date_to=date_to,
+                ob_date=ob_date,
+            )
+            base_opening = self._money(
+                opening
+                - prior_billed
+                - prior_followup_billed
+                - prior_obc_billed
+                + prior_received
+                + prior_obc_received
+            )
+            opening = self._money(base_opening + ic_prior_billed - ic_prior_received)
 
         name = (customer["CustomerName"] or f"Customer {customer_id}").strip()
         chart_group_name = ""

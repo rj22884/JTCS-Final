@@ -656,6 +656,8 @@ class LedgerReportService:
             amount = self._money(info.get("amount"))
             row["closing"] = float(amount)
             row["closing_dr_cr"] = info.get("dr_cr") or self._dr_cr_side(amount)
+            if info.get("txn_count") is not None:
+                row["txn_count"] = int(info["txn_count"])
 
     def _search_bank_closings(
         self, ids: list[int], as_of: date
@@ -970,6 +972,27 @@ class LedgerReportService:
                 db.session.rollback()
                 _log.exception("Ledger search customer other-bank/cash failed")
 
+        txn_counts: dict[int, int] = {}
+        try:
+            ic_ids = LedgerExportService().individual_client_ids(ids)
+        except Exception:
+            db.session.rollback()
+            ic_ids = set()
+        if ic_ids:
+            ic_totals = LedgerExportService().individual_client_closing_totals(
+                list(ic_ids),
+                as_of,
+                has_opening_cols=has_ob,
+            )
+            for cid in ic_ids:
+                info = ic_totals.get(cid) or {}
+                billed[cid] = self._money(info.get("billed"))
+                received[cid] = self._money(info.get("received"))
+                followup[cid] = Decimal("0.00")
+                obc_billed[cid] = Decimal("0.00")
+                obc_received[cid] = Decimal("0.00")
+                txn_counts[cid] = int(info.get("txn_count") or 0)
+
         result: dict[tuple[str, int], dict[str, Any]] = {}
         for raw_id in ids:
             try:
@@ -984,10 +1007,13 @@ class LedgerReportService:
                 - received.get(cid, Decimal("0.00"))
                 - obc_received.get(cid, Decimal("0.00"))
             )
-            result[("customer", cid)] = {
+            payload: dict[str, Any] = {
                 "amount": closing,
                 "dr_cr": self._dr_cr_side(closing),
             }
+            if cid in txn_counts:
+                payload["txn_count"] = txn_counts[cid]
+            result[("customer", cid)] = payload
         self._adjust_customer_asset_class_closings(result, asset_meta, as_of)
         return result
 

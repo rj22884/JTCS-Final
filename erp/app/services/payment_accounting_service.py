@@ -33,6 +33,28 @@ GST_SALE_SUB_WORK_TYPE = "Sale / Service Invoice"
 RECEIPT_SUB_SUFFIX = "Followup Receipt"
 
 
+def sql_not_udhaar_payment(bank_alias: str = "ba", mode_alias: str = "pm") -> str:
+    """Payment line is real money received, not credit / udhaar."""
+    return f"""
+        NOT (
+            {bank_alias}.BankName LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+            OR {bank_alias}.MaskedAccountNumber LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(LTRIM(RTRIM(ISNULL({mode_alias}.PaymentModeName, N'')))) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+        )
+    """
+
+
 def sql_not_udhaar_bank(alias: str = "b") -> str:
     """SQL predicate: bank row is a real cash/bank receipt, not credit/udhaar."""
     return f"""
