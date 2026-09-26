@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import re
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_GRAPH_VERSION = "v21.0"
 GRAPH_BASE = "https://graph.facebook.com"
 OAUTH_DIALOG = "https://www.facebook.com"
+SUBSCRIBED_APPS_TIMEOUT = 60
 
 
 class MetaGraphError(Exception):
@@ -165,6 +167,8 @@ class WhatsAppMetaClient:
         return self.get(f"/{waba_id}", {"fields": "id,name,account_review_status"})
 
     def get_phone(self, phone_number_id: str) -> dict[str, Any]:
+        # WhatsApp Cloud phone node — do not request whatsapp_business_account
+        # (Graph #100: nonexistent field on PHONE_NUMBER_ID).
         return self.get(
             f"/{phone_number_id}",
             {
@@ -172,8 +176,7 @@ class WhatsAppMetaClient:
                     "id,display_phone_number,verified_name,quality_rating,"
                     "code_verification_status,platform_type,throughput,"
                     "messaging_limit_tier,name_status,new_name_status,"
-                    "is_official_business_account,account_mode,"
-                    "whatsapp_business_account{id,name}"
+                    "is_official_business_account,account_mode"
                 )
             },
         )
@@ -240,8 +243,9 @@ class WhatsAppMetaClient:
             raise MetaGraphError("Access token is required for subscribed_apps.")
         path = f"/{self.version}/{waba}/subscribed_apps"
         url = f"{GRAPH_BASE}{path}"
-        # This WhatsApp edge is slower than node GETs used by other Test checks.
-        wait = max(30, int(self.timeout or 30))
+        # Dedicated wait: Test Connection uses a short client timeout for node GETs.
+        # subscribed_apps is slower and must not inherit that 12s/30s cap.
+        wait = max(SUBSCRIBED_APPS_TIMEOUT, int(self.timeout or 0))
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.access_token}",
@@ -295,7 +299,7 @@ class WhatsAppMetaClient:
                 self._redact_log_text(body_txt)[:2000],
             )
             raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
-        except TimeoutError as exc:
+        except (TimeoutError, socket.timeout) as exc:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             logger.warning(
                 "WhatsApp subscribed_apps timeout method=%s url=%s timeout_s=%s elapsed_ms=%s reason=%s",
@@ -311,7 +315,10 @@ class WhatsAppMetaClient:
         except urllib.error.URLError as exc:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             reason = exc.reason
-            timed_out = isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
+            timed_out = (
+                isinstance(reason, (TimeoutError, socket.timeout))
+                or "timed out" in str(reason).lower()
+            )
             logger.warning(
                 "WhatsApp subscribed_apps network_error method=%s url=%s elapsed_ms=%s timeout=%s reason=%s",
                 method,

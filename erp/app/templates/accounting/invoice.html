@@ -5,7 +5,7 @@
 {% set party_label = 'Supplier' if is_purchase else 'Customer' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260826round1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260925review2">
 {% endblock %}
 
 {# Ribbon left empty so the toolbar row collapses and bill moves up. #}
@@ -81,6 +81,32 @@
               <input type="text" class="form-control form-control-sm inv-fw-md" id="invNo" value="{{ next_invoice_no }}" readonly>
               {% endif %}
             </div>
+            {% if not is_purchase %}
+            <div class="col-auto d-none" id="invBillStatusWrap">
+              <label class="form-label">Bill Status</label>
+              <div class="form-check mb-0 mt-1">
+                <input class="form-check-input" type="checkbox" id="invBillApproved">
+                <label class="form-check-label" for="invBillApproved" id="invBillStatusValue">Approve pending</label>
+              </div>
+              <input type="text" class="form-control form-control-sm inv-status-reason d-none mt-1"
+                     id="invUnapproveReason" maxlength="500" placeholder="Reason for removing approval" autocomplete="off">
+            </div>
+            <div class="col-auto d-none" id="invPayReceivedWrap">
+              <label class="form-label d-block">Payment Received</label>
+              <div class="d-flex gap-3 mt-1" role="radiogroup" aria-label="Payment Received">
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="radio" name="invPayReceived" id="invPayReceivedYes" value="yes">
+                  <label class="form-check-label" for="invPayReceivedYes">Yes</label>
+                </div>
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="radio" name="invPayReceived" id="invPayReceivedNo" value="no" checked>
+                  <label class="form-check-label" for="invPayReceivedNo">No</label>
+                </div>
+              </div>
+              <input type="text" class="form-control form-control-sm inv-status-reason d-none mt-1"
+                     id="invPayRemoveReason" maxlength="500" placeholder="Reason for removing Payment Received" autocomplete="off">
+            </div>
+            {% endif %}
             <div class="col-auto">
               <label class="form-label" for="invDate">{% if is_purchase %}Invoice Date *{% else %}Date *{% endif %}</label>
               <input type="date" class="form-control form-control-sm inv-fw-sm" id="invDate"
@@ -270,6 +296,11 @@
             <th>{{ party_label }}</th>
             <th>Mobile</th>
             <th>Tax</th>
+            <th>Source</th>
+            {% if not is_purchase %}
+            <th>Bill Status</th>
+            <th>Payment Received</th>
+            {% endif %}
             <th class="text-end">Invoice Value</th>
             <th class="text-end">Actions</th>
           </tr>
@@ -288,10 +319,20 @@
         <h5 class="modal-title" id="invPreviewModalTitle">Invoice Preview</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body" id="invPreviewBody">
-        <div class="text-muted small">Loading preview…</div>
+      <div class="modal-body">
+        <div id="invReviewTrail" class="d-none"></div>
+        <div id="invPreviewBody">
+          <div class="text-muted small">Loading preview…</div>
+        </div>
       </div>
       <div class="modal-footer py-2">
+        <div class="me-auto d-none d-flex align-items-center gap-2" id="invReviewBar">
+          <div class="form-check mb-0">
+            <input class="form-check-input" type="checkbox" id="invReviewApproved">
+            <label class="form-check-label" for="invReviewApproved" id="invReviewStatusLabel">Approve pending</label>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" id="invReviewSaveBtn">Update Bill Status</button>
+        </div>
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
       </div>
     </div>
@@ -324,9 +365,10 @@
     today: {{ today | tojson }},
     nextInvoiceNo: {{ next_invoice_no | tojson }},
     voucherType: {{ voucher_type | tojson }},
+    canTickConverted: {{ can_tick_converted | tojson }},
     tallyBill: {{ url_for('accounting_invoice.api_tally_bill_lookup') | tojson }},
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260826round2"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20260926closepreview"></script>
 {% endblock %}

@@ -22,6 +22,28 @@ class ChartGroupService:
     def _parent_lookup(self) -> dict[int, object]:
         return {int(r.GroupID): r for r in self.repo.list_all()}
 
+    def _resolved_nature(self, row, by_id: dict) -> str:
+        from app.services.financial_statements.engine import NATURE_BY_NAME
+
+        cur = row
+        hops = 0
+        seen: set[int] = set()
+        while cur is not None and hops < 40:
+            gid = int(cur.GroupID)
+            if gid in seen:
+                break
+            seen.add(gid)
+            mapped = NATURE_BY_NAME.get((cur.GroupName or "").strip())
+            if mapped:
+                return mapped
+            stored = (getattr(cur, "GroupNature", None) or "").strip()
+            if stored in {"Asset", "Liability", "Income", "Expense"}:
+                return stored
+            pid = getattr(cur, "ParentGroupID", None)
+            cur = by_id.get(int(pid)) if pid else None
+            hops += 1
+        return "Asset" if (row.UnderType or "") == "Assets" else "Liability"
+
     def _serialize(self, row, by_id: dict | None = None) -> dict:
         by_id = by_id if by_id is not None else self._parent_lookup()
         parent_id = getattr(row, "ParentGroupID", None)
@@ -31,14 +53,13 @@ class ChartGroupService:
             if parent is not None:
                 parent_name = parent.GroupName or ""
         under_label = parent_name or (row.UnderType or "")
-        nature = (getattr(row, "GroupNature", None) or "").strip()
         return {
             "group_id": row.GroupID,
             "group_name": row.GroupName or "",
             "under_type": row.UnderType or "",
             "parent_group_id": int(parent_id) if parent_id else None,
             "parent_group_name": parent_name,
-            "group_nature": nature,
+            "group_nature": self._resolved_nature(row, by_id),
             "under_label": under_label,
             "is_active": bool(row.IsActive),
             "created_date": row.CreatedDate.isoformat() if row.CreatedDate else "",
@@ -102,7 +123,15 @@ class ChartGroupService:
         row = self.repo.get_by_id(group_id)
         if row is None:
             raise ValueError("Group not found.")
-        return self._serialize(row)
+        data = self._serialize(row)
+        try:
+            from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+            data.update(DynamicMasterFieldService().fields_for_group_editor(row.GroupID))
+        except Exception:
+            data["selected"] = [{"key": "customer_name", "required": True}]
+            data["configured"] = False
+        return data
 
     def _nature_from_under(self, under: str) -> str:
         return "Asset" if under == "Assets" else "Liability"
@@ -240,6 +269,7 @@ class ChartGroupService:
                 }
             )
             self._adopt_matching_ledgers(row.GroupID, row.GroupName, row.ParentGroupID)
+            self._save_dyn_fields(row.GroupID, payload)
             return self._serialize(row)
 
         try:
@@ -266,12 +296,30 @@ class ChartGroupService:
             self._adopt_matching_ledgers(
                 updated.GroupID, updated.GroupName, updated.ParentGroupID
             )
+            self._save_dyn_fields(updated.GroupID, payload)
             return self._serialize(updated)
 
         try:
             return persist(_write)
         except IntegrityError as exc:
             raise ValueError(f"Group Name '{data['GroupName']}' already exists.") from exc
+
+    def _save_dyn_fields(self, group_id: int, payload: dict) -> None:
+        if "dyn_fields" not in payload and "fields" not in payload:
+            return
+        raw = payload.get("dyn_fields")
+        if raw is None:
+            raw = payload.get("fields")
+        from app.repositories.dynamic_master_fields_repository import (
+            DynamicMasterFieldsRepository,
+        )
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        svc = DynamicMasterFieldService()
+        DynamicMasterFieldsRepository().ensure_schema()
+        rows = svc._parse_group_field_payload(raw)
+        DynamicMasterFieldsRepository().replace_group_fields(int(group_id), rows)
+        svc.reset_cache()
 
     def delete_record(self, group_id: int) -> str:
         row = self.repo.get_by_id(group_id)

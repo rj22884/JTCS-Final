@@ -37,7 +37,7 @@
         <label class="form-label">Customer ID</label>
         <input type="text" class="form-control" id="cm_display_customer_id" readonly placeholder="Auto">
       </div>
-      <div class="col-md-3">
+      <div class="col-md-3 cm-field-wrap" data-field="customer_type">
         <label class="form-label" for="cm_customer_type">Customer Type</label>
         <select class="form-select" id="cm_customer_type" name="customer_type" data-cm-field="customer_type">
           <option value="">-- Select --</option>
@@ -45,24 +45,58 @@
         </select>
       </div>
       {{ cm_field('customer_name', 'Customer Name', master_required=true, col='col-md-4', maxlength='200') }}
-      <div class="col-md-3">
+      <div class="col-md-3 cm-field-wrap" data-field="customer_status">
         <label class="form-label" for="cm_customer_status">Status</label>
         <select class="form-select" id="cm_customer_status" name="customer_status" data-cm-field="customer_status">
           {% for s in customer_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
         </select>
       </div>
       {{ cm_field('father_husband_name', 'Father / Husband Name', col='col-md-4', maxlength='200') }}
-      {{ cm_field('company_firm_name', 'Company / Firm Name', col='col-md-4', maxlength='200') }}
       {{ cm_field('date_of_birth', 'Date of Birth', 'date', col='col-md-2') }}
-      {{ cm_field('date_of_incorporation', 'Date of Incorporation', 'date', col='col-md-2') }}
-      <div class="col-md-2">
+      <div class="col-md-2 cm-field-wrap" data-field="gender">
         <label class="form-label" for="cm_gender">Gender</label>
         <select class="form-select" id="cm_gender" name="gender" data-cm-field="gender">
           <option value=""></option>
           {% for g in genders %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
         </select>
       </div>
-      {{ cm_field('occupation', 'Occupation', col='col-md-3', maxlength='100') }}
+      <div class="col-md-3 cm-field-wrap" data-field="occupation">
+        <label class="form-label" for="cm_occupation">Customer Occupation</label>
+        <select class="form-select" id="cm_occupation" name="occupation" data-cm-field="occupation">
+          <option value="">-- Select --</option>
+          <option value="Business">Business</option>
+          <option value="Employee">Employee</option>
+        </select>
+      </div>
+      <div class="col-12 d-none" id="cmOccupationBusiness">
+        <div class="row g-2">
+          {{ cm_field('company_firm_name', 'Company / Firm Name', col='col-md-4', maxlength='200') }}
+          {{ cm_field('gst_number', 'GST Number', col='col-md-4', maxlength='20') }}
+          {{ cm_field('date_of_incorporation', 'Date of Incorporation', 'date', col='col-md-3') }}
+        </div>
+      </div>
+      <div class="col-12 d-none" id="cmOccupationEmployee">
+        <div class="row g-2">
+          <div class="col-md-4 cm-field-wrap" data-field="employer_type">
+            <label class="form-label" for="cm_employer_type">Type</label>
+            <select class="form-select" id="cm_employer_type" name="employer_type" data-cm-field="employer_type">
+              <option value="">-- Select --</option>
+              <option value="PSU">PSU — Public Sector Undertaking</option>
+              <option value="CG">CG — Central Government</option>
+              <option value="STG">STG — State Government</option>
+            </select>
+          </div>
+          <div class="col-md-3 cm-field-wrap" data-field="employment_status">
+            <label class="form-label" for="cm_employment_status">Employee / Pensioner</label>
+            <select class="form-select" id="cm_employment_status" name="employment_status" data-cm-field="employment_status">
+              <option value="">-- Select --</option>
+              <option value="Employee">Employee</option>
+              <option value="Pensioner">Pensioner</option>
+            </select>
+          </div>
+          {{ cm_field('employee_code', 'Employee ID', col='col-md-3', maxlength='50') }}
+        </div>
+      </div>
       {{ cm_field('remarks', 'Remarks', 'textarea', col='col-12', maxlength='1000') }}
       <div class="col-md-3 cm-field-wrap" data-field="opening_balance">
         <label class="form-label" for="cm_opening_balance">Opening Balance</label>

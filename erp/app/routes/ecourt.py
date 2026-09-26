@@ -200,6 +200,28 @@ def manual_sale():
         return jsonify({"ok": False, "error": f"Unable to save manual entry: {exc}"}), 500
 
 
+@bp.route("/ecourt-activity/update-entry", methods=["POST"])
+@login_required
+def update_entry():
+    """Update purchase and sale fields of one existing receipt."""
+    try:
+        result = ECourtService().update_entry(request.form)
+        from app.extensions import db
+
+        db.session.commit()
+        return jsonify({"ok": True, **result})
+    except ValueError as exc:
+        from app.extensions import db
+
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        from app.extensions import db
+
+        db.session.rollback()
+        return jsonify({"ok": False, "error": f"Unable to update entry: {exc}"}), 500
+
+
 @bp.route("/ecourt-activity/sales")
 @login_required
 def recent_sales():

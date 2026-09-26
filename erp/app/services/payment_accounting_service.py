@@ -33,6 +33,28 @@ GST_SALE_SUB_WORK_TYPE = "Sale / Service Invoice"
 RECEIPT_SUB_SUFFIX = "Followup Receipt"
 
 
+def sql_not_udhaar_payment(bank_alias: str = "ba", mode_alias: str = "pm") -> str:
+    """Payment line is real money received, not credit / udhaar."""
+    return f"""
+        NOT (
+            {bank_alias}.BankName LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+            OR {bank_alias}.MaskedAccountNumber LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(LTRIM(RTRIM(ISNULL({mode_alias}.PaymentModeName, N'')))) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+        )
+    """
+
+
 def sql_not_udhaar_bank(alias: str = "b") -> str:
     """SQL predicate: bank row is a real cash/bank receipt, not credit/udhaar."""
     return f"""
@@ -116,6 +138,39 @@ def sql_unpaid_followup_exclusion() -> str:
               AND ISNULL(i.VoucherType, N'SALE') = N'SALE'
               AND UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
                   = UPPER(LTRIM(RTRIM(f.BillNo)))
+        )
+    """
+
+
+def sql_customer_ledger_exclude_sale_invoice(alias: str = "d") -> str:
+    """Customer ledger: never surface Accounting Sale / Service Invoice dailies."""
+    return f"""
+        AND NOT (
+            UPPER(LTRIM(RTRIM(ISNULL({alias}.WorkType, N'')))) = N'ACCOUNTING'
+            AND LTRIM(RTRIM(ISNULL({alias}.SubWorkType, N''))) = N'Sale / Service Invoice'
+        )
+    """
+
+
+def sql_unpaid_followup_exclusion_for_customer_ledger() -> str:
+    """Followup virtual debits for customer ledger (Sales Invoice module detached).
+
+    Do not hide FollowupEntryMaster bills just because a GstInvoice / Accounting
+    Sale daily exists — those invoice rows are no longer shown on this ledger.
+    Still hide the virtual bill when a non-invoice module sale daily exists.
+    """
+    return """
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.JTCSDailyTransaction d
+            WHERE d.Status = N'Posted'
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                  = UPPER(LTRIM(RTRIM(f.BillNo)))
+              AND ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) <> 0
+              AND NOT (
+                    UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
+                AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
+              )
         )
     """
 

@@ -1,0 +1,83 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/help.css') }}?v=20260909help1">
+{% endblock %}
+
+{% block page_heading_tools %}
+<a class="btn btn-sm btn-outline-secondary" href="{{ url_for('help.topic', slug='calculations-index') }}">
+  <i class="bi bi-calculator"></i> Calculations
+</a>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/help.js') }}?v=20260909help1"></script>
+{% endblock %}
+
+{% block content %}
+<div class="help-shell">
+  {% include 'help/_sidebar.html' %}
+  <article class="help-main jtcs-card">
+    {% if results is not none %}
+    <header class="help-hero">
+      <p class="help-kicker">Search</p>
+      <h1 class="help-title">Results for “{{ query }}”</h1>
+      <p class="help-lead">{{ results|length }} topic{% if results|length != 1 %}s{% endif %} matched menus, screens, or formulas.</p>
+    </header>
+    {% if results %}
+    <ul class="help-result-list">
+      {% for item in results %}
+      <li>
+        <a href="{{ url_for('help.topic', slug=item.slug) }}">
+          <i class="bi {{ item.icon }}"></i>
+          <span>
+            <strong>{{ item.title }}</strong>
+            <em>{{ item.menu_path }}</em>
+          </span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="help-empty">No matching topic. Try “ledger”, “depreciation”, or a menu name such as Stamp Activity.</p>
+    {% endif %}
+    {% else %}
+    <header class="help-hero">
+      <p class="help-kicker">JTCS ERP · User guide</p>
+      <h1 class="help-title">Help for every menu</h1>
+      <p class="help-lead">
+        This library documents each ribbon item, the working steps on that screen, and the
+        calculations used by ledgers, statements, invoices, stamp, and depreciation.
+        It does not change any module. Every signed-in user can open it from
+        <strong>Admin Role → Help</strong>.
+      </p>
+    </header>
+    <div class="help-figure-note">
+      Illustrated frames stand in for screenshots. Place a PNG named
+      <code>topic-slug-1.png</code> in <code>erp/app/static/img/help/</code> to replace Figure 1
+      with a live capture of that screen.
+    </div>
+    <div class="help-home-grid">
+      {% for key, title, icon, topics in groups %}
+      {% if topics %}
+      <section class="help-home-card">
+        <h2><i class="bi {{ icon }}"></i> {{ title }}</h2>
+        <ul>
+          {% for item in topics %}
+          <li>
+            <a href="{{ url_for('help.topic', slug=item.slug) }}">{{ item.title }}</a>
+            <span>{{ item.menu_path }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </section>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </article>
+</div>
+{% endblock %}

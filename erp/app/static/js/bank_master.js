@@ -93,6 +93,21 @@
 
   if (!els.gridBody || !window.BANK_MASTER_API) return;
 
+  const bankDynFields = window.JTCSDynamicMasterFields
+    ? window.JTCSDynamicMasterFields.bind({
+        select: els.underGroup,
+        mount: document.getElementById("bankMasterDynFields"),
+        config: window.JTCS_DYN_MASTER_FIELDS,
+        getEntityName: function () {
+          return (els.bankName?.value || "").trim();
+        },
+        entityNameEl: els.bankName,
+        openingDateEl: els.openingBalanceDate,
+        depRateSyncUrl: "/api/dynamic-master-fields/depreciation-rate-sync",
+        idPrefix: "bankDyn",
+      })
+    : null;
+
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
   let rows = [];
   let selectedId = null;
@@ -262,6 +277,7 @@
     if (els.underGroup) els.underGroup.value = String(defaultUnderGroupId(false) || "");
     applyDefaultDrCrFromUnderGroup();
     applyCashDisplayOrderLock(false);
+    if (bankDynFields) bankDynFields.apply({});
   }
 
   function fillForm(record) {
@@ -308,6 +324,7 @@
     if (els.underGroup && record.chart_group_id != null) {
       els.underGroup.value = String(record.chart_group_id);
     }
+    if (bankDynFields) bankDynFields.apply(record);
   }
 
   function openAddModal() {
@@ -417,6 +434,11 @@
       els.underGroup?.focus();
       return;
     }
+    const dynErrors = bankDynFields ? bankDynFields.validate() : [];
+    if (dynErrors.length) {
+      alert(dynErrors[0]);
+      return;
+    }
     const accountId = (els.accountId?.value || "").trim();
     const body = new FormData(els.form);
     if (!els.activeStatus?.checked) {
@@ -428,6 +450,7 @@
       body.set("QrBillReceived", "0");
     }
     body.set("UpiId", (els.upiId?.value || "").trim());
+    if (bankDynFields) bankDynFields.appendToFormData(body);
     const url = accountId
       ? apiUrl(window.BANK_MASTER_API.update, accountId)
       : window.BANK_MASTER_API.create;

@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260829row1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260921ui1">
 {% endblock %}
 
 {% block content %}
@@ -52,6 +52,9 @@
       <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampDataGrid">
         <thead>
           <tr>
+            <th class="stamp-sortable stamp-col-mode" data-sort-key="entry_mode" role="button" tabindex="0">
+              Mode <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
             <th class="stamp-sortable stamp-col-cert" data-sort-key="certificate_number" role="button" tabindex="0">
               Certificate <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
@@ -82,6 +85,7 @@
             <th class="text-end stamp-grid-actions-col">Actions</th>
           </tr>
           <tr class="stamp-filter-row">
+            <th class="stamp-col-mode"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="entry_mode" placeholder="Filter…" aria-label="Filter mode"></th>
             <th class="stamp-col-cert"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_number" placeholder="Filter…" aria-label="Filter certificate"></th>
             <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_date" placeholder="Filter…" aria-label="Filter cert date"></th>
             <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="stamp_duty_amount" placeholder="Filter…" aria-label="Filter duty"></th>
@@ -191,18 +195,22 @@
             <thead>
               <tr>
                 <th>Value</th>
-                <th class="text-end">nos</th>
-                <th class="text-end">amount</th>
+                <th class="text-end">No</th>
+                <th class="text-end">Amount</th>
+                <th class="text-end">Sale</th>
+                <th class="text-end">%</th>
               </tr>
             </thead>
             <tbody id="stampDutyGroupBody">
-              <tr><td colspan="3" class="text-muted text-center py-3">Loading…</td></tr>
+              <tr><td colspan="5" class="text-muted text-center py-3">Loading…</td></tr>
             </tbody>
             <tfoot>
               <tr>
                 <th>Total</th>
                 <th class="text-end" id="stampDutyGroupTotalNos">0</th>
                 <th class="text-end" id="stampDutyGroupTotalAmt">0.00</th>
+                <th class="text-end" id="stampDutyGroupTotalSale">0.00</th>
+                <th class="text-end" id="stampDutyGroupTotalPct">—</th>
               </tr>
             </tfoot>
           </table>
@@ -255,7 +263,7 @@
         </div>
         <div class="modal-body stamp-entry-modal-body">
   <div id="stampMainWorkspace">
-  <div class="jtcs-card stamp-mode-bar mb-1 py-1 px-2">
+  <div class="jtcs-card stamp-mode-bar mb-2 py-2 px-3">
     <div class="d-flex flex-wrap align-items-center gap-4">
       <div class="form-check mb-0">
         <input class="form-check-input" type="radio" name="EntryMode" id="modeManual" value="manual" checked>
@@ -265,10 +273,18 @@
         <input class="form-check-input" type="radio" name="EntryMode" id="modeOcr" value="ocr">
         <label class="form-check-label" for="modeOcr">Integration from Image</label>
       </div>
+      <div class="form-check mb-0">
+        <input class="form-check-input" type="radio" name="EntryMode" id="modeOnline" value="online">
+        <label class="form-check-label" for="modeOnline">Online e-Stamp</label>
+      </div>
+      <div class="small text-primary d-none" id="stampOnlineHint">
+        Load the e-Stamp order reference, then enter the certificate number manually. All other fields stay editable.
+        <button type="button" class="btn btn-outline-primary btn-sm ms-2" id="stampLoadOnlineBtn">Load Reference</button>
+      </div>
     </div>
   </div>
 
-  <div class="jtcs-card stamp-page-toolbar mb-1 py-1 px-2">
+  <div class="jtcs-card stamp-page-toolbar mb-2 py-2 px-3">
     <div class="stamp-toolbar-groups">
       <div class="stamp-toolbar-group">
         <button type="submit" form="stampActivityForm" class="btn btn-sm stamp-entry-save-btn" id="stampSaveBtn" title="Save (Ctrl+S)">
@@ -285,7 +301,11 @@
 
   {% if duplicate_existing %}
   <div class="alert alert-danger py-2">
+    {% if duplicate_existing.kind == 'reference' %}
+    e-Stamp reference <strong>{{ duplicate_existing.website_reference or duplicate_existing.certificate_number }}</strong> is already entered as certificate <strong>{{ duplicate_existing.certificate_number }}</strong>.
+    {% else %}
     Certificate <strong>{{ duplicate_existing.certificate_number }}</strong> is already sold in full.
+    {% endif %}
     {% if duplicate_existing.transaction_id %}
     Transaction <strong>#{{ duplicate_existing.transaction_id }}</strong>,
     {% else %}
@@ -333,6 +353,11 @@
     <input type="hidden" name="StampID" id="StampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EditStampID" id="EditStampID" value="{{ repost_stamp_id or '' }}">
     <input type="hidden" name="EntryMode" id="EntryMode" value="manual">
+    <input type="hidden" name="WebsiteReference" id="WebsiteReference" value="">
+    <input type="hidden" class="stamp-field stamp-field-optional" id="AccountReference" name="AccountReference" maxlength="200" tabindex="-1">
+    <input type="hidden" class="stamp-field stamp-field-optional" id="UniqueDocumentReference" name="UniqueDocumentReference" maxlength="200" tabindex="-1">
+    <input type="hidden" class="stamp-field stamp-field-optional" id="PropertyDescription" name="PropertyDescription" maxlength="1000" tabindex="-1">
+    <input type="hidden" class="stamp-field stamp-field-optional" id="ConsiderationPrice" name="ConsiderationPrice" tabindex="-1">
 
     <div class="row g-2" id="stampFormLayout">
       <div class="col-auto d-none" id="stampImageColumn">
@@ -382,24 +407,16 @@
       <div class="col" id="stampFormContent">
         <div class="stamp-entry-section" id="stampSectionCert">
           <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">1</span> Certificate Details</div>
-          <div class="row g-1 stamp-entry-field-row">
-            <div class="col-6 col-md-4 col-xl-2">
+          <div class="row g-2 stamp-entry-field-row">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="CertificateNumber">Certificate Number *</label>
               <input type="text" class="form-control stamp-field stamp-field-mandatory" id="CertificateNumber" name="CertificateNumber" required maxlength="100">
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="CertificateIssuedDate">Certificate Date *</label>
               <input type="date" class="form-control stamp-field stamp-field-mandatory" id="CertificateIssuedDate" name="CertificateIssuedDate" required>
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
-              <label class="form-label" for="AccountReference">Account Reference</label>
-              <input type="text" class="form-control stamp-field stamp-field-optional" id="AccountReference" name="AccountReference" maxlength="200" tabindex="-1">
-            </div>
-            <div class="col-6 col-md-4 col-xl-2">
-              <label class="form-label" for="UniqueDocumentReference">Unique Reference</label>
-              <input type="text" class="form-control stamp-field stamp-field-optional" id="UniqueDocumentReference" name="UniqueDocumentReference" maxlength="200" tabindex="-1">
-            </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="ReferenceNo">Reference Number</label>
               <input type="text" class="form-control stamp-field stamp-field-optional" id="ReferenceNo" name="ReferenceNo" maxlength="100" tabindex="-1">
             </div>
@@ -408,52 +425,51 @@
 
         <div class="stamp-entry-section" id="stampSectionParty">
           <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">2</span> Party &amp; Document Details</div>
-          <div class="row g-1 stamp-entry-field-row">
-            <div class="col-6 col-md-4 col-xl-2">
+          <div class="row g-2 stamp-entry-field-row">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="PurchasedBy">Purchased By</label>
               <input type="text" class="form-control stamp-field stamp-field-optional" id="PurchasedBy" name="PurchasedBy" maxlength="300" tabindex="-1">
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
-              <label class="form-label" for="DescriptionOfDocument">Description</label>
-              <input type="text" class="form-control stamp-field stamp-field-optional" id="DescriptionOfDocument" name="DescriptionOfDocument" maxlength="1000" tabindex="-1">
-            </div>
-            <div class="col-6 col-md-4 col-xl-2">
-              <label class="form-label" for="PropertyDescription">Property Description</label>
-              <input type="text" class="form-control stamp-field stamp-field-optional" id="PropertyDescription" name="PropertyDescription" maxlength="1000" tabindex="-1">
-            </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="FirstPartyName">First Party *</label>
               <input type="text" class="form-control stamp-field stamp-field-mandatory" id="FirstPartyName" name="FirstPartyName" maxlength="300" required>
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="SecondPartyName">Second Party</label>
               <input type="text" class="form-control stamp-field stamp-field-optional" id="SecondPartyName" name="SecondPartyName" maxlength="300" tabindex="-1">
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="StampDutyPaidBy">Stamp Duty Paid By</label>
               <input type="text" class="form-control stamp-field stamp-field-optional" id="StampDutyPaidBy" name="StampDutyPaidBy" maxlength="300" tabindex="-1">
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
-              <label class="form-label" for="ConsiderationPrice">Consideration Price</label>
-              <input type="number" step="0.01" min="0" class="form-control stamp-field stamp-field-optional" id="ConsiderationPrice" name="ConsiderationPrice" tabindex="-1">
+            <div class="col-12 col-md-6 col-xl-8">
+              <label class="form-label" for="DescriptionOfDocument">Description</label>
+              <input type="text" class="form-control stamp-field stamp-field-optional" id="DescriptionOfDocument" name="DescriptionOfDocument" maxlength="1000" tabindex="-1">
             </div>
           </div>
         </div>
 
         <div class="stamp-entry-section" id="stampSectionAmount">
           <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">3</span> Amount &amp; Payment Details</div>
-          <div class="row g-1 stamp-entry-field-row">
-            <div class="col-6 col-md-4 col-xl-2">
+          <div class="row g-2 stamp-entry-field-row">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="TransactionDate">Transaction Date *</label>
               <input type="date" class="form-control stamp-field stamp-field-mandatory" id="TransactionDate" name="TransactionDate" required>
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="StampDutyAmount">Stamp Duty Amount *</label>
               <input type="number" step="0.01" min="0.01" class="form-control stamp-field stamp-field-mandatory" id="StampDutyAmount" name="StampDutyAmount" required>
             </div>
-            <div class="col-6 col-md-4 col-xl-2">
+            <div class="col-12 col-md-6 col-xl-4">
               <label class="form-label" for="SaleAmount">Sale Amount *</label>
               <input type="number" step="0.01" min="0" class="form-control stamp-field stamp-field-mandatory" id="SaleAmount" name="SaleAmount" required>
+            </div>
+            <div class="col-12 col-md-6 col-xl-4">
+              <label class="form-label d-block">&nbsp;</label>
+              <button type="button" class="btn btn-outline-primary" id="stampGenerateQrBtn">Generate QR</button>
+            </div>
+            <div class="col-auto stamp-sale-qr-wrap d-none" id="stampSaleQrWrap">
+              <img id="stampSaleQrImg" class="stamp-sale-qr-img" alt="Sale amount UPI QR" width="192" height="192">
             </div>
             <div class="col-12">
               <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
@@ -473,7 +489,7 @@
 
         <div class="stamp-entry-section mb-0" id="stampSectionRemarks">
           <div class="stamp-entry-section-title"><span class="stamp-entry-section-num">4</span> Remarks</div>
-          <div class="row g-1 stamp-entry-field-row">
+          <div class="row g-2 stamp-entry-field-row">
             <div class="col-12">
               <label class="form-label" for="Remarks">Remarks</label>
               <input type="text" class="form-control stamp-field stamp-field-optional" id="Remarks" name="Remarks" maxlength="500" placeholder="Optional remarks" tabindex="-1">
@@ -575,9 +591,11 @@
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
   window.STAMP_CONTINUE_MOBILE = {{ continue_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
+  window.STAMP_ONLINE_ORDER_URL = {{ url_for('stamp.stamp_online_order', reference_no='__REF__') | tojson }};
   window.STAMP_OPEN_LOGIN_URL = {{ url_for('stamp.stamp_open_login') | tojson }};
   window.STAMP_SHCIL_LOGIN_URL = {{ shcil_login_url | tojson }};
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
+  window.STAMP_SALE_QR_URL = {{ url_for('sale_upi_qr.sale_upi_qr') | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260831rows25"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260925paydel1"></script>
 {% endblock %}

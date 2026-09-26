@@ -33,6 +33,7 @@
           <th>Amount</th>
           <th>Pay</th>
           <th>UTR</th>
+          <th>OCR</th>
           <th>Status</th>
           <th>Date</th>
         </tr>
@@ -61,7 +62,7 @@
       var rows = data.rows || [];
       if (count) count.textContent = rows.length + " application" + (rows.length === 1 ? "" : "s");
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="11" class="text-muted">No DSC applications yet.</td></tr>';
+        body.innerHTML = '<tr><td colspan="12" class="text-muted">No DSC applications yet.</td></tr>';
         return;
       }
       body.innerHTML = rows.map(function (row) {
@@ -75,12 +76,13 @@
           "<td>" + esc(row.payable_amount) + "</td>" +
           "<td>" + esc(row.pay_method || row.payment_status) + "</td>" +
           "<td>" + esc(row.utr_number) + "</td>" +
+          "<td>" + (row.ocr_verified ? "Verified" : "—") + "</td>" +
           "<td>" + esc(row.review_status) + "</td>" +
           "<td>" + esc(row.created_date) + "</td>" +
           "</tr>";
       }).join("");
     } catch (err) {
-      body.innerHTML = '<tr><td colspan="11" class="text-danger">Unable to load applications.</td></tr>';
+      body.innerHTML = '<tr><td colspan="12" class="text-danger">Unable to load applications.</td></tr>';
     }
   }
   document.getElementById("dscRefreshBtn")?.addEventListener("click", load);

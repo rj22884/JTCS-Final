@@ -31,6 +31,12 @@
     gridBody: document.getElementById("ecourtGridBody"),
     gridCount: document.getElementById("ecourtGridCount"),
     gridEmpty: document.getElementById("ecourtGridEmpty"),
+    denomBody: document.getElementById("ecourtDenomBody"),
+    denomTotalTickets: document.getElementById("ecourtDenomTotalTickets"),
+    denomTotalBuy: document.getElementById("ecourtDenomTotalBuy"),
+    denomTotalSale: document.getElementById("ecourtDenomTotalSale"),
+    denomTotalPct: document.getElementById("ecourtDenomTotalPct"),
+    denomHint: document.getElementById("ecourtDenomHint"),
     duplicateModalEl: document.getElementById("ecourtDuplicateModal"),
     duplicateSummary: document.getElementById("ecourtDuplicateSummary"),
     duplicateBody: document.getElementById("ecourtDuplicateBody"),
@@ -507,7 +513,10 @@
     select.className = "form-select form-select-sm ecourt-payment-bank";
     select.name = "PaymentBankAccountID[]";
     select.required = true;
-    const accounts = window.ECOURT_BANK_ACCOUNTS || [];
+    const accounts = (window.ECOURT_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -567,10 +576,9 @@
 
   function updatePaymentRemoveButtonsFor(container) {
     const lines = container?.querySelectorAll(".ecourt-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".ecourt-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -611,7 +619,15 @@
     removeBtn.className = "btn btn-outline-danger btn-sm ecourt-payment-remove";
     removeBtn.innerHTML = "<i class=\"bi bi-trash\"></i>";
     removeBtn.addEventListener("click", function () {
-      if ((container.querySelectorAll(".ecourt-payment-line") || []).length <= 1) return;
+      const lines = container.querySelectorAll(".ecourt-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".ecourt-payment-amount");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        (onAmountInput || updatePaymentSummary)();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtonsFor(container);
       (onAmountInput || updatePaymentSummary)();
@@ -1014,6 +1030,100 @@
     return status === "manual entry" || status === "manual";
   }
 
+  function formatDenomValue(value) {
+    const num = Math.round((parseAmount(value) || 0) * 100) / 100;
+    if (Math.abs(num - Math.round(num)) < 0.005) return String(Math.round(num));
+    return num.toFixed(2);
+  }
+
+  function formatSaleBuyPct(sale, buy) {
+    const saleNum = parseAmount(sale);
+    const buyNum = parseAmount(buy);
+    if (!buyNum) return "—";
+    const pct = ((saleNum - buyNum) / buyNum) * 100;
+    return pct.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "%";
+  }
+
+  function renderDenominationSummary(prepared) {
+    if (!els.denomBody) return;
+    const buckets = {};
+    (prepared || []).forEach(function (item) {
+      const group = item.group || {};
+      const receipts = item.receipts || [];
+      const all = group.receipts || [];
+      const allSold = all.filter(function (row) {
+        return row.sale_status === "Sold";
+      });
+      const visSold = receipts.filter(function (row) {
+        return row.sale_status === "Sold";
+      });
+      const allSoldBuy = allSold.reduce(function (sum, row) {
+        return sum + parseAmount(row.amount);
+      }, 0);
+      const visSoldBuy = visSold.reduce(function (sum, row) {
+        return sum + parseAmount(row.amount);
+      }, 0);
+      const groupSell = parseAmount(group.sold_sell_value || group.total_sell_value || 0);
+      const visibleSell =
+        visSoldBuy > 0 && allSoldBuy > 0 ? groupSell * (visSoldBuy / allSoldBuy) : 0;
+
+      receipts.forEach(function (row) {
+        const buy = parseAmount(row.amount);
+        const key = buy.toFixed(2);
+        if (!buckets[key]) buckets[key] = { denom: buy, tickets: 0, buy: 0, sale: 0 };
+        buckets[key].tickets += 1;
+        buckets[key].buy += buy;
+        if (row.sale_status === "Sold" && visSoldBuy > 0) {
+          buckets[key].sale += visibleSell * (buy / visSoldBuy);
+        }
+      });
+    });
+
+    const rows = Object.keys(buckets)
+      .map(function (key) {
+        return buckets[key];
+      })
+      .sort(function (a, b) {
+        return a.denom - b.denom;
+      });
+
+    let totalTickets = 0;
+    let totalBuy = 0;
+    let totalSale = 0;
+    if (!rows.length) {
+      els.denomBody.innerHTML =
+        '<tr><td colspan="5" class="text-muted text-center py-3">No receipts</td></tr>';
+    } else {
+      els.denomBody.innerHTML = rows
+        .map(function (row) {
+          totalTickets += row.tickets;
+          totalBuy += row.buy;
+          totalSale += row.sale;
+          return (
+            "<tr><td>" +
+            escapeHtml(formatDenomValue(row.denom)) +
+            '</td><td class="text-end">' +
+            escapeHtml(String(row.tickets)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatDenomValue(row.buy)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatDenomValue(row.sale)) +
+            '</td><td class="text-end">' +
+            escapeHtml(formatSaleBuyPct(row.sale, row.buy)) +
+            "</td></tr>"
+          );
+        })
+        .join("");
+    }
+    if (els.denomTotalTickets) els.denomTotalTickets.textContent = String(totalTickets);
+    if (els.denomTotalBuy) els.denomTotalBuy.textContent = formatDenomValue(totalBuy);
+    if (els.denomTotalSale) els.denomTotalSale.textContent = formatDenomValue(totalSale);
+    if (els.denomTotalPct) els.denomTotalPct.textContent = formatSaleBuyPct(totalSale, totalBuy);
+    if (els.denomHint) {
+      els.denomHint.textContent = hasActiveGridFilters() ? "Filtered rows" : "All rows";
+    }
+  }
+
   function renderImportTree(data, options) {
     options = options || {};
     lastTreeOptions = options;
@@ -1025,6 +1135,7 @@
       if (els.gridEmpty) els.gridEmpty.classList.remove("d-none");
       if (els.gridCount) els.gridCount.textContent = "0 records";
       updateGridSortHeaders();
+      renderDenominationSummary([]);
       return;
     }
 
@@ -1124,6 +1235,13 @@
         "<td class=\"text-center\">" + parentCheckbox + "</td>" +
         "<td><button type=\"button\" class=\"btn btn-link btn-sm p-0 ecourt-tree-toggle\" data-group=\"" + gi + "\">" +
         (expanded ? "−" : "+") + "</button></td>" +
+        "<td><span class=\"badge " + badgeClass + "\">" + escapeHtml(summary) + "</span></td>" +
+        "<td class=\"text-end ecourt-actions-cell\">" +
+        (sellAllBtn ? sellAllBtn + " " : "") +
+        editParentBtn + " " +
+        (unsellParentBtn ? unsellParentBtn + " " : "") +
+        deleteParentBtn +
+        "</td>" +
         "<td><strong>" + escapeHtml(group.stationerynumber) + "</strong> " +
         "<span class=\"text-muted\">(" + group.total_receipts + " receipts)</span></td>" +
         "<td>" + parentDateCell + "</td>" +
@@ -1131,14 +1249,7 @@
         "<td class=\"text-end\"><strong>" + buyValueCell + "</strong></td>" +
         "<td class=\"text-end\"><strong>" + sellValueCell + "</strong></td>" +
         "<td class=\"text-center\">" + soldRemainingCell + "</td>" +
-        "<td>" + parentAccountCell + "</td>" +
-        "<td><span class=\"badge " + badgeClass + "\">" + escapeHtml(summary) + "</span></td>" +
-        "<td class=\"text-end ecourt-actions-cell\">" +
-        (sellAllBtn ? sellAllBtn + " " : "") +
-        editParentBtn + " " +
-        (unsellParentBtn ? unsellParentBtn + " " : "") +
-        deleteParentBtn +
-        "</td>";
+        "<td>" + parentAccountCell + "</td>";
       els.gridBody.appendChild(parentTr);
 
       receipts.forEach(function (row) {
@@ -1204,16 +1315,16 @@
         childTr.innerHTML =
           selectCell +
           "<td></td>" +
+          "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
+          escapeHtml(row.sale_status) + "</span></td>" +
+          actionCell +
           "<td>" + escapeHtml(row.receipt_no) + "</td>" +
           "<td>" + escapeHtml(displayDate(row.receipt_date || "")) + "</td>" +
           "<td>" + childSoldDate + "</td>" +
           "<td class=\"text-end\">" + escapeHtml(row.amount) + "</td>" +
           "<td></td>" +
           "<td></td>" +
-          "<td>" + childAccountCell + "</td>" +
-          "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
-          escapeHtml(row.sale_status) + "</span></td>" +
-          actionCell;
+          "<td>" + childAccountCell + "</td>";
         els.gridBody.appendChild(childTr);
       });
 
@@ -1231,6 +1342,7 @@
     });
     updateSellSelectedButton();
     updateGridSortHeaders();
+    renderDenominationSummary(prepared);
     const focusTarget = options.focusAfterSale || pendingFocusAfterSale;
     if (focusTarget || options.restoreScroll || options.soldReceipts) {
       restoreGridAfterSale(Object.assign({}, options, { focusAfterSale: focusTarget }));
@@ -2017,27 +2129,55 @@
     }
     window.location.href = fallback;
   });
+  function blankAmount(value) {
+    const text = String(value == null ? "" : value).trim();
+    if (!text || text === "0" || text === "0.00" || text === "0.0") return "";
+    return text;
+  }
+
+  function setManualChrome(prefill) {
+    const editing = !!(prefill && prefill.receipt_no);
+    const sold = !!(prefill && prefill.sold);
+    const title = document.getElementById("ecourtManualModalTitle");
+    const saveBtn = document.getElementById("ecourtManualSaveBtn");
+    const updateBtn = document.getElementById("ecourtManualUpdateBtn");
+    const saleBlock = document.getElementById("ecourtManualSaleBlock");
+    if (title) title.textContent = editing ? "Update Entry" : "Manual Entry";
+    if (saveBtn) saveBtn.classList.toggle("d-none", editing);
+    if (updateBtn) updateBtn.classList.toggle("d-none", !editing);
+    if (saleBlock) saleBlock.classList.toggle("d-none", !sold);
+  }
+
   function fillManualForm(prefill) {
     prefill = prefill || {};
+    const editing = !!prefill.receipt_no;
     const receiptEl = document.getElementById("ecourtReceiptNo");
     const dateEl = document.getElementById("ecourtManualDate");
     const amountEl = document.getElementById("ecourtManualAmount");
     const stationeryEl = document.getElementById("ecourtStationeryNo");
     const remarksEl = document.getElementById("ecourtManualRemarks");
+    const soldDateEl = document.getElementById("ecourtManualSoldDate");
+    const saleAmountEl = document.getElementById("ecourtManualSaleAmount");
+    const accountEl = document.getElementById("ecourtManualAccount");
     if (receiptEl) receiptEl.value = prefill.receipt_no || "";
     if (dateEl) {
-      dateEl.value =
-        prefill.receipt_date ||
-        window.ECOURT_DEFAULT_DATE ||
-        new Date().toISOString().slice(0, 10);
+      dateEl.value = prefill.receipt_date
+        ? String(prefill.receipt_date).slice(0, 10)
+        : (editing ? "" : (window.ECOURT_DEFAULT_DATE || new Date().toISOString().slice(0, 10)));
     }
-    if (amountEl) amountEl.value = prefill.amount || "";
+    if (amountEl) amountEl.value = blankAmount(prefill.amount);
     if (stationeryEl) stationeryEl.value = prefill.stationerynumber || "";
     if (remarksEl) remarksEl.value = prefill.remarks || "";
+    if (soldDateEl) {
+      soldDateEl.value = prefill.transaction_date ? String(prefill.transaction_date).slice(0, 10) : "";
+    }
+    if (saleAmountEl) saleAmountEl.value = blankAmount(prefill.sale_amount);
+    if (accountEl) accountEl.value = prefill.account_number || "";
   }
 
   function openManualEntry(prefill) {
     els.manualForm?.reset();
+    setManualChrome(prefill || {});
     fillManualForm(prefill || {});
     refreshManualPreview();
     manualModal?.show();
@@ -2123,26 +2263,44 @@
     if (editBtn) {
       e.preventDefault();
       const receiptNo = (editBtn.dataset.receiptNo || "").trim();
+      const group = findGroupByStationery(editBtn.dataset.stationery || "");
       if (receiptNo) {
+        const row = (group?.receipts || []).find(function (item) {
+          return (item.receipt_no || "") === receiptNo;
+        });
+        const sold = (row && row.sale_status === "Sold") || editBtn.dataset.saleStatus === "Sold";
+        const soleSold = sold && (group?.receipts || []).filter(function (item) {
+          return item.sale_status === "Sold";
+        }).length === 1;
         openManualEntry({
           receipt_no: receiptNo,
-          stationerynumber: editBtn.dataset.stationery || "",
-          receipt_date: editBtn.dataset.receiptDate || "",
-          amount: editBtn.dataset.amount || "",
+          stationerynumber: (row && row.stationerynumber) || editBtn.dataset.stationery || "",
+          receipt_date: (row && row.receipt_date) || editBtn.dataset.receiptDate || "",
+          amount: (row && row.amount) || editBtn.dataset.amount || "",
+          remarks: (row && row.remarks) || "",
+          sold: sold,
+          transaction_date: (row && row.transaction_date) || "",
+          account_number: (row && row.account_number) || "",
+          sale_amount: soleSold ? (group.total_sell_value || group.sold_sell_value || "") : "",
         });
         return;
       }
-      const group = findGroupByStationery(editBtn.dataset.stationery || "");
       if (!group) return;
       const pick =
         (group.receipts || []).find(function (row) {
           return row.sale_status !== "Sold";
         }) || (group.receipts || [])[0];
+      const sold = !!(pick && pick.sale_status === "Sold");
       openManualEntry({
         receipt_no: pick ? pick.receipt_no || "" : "",
         stationerynumber: group.stationerynumber || "",
         receipt_date: pick ? pick.receipt_date || "" : "",
         amount: pick ? pick.amount || "" : "",
+        remarks: pick ? pick.remarks || "" : "",
+        sold: sold || group.summary_status === "Sold",
+        transaction_date: (pick && pick.transaction_date) || group.transaction_date || "",
+        account_number: (pick && pick.account_number) || group.account_number || "",
+        sale_amount: group.total_sell_value || group.sold_sell_value || "",
       });
       return;
     }
@@ -2246,8 +2404,51 @@
     return null;
   }
 
+  async function submitManualUpdate() {
+    const receiptNo = (document.getElementById("ecourtReceiptNo")?.value || "").trim();
+    const stationeryNo = (document.getElementById("ecourtStationeryNo")?.value || "").trim();
+    if (!receiptNo) {
+      alert("Receipt number is required.");
+      return;
+    }
+    if (!stationeryNo) {
+      alert("Stationery Number is required.");
+      return;
+    }
+    const body = new FormData(els.manualForm);
+    body.set("ReceiptNo", receiptNo.toUpperCase());
+    body.set("StationeryNumber", stationeryNo);
+    body.set("csrf_token", window.ECOURT_URLS.csrf || "");
+    const updateBtn = document.getElementById("ecourtManualUpdateBtn");
+    if (updateBtn) updateBtn.disabled = true;
+    try {
+      const res = await fetch(window.ECOURT_URLS.updateEntry, {
+        method: "POST",
+        body: body,
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update.");
+      manualModal?.hide();
+      await loadImportTree(null);
+    } catch (err) {
+      alert(err.message || String(err));
+    } finally {
+      if (updateBtn) updateBtn.disabled = false;
+    }
+  }
+
+  document.getElementById("ecourtManualUpdateBtn")?.addEventListener("click", function () {
+    submitManualUpdate();
+  });
+
   els.manualForm?.addEventListener("submit", async function (e) {
     e.preventDefault();
+    const editing = !document.getElementById("ecourtManualUpdateBtn")?.classList.contains("d-none");
+    if (editing) {
+      submitManualUpdate();
+      return;
+    }
     const receiptNo = (document.getElementById("ecourtReceiptNo")?.value || "").trim();
     const stationeryNo = (document.getElementById("ecourtStationeryNo")?.value || "").trim();
     const amountRaw = (document.getElementById("ecourtManualAmount")?.value || "").trim();

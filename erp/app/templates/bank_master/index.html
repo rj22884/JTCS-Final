@@ -24,6 +24,7 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/bank_master.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dynamic_master_fields.css') }}?v=20260906dyn1">
 {% endblock %}
 
 {% block content %}
@@ -97,13 +98,14 @@
               <select class="form-select" id="bankMasterUnderGroup" name="ChartGroupID" required>
                 <option value="">— Select group —</option>
                 {% for g in chart_groups %}
-                <option value="{{ g.group_id }}" data-under-type="{{ g.under_type or '' }}">{{ g.label or g.group_name }}</option>
+                <option value="{{ g.group_id }}" data-under-type="{{ g.under_type or '' }}" data-dyn-profile="{{ g.dyn_profile or '' }}">{{ g.label or g.group_name }}</option>
                 {% endfor %}
               </select>
               <div class="form-text">
                 Default: Bank Accounts (Cash → Cash-in-Hand). From Chart of Group Master — single select only.
               </div>
             </div>
+            <div class="col-12 jtcs-dyn-master-fields d-none" id="bankMasterDynFields"></div>
             <div class="col-md-6" id="bankMasterUpiWrap">
               <label class="form-label" for="bankMasterUpiId">UPI ID</label>
               <input type="text" class="form-control" id="bankMasterUpiId" name="UpiId" maxlength="100"
@@ -175,7 +177,7 @@
                 <label class="form-check-label" for="bankMasterQrBillReceived">QR/Bill Received</label>
               </div>
               <div class="form-text">
-                When ticked, this account appears in Payment Received / Make Payment account lists.
+                When ticked, this account number appears in Payment Received options throughout the project.
                 Money In-Out (Bank/Cash Transactions) always shows all accounts.
               </div>
             </div>
@@ -210,5 +212,6 @@
   window.BANK_MASTER_DEFAULT_CASH_GROUP_ID = {{ default_cash_group_id | tojson }};
 </script>
 {% include 'ledger_report/_embed.html' %}
-<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260831ob1"></script>
+{% include 'masters/_dynamic_master_fields_js.html' %}
+<script src="{{ url_for('static', filename='js/bank_master.js') }}?v=20260906dyn1"></script>
 {% endblock %}

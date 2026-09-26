@@ -35,6 +35,7 @@ TODAY_ACTIVITY_LABELS = {
     "expense": "Expense",
     "sales": "Sales",
     "total": "Total Amount",
+    "pending_sale": "Sale / Pending",
 }
 
 
@@ -90,6 +91,10 @@ class TodayActivitySummary:
     cash_amount: Decimal
     bank_lines: list[TodayActivityBankLine]
     bank_total: Decimal
+    sale_total_today: Decimal = Decimal("0.00")
+    sale_total_cumulative: Decimal = Decimal("0.00")
+    pending_amount_today: Decimal = Decimal("0.00")
+    pending_amount_cumulative: Decimal = Decimal("0.00")
 
 
 class DashboardService:
@@ -752,6 +757,7 @@ class DashboardService:
 
         bank_total = sum((line.amount for line in bank_lines), Decimal("0.00"))
 
+        sale_card = self.pending_sale_totals(system_date)
         return TodayActivitySummary(
             system_date=system_date,
             transaction_count=int(row["txn_count"] or 0),
@@ -762,7 +768,113 @@ class DashboardService:
             cash_amount=cash_amount.quantize(Decimal("0.01")),
             bank_lines=bank_lines,
             bank_total=Decimal(str(bank_total)).quantize(Decimal("0.01")),
+            sale_total_today=sale_card["sale_today"],
+            sale_total_cumulative=sale_card["sale_cumulative"],
+            pending_amount_today=sale_card["pending_today"],
+            pending_amount_cumulative=sale_card["pending_cumulative"],
         )
+
+    def pending_sale_totals(self, system_date: date | None = None) -> dict:
+        """Generated Miscellaneous sale bills: inclusive total and unpaid balance."""
+        system_date = system_date or date.today()
+        try:
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().rebifurcate_miscellaneous_inclusive()
+        except Exception:
+            db.session.rollback()
+        rows = self._miscellaneous_sale_rows()
+        sale_today = Decimal("0.00")
+        sale_all = Decimal("0.00")
+        pending_today = Decimal("0.00")
+        pending_all = Decimal("0.00")
+        for row in rows:
+            amount = row["sale_amount"]
+            pending = row["pending_amount"]
+            sale_all += amount
+            pending_all += pending
+            if row["invoice_date"] == system_date:
+                sale_today += amount
+                pending_today += pending
+        return {
+            "sale_today": sale_today.quantize(Decimal("0.01")),
+            "sale_cumulative": sale_all.quantize(Decimal("0.01")),
+            "pending_today": pending_today.quantize(Decimal("0.01")),
+            "pending_cumulative": pending_all.quantize(Decimal("0.01")),
+        }
+
+    def _miscellaneous_sale_rows(self) -> list[dict]:
+        """Generated Miscellaneous bills. Pending means payment is not received yet."""
+        from flask import url_for
+
+        from app.models.others import OthersIncomeExpenseDetail, OthersIncomeExpenseMaster, WorkMaster
+
+        entries = list(
+            db.session.scalars(
+                select(OthersIncomeExpenseMaster)
+                .where(
+                    OthersIncomeExpenseMaster.IsActive == True,
+                    OthersIncomeExpenseMaster.TallyBillGenerated == True,
+                )
+                .order_by(
+                    OthersIncomeExpenseMaster.WorkDate.desc(),
+                    OthersIncomeExpenseMaster.EntryID.desc(),
+                )
+            ).all()
+        )
+        if not entries:
+            return []
+        work_ids = {entry.WorkID for entry in entries if entry.WorkID}
+        work_names: dict[int, str] = {}
+        if work_ids:
+            for work in db.session.scalars(
+                select(WorkMaster).where(WorkMaster.WorkID.in_(work_ids))
+            ).all():
+                work_names[int(work.WorkID)] = (work.WorkName or "").strip()
+        entry_ids = [int(entry.EntryID) for entry in entries]
+        detail_by_entry: dict[int, str] = {}
+        if entry_ids:
+            details = db.session.scalars(
+                select(OthersIncomeExpenseDetail)
+                .where(OthersIncomeExpenseDetail.EntryID.in_(entry_ids))
+                .order_by(OthersIncomeExpenseDetail.LineSequence.asc())
+            ).all()
+            sub_ids = {row.WorkTypeID for row in details if row.WorkTypeID}
+            sub_names: dict[int, str] = {}
+            if sub_ids:
+                from app.models.transactions import WorkTypeMaster
+
+                for sub in db.session.scalars(
+                    select(WorkTypeMaster).where(WorkTypeMaster.WorkTypeID.in_(sub_ids))
+                ).all():
+                    sub_names[int(sub.WorkTypeID)] = (sub.SubWorkType or "").strip()
+            for row in details:
+                if int(row.EntryID) in detail_by_entry:
+                    continue
+                detail_by_entry[int(row.EntryID)] = sub_names.get(int(row.WorkTypeID or 0), "")
+        result = []
+        for entry in entries:
+            sale_amount = Decimal(str(entry.Amount or 0)).quantize(Decimal("0.01"))
+            received = bool(getattr(entry, "PaymentReceived", False))
+            work_name = work_names.get(int(entry.WorkID), "") if entry.WorkID else ""
+            sub_name = detail_by_entry.get(int(entry.EntryID), "")
+            label = " / ".join(part for part in (work_name, sub_name) if part) or "Miscellaneous"
+            result.append(
+                {
+                    "invoice_id": int(entry.EntryID),
+                    "invoice_date": entry.WorkDate,
+                    "invoice_no": entry.BillNo or "",
+                    "customer": entry.CustomerName or "—",
+                    "work": label,
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00") if received else sale_amount,
+                    "received": received,
+                    "entry_id": int(entry.EntryID),
+                    "source_url": url_for("miscellaneous.index", load_entry=int(entry.EntryID)),
+                    "bill_no": entry.BillNo or "",
+                }
+            )
+        return result
 
     def _validate_today_activity_metric(self, metric_key: str) -> str:
         key = (metric_key or "").strip().lower()
@@ -844,31 +956,97 @@ class DashboardService:
                     )
                 return base
 
-            if wt_u == "OTHERS" and sw.lower().startswith("income / expense") and ref:
-                row = db.session.execute(
-                    text(
-                        """
-                        SELECT TOP 1 EntryID
-                        FROM OthersIncomeExpenseMaster
-                        WHERE BillNo = :bill_no AND IsActive = 1
-                        ORDER BY EntryID DESC
-                        """
-                    ),
-                    {"bill_no": ref},
-                ).first()
-                if row:
-                    eid = int(row[0])
+            is_oie_sub = "income" in sw_l and "expense" in sw_l
+            looks_like_oie_bill = bool(
+                ref
+                and re.match(r"^[SEM][\s\-]?\d{8}/\d+", (ref or "").strip().upper())
+            )
+            if wt_u == "OTHERS" and (is_oie_sub or looks_like_oie_bill or not sw_l):
+                eid = None
+                ledger_kind = ""
+                is_active = True
+                bill_key = (ref or "").strip()
+                if bill_key:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM OthersIncomeExpenseMaster e
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(:bill_no)))
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"bill_no": bill_key},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is None and transaction_id:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM JTCSDailyTransaction d
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(d.ReferenceNo)))
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE d.TransactionID = :tid
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is None and transaction_id:
+                    # Bank Remarks often stores BillNo for OIE payment legs.
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM JtcsBankTransaction b
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE b.SourceRecordID = :tid
+                               OR b.SourceID = :tid
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is not None:
+                    is_misc = ledger_kind in {"Misc.", "Misc"}
+                    module = "miscellaneous" if is_misc else "income_expense"
+                    open_url = (
+                        url_for("miscellaneous.index", load_entry=eid)
+                        if is_misc
+                        else url_for("others_income_expense.index", load_entry=eid)
+                    )
+                    if not is_active:
+                        # Soft-deleted: do not deep-link (get_entry fails). Fall through
+                        # so bank-leg resolve can attach bank_orphan delete.
+                        return base
                     base.update(
                         {
-                            "source_module": "income_expense",
+                            "source_module": module,
                             "source_module_id": eid,
-                            "source_url": url_for(
-                                "others_income_expense.index", load_entry=eid
-                            ),
+                            "source_url": open_url,
                             "can_open": True,
                         }
                     )
-                return base
+                    return base
+                # Known OIE shape but master row missing — stop here.
+                if is_oie_sub or looks_like_oie_bill:
+                    return base
 
             if wt_u == "OTHERS" and sw.lower().startswith("other bank/cash") and ref:
                 row = db.session.execute(
@@ -1082,8 +1260,29 @@ class DashboardService:
         bank_transaction_id: int | None = None,
     ) -> dict:
         table = (source_table or "").strip().lower()
+        # SourceType values (e.g. "Others") are not real table names — treat as daily.
+        if table in {
+            "others",
+            "other",
+            "income",
+            "expense",
+            "misc",
+            "misc.",
+            "itr",
+            "dsc",
+            "tds",
+            "gst",
+            "accounting",
+            "shcil",
+        }:
+            table = "jtcsdailytransaction"
+
         if not source_record_id and not bank_transaction_id:
             return self._no_source_link()
+
+        # Purchase Invoice Amount Paid → bank Credit/Out (SourceTable=GstInvoice).
+        if table in {"gstinvoice", "gst_invoice"}:
+            return self._source_link_for_gst_invoice(int(source_record_id))
 
         # Other Bank/Cash contra legs (Cash Deposit Credit/Out, Debit/In, etc.)
         if table in {"othersbankcashtransaction", "others_bank_cash_transaction"} or (
@@ -1099,6 +1298,10 @@ class DashboardService:
                 return self._no_source_link()
 
         if not source_record_id:
+            if bank_transaction_id:
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("source_module"):
+                    return oie
             return self._no_source_link()
         if table and table != "jtcsdailytransaction":
             # Still try OBC resolve when SourceType/table naming varies.
@@ -1108,7 +1311,13 @@ class DashboardService:
             )
             if entry_id:
                 return self._source_link_for_bank_cash_entry(entry_id)
-            return self._no_source_link()
+            # Purchase payment bank legs may have SourceType=PURCHASE with SourceTable blank.
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+            # Fall through: SourceRecordID may still be JTCSDailyTransaction.TransactionID
+            # even when SourceTable/SourceType was stored with an unexpected label.
 
         daily = db.session.execute(
             text(
@@ -1122,6 +1331,26 @@ class DashboardService:
             {"tid": int(source_record_id)},
         ).mappings().first()
         if not daily:
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("source_module"):
+                    return oie
+                desc_row = db.session.execute(
+                    text(
+                        """
+                        SELECT TOP 1 Description
+                        FROM JtcsBankTransaction
+                        WHERE JtcsBankTransactionID = :btid
+                        """
+                    ),
+                    {"btid": int(bank_transaction_id)},
+                ).first()
+                desc = ((desc_row[0] if desc_row else "") or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    return self._bank_orphan_source_link(int(bank_transaction_id))
             return self._no_source_link()
         link = self._source_link_for_daily(
             transaction_id=daily["TransactionID"],
@@ -1139,7 +1368,152 @@ class DashboardService:
         )
         if entry_id:
             return self._source_link_for_bank_cash_entry(entry_id)
+        if bank_transaction_id:
+            purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+            if purchase_link.get("can_open"):
+                return purchase_link
+            oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+            # Prefer orphan/bank delete link over a dead (inactive) daily OIE deep-link.
+            if oie.get("source_module"):
+                return oie
+            if link.get("source_module") and not link.get("can_open"):
+                return self._bank_orphan_source_link(int(bank_transaction_id))
+        elif link.get("source_module") and not link.get("can_open"):
+            # No bank id — strip open URL so UI does not offer a broken "more" link.
+            link = {**link, "source_url": None, "can_open": False}
         return link
+
+    def _source_link_for_gst_invoice(self, invoice_id: int) -> dict:
+        """Deep-link bank legs posted from Purchase (or Sale) GstInvoice."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 InvoiceID, VoucherType, InvoiceNo
+                FROM dbo.GstInvoice
+                WHERE InvoiceID = :iid
+                """
+            ),
+            {"iid": int(invoice_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        voucher = (row["VoucherType"] or "SALE").strip().upper()
+        iid = int(row["InvoiceID"])
+        if voucher == "PURCHASE":
+            endpoint = "accounting_invoice.invoice_purchase"
+            module = "invoice"
+        else:
+            endpoint = "accounting_invoice.invoice_sale"
+            module = "invoice"
+        base.update(
+            {
+                "source_module": module,
+                "source_module_id": iid,
+                "source_url": url_for(endpoint, edit=iid),
+                "can_open": True,
+                "work_type": "Accounting",
+                "sub_work_type": "Purchase Invoice Payment" if voucher == "PURCHASE" else "Sale / Service Invoice",
+            }
+        )
+        return base
+
+    def _source_link_for_purchase_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Purchase Invoice from bank leg SourceTable/SourceType=PURCHASE."""
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 SourceRecordID, SourceTable, SourceType
+                FROM JtcsBankTransaction
+                WHERE JtcsBankTransactionID = :btid
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return self._no_source_link()
+        table = (row["SourceTable"] or "").strip().lower()
+        stype = (row["SourceType"] or "").strip().upper()
+        sid = row["SourceRecordID"]
+        if not sid:
+            return self._no_source_link()
+        if table in {"gstinvoice", "gst_invoice"} or stype == "PURCHASE":
+            return self._source_link_for_gst_invoice(int(sid))
+        return self._no_source_link()
+
+    def _source_link_for_oie_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Income/Expense/Misc entry from bank leg Remarks / SourceRecordID."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                FROM JtcsBankTransaction b
+                INNER JOIN OthersIncomeExpenseMaster e
+                    ON (
+                        UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                     OR (
+                            b.SourceRecordID IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM JTCSDailyTransaction d
+                            WHERE d.TransactionID = b.SourceRecordID
+                              AND UPPER(LTRIM(RTRIM(e.BillNo))) =
+                                  UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                        )
+                     )
+                   )
+                LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                WHERE b.JtcsBankTransactionID = :btid
+                ORDER BY e.IsActive DESC, e.EntryID DESC
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        if not row["IsActive"]:
+            # Soft-deleted OIE — open/delete via entry APIs fail; treat as orphan bank leg.
+            return self._bank_orphan_source_link(int(bank_transaction_id))
+        eid = int(row["EntryID"])
+        ledger = (row["LedgerKind"] or "").strip()
+        is_misc = ledger in {"Misc.", "Misc"}
+        module = "miscellaneous" if is_misc else "income_expense"
+        open_url = (
+            url_for("miscellaneous.index", load_entry=eid)
+            if is_misc
+            else url_for("others_income_expense.index", load_entry=eid)
+        )
+        base.update(
+            {
+                "source_module": module,
+                "source_module_id": eid,
+                "source_url": open_url,
+                "can_open": True,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
+
+    def _bank_orphan_source_link(self, bank_transaction_id: int) -> dict:
+        """Allow Bank Received Delete when Income/Expense master link is missing."""
+        base = self._no_source_link()
+        base.update(
+            {
+                "source_module": "bank_orphan",
+                "source_module_id": int(bank_transaction_id),
+                "source_url": None,
+                "can_open": False,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
 
     def _today_payment_detail_rows(
         self,
@@ -1332,12 +1706,81 @@ class DashboardService:
         )
         return result
 
+    def pending_sale_details(
+        self,
+        *,
+        part: str | None,
+        scope: str | None,
+        system_date: date | None = None,
+    ) -> dict:
+        """Summary grid of Miscellaneous bills behind the Sale / Pending card."""
+        system_date = system_date or date.today()
+        part_key = (part or "sale").strip().lower()
+        if part_key not in {"sale", "pending"}:
+            part_key = "sale"
+        scope_key = (scope or "today").strip().lower()
+        if scope_key not in {"today", "cumulative"}:
+            scope_key = "today"
+        rows_src = self._miscellaneous_sale_rows()
+        if scope_key == "today":
+            rows_src = [row for row in rows_src if row["invoice_date"] == system_date]
+        if part_key == "pending":
+            rows_src = [row for row in rows_src if row["pending_amount"] > 0]
+        grid = []
+        total = Decimal("0.00")
+        for row in rows_src:
+            amount = row["sale_amount"] if part_key == "sale" else row["pending_amount"]
+            total += amount
+            entry_date = row["invoice_date"].isoformat() if row["invoice_date"] else ""
+            status = "Received" if row["received"] else "Pending"
+            grid.append(
+                {
+                    "row_key": f"psale-{row['invoice_id']}",
+                    "source": "system",
+                    "can_edit": False,
+                    "can_delete": False,
+                    "entry_date": entry_date,
+                    "description": status,
+                    "reference": row["bill_no"] or row["invoice_no"],
+                    "work": row["work"],
+                    "customer": row["customer"],
+                    "amount": str(amount),
+                    "source_module": "miscellaneous",
+                    "source_module_id": row["entry_id"],
+                    "source_url": row["source_url"],
+                    "can_open": bool(row["source_url"]),
+                }
+            )
+        part_label = "Total Sale" if part_key == "sale" else "Pending Amount"
+        scope_label = "Today" if scope_key == "today" else "Cumulative"
+        when = (
+            system_date.isoformat()
+            if scope_key == "today"
+            else f"all · as of {system_date.isoformat()}"
+        )
+        return {
+            "metric_key": "pending_sale",
+            "metric_label": f"{part_label} — {scope_label}",
+            "date_from": system_date.isoformat() if scope_key == "today" else "",
+            "date_to": system_date.isoformat() if scope_key == "today" else "",
+            "total": str(total.quantize(Decimal("0.01"))),
+            "opening_balance": None,
+            "rows": grid,
+            "row_count": len(grid),
+            "read_only": True,
+            "scope": "today_activity",
+            "detail_button": "Detail",
+            "subtitle": when,
+        }
+
     def get_today_activity_details(
         self,
         metric_key: str,
         *,
         account_id: int | None = None,
         system_date: date | None = None,
+        part: str | None = None,
+        scope: str | None = None,
     ) -> dict:
         """Drill-down rows for Today's Activity Summary tiles (system date only)."""
         metric_key = self._validate_today_activity_metric(metric_key)
@@ -1371,6 +1814,10 @@ class DashboardService:
         elif metric_key == "sales":
             rows = self._daily_metric_rows("SaleAmount", system_date, system_date)
             total = summary.sale_amount
+        elif metric_key == "pending_sale":
+            return self.pending_sale_details(
+                part=part, scope=scope, system_date=system_date
+            )
         else:  # total
             rows = self._daily_metric_rows("TotalAmount", system_date, system_date)
             total = summary.total_amount
@@ -1702,6 +2149,13 @@ class DashboardService:
                     bank_transaction_id=row["JtcsBankTransactionID"],
                 )
             )
+            # Orphan Income/Expense bank legs: no master link → still allow Delete.
+            if not item.get("source_module"):
+                desc = (row["Description"] or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    item.update(
+                        self._bank_orphan_source_link(int(row["JtcsBankTransactionID"]))
+                    )
             result.append(item)
         return result
 

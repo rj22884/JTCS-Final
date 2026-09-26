@@ -19,6 +19,9 @@ class WorkMaster(db.Model):
     OpeningBalance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     OpeningBalanceDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     OpeningBalanceDrCr: Mapped[str | None] = mapped_column(Unicode(2), nullable=True)
+    PurchaseDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    DepreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
+    AppreciationRate: Mapped[Decimal] = mapped_column(Numeric(9, 4), nullable=False, default=0)
     ActiveStatus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -59,6 +62,7 @@ class OthersIncomeExpenseMaster(db.Model):
     CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     WorkDone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     TallyBillGenerated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    PaymentReceived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
     TallyBillDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     TallyBillAmount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
@@ -96,3 +100,58 @@ class OthersIncomeExpenseDetail(db.Model):
     )
     work_type: Mapped["WorkMaster"] = relationship("WorkMaster")
     sub_work_type: Mapped["WorkTypeMaster | None"] = relationship("WorkTypeMaster")
+
+
+class IncomeExpenseNewMaster(db.Model):
+    """Moved Income/Expense rows from OthersIncomeExpenseMaster (local migrate)."""
+
+    __tablename__ = "IncomeExpenseNewMaster"
+
+    EntryID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    SourceEntryID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    BillNo: Mapped[str] = mapped_column(Unicode(50), nullable=False, unique=True)
+    WorkDate: Mapped[date] = mapped_column(Date, nullable=False)
+    WorkID: Mapped[int] = mapped_column(Integer, db.ForeignKey("WorkMaster.WorkID"), nullable=False)
+    Amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    CustomerName: Mapped[str | None] = mapped_column(Unicode(255), nullable=True)
+    MobileNumber: Mapped[str | None] = mapped_column(Unicode(15), nullable=True)
+    Remarks: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
+    CreatedBy: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    IsActive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    WorkDone: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    TallyBillGenerated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
+    TallyBillDate: Mapped[date | None] = mapped_column(Date, nullable=True)
+    TallyBillAmount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    PaymentReceived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    MovedAt: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    work_type: Mapped["WorkMaster"] = relationship("WorkMaster")
+    detail_lines: Mapped[list["IncomeExpenseNewDetail"]] = relationship(
+        "IncomeExpenseNewDetail",
+        back_populates="entry",
+        cascade="all, delete-orphan",
+        order_by="IncomeExpenseNewDetail.LineSequence",
+    )
+
+
+class IncomeExpenseNewDetail(db.Model):
+    __tablename__ = "IncomeExpenseNewDetail"
+
+    DetailID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    EntryID: Mapped[int] = mapped_column(
+        Integer, db.ForeignKey("IncomeExpenseNewMaster.EntryID"), nullable=False
+    )
+    SourceDetailID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    LineSequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    WorkID: Mapped[int] = mapped_column(Integer, db.ForeignKey("WorkMaster.WorkID"), nullable=False)
+    Amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    WorkTypeID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    entry: Mapped["IncomeExpenseNewMaster"] = relationship(
+        "IncomeExpenseNewMaster",
+        back_populates="detail_lines",
+    )
+    work_type: Mapped["WorkMaster"] = relationship("WorkMaster")

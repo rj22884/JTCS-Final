@@ -293,7 +293,7 @@
       { chord: "alt+x", action: "Export Excel" },
       { chord: "alt+p", action: "Export PDF" },
       { chord: "alt+r", action: "Refresh" },
-      { chord: "escape", action: "Close dialog" },
+      { chord: "escape", action: "Close all windows and return to Dashboard" },
       { chord: "ctrl+/", action: "Show this help" },
       { chord: "alt+h", action: "Show this help" },
     ];
@@ -366,6 +366,22 @@
     }
 
     if (chord === "escape") {
+      var topWin = window.top || window;
+      var dialogOpen = false;
+      try {
+        var overlay = topWin.document.getElementById("jtcsDialogOverlay");
+        dialogOpen = !!(overlay && overlay.classList.contains("is-open"));
+      } catch (err) {
+        dialogOpen = false;
+      }
+      if (dialogOpen) return;
+      var closeAll = topWin.jtcsEscCloseAll || window.jtcsEscCloseAll;
+      if (typeof closeAll === "function") {
+        e.__jtcsHotkeyHandled = true;
+        stopBrowserChord(e);
+        closeAll();
+        return;
+      }
       if (closeTopModal()) {
         e.__jtcsHotkeyHandled = true;
         stopBrowserChord(e);
