@@ -1892,6 +1892,7 @@
       paintReviewStatus();
       showStatus(data.message || "Bill status updated.", "success");
       await loadGrid();
+      if (reviewState.saved && previewModal) previewModal.hide();
     } catch (err) {
       reviewApproved.checked = reviewState.saved;
       paintReviewStatus();
