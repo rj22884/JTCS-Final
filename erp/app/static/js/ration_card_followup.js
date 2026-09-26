@@ -271,7 +271,17 @@
     removeBtn.innerHTML = '<i class="bi bi-trash"></i>';
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines.querySelectorAll(".oie-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".oie-payment-amount, .rcf-payment-amount");
+        const date = line.querySelector(".oie-payment-date");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        if (date) date.value = "";
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();
@@ -289,10 +299,9 @@
 
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".oie-payment-remove, .rcf-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 

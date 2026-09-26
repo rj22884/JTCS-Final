@@ -166,6 +166,21 @@ class FollowupRepository:
         ).scalars().first()
         if cust_cols:
             columns.append("c.FilingFrequency")
+        for extra in ("DateOfBirth", "EmployeeCode"):
+            found = self.session.execute(
+                text(
+                    """
+                    SELECT c.name
+                    FROM sys.columns c
+                    INNER JOIN sys.objects o ON o.object_id = c.object_id
+                    WHERE o.type = 'U' AND o.name = 'CustomerMaster'
+                      AND c.name = :col
+                    """
+                ),
+                {"col": extra},
+            ).scalars().first()
+            if found:
+                columns.append("c." + extra)
         return ",\n                ".join(columns)
 
     def entry_master_columns(self) -> set[str]:

@@ -309,9 +309,11 @@
       if (kind === "prompt") {
         node.prompt.hidden = false;
         node.prompt.type = item.inputType === "password" ? "password" : "text";
+        node.prompt.placeholder = item.placeholder || "";
         node.prompt.value = item.defaultValue == null ? "" : String(item.defaultValue);
       } else {
         node.prompt.hidden = true;
+        node.prompt.placeholder = "";
         node.prompt.value = "";
       }
     }
@@ -375,8 +377,20 @@
     });
   }
 
-  function alertMessage(message, type) {
-    show({ message: message, type: type });
+  function alertMessage(message, type, options) {
+    options = options || {};
+    return new Promise(function (resolve) {
+      enqueue({
+        kind: "alert",
+        message: message == null ? "" : message,
+        type: type || options.type,
+        title: options.title || null,
+        okLabel: options.okLabel || "OK",
+        resolve: function () {
+          resolve(true);
+        },
+      });
+    });
   }
 
   function confirmMessage(message, options) {
@@ -407,6 +421,7 @@
         okLabel: options.okLabel || "OK",
         cancelLabel: options.cancelLabel || "Cancel",
         inputType: options.inputType || "text",
+        placeholder: options.placeholder || "",
         resolve: resolve,
       });
     });

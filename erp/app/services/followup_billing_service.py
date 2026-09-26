@@ -13,7 +13,7 @@ class FollowupBillingService:
         work_date = work_date or date.today()
         prefix = (module_code or "ITR").strip().upper()
         date_part = work_date.strftime("%d%m%Y")
-        pattern = f"{prefix}-{date_part}-%"
+        pattern = f"{prefix}-{date_part}/%"
         row = db.session.execute(
             text(
                 """
@@ -27,6 +27,7 @@ class FollowupBillingService:
         ).mappings().first()
         current = (row or {}).get("MaxBill") or ""
         seq = 1
-        if current and current.rsplit("-", 1)[-1].isdigit():
-            seq = int(current.rsplit("-", 1)[-1]) + 1
-        return f"{prefix}-{date_part}-{seq:03d}"
+        tail = current.rsplit("/", 1)[-1] if current else ""
+        if tail.isdigit():
+            seq = int(tail) + 1
+        return f"{prefix}-{date_part}/{seq:03d}"

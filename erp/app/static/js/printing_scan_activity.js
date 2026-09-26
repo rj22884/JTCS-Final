@@ -186,10 +186,9 @@
 
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".pscan-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".pscan-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -230,7 +229,15 @@
     removeBtn.innerHTML = "<i class=\"bi bi-trash\"></i>";
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".pscan-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".pscan-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".pscan-payment-amount");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();

@@ -576,10 +576,9 @@
 
   function updatePaymentRemoveButtonsFor(container) {
     const lines = container?.querySelectorAll(".ecourt-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".ecourt-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -620,7 +619,15 @@
     removeBtn.className = "btn btn-outline-danger btn-sm ecourt-payment-remove";
     removeBtn.innerHTML = "<i class=\"bi bi-trash\"></i>";
     removeBtn.addEventListener("click", function () {
-      if ((container.querySelectorAll(".ecourt-payment-line") || []).length <= 1) return;
+      const lines = container.querySelectorAll(".ecourt-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".ecourt-payment-amount");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        (onAmountInput || updatePaymentSummary)();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtonsFor(container);
       (onAmountInput || updatePaymentSummary)();
@@ -2122,27 +2129,55 @@
     }
     window.location.href = fallback;
   });
+  function blankAmount(value) {
+    const text = String(value == null ? "" : value).trim();
+    if (!text || text === "0" || text === "0.00" || text === "0.0") return "";
+    return text;
+  }
+
+  function setManualChrome(prefill) {
+    const editing = !!(prefill && prefill.receipt_no);
+    const sold = !!(prefill && prefill.sold);
+    const title = document.getElementById("ecourtManualModalTitle");
+    const saveBtn = document.getElementById("ecourtManualSaveBtn");
+    const updateBtn = document.getElementById("ecourtManualUpdateBtn");
+    const saleBlock = document.getElementById("ecourtManualSaleBlock");
+    if (title) title.textContent = editing ? "Update Entry" : "Manual Entry";
+    if (saveBtn) saveBtn.classList.toggle("d-none", editing);
+    if (updateBtn) updateBtn.classList.toggle("d-none", !editing);
+    if (saleBlock) saleBlock.classList.toggle("d-none", !sold);
+  }
+
   function fillManualForm(prefill) {
     prefill = prefill || {};
+    const editing = !!prefill.receipt_no;
     const receiptEl = document.getElementById("ecourtReceiptNo");
     const dateEl = document.getElementById("ecourtManualDate");
     const amountEl = document.getElementById("ecourtManualAmount");
     const stationeryEl = document.getElementById("ecourtStationeryNo");
     const remarksEl = document.getElementById("ecourtManualRemarks");
+    const soldDateEl = document.getElementById("ecourtManualSoldDate");
+    const saleAmountEl = document.getElementById("ecourtManualSaleAmount");
+    const accountEl = document.getElementById("ecourtManualAccount");
     if (receiptEl) receiptEl.value = prefill.receipt_no || "";
     if (dateEl) {
-      dateEl.value =
-        prefill.receipt_date ||
-        window.ECOURT_DEFAULT_DATE ||
-        new Date().toISOString().slice(0, 10);
+      dateEl.value = prefill.receipt_date
+        ? String(prefill.receipt_date).slice(0, 10)
+        : (editing ? "" : (window.ECOURT_DEFAULT_DATE || new Date().toISOString().slice(0, 10)));
     }
-    if (amountEl) amountEl.value = prefill.amount || "";
+    if (amountEl) amountEl.value = blankAmount(prefill.amount);
     if (stationeryEl) stationeryEl.value = prefill.stationerynumber || "";
     if (remarksEl) remarksEl.value = prefill.remarks || "";
+    if (soldDateEl) {
+      soldDateEl.value = prefill.transaction_date ? String(prefill.transaction_date).slice(0, 10) : "";
+    }
+    if (saleAmountEl) saleAmountEl.value = blankAmount(prefill.sale_amount);
+    if (accountEl) accountEl.value = prefill.account_number || "";
   }
 
   function openManualEntry(prefill) {
     els.manualForm?.reset();
+    setManualChrome(prefill || {});
     fillManualForm(prefill || {});
     refreshManualPreview();
     manualModal?.show();
@@ -2228,26 +2263,44 @@
     if (editBtn) {
       e.preventDefault();
       const receiptNo = (editBtn.dataset.receiptNo || "").trim();
+      const group = findGroupByStationery(editBtn.dataset.stationery || "");
       if (receiptNo) {
+        const row = (group?.receipts || []).find(function (item) {
+          return (item.receipt_no || "") === receiptNo;
+        });
+        const sold = (row && row.sale_status === "Sold") || editBtn.dataset.saleStatus === "Sold";
+        const soleSold = sold && (group?.receipts || []).filter(function (item) {
+          return item.sale_status === "Sold";
+        }).length === 1;
         openManualEntry({
           receipt_no: receiptNo,
-          stationerynumber: editBtn.dataset.stationery || "",
-          receipt_date: editBtn.dataset.receiptDate || "",
-          amount: editBtn.dataset.amount || "",
+          stationerynumber: (row && row.stationerynumber) || editBtn.dataset.stationery || "",
+          receipt_date: (row && row.receipt_date) || editBtn.dataset.receiptDate || "",
+          amount: (row && row.amount) || editBtn.dataset.amount || "",
+          remarks: (row && row.remarks) || "",
+          sold: sold,
+          transaction_date: (row && row.transaction_date) || "",
+          account_number: (row && row.account_number) || "",
+          sale_amount: soleSold ? (group.total_sell_value || group.sold_sell_value || "") : "",
         });
         return;
       }
-      const group = findGroupByStationery(editBtn.dataset.stationery || "");
       if (!group) return;
       const pick =
         (group.receipts || []).find(function (row) {
           return row.sale_status !== "Sold";
         }) || (group.receipts || [])[0];
+      const sold = !!(pick && pick.sale_status === "Sold");
       openManualEntry({
         receipt_no: pick ? pick.receipt_no || "" : "",
         stationerynumber: group.stationerynumber || "",
         receipt_date: pick ? pick.receipt_date || "" : "",
         amount: pick ? pick.amount || "" : "",
+        remarks: pick ? pick.remarks || "" : "",
+        sold: sold || group.summary_status === "Sold",
+        transaction_date: (pick && pick.transaction_date) || group.transaction_date || "",
+        account_number: (pick && pick.account_number) || group.account_number || "",
+        sale_amount: group.total_sell_value || group.sold_sell_value || "",
       });
       return;
     }
@@ -2351,8 +2404,51 @@
     return null;
   }
 
+  async function submitManualUpdate() {
+    const receiptNo = (document.getElementById("ecourtReceiptNo")?.value || "").trim();
+    const stationeryNo = (document.getElementById("ecourtStationeryNo")?.value || "").trim();
+    if (!receiptNo) {
+      alert("Receipt number is required.");
+      return;
+    }
+    if (!stationeryNo) {
+      alert("Stationery Number is required.");
+      return;
+    }
+    const body = new FormData(els.manualForm);
+    body.set("ReceiptNo", receiptNo.toUpperCase());
+    body.set("StationeryNumber", stationeryNo);
+    body.set("csrf_token", window.ECOURT_URLS.csrf || "");
+    const updateBtn = document.getElementById("ecourtManualUpdateBtn");
+    if (updateBtn) updateBtn.disabled = true;
+    try {
+      const res = await fetch(window.ECOURT_URLS.updateEntry, {
+        method: "POST",
+        body: body,
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update.");
+      manualModal?.hide();
+      await loadImportTree(null);
+    } catch (err) {
+      alert(err.message || String(err));
+    } finally {
+      if (updateBtn) updateBtn.disabled = false;
+    }
+  }
+
+  document.getElementById("ecourtManualUpdateBtn")?.addEventListener("click", function () {
+    submitManualUpdate();
+  });
+
   els.manualForm?.addEventListener("submit", async function (e) {
     e.preventDefault();
+    const editing = !document.getElementById("ecourtManualUpdateBtn")?.classList.contains("d-none");
+    if (editing) {
+      submitManualUpdate();
+      return;
+    }
     const receiptNo = (document.getElementById("ecourtReceiptNo")?.value || "").trim();
     const stationeryNo = (document.getElementById("ecourtStationeryNo")?.value || "").trim();
     const amountRaw = (document.getElementById("ecourtManualAmount")?.value || "").trim();

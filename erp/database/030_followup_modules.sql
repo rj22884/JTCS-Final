@@ -135,31 +135,13 @@ DECLARE @MastersID INT = (SELECT TOP 1 MenuID FROM dbo.MenuMaster WHERE MenuName
 
 IF @MastersID IS NOT NULL
 BEGIN
-    /* ITR Followup Master lives under Masters → Followup Master only (no direct Masters child). */
+    /* Stages are fixed on the followup screens. Do not recreate Followup Master menus. */
     DELETE FROM dbo.MenuMaster
-    WHERE ParentMenuID = @MastersID
-      AND MenuName = N'ITR Followup Master';
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'DSC Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'DSC Followup Master', N'bi-diagram-3', N'/masters/followup/dsc', 21, N'DSC workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/dsc', IsActive = 1
-        WHERE MenuName = N'DSC Followup Master' AND ParentMenuID = @MastersID;
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'TDS Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'TDS Followup Master', N'bi-diagram-3', N'/masters/followup/tds', 22, N'TDS workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/tds', IsActive = 1
-        WHERE MenuName = N'TDS Followup Master' AND ParentMenuID = @MastersID;
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'GST Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'GST Followup Master', N'bi-diagram-3', N'/masters/followup/gst', 23, N'GST workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/gst', IsActive = 1
-        WHERE MenuName = N'GST Followup Master' AND ParentMenuID = @MastersID;
+    WHERE MenuName IN (
+            N'ITR Followup Master', N'DSC Followup Master',
+            N'TDS Followup Master', N'GST Followup Master'
+          )
+       OR ISNULL(MenuURL, N'') LIKE N'/masters/followup%';
 END;
 GO
 

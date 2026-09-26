@@ -339,7 +339,7 @@ TOPICS: tuple[HelpTopic, ...] = (
                 fields=(("Tax period", "AY 2026-27"), ("Customer", "Sharma Enterprises")),
                 columns=("Customer", "Return", "Stage", "Bill No"),
                 rows=(("Sharma Enterprises", "ITR-3", "ITR Filed", "—"),),
-                highlights=("Stages come from Followup Master", "Bill links to customer ledger"),
+                highlights=("Workflow stages are fixed on this screen", "Bill links to customer ledger"),
             ),
         ),
         formulas=(

@@ -1350,6 +1350,7 @@
     applyDefaultChartGroupsIfEmpty();
     syncChartGroupBar();
     if (cmDynFields) cmDynFields.apply({});
+    syncOccupationPanels();
     const statusField = document.getElementById("cm_customer_status");
     if (statusField) statusField.value = "Active";
     const countryField = document.getElementById("cm_country");
@@ -1427,6 +1428,7 @@
       els.modalTitle.textContent = record.customer_id ? "Edit Customer" : "New Customer";
     }
     syncMandatoryMarkers();
+    syncOccupationPanels();
     syncFilingFrequencyVisibility();
     refreshPincodeIntegration();
     if (els.restoreFormBtn) {
@@ -1900,9 +1902,24 @@
     stopAadhaarPoll();
   });
 
+  function syncOccupationPanels() {
+    const occ = (document.getElementById("cm_occupation")?.value || "").trim();
+    document.getElementById("cmOccupationBusiness")?.classList.toggle("d-none", occ !== "Business");
+    document.getElementById("cmOccupationEmployee")?.classList.toggle("d-none", occ !== "Employee");
+  }
+
+  document.getElementById("cm_occupation")?.addEventListener("change", syncOccupationPanels);
+  syncOccupationPanels();
+
   syncFilingFrequencyVisibility();
   els.form?.querySelectorAll('[data-cm-field="gst_number"]').forEach(function (field) {
-    field.addEventListener("input", syncFilingFrequencyVisibility);
+    field.addEventListener("input", function () {
+      const value = field.value;
+      els.form?.querySelectorAll('[data-cm-field="gst_number"]').forEach(function (other) {
+        if (other !== field) other.value = value;
+      });
+      syncFilingFrequencyVisibility();
+    });
     field.addEventListener("change", syncFilingFrequencyVisibility);
   });
   els.form?.querySelectorAll('[data-cm-field="filing_frequency"]').forEach(function (field) {

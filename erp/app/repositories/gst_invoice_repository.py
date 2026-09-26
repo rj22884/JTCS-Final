@@ -102,6 +102,11 @@ class GstInvoiceRepository:
             ("PaymentDate", "DATE NULL"),
             ("AmountPaid", "DECIMAL(18,2) NULL"),
             ("TallyBillNo", "NVARCHAR(50) NULL"),
+            ("PayBankAccounts", "NVARCHAR(2000) NULL"),
+            ("BillApproved", "BIT NULL"),
+            ("BillUnapproveReason", "NVARCHAR(500) NULL"),
+            ("InvoicePaymentReceived", "BIT NULL"),
+            ("InvoicePaymentRemoveReason", "NVARCHAR(500) NULL"),
             ("DailyTransactionID", "INT NULL"),
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
             (
@@ -183,6 +188,51 @@ class GstInvoiceRepository:
         if not invoice_id:
             return None
         return self.get_by_id(int(invoice_id))
+
+    def list_ids_for_bill_no(self, bill_no: str) -> list[int]:
+        """Every invoice whose tally bill number or invoice number is this bill."""
+        self.ensure_schema()
+        key = normalize_tally_bill_key(bill_no)
+        compact = tally_bill_compact(bill_no)
+        if not key:
+            return []
+        rows = self.session.execute(
+            text(
+                """
+                SELECT InvoiceID
+                FROM dbo.GstInvoice
+                WHERE (
+                        TallyBillNo IS NOT NULL
+                        AND LTRIM(RTRIM(TallyBillNo)) <> N''
+                        AND (
+                              UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_key
+                              OR UPPER(
+                                  REPLACE(
+                                      REPLACE(LTRIM(RTRIM(TallyBillNo)), N' ', N''),
+                                      N'-', N''
+                                  )
+                              ) = :bill_compact
+                        )
+                      )
+                   OR (
+                        InvoiceNo IS NOT NULL
+                        AND LTRIM(RTRIM(InvoiceNo)) <> N''
+                        AND (
+                              UPPER(LTRIM(RTRIM(InvoiceNo))) = :bill_key
+                              OR UPPER(
+                                  REPLACE(
+                                      REPLACE(LTRIM(RTRIM(InvoiceNo)), N' ', N''),
+                                      N'-', N''
+                                  )
+                              ) = :bill_compact
+                        )
+                      )
+                ORDER BY InvoiceID
+                """
+            ),
+            {"bill_key": key, "bill_compact": compact},
+        ).scalars()
+        return [int(invoice_id) for invoice_id in rows]
 
     def list_all(
         self,

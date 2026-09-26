@@ -1347,6 +1347,8 @@ body.jtcs-dialog-open {
 
 .jtcs-dialog-prompt {
   margin-top: 0.7rem;
+  border-radius: 8px;
+  min-height: 2.25rem;
 }
 
 .jtcs-dialog[data-type="warning"] .jtcs-dialog-ok,

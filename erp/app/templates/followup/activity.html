@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260912vid7">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260925genbill1">
 {% endblock %}
 
 {% block content %}
@@ -211,6 +211,10 @@
                 <th>Return Type</th>
                 {% endif %}
                 <th>Customer</th>
+                {% if module_code == 'DSC' %}
+                <th>Employee ID</th>
+                <th>Date of Birth</th>
+                {% endif %}
                 <th>Mobile</th>
                 {% if module_code == 'DSC' %}
                 <th>Email</th>
@@ -418,6 +422,27 @@
                 <input type="text" class="form-control" id="fuBillNo" name="bill_no" maxlength="50"
                        placeholder="Bill / invoice number">
               </div>
+              <div class="col-md-6">
+                <label class="form-label" for="fuBillAmount">Bill / Invoice Amount (₹)</label>
+                <input type="number" class="form-control" id="fuBillAmount" name="bill_amount"
+                       min="0" step="0.01" placeholder="Amount">
+              </div>
+            </div>
+            <div class="fu-generate-bill-wrap mt-3" id="fuGenerateBillWrap">
+              <div class="fu-generate-bill-label mb-1" id="fuGenerateBillLabel">Do you want generate bill here?</div>
+              <div class="fu-generate-bill-radios" role="radiogroup" aria-label="Generate bill here">
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="fuGenerateBillHere"
+                         id="fuGenerateBillYes" value="yes">
+                  <label class="form-check-label" for="fuGenerateBillYes">YES</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="fuGenerateBillHere"
+                         id="fuGenerateBillNo" value="no" checked>
+                  <label class="form-check-label" for="fuGenerateBillNo">NO</label>
+                </div>
+              </div>
+              <div class="small mt-2 d-none" id="fuInvoiceStatus"></div>
             </div>
           </div>
 
@@ -450,6 +475,8 @@
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-primary" id="fuSaveBtn">Save</button>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-primary d-none" id="fuEditBtn">Edit</button>
+        <button type="button" class="btn btn-outline-danger d-none" id="fuDeleteBtn">Delete</button>
       </div>
     </div>
   </div>
@@ -547,6 +574,9 @@
   window.FU_ALLOW_CUSTOMER_ADD = {{ allow_customer_add|tojson }};
   window.FU_DEFAULT_TAX_PERIOD = {{ default_tax_period|tojson }};
   window.FU_DEFAULT_DATE = {{ default_date|tojson }};
+  window.FU_GENERATE_BILL_URL = {{ url_for('miscellaneous.generate_bill_page')|tojson }};
+  window.FU_INVOICE_STATUS_URL = {{ url_for('miscellaneous.generate_bill_invoice')|tojson }};
+  window.FU_INVOICE_DELETE_URL = {{ url_for('miscellaneous.delete_generated_bill_invoices')|tojson }};
   window.FU_BANK_ACCOUNTS = {{ payment_modes|tojson }};
   window.FU_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
   window.FU_PINCODE_LOOKUP = {{ (pincode_lookup_url or '')|tojson }};
@@ -574,5 +604,5 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260915tally1"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260926dscid"></script>
 {% endblock %}

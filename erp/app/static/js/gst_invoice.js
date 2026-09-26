@@ -40,6 +40,14 @@
     id: document.getElementById("invId"),
     rcm: document.getElementById("invRcm"),
     notes: document.getElementById("invNotes"),
+    billStatusWrap: document.getElementById("invBillStatusWrap"),
+    billApproved: document.getElementById("invBillApproved"),
+    billStatusValue: document.getElementById("invBillStatusValue"),
+    unapproveReason: document.getElementById("invUnapproveReason"),
+    payReceivedWrap: document.getElementById("invPayReceivedWrap"),
+    payReceivedYes: document.getElementById("invPayReceivedYes"),
+    payReceivedNo: document.getElementById("invPayReceivedNo"),
+    payRemoveReason: document.getElementById("invPayRemoveReason"),
     payBank: document.getElementById("invPayBank"),
     payDate: document.getElementById("invPayDate"),
     amountPaid: document.getElementById("invAmountPaid"),
@@ -72,6 +80,10 @@
   let editingId = null;
   let currentBillSource = "Manual";
   let lastTallyLookup = "";
+  let savedBillApproved = false;
+  let savedPaymentReceived = false;
+  let statusAuth = null;
+  let applyingTallyStatus = false;
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -478,6 +490,178 @@
     previewTimer = setTimeout(runTotalsPreview, 350);
   }
 
+  function tallyStatusVisible() {
+    return voucherType !== "PURCHASE" && currentBillSource === "Miscellaneous";
+  }
+
+  function paymentReceivedYes() {
+    return !!(els.payReceivedYes && els.payReceivedYes.checked);
+  }
+
+  function updateBillStatusLabel() {
+    if (!els.billStatusValue) return;
+    const approved = !!(els.billApproved && els.billApproved.checked);
+    els.billStatusValue.textContent = approved ? "Approved" : "Approve pending";
+  }
+
+  function showReason(input, text) {
+    if (!input) return;
+    input.classList.remove("d-none");
+    if (text != null) input.value = text;
+  }
+
+  function hideReason(input, clear) {
+    if (!input) return;
+    input.classList.add("d-none");
+    if (clear) input.value = "";
+  }
+
+  function canTickConverted() {
+    return !!api.canTickConverted;
+  }
+
+  function showAwaitPaymentPopup() {
+    const message = "Bill Status can be changed only after Payment Received is Yes.";
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Payment Received is No",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
+  function showTickRightsPopup() {
+    const message = "Only Manager and Administrator can change Bill Status on a converted invoice.";
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Not allowed",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
+  function syncTallyStatusVisibility() {
+    const show = tallyStatusVisible();
+    els.billStatusWrap?.classList.toggle("d-none", !show);
+    els.payReceivedWrap?.classList.toggle("d-none", !show);
+    if (els.billApproved) els.billApproved.disabled = !show || !canTickConverted();
+    if (els.payReceivedYes) els.payReceivedYes.disabled = true;
+    if (els.payReceivedNo) els.payReceivedNo.disabled = true;
+    if (!show) {
+      statusAuth = null;
+    }
+  }
+
+  function applyTallyStatus(record) {
+    applyingTallyStatus = true;
+    savedBillApproved = !!(record && record.bill_approved);
+    savedPaymentReceived = !!(record && record.payment_received);
+    statusAuth = null;
+    if (els.billApproved) els.billApproved.checked = savedBillApproved;
+    updateBillStatusLabel();
+    if (els.payReceivedYes) els.payReceivedYes.checked = savedPaymentReceived;
+    if (els.payReceivedNo) els.payReceivedNo.checked = !savedPaymentReceived;
+    const unapprove = (record && record.bill_unapprove_reason) || "";
+    const removePay = (record && record.payment_remove_reason) || "";
+    if (!savedBillApproved && unapprove) showReason(els.unapproveReason, unapprove);
+    else hideReason(els.unapproveReason, true);
+    if (!savedPaymentReceived && removePay) showReason(els.payRemoveReason, removePay);
+    else hideReason(els.payRemoveReason, true);
+    applyingTallyStatus = false;
+    syncTallyStatusVisibility();
+  }
+
+  function resetTallyStatus() {
+    applyTallyStatus({
+      bill_approved: false,
+      payment_received: false,
+      bill_unapprove_reason: "",
+      payment_remove_reason: "",
+    });
+  }
+
+  function waitForDeleteModalHidden() {
+    return new Promise(function (resolve) {
+      const modal = document.getElementById("jtcsDeleteConfirmModal");
+      if (!modal || !modal.classList.contains("show")) {
+        resolve();
+        return;
+      }
+      let settled = false;
+      const done = function () {
+        if (settled) return;
+        settled = true;
+        modal.removeEventListener("hidden.bs.modal", done);
+        resolve();
+      };
+      modal.addEventListener("hidden.bs.modal", done);
+      setTimeout(done, 500);
+    });
+  }
+
+  async function askReason(reasonLabel) {
+    const title = reasonLabel || "Reason";
+    if (window.JTCSDialog?.prompt) {
+      const value = await window.JTCSDialog.prompt("Enter the reason. It is saved with this invoice.", "", {
+        title: title,
+        type: "warning",
+        okLabel: "OK",
+        cancelLabel: "Cancel",
+        placeholder: title,
+      });
+      if (value == null) return null;
+      return String(value).trim();
+    }
+    const fallback = window.prompt(title);
+    if (fallback == null) return null;
+    return String(fallback).trim();
+  }
+
+  async function confirmProtectedChange(message, reasonLabel) {
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: message,
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    } else {
+      const userId = window.prompt("User ID");
+      if (!userId) return null;
+      const password = window.prompt("Password");
+      if (!password) return null;
+      creds = { user_id: userId.trim(), password: password };
+    }
+    if (!creds || !creds.user_id || !creds.password) return null;
+    await waitForDeleteModalHidden();
+    let reason = "";
+    while (!reason) {
+      reason = await askReason(reasonLabel);
+      if (reason == null) return null;
+    }
+    return {
+      user_id: creds.user_id,
+      password: creds.password,
+      reason: reason,
+    };
+  }
+
+  function clearStatusAuthIfIdle() {
+    const removingApproval = savedBillApproved && !(els.billApproved && els.billApproved.checked);
+    const removingPayment = savedPaymentReceived && !paymentReceivedYes();
+    if (!removingApproval && !removingPayment) statusAuth = null;
+  }
+
   function collectPayload() {
     const lines = [];
     els.body.querySelectorAll(".inv-line").forEach(function (tr) {
@@ -495,7 +679,7 @@
         gst_rate_percent: tr.querySelector(".inv-gst")?.value || "18",
       });
     });
-    return {
+    const payload = {
       invoice_no: els.no?.value || "",
       invoice_date: els.date?.value || "",
       invoice_kind: selectedInvoiceKind(),
@@ -522,6 +706,13 @@
       bill_source: currentBillSource || "Manual",
       lines: lines,
     };
+    if (tallyStatusVisible()) {
+      payload.bill_approved = !!(els.billApproved && els.billApproved.checked);
+      payload.payment_received = paymentReceivedYes();
+      payload.bill_unapprove_reason = (els.unapproveReason?.value || "").trim();
+      payload.payment_remove_reason = (els.payRemoveReason?.value || "").trim();
+    }
+    return payload;
   }
 
   function applyTotals(t) {
@@ -576,6 +767,7 @@
   function fillRecord(record) {
     editingId = record.invoice_id || null;
     currentBillSource = record.bill_source || "Manual";
+    applyTallyStatus(record);
     if (els.id) els.id.value = String(record.invoice_id || "");
     if (els.no) els.no.value = record.invoice_no || "";
     setInvoiceKind(record.invoice_kind || "NON_GST", true);
@@ -663,6 +855,7 @@
   async function startNew() {
     editingId = null;
     currentBillSource = "Manual";
+    resetTallyStatus();
     if (els.id) els.id.value = "";
     setInvoiceKind("NON_GST", false);
     if (els.customerId) els.customerId.value = "";
@@ -758,6 +951,28 @@
       showStatus("Save cancelled. Select Tax Year / Quarter / Month for service item review.", "warning");
       return;
     }
+    if (tallyStatusVisible()) {
+      const removingApproval = savedBillApproved && !payload.bill_approved;
+      const removingPayment = savedPaymentReceived && !payload.payment_received;
+      if (removingApproval && !payload.bill_unapprove_reason) {
+        showStatus("Enter the reason for removing approval.", "danger");
+        els.unapproveReason?.focus();
+        return;
+      }
+      if (removingPayment && !payload.payment_remove_reason) {
+        showStatus("Enter the reason for removing Payment Received.", "danger");
+        els.payRemoveReason?.focus();
+        return;
+      }
+      if ((removingApproval || removingPayment) && (!statusAuth || !statusAuth.user_id || !statusAuth.password)) {
+        showStatus("User ID and password are required to remove approval or Payment Received.", "danger");
+        return;
+      }
+      if (statusAuth && (removingApproval || removingPayment)) {
+        payload.user_id = statusAuth.user_id;
+        payload.password = statusAuth.password;
+      }
+    }
     showStatus("Saving...", "info");
     const url = editingId ? apiUrl(api.update, editingId) : api.create;
     const res = await fetch(url, {
@@ -776,10 +991,31 @@
     await startNew();
   }
 
+  function showOriginPopup(path) {
+    const message =
+      "This bill came from Convert to Invoice.\n\n" +
+      "Edit and delete it from this path:\n\n" +
+      (path || "Activities → Miscellaneous → Edit Entry");
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Edit and delete from the source",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
   async function loadForEdit(id) {
     const res = await fetch(apiUrl(api.get, id), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Load failed");
+    if (data.record && data.record.converted_invoice) {
+      showOriginPopup(data.record.origin_path);
+      return;
+    }
     fillRecord(data.record);
     showStatus("Editing " + (data.record.invoice_no || ""), "info");
   }
@@ -844,6 +1080,161 @@
     window.open(url, "_blank");
   }
 
+  function billStatusLabel(row) {
+    if (String(row.bill_source || "") !== "Miscellaneous") return "—";
+    return row.bill_approved ? "Approved" : "Approve pending";
+  }
+
+  function paymentReceivedLabel(row) {
+    if (String(row.bill_source || "") !== "Miscellaneous") return "—";
+    return row.payment_received ? "Yes" : "No";
+  }
+
+  function isConvertedRow(row) {
+    return String(row.bill_source || "") === "Miscellaneous" || !!row.converted_invoice;
+  }
+
+  function workflowCells(row) {
+    if (voucherType === "PURCHASE") return "";
+    if (!isConvertedRow(row)) {
+      return (
+        "<td>" +
+        escapeHtml(billStatusLabel(row)) +
+        "</td><td>" +
+        escapeHtml(paymentReceivedLabel(row)) +
+        "</td>"
+      );
+    }
+    const approvedOn = !!row.bill_approved;
+    const paidOn = !!row.payment_received;
+    const canApprove = canTickConverted();
+    const approveClass = canApprove ? "" : " is-readonly";
+    const approveDisabled = canApprove ? "" : " disabled";
+    const approveTip = canApprove
+      ? ""
+      : ' title="Only Manager and Administrator can change Bill Status"';
+    return (
+      '<td><label class="inv-grid-tick' +
+      approveClass +
+      '"' +
+      approveTip +
+      ">" +
+      '<input type="checkbox" class="inv-g-approve" data-id="' +
+      row.invoice_id +
+      '" data-saved="' +
+      (approvedOn ? "1" : "0") +
+      '" data-paid="' +
+      (paidOn ? "1" : "0") +
+      '"' +
+      (approvedOn ? " checked" : "") +
+      approveDisabled +
+      ">" +
+      '<span class="' +
+      (approvedOn ? "inv-tick-yes" : "inv-tick-pending") +
+      '">' +
+      (approvedOn ? "Approved" : "Approve pending") +
+      "</span></label></td>" +
+      '<td><label class="inv-grid-tick is-source" title="Payment Received comes from the source entry">' +
+      '<input type="checkbox" class="inv-g-paid" data-id="' +
+      row.invoice_id +
+      '" data-saved="' +
+      (paidOn ? "1" : "0") +
+      '"' +
+      (paidOn ? " checked" : "") +
+      " disabled>" +
+      '<span class="' +
+      (paidOn ? "inv-tick-yes" : "inv-tick-no") +
+      '">' +
+      (paidOn ? "Yes" : "No") +
+      "</span></label></td>"
+    );
+  }
+
+  function syncTickLabel(box) {
+    const span = box.parentElement?.querySelector("span");
+    if (!span) return;
+    if (box.classList.contains("inv-g-approve")) {
+      span.textContent = box.checked ? "Approved" : "Approve pending";
+      span.className = box.checked ? "inv-tick-yes" : "inv-tick-pending";
+    } else {
+      span.textContent = box.checked ? "Yes" : "No";
+      span.className = box.checked ? "inv-tick-yes" : "inv-tick-no";
+    }
+  }
+
+  async function saveGridWorkflow(tr) {
+    const approve = tr.querySelector(".inv-g-approve");
+    const paid = tr.querySelector(".inv-g-paid");
+    if (!approve || !paid) return;
+    if (!canTickConverted()) {
+      approve.checked = approve.dataset.saved === "1";
+      paid.checked = paid.dataset.saved === "1";
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showTickRightsPopup();
+      return;
+    }
+    const wasApproved = approve.dataset.saved === "1";
+    const wasPaid = paid.dataset.saved === "1";
+    const nowApproved = !!approve.checked;
+    const removingApproval = wasApproved && !nowApproved;
+    let auth = null;
+    if (removingApproval) {
+      auth = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!auth) {
+        approve.checked = wasApproved;
+        syncTickLabel(approve);
+        return;
+      }
+    }
+    const payload = {
+      bill_approved: nowApproved,
+      payment_received: wasPaid,
+    };
+    if (auth) {
+      payload.user_id = auth.user_id;
+      payload.password = auth.password;
+      payload.bill_unapprove_reason = auth.reason;
+    }
+    approve.disabled = true;
+    paid.disabled = true;
+    try {
+      const res = await fetch(apiUrl(api.update, approve.getAttribute("data-id")) + "/workflow", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": api.csrf || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update bill status.");
+      const record = data.record || {};
+      approve.checked = !!record.bill_approved;
+      paid.checked = !!record.payment_received;
+      approve.dataset.saved = approve.checked ? "1" : "0";
+      paid.dataset.saved = paid.checked ? "1" : "0";
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showStatus(data.message || "Bill status updated.", "success");
+    } catch (err) {
+      approve.checked = wasApproved;
+      paid.checked = wasPaid;
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showStatus(err.message || String(err), "danger");
+    } finally {
+      approve.disabled = false;
+      paid.disabled = false;
+    }
+  }
+
   function renderGrid(rows) {
     if (!els.gridBody) return;
     els.gridBody.innerHTML = "";
@@ -891,16 +1282,48 @@
         '">' +
         escapeHtml(billSource) +
         "</span></td>" +
+        workflowCells(row) +
         '<td class="text-end fw-semibold">' +
         money(row.invoice_value) +
         "</td>" +
         '<td class="text-end text-nowrap">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm me-1 inv-g-edit" data-id="' +
+        (isConvertedRow(row)
+          ? '<button type="button" class="btn btn-outline-dark btn-sm me-1 inv-g-review" data-id="' +
+            row.invoice_id +
+            '" data-no="' +
+            escapeHtml(row.invoice_no || "") +
+            '" data-paid="' +
+            (row.payment_received ? "1" : "0") +
+            '" data-approved="' +
+            (row.bill_approved ? "1" : "0") +
+            '" title="Review, then update Bill Status"><i class="bi bi-clipboard-check"></i></button>'
+          : "") +
+        '<button type="button" class="btn btn-outline-primary btn-sm me-1 inv-g-edit' +
+        (isConvertedRow(row) ? " is-locked" : "") +
+        '" data-id="' +
         row.invoice_id +
-        '" title="Edit"><i class="bi bi-pencil"></i></button>' +
-        '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del" data-id="' +
+        '"' +
+        (isConvertedRow(row)
+          ? ' data-origin="' +
+            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
+            '"'
+          : "") +
+        ' title="' +
+        (isConvertedRow(row) ? "Edit from the source screen" : "Edit") +
+        '"><i class="bi bi-pencil"></i></button>' +
+        '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del' +
+        (isConvertedRow(row) ? " is-locked" : "") +
+        '" data-id="' +
         row.invoice_id +
-        '" title="Delete"><i class="bi bi-trash"></i></button>' +
+        '"' +
+        (isConvertedRow(row)
+          ? ' data-origin="' +
+            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
+            '"'
+          : "") +
+        ' title="' +
+        (isConvertedRow(row) ? "Delete from the source screen" : "Delete") +
+        '"><i class="bi bi-trash"></i></button>' +
         '<button type="button" class="btn btn-outline-info btn-sm me-1 inv-g-preview" data-id="' +
         row.invoice_id +
         '" data-no="' +
@@ -1255,6 +1678,54 @@
     }
   });
 
+  els.billApproved?.addEventListener("change", async function () {
+    if (applyingTallyStatus) return;
+    updateBillStatusLabel();
+    if (savedBillApproved && !this.checked) {
+      const result = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!result) {
+        applyingTallyStatus = true;
+        this.checked = true;
+        updateBillStatusLabel();
+        applyingTallyStatus = false;
+        return;
+      }
+      statusAuth = { user_id: result.user_id, password: result.password };
+      showReason(els.unapproveReason, result.reason);
+      return;
+    }
+    if (this.checked) hideReason(els.unapproveReason, true);
+    clearStatusAuthIfIdle();
+  });
+
+  async function onPaymentReceivedChange() {
+    if (applyingTallyStatus) return;
+    if (savedPaymentReceived && !paymentReceivedYes()) {
+      const result = await confirmProtectedChange(
+        "Removing Payment Received needs your User ID and password.",
+        "Reason for removing Payment Received"
+      );
+      if (!result) {
+        applyingTallyStatus = true;
+        if (els.payReceivedYes) els.payReceivedYes.checked = true;
+        if (els.payReceivedNo) els.payReceivedNo.checked = false;
+        applyingTallyStatus = false;
+        return;
+      }
+      statusAuth = { user_id: result.user_id, password: result.password };
+      showReason(els.payRemoveReason, result.reason);
+      return;
+    }
+    if (paymentReceivedYes()) hideReason(els.payRemoveReason, true);
+    clearStatusAuthIfIdle();
+  }
+
+  els.payReceivedYes?.addEventListener("change", onPaymentReceivedChange);
+  els.payReceivedNo?.addEventListener("change", onPaymentReceivedChange);
+
   els.tallyBillNo?.addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") {
       ev.preventDefault();
@@ -1300,6 +1771,143 @@
     }, 300);
   });
 
+  const reviewBar = document.getElementById("invReviewBar");
+  const reviewApproved = document.getElementById("invReviewApproved");
+  const reviewStatusLabel = document.getElementById("invReviewStatusLabel");
+  const reviewSaveBtn = document.getElementById("invReviewSaveBtn");
+  let reviewState = null;
+
+  function paintReviewStatus() {
+    if (!reviewApproved || !reviewStatusLabel) return;
+    const on = !!reviewApproved.checked;
+    reviewStatusLabel.textContent = on ? "Approved" : "Approve pending";
+    reviewStatusLabel.className = "form-check-label " + (on ? "inv-tick-yes" : "inv-tick-pending");
+  }
+
+  function renderReviewTrail(steps) {
+    const box = document.getElementById("invReviewTrail");
+    if (!box) return;
+    if (!steps || !steps.length) {
+      box.classList.add("d-none");
+      box.innerHTML = "";
+      return;
+    }
+    const items = steps
+      .map(function (step) {
+        return (
+          "<li><strong>" +
+          escapeHtml(step.title || "") +
+          "</strong><span>" +
+          escapeHtml(step.detail || "") +
+          "</span></li>"
+        );
+      })
+      .join("");
+    box.innerHTML =
+      '<div class="inv-review-trail"><div class="fw-semibold">Entry review — what the user did</div><ol>' +
+      items +
+      "</ol></div>";
+    box.classList.remove("d-none");
+  }
+
+  async function loadReviewTrail(invoiceId) {
+    renderReviewTrail([]);
+    try {
+      const res = await fetch(apiUrl(api.get, invoiceId), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const data = await res.json();
+      if (!data.ok || !data.record) return;
+      renderReviewTrail(data.record.review_steps || []);
+    } catch (_err) {
+      renderReviewTrail([]);
+    }
+  }
+
+  function showReviewBar(row) {
+    reviewState = {
+      id: row.invoice_id,
+      paid: !!row.paid,
+      saved: !!row.approved,
+    };
+    if (reviewApproved) {
+      reviewApproved.checked = !!row.approved;
+      reviewApproved.disabled = !canTickConverted();
+    }
+    if (reviewSaveBtn) reviewSaveBtn.disabled = !canTickConverted();
+    paintReviewStatus();
+    reviewBar?.classList.remove("d-none");
+  }
+
+  function hideReviewBar() {
+    reviewState = null;
+    reviewBar?.classList.add("d-none");
+    renderReviewTrail([]);
+  }
+
+  async function saveReviewStatus() {
+    if (!reviewState || !reviewApproved) return;
+    if (!canTickConverted()) {
+      showTickRightsPopup();
+      return;
+    }
+    const nowApproved = !!reviewApproved.checked;
+    const removingApproval = reviewState.saved && !nowApproved;
+    let auth = null;
+    if (removingApproval) {
+      auth = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!auth) {
+        reviewApproved.checked = true;
+        paintReviewStatus();
+        return;
+      }
+    }
+    const payload = { bill_approved: nowApproved, payment_received: true };
+    if (auth) {
+      payload.user_id = auth.user_id;
+      payload.password = auth.password;
+      payload.bill_unapprove_reason = auth.reason;
+    }
+    reviewSaveBtn.disabled = true;
+    try {
+      const res = await fetch(apiUrl(api.update, reviewState.id) + "/workflow", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": api.csrf || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update bill status.");
+      reviewState.saved = !!(data.record && data.record.bill_approved);
+      reviewApproved.checked = reviewState.saved;
+      paintReviewStatus();
+      showStatus(data.message || "Bill status updated.", "success");
+      await loadGrid();
+    } catch (err) {
+      reviewApproved.checked = reviewState.saved;
+      paintReviewStatus();
+      showStatus(err.message || String(err), "danger");
+    } finally {
+      if (reviewSaveBtn) reviewSaveBtn.disabled = !canTickConverted();
+    }
+  }
+
+  reviewApproved?.addEventListener("change", paintReviewStatus);
+  reviewSaveBtn?.addEventListener("click", function () {
+    saveReviewStatus().catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
+  });
+
   async function openHtmlPreview(invoiceId, invoiceNo) {
     if (!previewModal || !els.previewBody) {
       showStatus("Preview modal is not available.", "danger");
@@ -1333,19 +1941,66 @@
   }
 
   els.gridBody?.addEventListener("click", function (ev) {
+    const awaitPay = ev.target.closest(".inv-grid-tick.is-await-pay");
+    if (awaitPay) {
+      ev.preventDefault();
+      showAwaitPaymentPopup();
+      return;
+    }
+    const lockedTick = ev.target.closest(".inv-grid-tick.is-readonly");
+    if (!lockedTick) return;
+    ev.preventDefault();
+    showTickRightsPopup();
+  });
+
+  els.gridBody?.addEventListener("change", function (ev) {
+    const box = ev.target.closest(".inv-g-approve, .inv-g-paid");
+    if (!box) return;
+    const tr = box.closest("tr");
+    if (!tr) return;
+    syncTickLabel(box);
+    saveGridWorkflow(tr).catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
+  });
+
+  els.gridBody?.addEventListener("click", function (ev) {
     const editBtn = ev.target.closest(".inv-g-edit");
     const delBtn = ev.target.closest(".inv-g-del");
+    const reviewBtn = ev.target.closest(".inv-g-review");
     const previewBtn = ev.target.closest(".inv-g-preview");
+    if (reviewBtn) {
+      hideReviewBar();
+      showReviewBar({
+        invoice_id: reviewBtn.getAttribute("data-id"),
+        paid: reviewBtn.getAttribute("data-paid") === "1",
+        approved: reviewBtn.getAttribute("data-approved") === "1",
+      });
+      loadReviewTrail(reviewBtn.getAttribute("data-id"));
+      openHtmlPreview(
+        reviewBtn.getAttribute("data-id"),
+        reviewBtn.getAttribute("data-no") || ""
+      );
+    }
+    if (previewBtn) hideReviewBar();
     const waBtn = ev.target.closest(".inv-g-wa");
     if (editBtn) {
-      loadForEdit(editBtn.getAttribute("data-id")).catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
+      if (editBtn.classList.contains("is-locked")) {
+        showOriginPopup(editBtn.getAttribute("data-origin") || "");
+      } else {
+        loadForEdit(editBtn.getAttribute("data-id")).catch(function (err) {
+          showStatus(err.message || String(err), "danger");
+        });
+      }
     }
     if (delBtn) {
-      deleteInvoice(delBtn.getAttribute("data-id")).catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
+      if (delBtn.classList.contains("is-locked")) {
+        showOriginPopup(delBtn.getAttribute("data-origin") || "");
+      } else {
+        deleteInvoice(delBtn.getAttribute("data-id")).catch(function (err) {
+          showStatus(err.message || String(err), "danger");
+        });
+      }
     }
     if (previewBtn) {
       openHtmlPreview(

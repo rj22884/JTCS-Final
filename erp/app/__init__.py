@@ -38,7 +38,6 @@ from app.routes.miscellaneous import (
     bp as miscellaneous_bp,
     bp_alias as miscellaneous_alias_bp,
 )
-from app.routes.ration_card_followup import bp as ration_card_followup_bp
 from app.routes.others_bank_cash import bp as others_bank_cash_bp
 from app.routes.purpose_master import bp as purpose_master_bp
 from app.routes.credentials_master import bp as credentials_master_bp
@@ -153,7 +152,6 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(income_expense_new_alias_bp)
     app.register_blueprint(miscellaneous_bp)
     app.register_blueprint(miscellaneous_alias_bp)
-    app.register_blueprint(ration_card_followup_bp)
     app.register_blueprint(others_bank_cash_bp)
     app.register_blueprint(purpose_master_bp)
     app.register_blueprint(credentials_master_bp)

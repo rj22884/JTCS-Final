@@ -9,6 +9,7 @@ from app.customer_master.constants import CUSTOMER_TYPES
 from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
 from app.services.followup_service import default_tax_period, tax_period_options
+from app.services.bank_master_service import BankMasterService
 from app.services.gst_invoice_service import STATE_CODES, GstInvoiceService
 from app.services.menu_service import MenuService
 from app.services.others_income_expense_service import OthersIncomeExpenseService
@@ -129,6 +130,96 @@ def sub_works():
     return jsonify({"ok": True, "rows": OthersIncomeExpenseService().list_sub_works(work_name)})
 
 
+def upi_bank_choices() -> list[dict]:
+    """Active Bank Master accounts with QR/Bill Received = Yes."""
+    try:
+        rows = BankMasterService().list_records()
+    except Exception:
+        return []
+    choices = []
+    for row in rows:
+        if not row.get("active_status", True):
+            continue
+        if not row.get("qr_bill_received"):
+            continue
+        name = (row.get("bank_name") or "").strip()
+        number = (row.get("account_number") or "").strip()
+        if name.casefold() == "cash" or number.casefold() == "cash":
+            continue
+        if not name and not number:
+            continue
+        choices.append(
+            {
+                "account_id": row.get("account_id"),
+                "bank_name": name or "Bank",
+                "account_number": number,
+                "ifsc_code": (row.get("ifsc_code") or "").strip(),
+                "upi_id": (row.get("upi_id") or "").strip(),
+            }
+        )
+    return choices
+
+
+@bp.route("/generate-bill/invoice", methods=["GET"], strict_slashes=False)
+@bp_alias.route("/generate-bill/invoice", methods=["GET"], strict_slashes=False)
+@login_required
+def generate_bill_invoice():
+    """Saved Miscellaneous invoice for this bill number, used by Edit."""
+    bill_no = (request.args.get("bill_no") or "").strip()
+    if not bill_no:
+        return jsonify({"ok": False, "found": False, "error": "Bill number is required."}), 400
+    found = GstInvoiceService().find_invoice_for_tally_bill(bill_no)
+    if not found:
+        return jsonify({"ok": True, "found": False})
+    record = GstInvoiceService().get_record(int(found["invoice_id"]))
+    return jsonify({"ok": True, "found": True, "record": record})
+
+
+@bp.route("/payment-received", methods=["POST"], strict_slashes=False)
+@bp_alias.route("/payment-received", methods=["POST"], strict_slashes=False)
+@login_required
+def mark_payment_received():
+    """Source Payment Received Yes/No. Sale invoice grid follows this."""
+    payload = request.get_json(silent=True) or {}
+    bill_no = (payload.get("bill_no") or "").strip()
+    paid = str(payload.get("payment_received") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if not bill_no:
+        return jsonify({"ok": False, "error": "Bill number is required."}), 400
+    try:
+        GstInvoiceService().mark_source_payment_received(bill_no, paid)
+        return jsonify({"ok": True, "payment_received": paid})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/generate-bill/invoice/delete", methods=["POST"], strict_slashes=False)
+@bp_alias.route("/generate-bill/invoice/delete", methods=["POST"], strict_slashes=False)
+@login_required
+@require_delete_reauth
+def delete_generated_bill_invoices():
+    """Permanently delete sale invoices created from this bill number."""
+    payload = request.get_json(silent=True) or {}
+    bill_no = (payload.get("bill_no") or "").strip()
+    if not bill_no:
+        return jsonify({"ok": False, "error": "Bill number is required."}), 400
+    try:
+        count = GstInvoiceService().delete_invoices_for_bill(bill_no)
+        noun = "invoice" if count == 1 else "invoices"
+        return jsonify(
+            {
+                "ok": True,
+                "deleted": count,
+                "message": f"Permanently deleted {count} related {noun}.",
+            }
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/generate-bill", methods=["GET"], strict_slashes=False)
 @bp_alias.route("/generate-bill", methods=["GET"], strict_slashes=False)
 @login_required
@@ -153,6 +244,9 @@ def generate_bill_page():
         create_url=url_for("accounting_invoice.api_create_invoice"),
         update_url=url_for("accounting_invoice.api_update_invoice", invoice_id=0),
         customer_url=url_for("accounting_invoice.api_customer_detail", customer_id=0),
+        lookup_url=url_for("miscellaneous.generate_bill_invoice"),
+        delete_url=url_for("accounting_invoice.api_delete_invoice", invoice_id=0),
+        upi_banks=upi_bank_choices(),
     )
 
 

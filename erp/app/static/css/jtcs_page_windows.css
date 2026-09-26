@@ -45,21 +45,44 @@ html.jtcs-embed .stamp-erp-page {
   height: 100%;
 }
 
+.jtcs-sticky-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 4030;
+  background: #fff;
+}
+
+.jtcs-sticky-chrome .jtcs-app-header,
+.jtcs-sticky-chrome .jtcs-menu-bar {
+  position: relative;
+  top: auto;
+}
+
 .jtcs-app-header {
-  z-index: 2030;
+  z-index: 2;
 }
 .jtcs-menu-bar {
-  z-index: 2020;
+  z-index: 3;
+}
+
+a.jtcs-menu-link.jtcs-menu-held,
+a.jtcs-top-link.jtcs-menu-held {
+  pointer-events: none;
+  opacity: 0.45;
+  cursor: default;
 }
 .jtcs-dropdown-panel,
 .jtcs-flyout-sub {
-  z-index: 2100;
+  z-index: 4100;
 }
 
 .jtcs-page-windows {
   position: fixed;
-  inset: 0;
-  z-index: 2000;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 0;
+  z-index: 1500;
   pointer-events: none;
 }
 

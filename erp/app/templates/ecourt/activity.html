@@ -341,6 +341,25 @@
             <label class="form-label" for="ecourtManualRemarks">Remarks</label>
             <input type="text" class="form-control form-control-sm" id="ecourtManualRemarks" name="Remarks">
           </div>
+          <div class="col-12 d-none" id="ecourtManualSaleBlock">
+            <div class="border rounded p-2">
+              <div class="small fw-semibold mb-2">Sale</div>
+              <div class="row g-2">
+                <div class="col-md-4">
+                  <label class="form-label" for="ecourtManualSoldDate">Sold Date</label>
+                  <input type="date" class="form-control form-control-sm" id="ecourtManualSoldDate" name="SoldDate">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="ecourtManualSaleAmount">Sale Amount</label>
+                  <input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" id="ecourtManualSaleAmount" name="SaleAmount">
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label" for="ecourtManualAccount">Account Number</label>
+                  <input type="text" class="form-control form-control-sm" id="ecourtManualAccount" name="AccountNumber" readonly>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="col-12">
             <div class="table-responsive ecourt-manual-preview-wrap">
               <table class="table table-sm table-bordered mb-0 ecourt-manual-preview-table" id="ecourtManualPreviewGrid">
@@ -361,9 +380,15 @@
               </table>
             </div>
           </div>
-          <div class="col-12">
+          <div class="col-12 d-flex gap-2">
             <button type="submit" class="btn btn-primary btn-sm" id="ecourtManualSaveBtn" data-hotkey="ctrl+s" data-hotkey-action="Save">
               <i class="bi bi-save"></i> Save
+            </button>
+            <button type="button" class="btn btn-primary btn-sm d-none" id="ecourtManualUpdateBtn">
+              <i class="bi bi-check2"></i> Update
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="ecourtManualCancelBtn" data-bs-dismiss="modal">
+              Cancel
             </button>
           </div>
         </form>
@@ -386,6 +411,7 @@
     deleteStationery: {{ url_for('ecourt.delete_stationery') | tojson }},
     importPage: {{ url_for('ecourt.ecourt_activity_import') | tojson }},
     manual: {{ url_for('ecourt.manual_sale') | tojson }},
+    updateEntry: {{ url_for('ecourt.update_entry') | tojson }},
     sales: {{ url_for('ecourt.recent_sales') | tojson }},
     back: {{ url_for('dashboard.index') | tojson }},
     csrf: {{ csrf_token() | tojson }}
@@ -394,5 +420,5 @@
   window.ECOURT_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.ECOURT_DEFAULT_DATE = {{ default_date | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260917col1"></script>
+<script src="{{ url_for('static', filename='js/ecourt_activity.js') }}?v=20260925paydel1"></script>
 {% endblock %}

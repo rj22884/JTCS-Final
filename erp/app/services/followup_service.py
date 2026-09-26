@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 from app.repositories.customer_repository import CustomerRepository
 from app.repositories.followup_repository import FollowupRepository
+from app.services.followup_billing_service import FollowupBillingService
 from app.services.followup_payment_service import FollowupPaymentService
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import assert_master_unused
@@ -56,6 +57,37 @@ MODULE_META = {
 
 
 DSC_APPLICATION_STAGE_CODES = frozenset({"application_received", "application_no"})
+
+# Pasted from Followup Master. Followup screens use these names, not the master screen.
+FIXED_WORKFLOW_STAGES = {
+    "ITR": (
+        ("documents_received", "Documents Received", 1),
+        ("itr_filed", "ITR Filed", 2),
+        ("tally_bill_generated", "Tally Bill Generated", 3),
+        ("payment_received", "Payment Received", 4),
+        ("unverified", "Unverified", 5),
+    ),
+    "DSC": (
+        ("documents_received", "Documents Received", 1),
+        ("application_received", "Application Received", 2),
+        ("kyc", "KYC", 3),
+        ("download_status", "Download Status", 4),
+        ("tally_bill_generated", "Tally Bill Generated", 5),
+        ("payment_received", "Payment Received", 6),
+    ),
+    "TDS": (
+        ("documents_received", "Documents Received", 1),
+        ("kyc", "KYC", 2),
+        ("tally_bill_generated", "Tally Bill Generated", 3),
+        ("payment_received", "Payment Received", 4),
+    ),
+    "GST": (
+        ("documents_received", "Documents Received", 1),
+        ("return_filed", "Return Filed", 2),
+        ("tally_bill_generated", "Tally Bill Generated", 3),
+        ("payment_received", "Payment Received", 4),
+    ),
+}
 
 TDS_FORM_TYPES = ("Original", "Revised")
 TDS_QUARTERS = ("Q1", "Q2", "Q3", "Q4")
@@ -350,8 +382,38 @@ class FollowupService:
                 self.followup_repo.ensure_gst_return_filed_stage()
             except Exception:
                 self.followup_repo.session.rollback()
-        rows = self.followup_repo.list_stages(self.module_code, active_only=active_only)
-        return [self._stage_dict(row) for row in rows]
+        fixed = FIXED_WORKFLOW_STAGES.get(self.module_code) or ()
+        rows = []
+        for code, name, order in fixed:
+            row = self.followup_repo.get_stage_by_code(self.module_code, code)
+            if row is None:
+                row = self.followup_repo.create_stage(
+                    {
+                        "ModuleCode": self.module_code,
+                        "StageCode": code,
+                        "StageName": name,
+                        "DisplayOrder": order,
+                        "ActiveStatus": True,
+                        "CreatedDate": datetime.utcnow(),
+                    }
+                )
+                self.followup_repo.session.commit()
+            else:
+                changed = False
+                if row.StageName != name or row.DisplayOrder != order or not row.ActiveStatus:
+                    row.StageName = name
+                    row.DisplayOrder = order
+                    row.ActiveStatus = True
+                    changed = True
+                if changed:
+                    self.followup_repo.session.commit()
+            item = self._stage_dict(row)
+            item["stage_name"] = name
+            item["display_order"] = order
+            item["active_status"] = True
+            if active_only or item["active_status"]:
+                rows.append(item)
+        return rows
 
     def list_entries(
         self,
@@ -367,6 +429,10 @@ class FollowupService:
             self.followup_repo.ensure_filing_status_columns()
         if self.module_code == "TDS":
             self.followup_repo.ensure_tds_period_columns()
+        if self.module_code == "DSC":
+            from app.repositories.customer_repository import CustomerRepository
+
+            CustomerRepository().ensure_schema()
         # Progressive exclusive-bucket status filter (ITR + DSC).
         # Other modules keep repository tick-based status filtering.
         repo_status = None if self.module_code in {"ITR", "DSC"} else status_filter
@@ -391,6 +457,12 @@ class FollowupService:
             row["mobile_number"] = row.get("MobileNumber") or ""
             row["email_id"] = row.get("EmailID") or row.get("email_id") or ""
             row["pan_number"] = row.get("PANNumber") or row.get("pan_number") or ""
+            row["employee_code"] = row.get("EmployeeCode") or ""
+            dob = row.get("DateOfBirth")
+            if dob is not None and hasattr(dob, "isoformat"):
+                row["date_of_birth"] = dob.isoformat()
+            else:
+                row["date_of_birth"] = str(dob)[:10] if dob else ""
             row["return_type"] = row.get("ReturnType")
             row["application_number"] = row.get("ApplicationNumber")
             row["location"] = row.get("Location")
@@ -439,6 +511,14 @@ class FollowupService:
         elif self.module_code == "DSC":
             if status_filter:
                 rows = self._filter_entries_by_status(rows, status_filter, module_code="DSC")
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        status_map = GstInvoiceService().sale_status_by_bill_nos(
+            [(row.get("bill_no") or row.get("BillNo") or "") for row in rows]
+        )
+        for row in rows:
+            key = (row.get("bill_no") or row.get("BillNo") or "").strip().upper()
+            row["sale_invoice"] = status_map.get(key)
         return rows
 
     def _attach_itr_payment_receive_dates(self, rows: list[dict]) -> None:
@@ -1263,20 +1343,16 @@ class FollowupService:
             email_id = None
 
         needs_billing = (
-            self.module_code == "ITR"
-            and (
-                "tally_bill_generated" in stage_codes
-                or "payment_received" in stage_codes
-                or "itr_filed" in stage_codes
-            )
+            "tally_bill_generated" in stage_codes or "payment_received" in stage_codes
         ) or (
-            self.module_code == "DSC"
-            and ("tally_bill_generated" in stage_codes or "payment_received" in stage_codes)
+            self.module_code == "ITR" and "itr_filed" in stage_codes
         )
         if needs_billing:
             self.followup_repo.ensure_billing_columns()
 
         bill_no = (payload.get("bill_no") or payload.get("BillNo") or existing_bill_no or "").strip() or None
+        if "tally_bill_generated" in stage_codes and not bill_no:
+            bill_no = FollowupBillingService.next_bill_no(self.module_code, work_date)
         if bill_no:
             other = self.followup_repo.find_by_tally_bill_no(bill_no)
             other_id = int(other.get("EntryID") or 0) if other else 0
@@ -1432,18 +1508,40 @@ class FollowupService:
             elif old_bill:
                 payment_service.remove_followup_accounting(old_bill)
 
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            if new_bill:
+                GstInvoiceService().sync_payment_received_for_bill(
+                    new_bill, "payment_received" in stage_codes
+                )
             return self.get_entry(saved_id)
 
         return persist(_write)
 
     def delete_entry(self, entry_id: int) -> str:
+        row = self.followup_repo.get_entry(entry_id)
+        if row is None or not row.IsActive or row.ModuleCode != self.module_code:
+            raise ValueError("Followup entry not found.")
+        for link in list(row.stages or []):
+            code = ((link.stage.StageCode if link.stage else "") or "").strip().lower()
+            if code == "payment_received":
+                raise ValueError("Remove Payment Received in Edit before deleting this entry.")
+        bill_no = (row.BillNo or "").strip()
+        application_no = (row.ApplicationNumber or "").strip()
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        invoices = GstInvoiceService()
+        for key in (bill_no, application_no):
+            if key:
+                invoices.delete_invoices_for_bill_if_any(key)
+
         def _write() -> str:
-            row = self.followup_repo.get_entry(entry_id)
-            if row is None or not row.IsActive or row.ModuleCode != self.module_code:
+            current = self.followup_repo.get_entry(entry_id)
+            if current is None or not current.IsActive or current.ModuleCode != self.module_code:
                 raise ValueError("Followup entry not found.")
-            if row.BillNo:
-                FollowupPaymentService(self.module_code).remove_followup_accounting(row.BillNo)
-            self.followup_repo.deactivate_entry(row)
+            if current.BillNo:
+                FollowupPaymentService(self.module_code).remove_followup_accounting(current.BillNo)
+            self.followup_repo.deactivate_entry(current)
             return "Followup entry deleted successfully."
 
         return persist(_write)

@@ -209,6 +209,18 @@ class CustomerRepository:
                 ALTER TABLE dbo.CustomerMaster ADD AppreciationRate DECIMAL(9, 4) NOT NULL
                     CONSTRAINT DF_CustomerMaster_AppreciationRate DEFAULT (0);
             """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'EmployerType') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD EmployerType NVARCHAR(20) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'EmploymentStatus') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD EmploymentStatus NVARCHAR(20) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'EmployeeCode') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD EmployeeCode NVARCHAR(50) NULL;
+            """,
         ):
             self.session.execute(text(stmt))
             self.session.commit()

@@ -64,8 +64,12 @@
     tallyBillDate: document.getElementById("oieTallyBillDate"),
     tallyBillAmount: document.getElementById("oieTallyBillAmount"),
     generateBillWrap: document.getElementById("oieGenerateBillWrap"),
+    generateBillLabel: document.getElementById("oieGenerateBillLabel"),
     generateBillYes: document.getElementById("oieGenerateBillYes"),
     generateBillNo: document.getElementById("oieGenerateBillNo"),
+    paymentReceivedYes: document.getElementById("oiePaymentReceivedYes"),
+    paymentReceivedNo: document.getElementById("oiePaymentReceivedNo"),
+    invoiceStatus: document.getElementById("oieInvoiceStatus"),
     paymentSection: document.getElementById("oiePaymentSection"),
     paymentFieldset: document.getElementById("oiePaymentFieldset"),
     paymentLockedHint: document.getElementById("oiePaymentLockedHint"),
@@ -188,13 +192,250 @@
     return !!(els.tallyBill && els.tallyBill.checked);
   }
 
+  function isPaymentReceivedYes() {
+    return !!(els.paymentReceivedYes && els.paymentReceivedYes.checked);
+  }
+
+  function setPaymentReceivedChoice(yes) {
+    if (els.paymentReceivedYes) els.paymentReceivedYes.checked = !!yes;
+    if (els.paymentReceivedNo) els.paymentReceivedNo.checked = !yes;
+  }
+
   function isPaymentActive() {
-    return !isMiscKind() || isTallyChecked();
+    if (!isMiscKind()) return true;
+    return isTallyChecked() && isPaymentReceivedYes();
+  }
+
+  let lastSaleRecord = null;
+
+  function sourcePaymentReceived() {
+    return isPaymentReceivedYes();
+  }
+
+  function pushPaymentReceived(paid) {
+    const billNo = (els.billNo?.value || els.tallyBillNo?.value || "").trim();
+    if (!billNo || !window.OIE_PAYMENT_RECEIVED_URL) return Promise.resolve();
+    return fetch(window.OIE_PAYMENT_RECEIVED_URL, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": window.OIE_CSRF || "",
+      },
+      body: JSON.stringify({ bill_no: billNo, payment_received: !!paid }),
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update Payment Received.");
+        return data;
+      });
+    });
+  }
+
+  function saleStatusText(record) {
+    if (!record) return "";
+    const approved = record.bill_approved ? "Approved" : "Approve pending";
+    const paid = sourcePaymentReceived() ? "Yes" : "No";
+    const no = record.invoice_no ? record.invoice_no + " — " : "";
+    return "Sale invoice " + no + approved + " · Payment Received: " + paid;
+  }
+
+  function saleIsApproved() {
+    return !!(lastSaleRecord && lastSaleRecord.bill_approved);
+  }
+
+  let entryFieldsLocked = false;
+
+  function approvedEditMessage() {
+    const paid = isPaymentReceivedYes() || !!(lastSaleRecord && lastSaleRecord.payment_received);
+    if (paid) {
+      return "Payment aa chuki hai aur admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+    }
+    return "Admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+  }
+
+  async function ensureEntryChangeAllowed() {
+    await refreshInvoiceStatus();
+    if (!saleIsApproved()) return true;
+    const message = approvedEditMessage();
+    if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+    else alert(message);
+    return false;
+  }
+
+  function syncEntryActionButtons() {
+    const existing = isEditMode();
+    const editBtn = document.getElementById("oieEditBtn");
+    const deleteBtn = document.getElementById("oieDeleteBtn");
+    if (editBtn) editBtn.classList.toggle("d-none", !existing);
+    if (deleteBtn) deleteBtn.classList.toggle("d-none", !existing);
+  }
+
+  function setEntryFieldsLocked(locked) {
+    entryFieldsLocked = !!locked;
+    if (!form) return;
+    form.querySelectorAll("input, select, textarea, button").forEach(function (el) {
+      if (el.id === "oieEditBtn" || el.id === "oieDeleteBtn") return;
+      if (el.getAttribute("data-bs-dismiss") === "modal") return;
+      if (el.type === "hidden") return;
+      el.disabled = !!locked;
+    });
+    if (els.paymentFieldset) els.paymentFieldset.disabled = !!locked;
+    const saveBtn = document.getElementById("oieSaveBtn");
+    if (saveBtn) saveBtn.disabled = !!locked;
+    if (!locked) syncMiscWorkflow();
+    syncEntryActionButtons();
+  }
+
+  function hasCreditPayment() {
+    const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+    for (let i = 0; i < lines.length; i++) {
+      const select = lines[i].querySelector("select");
+      const text =
+        (select && select.selectedOptions && select.selectedOptions[0] && select.selectedOptions[0].textContent) ||
+        "";
+      if (/credit/i.test(text)) return true;
+    }
+    return false;
+  }
+
+  function syncGenerateBillPrompt() {
+    const approved = saleIsApproved();
+    if (els.generateBillLabel) {
+      els.generateBillLabel.textContent = "Do you want generate bill here?";
+    }
+    [els.generateBillYes, els.generateBillNo, els.paymentReceivedYes, els.paymentReceivedNo].forEach(
+      function (input) {
+        if (input) input.disabled = approved || entryFieldsLocked;
+      }
+    );
+    const paymentOn = isPaymentActive();
+    const creditOpen = approved && hasCreditPayment() && !entryFieldsLocked;
+    const fieldsOn = !entryFieldsLocked && (creditOpen || (!approved && paymentOn));
+    if (creditOpen) els.paymentSection?.classList.remove("d-none");
+    if (els.paymentFieldset) els.paymentFieldset.disabled = !fieldsOn;
+    els.paymentSection?.classList.toggle("oie-payment-section-locked", !fieldsOn && !creditOpen);
+  }
+
+  async function refreshInvoiceStatus() {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    const billNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
+    if (!isTallyChecked() || !billNo || !window.OIE_INVOICE_STATUS_URL) {
+      box.textContent = "";
+      box.classList.add("d-none");
+      lastSaleRecord = null;
+      syncGenerateBillPrompt();
+      return;
+    }
+    try {
+      const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.found || !data.record) {
+        box.textContent = "";
+        box.classList.add("d-none");
+        lastSaleRecord = null;
+        syncGenerateBillPrompt();
+        return;
+      }
+      lastSaleRecord = data.record;
+      box.textContent = saleStatusText(data.record);
+      box.classList.remove("d-none");
+      syncGenerateBillPrompt();
+    } catch (_err) {
+      box.textContent = "";
+      box.classList.add("d-none");
+      syncGenerateBillPrompt();
+    }
   }
 
   function resetGenerateBillChoice() {
     if (els.generateBillYes) els.generateBillYes.checked = false;
     if (els.generateBillNo) els.generateBillNo.checked = true;
+  }
+
+  function keepGenerateBillYes() {
+    if (els.generateBillYes) els.generateBillYes.checked = true;
+    if (els.generateBillNo) els.generateBillNo.checked = false;
+  }
+
+  async function lookupGeneratedInvoice(billNo) {
+    if (!billNo || !window.OIE_INVOICE_STATUS_URL) return null;
+    const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+    url.searchParams.set("bill_no", billNo);
+    const res = await fetch(url.toString(), { credentials: "same-origin" });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!data.ok || !data.found || !data.record) return null;
+    return data.record;
+  }
+
+  async function declineGeneratedBill() {
+    const billNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
+    const record = await lookupGeneratedInvoice(billNo);
+    if (!record) return;
+    keepGenerateBillYes();
+    const sure = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?",
+          { title: "Delete related bills", okLabel: "Yes", cancelLabel: "No", type: "warning" }
+        )
+      : window.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?"
+        );
+    if (!sure) return;
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: "Enter your User ID and password to delete the invoices related to this bill.",
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    }
+    if (!creds || !creds.user_id || !creds.password) return;
+    const permanent = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "This will permanently delete all invoices related to this bill.",
+          { title: "Permanently delete", okLabel: "Yes", cancelLabel: "No", type: "danger" }
+        )
+      : window.confirm("This will permanently delete all invoices related to this bill.");
+    if (!permanent) return;
+    const res = await fetch(window.OIE_INVOICE_DELETE_URL, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": window.OIE_CSRF || csrfToken(),
+      },
+      body: JSON.stringify({
+        bill_no: billNo,
+        user_id: creds.user_id,
+        password: creds.password,
+      }),
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok) {
+      const message = data.error || "Unable to delete the related invoices.";
+      if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+      else alert(message);
+      return;
+    }
+    resetGenerateBillChoice();
+    if (els.invoiceStatus) {
+      els.invoiceStatus.textContent = "";
+      els.invoiceStatus.classList.add("d-none");
+    }
+    if (window.JTCSDialog?.alert) {
+      window.JTCSDialog.alert(data.message || "Related invoices deleted.", "success");
+    }
   }
 
   function firstCategoryLineData() {
@@ -272,8 +513,8 @@
       resetGenerateBillChoice();
       return;
     }
-    const width = Math.round(9 * 96);
-    const height = Math.round(4 * 96);
+    const width = Math.round(9.4 * 96);
+    const height = Math.round(7.2 * 96);
     const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
     const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
     const features = [
@@ -323,11 +564,14 @@
     els.tallyBillWrap?.classList.toggle("d-none", !tally);
     if (!tally) {
       resetGenerateBillChoice();
+      setPaymentReceivedChoice(false);
     }
     if (tally && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
       els.tallyBillNo.value = (els.billNo.value || "").trim();
     }
+    refreshInvoiceStatus();
     const paymentOn = isPaymentActive();
+    els.paymentSection?.classList.toggle("d-none", isMiscKind() && !paymentOn);
     if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
     els.paymentSection?.classList.toggle("oie-payment-section-locked", !paymentOn);
     els.paymentLockedHint?.classList.toggle("d-none", paymentOn);
@@ -340,6 +584,7 @@
         syncFirstPaymentFromCategories();
       }
     }
+    syncGenerateBillPrompt();
   }
 
   function isEditMode() {
@@ -488,7 +733,10 @@
       return;
     }
     const amountInput = lines[0].querySelector(".oie-payment-amount");
-    if (!amountInput) return;
+    if (!amountInput || lines[0].dataset.paymentCleared === "1") {
+      updatePaymentSummary();
+      return;
+    }
     const categoryTotal = getCategoryTotal();
     // Keep payment in sync when there is a single payment line.
     amountInput.value = categoryTotal > 0 ? categoryTotal.toFixed(2) : "0";
@@ -762,6 +1010,10 @@
     select.className = "form-select oie-payment-bank";
     select.required = true;
     const accounts = paymentReceivedAccounts();
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "-- Select --";
+    select.appendChild(blank);
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -804,6 +1056,10 @@
       select.value = String(preferredValue);
       return;
     }
+    if (!preferredValue) {
+      select.value = "";
+      return;
+    }
     const cashOption = Array.from(select.options).find(function (opt) {
       return opt.value && opt.textContent.trim() === "Cash";
     });
@@ -811,10 +1067,7 @@
       select.value = cashOption.value;
       return;
     }
-    const firstOption = Array.from(select.options).find(function (opt) {
-      return opt.value;
-    });
-    if (firstOption) select.value = firstOption.value;
+    select.value = "";
   }
 
   function getPaymentTotal() {
@@ -847,12 +1100,34 @@
       "small ms-auto " + (matched || !categoryTotal ? "text-success" : "text-danger");
   }
 
+  function clearPaymentLine(line) {
+    const select = line.querySelector("select");
+    const amount = line.querySelector(".oie-payment-amount");
+    const date = line.querySelector(".oie-payment-date");
+    line.dataset.paymentCleared = "1";
+    if (select) {
+      select.value = "";
+      select.required = false;
+    }
+    if (amount) {
+      amount.value = "";
+      amount.required = false;
+    }
+    if (date) {
+      date.value = defaultPaymentDate();
+      date.required = false;
+      delete date.dataset.userEdited;
+    }
+    if (lastSaleRecord && els.invoiceStatus) {
+      els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+    }
+  }
+
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".oie-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -929,7 +1204,16 @@
     amount.required = true;
     amount.name = "PaymentAmount[]";
     amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
-    amount.addEventListener("input", updatePaymentSummary);
+    amount.addEventListener("input", function () {
+      if (String(amount.value || "").trim() !== "") line.dataset.paymentCleared = "";
+      updatePaymentSummary();
+      if (lastSaleRecord && els.invoiceStatus) {
+        els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+      }
+    });
+    select.addEventListener("change", function () {
+      if (select.value) line.dataset.paymentCleared = "";
+    });
     amountWrap.appendChild(amountLabel);
     amountWrap.appendChild(amount);
 
@@ -941,7 +1225,12 @@
     removeBtn.innerHTML = '<i class="bi bi-trash"></i>';
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".oie-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length <= 1) {
+        clearPaymentLine(line);
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();
@@ -1048,7 +1337,7 @@
       wrap.appendChild(indexHidden);
       form.appendChild(wrap);
     });
-    if (getPaymentTotal() > 0) {
+    if (isPaymentReceivedYes() || getPaymentTotal() > 0) {
       const flag = document.createElement("input");
       flag.type = "hidden";
       flag.name = "PaymentReceived";
@@ -1354,6 +1643,7 @@
     resetForm().then(function () {
       ensureCategoryLines();
       ensurePaymentLines();
+      setEntryFieldsLocked(false);
       if (entryModal) entryModal.show();
     });
   }
@@ -1672,7 +1962,14 @@
                 ? ' <span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
                 : row.work_done
                   ? ' <span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
-                  : "")
+                  : "") +
+              (row.sale_invoice
+                ? ' <span class="badge text-bg-info oie-wf-badge">' +
+                  escapeHtml(row.sale_invoice.bill_status) +
+                  " · Payment " +
+                  escapeHtml(row.sale_invoice.payment_received) +
+                  "</span>"
+                : "")
             : "") +
           "</td>" +
           '<td class="oie-account-cell">' +
@@ -1699,7 +1996,11 @@
           '" title="Edit"><i class="bi bi-pencil"></i></button> ' +
           '<button type="button" class="btn btn-outline-danger btn-sm oie-grid-delete-btn" data-id="' +
           row.entry_id +
-          '" title="Delete"><i class="bi bi-trash"></i></button>' +
+          '"' +
+          (row.payment_received
+            ? ' disabled title="Remove Payment Received in Edit, then Delete will enable"'
+            : ' title="Delete"') +
+          '><i class="bi bi-trash"></i></button>' +
           "</td>" +
           "</tr>"
         );
@@ -1808,8 +2109,10 @@
           els.customerSelected.textContent = "Customer selected from master";
           els.customerSelected.classList.remove("d-none");
         }
+        setPaymentReceivedChoice(hasPayments || !!record.payment_received);
         resetPaymentLines(record.payments && record.payments.length ? record.payments : [{}]);
         syncMiscWorkflow();
+        setEntryFieldsLocked(true);
         if (entryModal) entryModal.show();
       });
   }
@@ -1833,6 +2136,7 @@
       })
       .then(function (data) {
         if (data.ok) {
+          entryModal?.hide();
           loadGrid();
         } else {
           alert(data.error || "Delete failed.");
@@ -1884,6 +2188,7 @@
   }
 
   function saveEntry() {
+    if (entryFieldsLocked) return Promise.resolve();
     const categoryError = validateCategoryLines();
     if (categoryError) {
       alert(categoryError);
@@ -1945,7 +2250,23 @@
 
   form.addEventListener("submit", function (event) {
     event.preventDefault();
+    if (entryFieldsLocked) return;
     ensureBillNoThenSave();
+  });
+
+  document.getElementById("oieEditBtn")?.addEventListener("click", function () {
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      setEntryFieldsLocked(false);
+    });
+  });
+
+  document.getElementById("oieDeleteBtn")?.addEventListener("click", function () {
+    if (!editingEntryId) return;
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      deleteEntry(editingEntryId);
+    });
   });
 
   if (els.newEntryBtn) {
@@ -2108,9 +2429,105 @@
 
   els.workDone?.addEventListener("change", syncMiscWorkflow);
   els.tallyBill?.addEventListener("change", syncMiscWorkflow);
+  els.tallyBillNo?.addEventListener("change", refreshInvoiceStatus);
+  els.tallyBillNo?.addEventListener("blur", refreshInvoiceStatus);
+  window.jtcsRefreshInvoiceStatus = refreshInvoiceStatus;
+  window.addEventListener("focus", refreshInvoiceStatus);
+
+  els.paymentLines?.addEventListener("change", function (ev) {
+    if (!ev.target.closest("select")) return;
+    if (saleIsApproved()) syncGenerateBillPrompt();
+  });
+
+  els.paymentLines?.addEventListener("input", function () {
+    if (!lastSaleRecord || !els.invoiceStatus) return;
+    els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+  });
+
+  async function declineExistingPayment() {
+    const hasPayment = getPaymentTotal() > 0;
+    if (!hasPayment) {
+      setPaymentReceivedChoice(false);
+      syncMiscWorkflow();
+      return;
+    }
+    setPaymentReceivedChoice(true);
+    const sure = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "Payment already received for this bill will be deleted. Are you sure?",
+          { title: "Delete payment", okLabel: "Yes", cancelLabel: "No", type: "warning" }
+        )
+      : window.confirm("Payment already received for this bill will be deleted. Are you sure?");
+    if (!sure) return;
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: "Enter your User ID and password to delete this payment.",
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    }
+    if (!creds || !creds.user_id || !creds.password) return;
+    const permanent = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "This will permanently delete the payment on this bill.",
+          { title: "Permanently delete", okLabel: "Yes", cancelLabel: "No", type: "danger" }
+        )
+      : window.confirm("This will permanently delete the payment on this bill.");
+    if (!permanent) return;
+    resetPaymentLines([{}]);
+    const line = els.paymentLines?.querySelector(".oie-payment-line");
+    if (line) clearPaymentLine(line);
+    setPaymentReceivedChoice(false);
+    syncMiscWorkflow();
+    if (lastSaleRecord && els.invoiceStatus) {
+      els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+    }
+    await pushPaymentReceived(false);
+  }
+
+  els.paymentReceivedYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (!isPaymentReceivedYes()) return;
+      syncMiscWorkflow();
+      if (lastSaleRecord && els.invoiceStatus) {
+        els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+      }
+      pushPaymentReceived(true).catch(function (err) {
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(err.message || String(err), "error");
+      });
+    }, 0);
+  });
+
+  els.paymentReceivedNo?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (els.paymentReceivedNo && !els.paymentReceivedNo.checked) return;
+      declineExistingPayment().catch(function (err) {
+        setPaymentReceivedChoice(true);
+        const message = err.message || String(err);
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+        else alert(message);
+      });
+    }, 0);
+  });
+
   els.generateBillYes?.addEventListener("click", function () {
     setTimeout(function () {
       if (els.generateBillYes && els.generateBillYes.checked) openGenerateBillPopup();
+    }, 0);
+  });
+
+  els.generateBillNo?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (!els.generateBillNo || !els.generateBillNo.checked) return;
+      declineGeneratedBill().catch(function (err) {
+        keepGenerateBillYes();
+        const message = err.message || String(err);
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+        else alert(message);
+      });
     }, 0);
   });
 
@@ -2123,6 +2540,7 @@
       }
       const deleteBtn = event.target.closest(".oie-grid-delete-btn");
       if (deleteBtn) {
+        if (deleteBtn.disabled) return;
         deleteEntry(deleteBtn.getAttribute("data-id"));
       }
     });

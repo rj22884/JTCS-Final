@@ -12,6 +12,7 @@ from flask import (
 )
 
 from app.decorators import login_required, require_delete_reauth
+from app.utils.roles import has_converted_invoice_tick_role
 from app.services.bank_master_service import BankMasterService
 from app.services.gst_invoice_pdf_service import GstInvoicePdfService
 from app.services.gst_invoice_service import GstInvoiceService
@@ -152,6 +153,7 @@ def _render_invoice_form(*, voucher_type: str, page_title: str):
         service_quarters=_SERVICE_QUARTERS,
         quarter_months=_QUARTER_MONTHS,
         voucher_type=vt,
+        can_tick_converted=has_converted_invoice_tick_role(session.get("role")),
     )
 
 
@@ -437,6 +439,26 @@ def api_update_invoice(invoice_id: int):
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 
+@bp.route("/api/invoices/<int:invoice_id>/workflow", methods=["POST"], strict_slashes=False)
+@login_required
+def api_invoice_workflow(invoice_id: int):
+    if not has_converted_invoice_tick_role(session.get("role")):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Only Manager and Administrator can change Bill Status or Payment Received.",
+            }
+        ), 403
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = GstInvoiceService().update_workflow_flags(invoice_id, payload)
+        return jsonify({"ok": True, "record": record, "message": "Bill status updated."})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
 @bp.route("/api/invoices/navigate", methods=["GET"], strict_slashes=False)
 @login_required
 def api_navigate_invoice():
@@ -529,8 +551,18 @@ def api_next_invoice_no():
 @login_required
 @require_delete_reauth
 def api_delete_invoice(invoice_id: int):
+    payload = request.get_json(silent=True) or {}
     try:
-        message = GstInvoiceService().delete_record(invoice_id)
+        svc = GstInvoiceService()
+        inv = svc.repo.get_by_id(invoice_id)
+        if (
+            inv is not None
+            and svc.normalize_bill_source(getattr(inv, "BillSource", None))
+            == svc.BILL_SOURCE_MISCELLANEOUS
+            and not svc._form_flag(payload, "from_source")
+        ):
+            return jsonify({"ok": False, "error": svc.converted_edit_message(inv)}), 400
+        message = svc.delete_record(invoice_id)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

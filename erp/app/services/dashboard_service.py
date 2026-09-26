@@ -35,6 +35,7 @@ TODAY_ACTIVITY_LABELS = {
     "expense": "Expense",
     "sales": "Sales",
     "total": "Total Amount",
+    "pending_sale": "Sale / Pending",
 }
 
 
@@ -90,6 +91,10 @@ class TodayActivitySummary:
     cash_amount: Decimal
     bank_lines: list[TodayActivityBankLine]
     bank_total: Decimal
+    sale_total_today: Decimal = Decimal("0.00")
+    sale_total_cumulative: Decimal = Decimal("0.00")
+    pending_amount_today: Decimal = Decimal("0.00")
+    pending_amount_cumulative: Decimal = Decimal("0.00")
 
 
 class DashboardService:
@@ -752,6 +757,7 @@ class DashboardService:
 
         bank_total = sum((line.amount for line in bank_lines), Decimal("0.00"))
 
+        sale_card = self.pending_sale_totals(system_date)
         return TodayActivitySummary(
             system_date=system_date,
             transaction_count=int(row["txn_count"] or 0),
@@ -762,7 +768,113 @@ class DashboardService:
             cash_amount=cash_amount.quantize(Decimal("0.01")),
             bank_lines=bank_lines,
             bank_total=Decimal(str(bank_total)).quantize(Decimal("0.01")),
+            sale_total_today=sale_card["sale_today"],
+            sale_total_cumulative=sale_card["sale_cumulative"],
+            pending_amount_today=sale_card["pending_today"],
+            pending_amount_cumulative=sale_card["pending_cumulative"],
         )
+
+    def pending_sale_totals(self, system_date: date | None = None) -> dict:
+        """Generated Miscellaneous sale bills: inclusive total and unpaid balance."""
+        system_date = system_date or date.today()
+        try:
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().rebifurcate_miscellaneous_inclusive()
+        except Exception:
+            db.session.rollback()
+        rows = self._miscellaneous_sale_rows()
+        sale_today = Decimal("0.00")
+        sale_all = Decimal("0.00")
+        pending_today = Decimal("0.00")
+        pending_all = Decimal("0.00")
+        for row in rows:
+            amount = row["sale_amount"]
+            pending = row["pending_amount"]
+            sale_all += amount
+            pending_all += pending
+            if row["invoice_date"] == system_date:
+                sale_today += amount
+                pending_today += pending
+        return {
+            "sale_today": sale_today.quantize(Decimal("0.01")),
+            "sale_cumulative": sale_all.quantize(Decimal("0.01")),
+            "pending_today": pending_today.quantize(Decimal("0.01")),
+            "pending_cumulative": pending_all.quantize(Decimal("0.01")),
+        }
+
+    def _miscellaneous_sale_rows(self) -> list[dict]:
+        """Generated Miscellaneous bills. Pending means payment is not received yet."""
+        from flask import url_for
+
+        from app.models.others import OthersIncomeExpenseDetail, OthersIncomeExpenseMaster, WorkMaster
+
+        entries = list(
+            db.session.scalars(
+                select(OthersIncomeExpenseMaster)
+                .where(
+                    OthersIncomeExpenseMaster.IsActive == True,
+                    OthersIncomeExpenseMaster.TallyBillGenerated == True,
+                )
+                .order_by(
+                    OthersIncomeExpenseMaster.WorkDate.desc(),
+                    OthersIncomeExpenseMaster.EntryID.desc(),
+                )
+            ).all()
+        )
+        if not entries:
+            return []
+        work_ids = {entry.WorkID for entry in entries if entry.WorkID}
+        work_names: dict[int, str] = {}
+        if work_ids:
+            for work in db.session.scalars(
+                select(WorkMaster).where(WorkMaster.WorkID.in_(work_ids))
+            ).all():
+                work_names[int(work.WorkID)] = (work.WorkName or "").strip()
+        entry_ids = [int(entry.EntryID) for entry in entries]
+        detail_by_entry: dict[int, str] = {}
+        if entry_ids:
+            details = db.session.scalars(
+                select(OthersIncomeExpenseDetail)
+                .where(OthersIncomeExpenseDetail.EntryID.in_(entry_ids))
+                .order_by(OthersIncomeExpenseDetail.LineSequence.asc())
+            ).all()
+            sub_ids = {row.WorkTypeID for row in details if row.WorkTypeID}
+            sub_names: dict[int, str] = {}
+            if sub_ids:
+                from app.models.transactions import WorkTypeMaster
+
+                for sub in db.session.scalars(
+                    select(WorkTypeMaster).where(WorkTypeMaster.WorkTypeID.in_(sub_ids))
+                ).all():
+                    sub_names[int(sub.WorkTypeID)] = (sub.SubWorkType or "").strip()
+            for row in details:
+                if int(row.EntryID) in detail_by_entry:
+                    continue
+                detail_by_entry[int(row.EntryID)] = sub_names.get(int(row.WorkTypeID or 0), "")
+        result = []
+        for entry in entries:
+            sale_amount = Decimal(str(entry.Amount or 0)).quantize(Decimal("0.01"))
+            received = bool(getattr(entry, "PaymentReceived", False))
+            work_name = work_names.get(int(entry.WorkID), "") if entry.WorkID else ""
+            sub_name = detail_by_entry.get(int(entry.EntryID), "")
+            label = " / ".join(part for part in (work_name, sub_name) if part) or "Miscellaneous"
+            result.append(
+                {
+                    "invoice_id": int(entry.EntryID),
+                    "invoice_date": entry.WorkDate,
+                    "invoice_no": entry.BillNo or "",
+                    "customer": entry.CustomerName or "—",
+                    "work": label,
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00") if received else sale_amount,
+                    "received": received,
+                    "entry_id": int(entry.EntryID),
+                    "source_url": url_for("miscellaneous.index", load_entry=int(entry.EntryID)),
+                    "bill_no": entry.BillNo or "",
+                }
+            )
+        return result
 
     def _validate_today_activity_metric(self, metric_key: str) -> str:
         key = (metric_key or "").strip().lower()
@@ -1594,12 +1706,81 @@ class DashboardService:
         )
         return result
 
+    def pending_sale_details(
+        self,
+        *,
+        part: str | None,
+        scope: str | None,
+        system_date: date | None = None,
+    ) -> dict:
+        """Summary grid of Miscellaneous bills behind the Sale / Pending card."""
+        system_date = system_date or date.today()
+        part_key = (part or "sale").strip().lower()
+        if part_key not in {"sale", "pending"}:
+            part_key = "sale"
+        scope_key = (scope or "today").strip().lower()
+        if scope_key not in {"today", "cumulative"}:
+            scope_key = "today"
+        rows_src = self._miscellaneous_sale_rows()
+        if scope_key == "today":
+            rows_src = [row for row in rows_src if row["invoice_date"] == system_date]
+        if part_key == "pending":
+            rows_src = [row for row in rows_src if row["pending_amount"] > 0]
+        grid = []
+        total = Decimal("0.00")
+        for row in rows_src:
+            amount = row["sale_amount"] if part_key == "sale" else row["pending_amount"]
+            total += amount
+            entry_date = row["invoice_date"].isoformat() if row["invoice_date"] else ""
+            status = "Received" if row["received"] else "Pending"
+            grid.append(
+                {
+                    "row_key": f"psale-{row['invoice_id']}",
+                    "source": "system",
+                    "can_edit": False,
+                    "can_delete": False,
+                    "entry_date": entry_date,
+                    "description": status,
+                    "reference": row["bill_no"] or row["invoice_no"],
+                    "work": row["work"],
+                    "customer": row["customer"],
+                    "amount": str(amount),
+                    "source_module": "miscellaneous",
+                    "source_module_id": row["entry_id"],
+                    "source_url": row["source_url"],
+                    "can_open": bool(row["source_url"]),
+                }
+            )
+        part_label = "Total Sale" if part_key == "sale" else "Pending Amount"
+        scope_label = "Today" if scope_key == "today" else "Cumulative"
+        when = (
+            system_date.isoformat()
+            if scope_key == "today"
+            else f"all · as of {system_date.isoformat()}"
+        )
+        return {
+            "metric_key": "pending_sale",
+            "metric_label": f"{part_label} — {scope_label}",
+            "date_from": system_date.isoformat() if scope_key == "today" else "",
+            "date_to": system_date.isoformat() if scope_key == "today" else "",
+            "total": str(total.quantize(Decimal("0.01"))),
+            "opening_balance": None,
+            "rows": grid,
+            "row_count": len(grid),
+            "read_only": True,
+            "scope": "today_activity",
+            "detail_button": "Detail",
+            "subtitle": when,
+        }
+
     def get_today_activity_details(
         self,
         metric_key: str,
         *,
         account_id: int | None = None,
         system_date: date | None = None,
+        part: str | None = None,
+        scope: str | None = None,
     ) -> dict:
         """Drill-down rows for Today's Activity Summary tiles (system date only)."""
         metric_key = self._validate_today_activity_metric(metric_key)
@@ -1633,6 +1814,10 @@ class DashboardService:
         elif metric_key == "sales":
             rows = self._daily_metric_rows("SaleAmount", system_date, system_date)
             total = summary.sale_amount
+        elif metric_key == "pending_sale":
+            return self.pending_sale_details(
+                part=part, scope=scope, system_date=system_date
+            )
         else:  # total
             rows = self._daily_metric_rows("TotalAmount", system_date, system_date)
             total = summary.total_amount

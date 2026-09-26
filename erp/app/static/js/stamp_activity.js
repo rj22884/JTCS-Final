@@ -308,9 +308,7 @@
     if (els.paymentAddBtn) els.paymentAddBtn.disabled = !active && !editingStampId;
     els.paymentLines?.querySelectorAll("input, select, button").forEach(function (el) {
       if (editingStampId) {
-        el.disabled = el.classList.contains("stamp-payment-remove")
-          ? (els.paymentLines?.querySelectorAll(".stamp-payment-line") || []).length <= 1
-          : false;
+        el.disabled = false;
         return;
       }
       if (el.classList.contains("stamp-payment-remove")) {
@@ -1707,10 +1705,9 @@
 
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".stamp-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".stamp-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -1753,7 +1750,15 @@
     removeBtn.innerHTML = "<i class=\"bi bi-trash\"></i>";
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".stamp-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".stamp-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".stamp-payment-amount");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();

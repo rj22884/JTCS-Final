@@ -717,6 +717,15 @@ class OthersIncomeExpenseService:
             item["account_label"] = account_map.get((item.get("bill_no") or "").strip().upper(), "—")
             if not item.get("payment_received") and item.get("account_label") not in (None, "", "—"):
                 item["payment_received"] = True
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        status_map = GstInvoiceService().sale_status_by_bill_nos(
+            [item.get("tally_bill_no") or item.get("bill_no") or "" for item in entries]
+            + [item.get("bill_no") or "" for item in entries]
+        )
+        for item in entries:
+            key = (item.get("tally_bill_no") or item.get("bill_no") or "").strip().upper()
+            item["sale_invoice"] = status_map.get(key)
         return entries
 
     def get_entry(self, entry_id: int) -> dict:
@@ -978,7 +987,6 @@ class OthersIncomeExpenseService:
         has_positive_payment = self._form_has_positive_payment_amount(form)
         require_payments = (
             ledger_kind != self.LEDGER_MISC
-            or payment_received
             or has_positive_payment
             or extra_payment_lines
         )
@@ -993,7 +1001,9 @@ class OthersIncomeExpenseService:
             if require_payments and not payment_lines:
                 raise ValueError("At least one payment mode is required.")
         if ledger_kind == self.LEDGER_MISC:
-            payment_received = bool(payment_lines)
+            payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received") or bool(
+                payment_lines
+            )
             if payment_received and not tally_bill:
                 raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
@@ -1110,6 +1120,13 @@ class OthersIncomeExpenseService:
             else:
                 message = f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount})."
 
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().sync_payment_received_for_bill(row.BillNo, payment_received)
+            tally_key = (row.TallyBillNo or "").strip()
+            if tally_key and tally_key != (row.BillNo or "").strip():
+                GstInvoiceService().sync_payment_received_for_bill(tally_key, payment_received)
+
             return OthersIncomeExpenseSaveResult(
                 entry_id=row.EntryID,
                 bill_no=row.BillNo,
@@ -1132,6 +1149,27 @@ class OthersIncomeExpenseService:
             raise ValueError("Income / expense record not found.")
 
         bill_no = row.BillNo
+        if bool(getattr(row, "PaymentReceived", False)):
+            raise ValueError("Remove Payment Received in Edit before deleting this entry.")
+        daily = self._find_daily_for_bill(bill_no)
+        if daily:
+            for line in self._load_payment_lines(daily):
+                try:
+                    amount = Decimal(str(line.get("amount") or "0"))
+                except (InvalidOperation, ValueError):
+                    amount = Decimal("0")
+                if amount > 0:
+                    raise ValueError("Remove the payment in Edit before deleting this entry.")
+        tally_no = (getattr(row, "TallyBillNo", None) or "").strip()
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        invoices = GstInvoiceService()
+        invoices.delete_invoices_for_bill_if_any(bill_no)
+        if tally_no and tally_no != (bill_no or "").strip():
+            invoices.delete_invoices_for_bill_if_any(tally_no)
+        row = self.entry_repo.get_by_id(entry_id)
+        if row is None:
+            raise ValueError("Income / expense record not found.")
         try:
             with db.session.begin_nested():
                 self._remove_linked_transactions(bill_no)

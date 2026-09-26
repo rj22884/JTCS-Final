@@ -1,26 +1,24 @@
-/* Compact 9in × 4in sales-invoice bill popup */
+/* Generate Bill window is sized to the invoice, not a tall empty page. */
 html,
 body.mgb-body {
   margin: 0;
-  height: 100%;
+  height: auto;
   overflow: hidden;
-  background: #f1f5f9;
+  background: #fff;
   font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 11px;
 }
 
 .mgb-shell {
   box-sizing: border-box;
-  width: 9in;
+  width: 9.4in;
   max-width: 100vw;
-  height: 4in;
-  max-height: 100vh;
-  margin: 0 auto;
-  padding: 0.12in 0.16in;
+  height: auto;
+  margin: 0;
+  padding: 0.12in 0.16in 0.14in;
   display: flex;
   flex-direction: column;
   background: #fff;
-  border: 1px solid #cbd5e1;
 }
 
 .mgb-header {
@@ -36,12 +34,10 @@ body.mgb-body {
 }
 
 .mgb-form {
-  flex: 1;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.06in;
-  overflow: auto;
+  overflow: visible;
 }
 
 .mgb-grid {
@@ -56,6 +52,21 @@ body.mgb-body {
 
 .mgb-span-4 {
   grid-column: 1 / -1;
+}
+
+.mgb-banks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.7rem;
+}
+
+.mgb-bank-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .mgb-form .form-label {
@@ -84,17 +95,25 @@ body.mgb-body {
 
 .mgb-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: 0.3rem;
-  margin-top: auto;
   padding-top: 0.06in;
   border-top: 1px solid #e2e8f0;
+}
+
+.mgb-convert-btn {
+  margin-left: auto;
+  padding: 0.38rem 0.85rem;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 @media (max-width: 860px) {
   .mgb-shell {
     width: 100vw;
-    height: 100vh;
+    height: auto;
   }
 
   .mgb-grid {

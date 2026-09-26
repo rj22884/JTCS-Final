@@ -35,6 +35,10 @@
     downloadBtn: document.getElementById("mgbDownloadBtn"),
     closeBtn: document.getElementById("mgbCloseBtn"),
     closeBtn2: document.getElementById("mgbCloseBtn2"),
+    convertBtn: document.getElementById("mgbConvertBtn"),
+    editBtn: document.getElementById("mgbEditBtn"),
+    deleteBtn: document.getElementById("mgbDeleteBtn"),
+    banks: document.getElementById("mgbBanks"),
   };
 
   function money(n) {
@@ -90,31 +94,37 @@
   }
 
   function computeTaxes() {
-    const rate = money(els.rate?.value);
+    // Category amount is GST-inclusive. ₹400 stays ₹400; tax is taken out of it.
+    const gross = money(els.rate?.value);
     const gstPct = money(els.gstRate?.value);
     const placeCode = selectedStateCode();
     const seller = String(cfg.companyStateCode || "05").trim();
-    const taxable = rate;
+    const intra = !!(placeCode && placeCode === seller);
+    let taxable = gross;
     let cgstRate = 0;
     let sgstRate = 0;
     let igstRate = 0;
     let cgstAmt = 0;
     let sgstAmt = 0;
     let igstAmt = 0;
-    let taxType = "IGST";
+    let taxType = intra ? "CGST_SGST" : "IGST";
 
-    if (placeCode && placeCode === seller) {
-      taxType = "CGST_SGST";
-      cgstRate = money(gstPct / 2);
-      sgstRate = cgstRate;
-      cgstAmt = money((taxable * cgstRate) / 100);
-      sgstAmt = money((taxable * sgstRate) / 100);
-    } else {
-      igstRate = gstPct;
-      igstAmt = money((taxable * igstRate) / 100);
+    if (gross > 0 && gstPct > 0) {
+      taxable = money((gross * 100) / (100 + gstPct));
+      if (intra) {
+        taxType = "CGST_SGST";
+        cgstRate = money(gstPct / 2);
+        sgstRate = cgstRate;
+        cgstAmt = money((taxable * cgstRate) / 100);
+        sgstAmt = money((taxable * sgstRate) / 100);
+      } else {
+        taxType = "IGST";
+        igstRate = gstPct;
+        igstAmt = money((taxable * igstRate) / 100);
+      }
     }
 
-    const invoiceValue = money(taxable + cgstAmt + sgstAmt + igstAmt);
+    const invoiceValue = gross;
 
     if (els.placeCode) els.placeCode.value = placeCode;
     if (els.cgst) els.cgst.value = cgstAmt ? fmt(cgstAmt) + " (" + fmt(cgstRate) + "%)" : "0.00";
@@ -124,8 +134,12 @@
     if (els.taxHint) {
       els.taxHint.textContent =
         taxType === "CGST_SGST"
-          ? "Intra-state: CGST + SGST (from item GST%)."
-          : "Inter-state: IGST (from item GST%).";
+          ? "Amount includes GST. Taxable ₹" +
+            fmt(taxable) +
+            " · CGST + SGST stay inside this total."
+          : "Amount includes GST. Taxable ₹" +
+            fmt(taxable) +
+            " · IGST stays inside this total.";
     }
 
     return {
@@ -177,8 +191,26 @@
       notes: "",
       tally_bill_no: (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim(),
       bill_source: "Miscellaneous",
+      payment_bank_account_ids: selectedBankIds(),
       lines: [line],
     };
+  }
+
+  const bankOrder = [];
+
+  function selectedBankIds() {
+    return bankOrder.slice();
+  }
+
+  function setSelectedBanks(ids) {
+    bankOrder.length = 0;
+    (ids || []).forEach(function (id) {
+      const key = String(id);
+      if (bankOrder.indexOf(key) < 0 && bankOrder.length < 2) bankOrder.push(key);
+    });
+    els.banks?.querySelectorAll(".mgb-bank").forEach(function (box) {
+      box.checked = bankOrder.indexOf(box.value) >= 0;
+    });
   }
 
   function validateForm() {
@@ -190,6 +222,7 @@
     if (!(els.state?.value || "").trim()) return "State is required.";
     const rate = Number(els.rate?.value);
     if (!Number.isFinite(rate) || rate < 0) return "Valid rate is required.";
+    if (!selectedBankIds().length) return "Select a bank account.";
     return "";
   }
 
@@ -199,6 +232,7 @@
 
   async function saveInvoice() {
     const payload = collectPayload(false);
+    payload.from_source = true;
     const existingId = (els.invoiceId?.value || "").trim();
     const url = existingId ? apiUrl(cfg.updateUrl, existingId) : cfg.createUrl;
     const res = await fetch(url, {
@@ -376,9 +410,176 @@
   els.downloadBtn?.addEventListener("click", function () {
     requestPdf("attachment");
   });
+  els.banks?.addEventListener("change", function (event) {
+    const box = event.target.closest(".mgb-bank");
+    if (!box) return;
+    const id = box.value;
+    const idx = bankOrder.indexOf(id);
+    if (box.checked) {
+      if (bankOrder.length >= 2) {
+        box.checked = false;
+        showError("Select at most 2 bank accounts.");
+        return;
+      }
+      if (idx < 0) bankOrder.push(id);
+      showError("");
+      return;
+    }
+    if (idx >= 0) bankOrder.splice(idx, 1);
+  });
+
+  async function editInvoice() {
+    showError("");
+    const billNo = (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim();
+    if (!billNo || !cfg.lookupUrl) {
+      showError("Invoice number is required before edit.");
+      return;
+    }
+    const url = new URL(cfg.lookupUrl, window.location.origin);
+    url.searchParams.set("bill_no", billNo);
+    const res = await fetch(url.toString(), {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok || !data.found || !data.record) {
+      showError(data.error || "No saved bill found to edit.");
+      return;
+    }
+    const rec = data.record;
+    if (els.invoiceId) els.invoiceId.value = rec.invoice_id ? String(rec.invoice_id) : "";
+    if (els.invoiceNo && rec.invoice_no) els.invoiceNo.value = rec.invoice_no;
+    if (els.date && rec.invoice_date) els.date.value = String(rec.invoice_date).slice(0, 10);
+    if (els.customerName && rec.customer_name) els.customerName.value = rec.customer_name;
+    if (els.rate && rec.invoice_value != null) els.rate.value = String(rec.invoice_value);
+    const line = (rec.lines || [])[0] || {};
+    if (els.gstRate && line.gst_rate_percent != null) {
+      els.gstRate.value = String(line.gst_rate_percent);
+    }
+    if (els.item && (line.particulars || line.item_name)) {
+      els.item.value = line.item_name || line.particulars;
+    }
+    setSelectedBanks(rec.payment_bank_account_ids || []);
+    computeTaxes();
+    showOk("Bill loaded for edit. Preview or Download saves the changes.");
+  }
+
+  async function deleteInvoice() {
+    showError("");
+    const invoiceId = (els.invoiceId?.value || "").trim();
+    if (!invoiceId) {
+      showError("Save or Edit the bill before delete.");
+      return;
+    }
+    if (!window.confirm("Delete this generated bill?")) return;
+    const userId = window.prompt("User ID");
+    if (!userId) return;
+    const password = window.prompt("Password");
+    if (!password) return;
+    const res = await fetch(apiUrl(cfg.deleteUrl, invoiceId), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": cfg.csrf || "",
+      },
+      body: JSON.stringify({ user_id: userId, password: password, from_source: true }),
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok) {
+      showError(data.error || data.message || "Unable to delete bill.");
+      return;
+    }
+    if (els.invoiceId) els.invoiceId.value = "";
+    setSelectedBanks([]);
+    showOk(data.message || "Bill deleted.");
+  }
+
+  async function convertToInvoice() {
+    showError("");
+    showOk("");
+    const err = validateForm();
+    if (err) {
+      showError(err);
+      return;
+    }
+    if (els.convertBtn) els.convertBtn.disabled = true;
+    try {
+      const saved = await saveInvoice();
+      const message =
+        "Converted to Sale / Service Invoice" +
+        (saved.invoice_no ? " — " + saved.invoice_no : "") +
+        ". Open that invoice for Bill Status and Payment Received.";
+      if (window.JTCSDialog?.alert) {
+        await window.JTCSDialog.alert(message, "success", {
+          title: "Converted to invoice",
+          okLabel: "OK",
+        });
+      } else {
+        window.alert(message);
+      }
+      try {
+        if (window.opener && typeof window.opener.jtcsRefreshInvoiceStatus === "function") {
+          window.opener.jtcsRefreshInvoiceStatus();
+        }
+      } catch (_err) {
+        /* opener may be closed */
+      }
+      window.close();
+      return;
+    } catch (err) {
+      showError(err.message || "Unable to convert to invoice.");
+    } finally {
+      if (els.convertBtn) els.convertBtn.disabled = false;
+    }
+  }
+
+  els.convertBtn?.addEventListener("click", function () {
+    convertToInvoice();
+  });
+
   els.closeBtn?.addEventListener("click", closeWindow);
   els.closeBtn2?.addEventListener("click", closeWindow);
+  els.editBtn?.addEventListener("click", function () {
+    editInvoice().catch(function (err) {
+      showError(err.message || "Unable to edit bill.");
+    });
+  });
+  els.deleteBtn?.addEventListener("click", function () {
+    deleteInvoice().catch(function (err) {
+      showError(err.message || "Unable to delete bill.");
+    });
+  });
+
+  function fitWindowToInvoice() {
+    const shell = document.querySelector(".mgb-shell");
+    if (!shell || !window.resizeTo) return;
+    const chromeX = Math.max(0, window.outerWidth - window.innerWidth);
+    const chromeY = Math.max(0, window.outerHeight - window.innerHeight);
+    const width = Math.ceil(shell.offsetWidth + chromeX);
+    const height = Math.ceil(shell.offsetHeight + chromeY);
+    if (Math.abs(window.outerWidth - width) < 12 && Math.abs(window.outerHeight - height) < 12) {
+      return;
+    }
+    const left = Math.max(0, Math.round(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.round(((screen.availHeight || height) - height) / 2));
+    window.resizeTo(width, height);
+    window.moveTo(left, top);
+  }
 
   loadSeed();
   computeTaxes();
+  requestAnimationFrame(function () {
+    fitWindowToInvoice();
+    setTimeout(fitWindowToInvoice, 80);
+  });
+  window.addEventListener("resize", function () {
+    clearTimeout(window.__mgbFitTimer);
+    window.__mgbFitTimer = setTimeout(fitWindowToInvoice, 60);
+  });
 })();

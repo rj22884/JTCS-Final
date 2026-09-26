@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260911bankpct1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260925pendsale1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -86,6 +86,48 @@
             <div class="small text-muted">Total Amount</div>
             <strong class="{% if today_activity.total_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
           </button>
+          {% if today_activity.pending_amount_cumulative > 0 %}
+          <div class="dash-today-metric dash-pending-sale-card" title="Generated bills waiting for receiving">
+            <div class="small text-muted">Sale / Pending</div>
+            <table class="dash-pending-sale-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Today</th>
+                  <th>Cumulative</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th>Total Sale</th>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="sale" data-sale-scope="today"
+                            data-label="Total Sale — Today">₹ {{ '%.2f'|format(today_activity.sale_total_today) }}</button>
+                  </td>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="sale" data-sale-scope="cumulative"
+                            data-label="Total Sale — Cumulative">₹ {{ '%.2f'|format(today_activity.sale_total_cumulative) }}</button>
+                  </td>
+                </tr>
+                <tr>
+                  <th>Pending Amount</th>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="pending" data-sale-scope="today"
+                            data-label="Pending Amount — Today">₹ {{ '%.2f'|format(today_activity.pending_amount_today) }}</button>
+                  </td>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="pending" data-sale-scope="cumulative"
+                            data-label="Pending Amount — Cumulative">₹ {{ '%.2f'|format(today_activity.pending_amount_cumulative) }}</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -782,7 +824,7 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260916orphan2"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260925sale2"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>

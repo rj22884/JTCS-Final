@@ -364,6 +364,18 @@
   border-radius: 0.375rem;
 }
 
+.oie-generate-bill-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.oie-pay-received-choice {
+  margin-left: auto;
+  text-align: right;
+}
+
 .oie-generate-bill-label {
   font-size: 0.875rem;
   font-weight: 600;

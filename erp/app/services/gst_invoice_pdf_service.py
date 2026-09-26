@@ -13,7 +13,9 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
+    Flowable,
     Image,
     Paragraph,
     SimpleDocTemplate,
@@ -46,6 +48,47 @@ class _LinkedImage(Image):
                 relative=1,
                 thickness=0,
             )
+
+
+class _StampWithSignature(Flowable):
+    """Round stamp with the signature drawn across it."""
+
+    def __init__(self, stamp_path: str, sign_path: str | None, size: float):
+        super().__init__()
+        self.stamp_path = stamp_path
+        self.sign_path = sign_path
+        self.size = size
+
+    def wrap(self, availWidth, availHeight):
+        return self.size, self.size
+
+    def draw(self):
+        self.canv.drawImage(
+            self.stamp_path,
+            0,
+            0,
+            width=self.size,
+            height=self.size,
+            mask="auto",
+            preserveAspectRatio=True,
+            anchor="c",
+        )
+        if not self.sign_path:
+            return
+        sign_w = self.size * 0.92
+        sign_h = self.size * 0.42
+        x = (self.size - sign_w) / 2
+        y = (self.size - sign_h) / 2
+        self.canv.drawImage(
+            self.sign_path,
+            x,
+            y,
+            width=sign_w,
+            height=sign_h,
+            mask="auto",
+            preserveAspectRatio=True,
+            anchor="c",
+        )
 
 
 class GstInvoicePdfService:
@@ -112,6 +155,7 @@ class GstInvoicePdfService:
             "pay_account_holder": header.get("PayAccountHolder") or "",
             "pay_account_type": header.get("PayAccountType") or "",
             "pay_upi_id": header.get("PayUpiId") or "",
+            "pay_banks": self._banks_from_header(header),
             "lines": [
                 self._pdf_line_from_build(ln) for ln in lines
             ],
@@ -227,14 +271,63 @@ class GstInvoicePdfService:
             return None
         return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
-    def _upi_qr_image(self, data: dict) -> Image | None:
+    def _banks_for_pdf(self, data: dict) -> list[dict]:
+        banks = data.get("pay_banks") or []
+        if isinstance(banks, list) and banks:
+            return [row for row in banks if isinstance(row, dict)][:2]
+        upi = (data.get("pay_upi_id") or "").strip()
+        number = (data.get("pay_account_number") or "").strip()
+        if not upi and not number:
+            return []
+        return [
+            {
+                "bank_name": data.get("pay_bank_name") or "",
+                "account_number": number,
+                "ifsc_code": data.get("pay_ifsc") or "",
+                "branch_name": data.get("pay_branch") or "",
+                "account_holder_name": data.get("pay_account_holder") or "",
+                "account_type": data.get("pay_account_type") or "",
+                "upi_id": upi,
+            }
+        ]
+
+    def _banks_from_header(self, header: dict) -> list[dict]:
+        import json
+
+        raw = header.get("PayBankAccounts") or ""
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                parsed = []
+            if isinstance(parsed, list):
+                return [row for row in parsed if isinstance(row, dict)][:2]
+        upi = (header.get("PayUpiId") or "").strip()
+        number = (header.get("PayAccountNumber") or "").strip()
+        if not upi and not number:
+            return []
+        return [
+            {
+                "account_id": header.get("PaymentBankAccountID"),
+                "bank_name": header.get("PayBankName") or "",
+                "account_number": number,
+                "ifsc_code": header.get("PayIFSC") or "",
+                "branch_name": header.get("PayBranch") or "",
+                "account_holder_name": header.get("PayAccountHolder") or "",
+                "account_type": header.get("PayAccountType") or "",
+                "upi_id": upi,
+            }
+        ]
+
+    def _upi_qr_image(self, data: dict, size: float | None = None) -> Image | None:
         png = self._upi_qr_png_bytes(data)
         if not png:
             return None
+        side = size if size and size > 0 else 32 * mm
         return _LinkedImage(
             io.BytesIO(png),
-            width=32 * mm,
-            height=32 * mm,
+            width=side,
+            height=side,
             link_url=self.upi_intent_url(data),
         )
 
@@ -361,21 +454,63 @@ class GstInvoicePdfService:
             left_col.append(Spacer(1, 3))
         left_col.extend(left_bits)
 
-        right_col = [
-            Paragraph(
-                f"Invoice Value: <b>Rs. {self._fmt(data['invoice_value'])}</b>",
-                small_r,
-            ),
-            Paragraph(f"Invoice No: <b>{data['invoice_no']}</b>", small_r),
-            Paragraph(
-                f"Invoice Date: <b>{self._display_date(data['invoice_date'])}</b>",
-                small_r,
-            ),
+        banks = self._banks_for_pdf(data)
+        right_bank = banks[0] if banks else None
+        left_bank = banks[1] if len(banks) > 1 else None
+        qr_bank = next(
+            (bank for bank in banks if (bank.get("upi_id") or "").strip()),
+            None,
+        )
+        if qr_bank:
+            data = {
+                **data,
+                "pay_upi_id": qr_bank.get("upi_id") or "",
+                "pay_bank_name": qr_bank.get("bank_name") or "",
+                "pay_account_holder": qr_bank.get("account_holder_name") or "",
+            }
+        invoice_no = str(data.get("invoice_no") or "")
+        qr_side = stringWidth("Invoice No: ", "Helvetica", 8) + stringWidth(
+            invoice_no, "Helvetica-Bold", 8
+        )
+        right_w = content_w * 0.38
+        right_rows = [
+            [
+                Paragraph(
+                    f"Invoice Value: <b>Rs. {self._fmt(data['invoice_value'])}</b>",
+                    small_r,
+                )
+            ],
+            [Paragraph(f"Invoice No: <b>{invoice_no}</b>", small_r)],
+            [
+                Paragraph(
+                    f"Invoice Date: <b>{self._display_date(data['invoice_date'])}</b>",
+                    small_r,
+                )
+            ],
         ]
+        qr_img = self._upi_qr_image(data, qr_side)
+        if qr_img is not None:
+            qr_img.hAlign = "RIGHT"
+            right_rows.append([Spacer(1, 1)])
+            right_rows.append([qr_img])
+        right_col = Table(right_rows, colWidths=[right_w])
+        right_col.hAlign = "RIGHT"
+        right_col.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
 
         header_table = Table(
             [[left_col, right_col]],
-            colWidths=[content_w * 0.62, content_w * 0.38],
+            colWidths=[content_w * 0.62, right_w],
         )
         header_table.hAlign = "LEFT"
         header_table.setStyle(
@@ -585,71 +720,33 @@ class GstInvoicePdfService:
         story.append(totals)
         story.append(Spacer(1, 8))
 
-        # Payment bank details + UPI QR (just below Invoice Value)
-        if data.get("pay_account_number") or data.get("pay_bank_name") or data.get("pay_upi_id"):
-            bank_lines = [
-                Paragraph("<b>Payment / Bank Details</b>", cell_b),
-                Paragraph(
-                    f"<b>Bank Name:</b> {data.get('pay_bank_name') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>Account Holder:</b> {data.get('pay_account_holder') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>Account Number:</b> {data.get('pay_account_number') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>IFSC Code:</b> {data.get('pay_ifsc') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>Branch:</b> {data.get('pay_branch') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>Account Type:</b> {data.get('pay_account_type') or '—'}",
-                    small,
-                ),
-                Paragraph(
-                    f"<b>UPI ID:</b> {data.get('pay_upi_id') or '—'}",
-                    small,
-                ),
-            ]
-            qr_img = self._upi_qr_image(data)
-            qr_col: list = []
-            if qr_img is not None:
-                qr_col.append(qr_img)
-                qr_col.append(Spacer(1, 2))
-                qr_col.append(
+        if right_bank:
+            small_l = ParagraphStyle("BankL", parent=small, alignment=TA_LEFT)
+            small_bank_r = ParagraphStyle("BankR", parent=small, alignment=TA_RIGHT)
+
+            def bank_lines(bank: dict | None, style) -> list:
+                if not bank:
+                    return [Paragraph("", style)]
+                return [
+                    Paragraph("<b>Bank Details</b>", style),
+                    Paragraph(f"<b>Bank:</b> {bank.get('bank_name') or '—'}", style),
                     Paragraph(
-                        f"Tap / scan to pay Rs. {self._fmt(data.get('invoice_value'))}",
-                        ParagraphStyle(
-                            "QrCap",
-                            parent=small,
-                            alignment=TA_CENTER,
-                            fontSize=7,
-                        ),
-                    )
-                )
-            else:
-                qr_col.append(
+                        f"<b>A/c No:</b> {bank.get('account_number') or '—'}",
+                        style,
+                    ),
+                    Paragraph(f"<b>IFSC:</b> {bank.get('ifsc_code') or '—'}", style),
+                    Paragraph(f"<b>Branch:</b> {bank.get('branch_name') or '—'}", style),
                     Paragraph(
-                        "UPI QR not available<br/>(set UPI ID on bank master).",
-                        ParagraphStyle(
-                            "QrMiss",
-                            parent=small,
-                            alignment=TA_CENTER,
-                            fontSize=7,
-                            textColor=colors.HexColor("#7F8C8D"),
-                        ),
-                    )
-                )
+                        f"<b>Holder:</b> {bank.get('account_holder_name') or '—'}",
+                        style,
+                    ),
+                    Paragraph(f"<b>UPI:</b> {bank.get('upi_id') or '—'}", style),
+                ]
+
+            # One account stays on the right. Two accounts: second on the left, first on the right.
             pay_table = Table(
-                [[bank_lines, qr_col]],
-                colWidths=[content_w * 0.70, content_w * 0.30],
+                [[bank_lines(left_bank, small_l), bank_lines(right_bank, small_bank_r)]],
+                colWidths=[content_w * 0.50, content_w * 0.50],
             )
             pay_table.hAlign = "LEFT"
             pay_table.setStyle(
@@ -658,50 +755,52 @@ class GstInvoicePdfService:
                         ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#E8F3FC")),
                         ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#D7E0EA")),
                         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                        ("TOPPADDING", (0, 0), (-1, -1), 5),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                        ("ALIGN", (1, 0), (1, 0), "CENTER"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                        ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
                     ]
                 )
             )
             story.append(pay_table)
-            story.append(Spacer(1, 12))
+            story.append(Spacer(1, 8))
         else:
             story.append(Spacer(1, 8))
 
         story.append(Paragraph(f"for {company['name']}", ParagraphStyle("SignFor", parent=small, alignment=TA_RIGHT)))
         stamp_path = self._static_img_path("jtcs_invoice_stamp.png")
         sign_path = self._static_img_path("jtcs_invoice_sign.png")
-        stamp_flow = ""
+        stamp_size = 32 * mm
+        sign_flow: Flowable | str = ""
         if stamp_path:
-            stamp_flow = Image(str(stamp_path), width=28 * mm, height=28 * mm, mask="auto")
-        sign_bits: list = []
-        if sign_path:
-            sign_bits.append(Image(str(sign_path), width=38 * mm, height=16 * mm, mask="auto"))
-            sign_bits.append(Spacer(1, 2))
-        sign_bits.append(
-            Paragraph(
-                "<b>Authorised Signatory</b>",
-                ParagraphStyle("SignLab", parent=small, alignment=TA_RIGHT),
+            sign_flow = _StampWithSignature(
+                str(stamp_path),
+                str(sign_path) if sign_path else None,
+                stamp_size,
             )
+        elif sign_path:
+            sign_flow = Image(str(sign_path), width=38 * mm, height=16 * mm, mask="auto")
+        sign_label = Paragraph(
+            "<b>Authorised Signatory</b>",
+            ParagraphStyle("SignLab", parent=small, alignment=TA_CENTER),
         )
         sign_table = Table(
-            [[stamp_flow, sign_bits]],
-            colWidths=[32 * mm, 48 * mm],
+            [[sign_flow], [sign_label]],
+            colWidths=[stamp_size],
         )
         sign_table.hAlign = "RIGHT"
         sign_table.setStyle(
             TableStyle(
                 [
                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (0, 0), (0, 0), "CENTER"),
-                    ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                     ("LEFTPADDING", (0, 0), (-1, -1), 0),
                     ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                     ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (0, 0), 0),
+                    ("TOPPADDING", (0, 1), (0, 1), 1),
                 ]
             )
         )

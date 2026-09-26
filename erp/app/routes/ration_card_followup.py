@@ -18,68 +18,22 @@ FOLLOWUP_MENU_NAME = "Followup"
 
 
 def ensure_ration_card_followup_menu() -> None:
-    """Place Followup under Public Report → Ration Card Report."""
-    RationCardFollowupService().entry_repo.ensure_schema()
-    parent = db.session.execute(
+    """Permanently remove Followup from Public Report → Ration Card Report."""
+    db.session.execute(
         text(
             """
-            SELECT TOP 1 MenuID FROM dbo.MenuMaster
-            WHERE MenuName = N'Ration Card Report'
-            ORDER BY MenuID
-            """
-        )
-    ).first()
-    if not parent:
-        return
-    parent_id = int(parent[0])
-    existing = db.session.execute(
-        text(
-            """
-            SELECT TOP 1 MenuID FROM dbo.MenuMaster
-            WHERE MenuURL = :url OR (ParentMenuID = :parent AND MenuName = :name)
+            DELETE FROM dbo.MenuMaster
+            WHERE MenuURL = :url
+               OR (
+                    MenuName = :name
+                    AND ParentMenuID IN (
+                        SELECT MenuID FROM dbo.MenuMaster WHERE MenuName = N'Ration Card Report'
+                    )
+               )
             """
         ),
-        {"url": MENU_PATH, "parent": parent_id, "name": FOLLOWUP_MENU_NAME},
-    ).first()
-    if existing:
-        db.session.execute(
-            text(
-                """
-                UPDATE dbo.MenuMaster
-                SET ParentMenuID = :parent,
-                    MenuName = :name,
-                    MenuIcon = N'bi-clipboard-check',
-                    MenuURL = :url,
-                    DisplayOrder = 2,
-                    Description = N'Ration Card FPS followup (Work Done / Tally / Payment)',
-                    IsActive = 1,
-                    RoleName = NULL
-                WHERE MenuID = :mid
-                """
-            ),
-            {
-                "parent": parent_id,
-                "name": FOLLOWUP_MENU_NAME,
-                "url": MENU_PATH,
-                "mid": int(existing[0]),
-            },
-        )
-    else:
-        db.session.execute(
-            text(
-                """
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    :parent, :name, N'bi-clipboard-check', :url, 2,
-                    N'Ration Card FPS followup (Work Done / Tally / Payment)', 1, NULL
-                )
-                """
-            ),
-            {"parent": parent_id, "name": FOLLOWUP_MENU_NAME, "url": MENU_PATH},
-        )
+        {"url": MENU_PATH, "name": FOLLOWUP_MENU_NAME},
+    )
     db.session.commit()
 
 
@@ -87,7 +41,6 @@ def ensure_ration_card_followup_menu() -> None:
 @bp.route("/", methods=["GET"], strict_slashes=False)
 @login_required
 def index():
-    ensure_ration_card_followup_menu()
     master_repo = MasterRepository()
     return render_template(
         "public_report/ration_card_followup.html",

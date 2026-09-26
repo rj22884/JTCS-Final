@@ -213,7 +213,12 @@ def today_activity_details():
         except ValueError:
             return jsonify({"ok": False, "error": "Invalid bank account."}), 400
     try:
-        data = service.get_today_activity_details(metric_key, account_id=account_id)
+        data = service.get_today_activity_details(
+            metric_key,
+            account_id=account_id,
+            part=(request.args.get("part") or "").strip(),
+            scope=(request.args.get("scope") or "").strip(),
+        )
         return jsonify({"ok": True, **data})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

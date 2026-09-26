@@ -727,6 +727,91 @@
   color: #445566;
 }
 
+.inv-status-reason {
+  width: 220px;
+  max-width: 100%;
+}
+
+.inv-grid-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.inv-grid-tick input {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  accent-color: #0f766e;
+  cursor: pointer;
+}
+
+.inv-tick-yes {
+  color: #0f766e;
+}
+
+.inv-tick-pending {
+  color: #b45309;
+}
+
+.inv-tick-no {
+  color: #64748b;
+}
+
+.inv-grid-tick.is-readonly {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.inv-grid-tick.is-readonly input,
+.inv-grid-tick.is-await-pay input,
+.inv-grid-tick.is-source input {
+  pointer-events: none;
+  accent-color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.inv-review-trail {
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.inv-review-trail ol {
+  margin: 0.4rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.inv-review-trail li {
+  margin-bottom: 0.45rem;
+}
+
+.inv-review-trail li strong {
+  display: block;
+}
+
+.inv-grid-tick.is-await-pay,
+.inv-grid-tick.is-source {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.inv-g-edit.is-locked,
+.inv-g-del.is-locked {
+  opacity: 0.38;
+  filter: grayscale(1);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .inv-bill-source-miscellaneous {
   background: #e8dff8;
   color: #5b2d8e;

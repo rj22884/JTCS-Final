@@ -1022,6 +1022,57 @@ class ECourtService:
         )
         return result
 
+    def update_entry(self, form: dict) -> dict:
+        """Update one receipt's purchase fields and, when sold, its sale date and amount."""
+        receipt_no = (form.get("ReceiptNo") or "").strip().upper()
+        if not receipt_no:
+            raise ValueError("Receipt number is required.")
+        lines = self.repo.get_lines_by_receipts([receipt_no])
+        if not lines:
+            raise ValueError(f"Receipt number '{receipt_no}' was not found.")
+        line = lines[0]
+        stationery = (form.get("StationeryNumber") or "").strip()
+        if stationery:
+            if len(stationery) > 20:
+                raise ValueError("Stationery number must be at most 20 characters.")
+            line.StationeryNumber = stationery
+        amount_raw = (form.get("Amount") or "").strip()
+        if amount_raw:
+            amount = self._decimal(amount_raw)
+            if amount < self.MIN_IMPORT_AMOUNT:
+                raise ValueError(f"Amount must be at least {self.MIN_IMPORT_AMOUNT}.")
+            line.Amount = amount
+        receipt_date = self._date(form.get("ReceiptDate"))
+        if receipt_date:
+            line.ReceiptDate = receipt_date
+        if "Remarks" in form:
+            line.Remarks = (form.get("Remarks") or "").strip() or None
+
+        sales = self.repo.list_sales_for_receipts([receipt_no])
+        sale = sales[0] if sales else None
+        if sale is not None:
+            if stationery:
+                sale.StationeryNumber = stationery
+            if receipt_date:
+                sale.ReceiptDate = receipt_date
+            if amount_raw:
+                sale.Amount = line.Amount
+            daily = self.daily_repo.get_by_id(sale.DailyTransactionID) if sale.DailyTransactionID else None
+            if daily is not None:
+                sold_date = self._date(form.get("SoldDate"))
+                if sold_date:
+                    daily.TransactionDate = sold_date
+                sale_raw = (form.get("SaleAmount") or "").strip()
+                if sale_raw:
+                    sale_amount = self._decimal(sale_raw)
+                    if sale_amount <= 0:
+                        raise ValueError("Sale amount must be greater than 0.")
+                    daily.SaleAmount = sale_amount
+                    daily.TotalAmount = sale_amount
+                daily.ModifiedDate = datetime.utcnow()
+        db.session.flush()
+        return {"receipt_no": receipt_no, "message": f"Updated {receipt_no}."}
+
     def save_manual_sale(self, form: dict, *, created_by: str) -> dict:
         """Legacy CLI helper: import if missing, then sell. Prefer save_manual_import for UI."""
         receipt_no = (form.get("ReceiptNo") or "").strip().upper()

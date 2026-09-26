@@ -57,6 +57,8 @@
   let currentMetric = "";
   let currentLabel = "";
   let currentAccountId = "";
+  let currentSalePart = "";
+  let currentSaleScope = "";
   let todayActivityMode = false;
   let sourceRows = [];
   let currentRows = [];
@@ -563,6 +565,13 @@
       alert("Source entry is not available for this row.");
       return;
     }
+    if (
+      currentMetric === "pending_sale" &&
+      typeof window.jtcsOpenPageWindow === "function"
+    ) {
+      window.jtcsOpenPageWindow(row.source_url, row.work || "Miscellaneous");
+      return;
+    }
 
     if (row.row_key && String(row.row_key).indexOf("recent-") !== 0) {
       selectMetricRow(row.row_key);
@@ -667,8 +676,12 @@
             escapeHtml(formatMoney(row.running_balance)) +
             "</td>"
           : "";
+        const moreLabel =
+          currentMetric === "pending_sale" ? "Detail" : "click here for more";
         const moreCell = rowHasOpenableSource(row)
-          ? '<td><button type="button" class="btn btn-link btn-sm p-0 dash-open-source">click here for more</button></td>'
+          ? '<td><button type="button" class="btn btn-link btn-sm p-0 dash-open-source">' +
+            moreLabel +
+            "</button></td>"
           : '<td class="text-muted small">—</td>';
         const canDel = rowCanDelete(row);
         const actionsCell = canDel
@@ -774,6 +787,13 @@
       if (currentAccountId) {
         url += "&account_id=" + encodeURIComponent(currentAccountId);
       }
+      if (currentMetric === "pending_sale") {
+        url +=
+          "&part=" +
+          encodeURIComponent(currentSalePart || "sale") +
+          "&scope=" +
+          encodeURIComponent(currentSaleScope || "today");
+      }
     } else {
       if (!cfg.detailsUrl) return Promise.resolve();
       const period = detailPeriodParams();
@@ -860,10 +880,12 @@
     loadDetails();
   }
 
-  function openTodayActivity(metric, label, accountId) {
+  function openTodayActivity(metric, label, accountId, salePart, saleScope) {
     currentMetric = metric;
     currentLabel = label || metric;
     currentAccountId = accountId || "";
+    currentSalePart = salePart || "";
+    currentSaleScope = saleScope || "";
     setTodayActivityMode(true);
     if (els.title) els.title.textContent = currentLabel;
     if (els.sub) els.sub.textContent = "Loading...";
@@ -1062,6 +1084,18 @@
         btn.getAttribute("data-today-metric"),
         btn.getAttribute("data-label"),
         btn.getAttribute("data-account-id")
+      );
+    });
+  });
+
+  document.querySelectorAll(".dash-pending-sale-val").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      openTodayActivity(
+        "pending_sale",
+        btn.getAttribute("data-label"),
+        "",
+        btn.getAttribute("data-sale-part"),
+        btn.getAttribute("data-sale-scope")
       );
     });
   });

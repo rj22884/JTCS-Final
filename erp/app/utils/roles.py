@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 ADMIN_ROLES = frozenset({"Administrator", "Admin"})
+CONVERTED_INVOICE_TICK_ROLES = ADMIN_ROLES | frozenset({"Manager"})
 DATA_BACKUP_STAFF_ROLES = frozenset({"Manager", "Operator", "Viewer"})
 DATA_BACKUP_ROLES = ADMIN_ROLES | DATA_BACKUP_STAFF_ROLES
 FPS_USER_ROLE = "FPS_USER"
@@ -43,6 +44,11 @@ def join_roles(roles) -> str | None:
 
 def has_admin_role(value: str | None) -> bool:
     return bool(parse_roles(value) & ADMIN_ROLES)
+
+
+def has_converted_invoice_tick_role(value: str | None) -> bool:
+    """Manager, Administrator, and Admin may tick Bill Status on a converted invoice."""
+    return bool(parse_roles(value) & CONVERTED_INVOICE_TICK_ROLES)
 
 
 def has_data_backup_role(value: str | None) -> bool:

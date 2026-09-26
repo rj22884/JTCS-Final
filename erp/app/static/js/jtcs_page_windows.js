@@ -142,17 +142,18 @@
     if (!taskbarEl) return;
     taskbarEl.innerHTML = "";
     var wins = allWindows();
-    var anyMin = wins.some(function (win) {
+    syncOpenMenus(wins);
+    var minimized = wins.filter(function (win) {
       return win.dataset.state === "min";
     });
-    if (!wins.length || !anyMin) {
+    if (!minimized.length) {
       taskbarEl.hidden = true;
       relayoutAll();
       if (!wins.length) return;
     } else {
       taskbarEl.hidden = false;
     }
-    wins.forEach(function (win) {
+    minimized.forEach(function (win) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "jtcs-page-task-btn";
@@ -170,6 +171,28 @@
       taskbarEl.appendChild(btn);
     });
     relayoutAll();
+  }
+
+  function syncOpenMenus(wins) {
+    var openKeys = {};
+    (wins || allWindows()).forEach(function (win) {
+      if (win.dataset.key) openKeys[win.dataset.key] = true;
+    });
+    document.querySelectorAll("a.jtcs-menu-link, a.jtcs-top-link").forEach(function (link) {
+      var href = link.getAttribute("href") || "";
+      if (skipUrl(href) || href === "#") return;
+      var held = !!openKeys[windowKey(href)];
+      link.classList.toggle("jtcs-menu-held", held);
+      if (held) {
+        link.setAttribute("aria-disabled", "true");
+        link.setAttribute("tabindex", "-1");
+      } else if (link.dataset.jtcsHeld === "1") {
+        link.removeAttribute("aria-disabled");
+        link.removeAttribute("tabindex");
+      }
+      if (held) link.dataset.jtcsHeld = "1";
+      else delete link.dataset.jtcsHeld;
+    });
   }
 
   function focusWindow(win) {
@@ -229,6 +252,45 @@
       if (win.parentNode) win.parentNode.removeChild(win);
     });
     refreshTaskbar();
+  }
+
+  function isMainDashboard() {
+    var path = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+    return path === "" || path === "/dashboard";
+  }
+
+  function closeTopModals() {
+    var closed = false;
+    document.querySelectorAll(".modal.show").forEach(function (modal) {
+      if (!window.bootstrap || !window.bootstrap.Modal) return;
+      var inst = window.bootstrap.Modal.getInstance(modal);
+      if (inst) {
+        inst.hide();
+        closed = true;
+      }
+    });
+    return closed;
+  }
+
+  function showEscWarning() {
+    var message = "Please Click or use keyboard shortcut keys";
+    if (window.JTCSDialog && typeof window.JTCSDialog.alert === "function") {
+      window.JTCSDialog.alert(message, "warning");
+      return;
+    }
+    window.alert(message);
+  }
+
+  function escCloseAll() {
+    ensureHosts();
+    var hadWindows = allWindows().length > 0;
+    if (hadWindows) closeAllWindows();
+    var hadModals = closeTopModals();
+    if (hadWindows && !isMainDashboard()) {
+      window.location.href = "/dashboard";
+      return;
+    }
+    if (!hadWindows && !hadModals) showEscWarning();
   }
 
   function goBack(win) {
@@ -385,11 +447,11 @@
       if (!link) return;
       var href = link.getAttribute("href") || "";
       if (skipUrl(href)) return;
-      if (link.classList.contains("disabled") || link.getAttribute("aria-disabled") === "true") return;
+      if (link.classList.contains("disabled") || (link.getAttribute("aria-disabled") === "true" && !link.classList.contains("jtcs-menu-held"))) return;
 
       ev.preventDefault();
       ev.stopPropagation();
-
+      if (link.classList.contains("jtcs-menu-held") || findWindow(windowKey(href))) return;
       var title = (link.textContent || "").replace(/\s+/g, " ").trim() || document.title;
       if (isDesktopUrl(href)) {
         closeAllWindows();
@@ -418,6 +480,30 @@
   );
 
   if (document.readyState === "loading") {
+  window.jtcsEscCloseAll = escCloseAll;
+
+  window.jtcsOpenPageWindow = function (href, title) {
+    var target = windowKey(String(href || "").split("?")[0]);
+    var existing =
+      allWindows().filter(function (win) {
+        return String(win.dataset.key || "").split("?")[0] === target;
+      })[0] || null;
+    if (existing) {
+      var frame = existing.querySelector("iframe");
+      if (frame) frame.src = href;
+      if (title) {
+        existing.dataset.title = title;
+        var label = existing.querySelector(".jtcs-page-win-title");
+        if (label) label.textContent = title;
+      }
+      if (existing.dataset.state === "min") restoreWindow(existing);
+      else maximizeWindow(existing);
+      focusWindow(existing);
+      return existing;
+    }
+    return openPageWindow(href, title);
+  };
+
     document.addEventListener("DOMContentLoaded", ensureHosts);
   } else {
     ensureHosts();
