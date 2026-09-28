@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260921ui1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260928cols1">
 {% endblock %}
 
 {% block content %}
@@ -52,14 +52,12 @@
       <table class="table table-sm table-hover table-striped align-middle mb-0" id="stampDataGrid">
         <thead>
           <tr>
-            <th class="stamp-sortable stamp-col-mode" data-sort-key="entry_mode" role="button" tabindex="0">
-              Mode <span class="stamp-sort-icon" aria-hidden="true"></span>
+            <th class="stamp-grid-actions-col">Action</th>
+            <th class="stamp-sortable stamp-col-grow" data-sort-key="payment_mode" role="button" tabindex="0">
+              Payment <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="stamp-sortable stamp-col-cert" data-sort-key="certificate_number" role="button" tabindex="0">
-              Certificate <span class="stamp-sort-icon" aria-hidden="true"></span>
-            </th>
-            <th class="stamp-sortable stamp-col-date" data-sort-key="certificate_date" role="button" tabindex="0">
-              Cert Date <span class="stamp-sort-icon" aria-hidden="true"></span>
+            <th class="stamp-sortable stamp-col-grow" data-sort-key="customer_name" role="button" tabindex="0">
+              Customer <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
             <th class="stamp-sortable text-end stamp-col-num" data-sort-key="stamp_duty_amount" role="button" tabindex="0">
               Duty ₹ <span class="stamp-sort-icon" aria-hidden="true"></span>
@@ -67,35 +65,33 @@
             <th class="stamp-sortable text-end stamp-col-num" data-sort-key="sale_amount" role="button" tabindex="0">
               Sale ₹ <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="stamp-sortable stamp-col-date" data-sort-key="transaction_date" role="button" tabindex="0">
-              Txn Date <span class="stamp-sort-icon" aria-hidden="true"></span>
-            </th>
-            <th class="stamp-sortable stamp-col-grow" data-sort-key="customer_name" role="button" tabindex="0">
-              Customer <span class="stamp-sort-icon" aria-hidden="true"></span>
-            </th>
             <th class="stamp-sortable stamp-col-mobile" data-sort-key="mobile_number" role="button" tabindex="0">
               Mobile <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="stamp-sortable stamp-col-grow" data-sort-key="payment_mode" role="button" tabindex="0">
-              Payment <span class="stamp-sort-icon" aria-hidden="true"></span>
+            <th class="stamp-sortable stamp-col-cert" data-sort-key="certificate_number" role="button" tabindex="0">
+              Certificate <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-date" data-sort-key="certificate_date" role="button" tabindex="0">
+              Cert Date <span class="stamp-sort-icon" aria-hidden="true"></span>
+            </th>
+            <th class="stamp-sortable stamp-col-mode" data-sort-key="entry_mode" role="button" tabindex="0">
+              Mode <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
             <th class="stamp-sortable text-end stamp-col-daily" data-sort-key="transaction_id" role="button" tabindex="0">
               Daily # <span class="stamp-sort-icon" aria-hidden="true"></span>
             </th>
-            <th class="text-end stamp-grid-actions-col">Actions</th>
           </tr>
           <tr class="stamp-filter-row">
-            <th class="stamp-col-mode"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="entry_mode" placeholder="Filter…" aria-label="Filter mode"></th>
-            <th class="stamp-col-cert"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_number" placeholder="Filter…" aria-label="Filter certificate"></th>
-            <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_date" placeholder="Filter…" aria-label="Filter cert date"></th>
+            <th class="stamp-grid-actions-col"></th>
+            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="payment_mode" placeholder="Filter…" aria-label="Filter payment"></th>
+            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="customer_name" placeholder="Filter…" aria-label="Filter customer"></th>
             <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="stamp_duty_amount" placeholder="Filter…" aria-label="Filter duty"></th>
             <th class="stamp-col-num"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="sale_amount" placeholder="Filter…" aria-label="Filter sale"></th>
-            <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="transaction_date" placeholder="Filter…" aria-label="Filter txn date"></th>
-            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="customer_name" placeholder="Filter…" aria-label="Filter customer"></th>
             <th class="stamp-col-mobile"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="mobile_number" placeholder="Filter…" aria-label="Filter mobile"></th>
-            <th class="stamp-col-grow"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="payment_mode" placeholder="Filter…" aria-label="Filter payment"></th>
+            <th class="stamp-col-cert"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_number" placeholder="Filter…" aria-label="Filter certificate"></th>
+            <th class="stamp-col-date"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="certificate_date" placeholder="Filter…" aria-label="Filter cert date"></th>
+            <th class="stamp-col-mode"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="entry_mode" placeholder="I / O / M" aria-label="Filter mode"></th>
             <th class="stamp-col-daily"><input type="text" class="form-control form-control-sm stamp-col-filter" data-filter-key="transaction_id" placeholder="Filter…" aria-label="Filter daily id"></th>
-            <th class="stamp-grid-actions-col"></th>
           </tr>
         </thead>
         <tbody id="stampDataGridBody"></tbody>
@@ -597,5 +593,5 @@
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
   window.STAMP_SALE_QR_URL = {{ url_for('sale_upi_qr.sale_upi_qr') | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260925paydel1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260928cols1"></script>
 {% endblock %}

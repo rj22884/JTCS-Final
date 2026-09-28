@@ -1597,6 +1597,18 @@ html.jtcs-os-ios .jtcs-header-btn {
   min-width: 44px;
 }
 
+/* Number fields: typed entry only. Spinners are hidden so the mouse cannot step the value. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 @media print {
   .jtcs-dialog-overlay {
     display: none !important;

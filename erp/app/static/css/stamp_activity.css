@@ -401,6 +401,14 @@
   width: 1%;
   white-space: nowrap;
 }
+#stampDataGrid .stamp-col-mode {
+  text-align: center;
+}
+#stampDataGrid .stamp-col-mode .stamp-col-filter {
+  min-width: 2.4rem;
+  max-width: 3.2rem;
+  text-align: center;
+}
 #stampDataGrid .stamp-col-num .stamp-col-filter,
 #stampDataGrid .stamp-col-date .stamp-col-filter,
 #stampDataGrid .stamp-col-daily .stamp-col-filter {

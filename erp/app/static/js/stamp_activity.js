@@ -547,6 +547,26 @@
     });
   }
 
+  function entryModeCode(row) {
+    const source = String((row && row.entry_source) || "").toLowerCase();
+    const label = String((row && row.entry_mode) || "").toLowerCase();
+    if (source === "online" || label.indexOf("online") === 0) return "O";
+    if (source === "integration" || (row && row.is_ocr_entry) || label.indexOf("integration") === 0 || label.indexOf("ocr") === 0) {
+      return "I";
+    }
+    return "M";
+  }
+
+  function entryModeTitle(row) {
+    const code = entryModeCode(row);
+    const label = code === "I" ? "Integration" : code === "O" ? "Online" : "Manual";
+    const ref = String((row && row.website_reference) || "").trim();
+    if (code === "O" && ref) return label + " · " + ref;
+    const stored = String((row && row.entry_mode) || "").trim();
+    if (stored && stored.toLowerCase().indexOf(label.toLowerCase()) === 0) return stored;
+    return label;
+  }
+
   function rowFilterValue(row, key) {
     if (key === "certificate_date" || key === "transaction_date") {
       const iso = row[key] || "";
@@ -556,7 +576,7 @@
       return row.transaction_id != null ? String(row.transaction_id) : "";
     }
     if (key === "entry_mode") {
-      return [row.entry_mode, row.entry_source, row.website_reference]
+      return [entryModeCode(row), row.entry_mode, row.entry_source, row.website_reference]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -569,6 +589,9 @@
     return Object.keys(gridFilters).every(function (key) {
       const needle = (gridFilters[key] || "").trim().toLowerCase();
       if (!needle) return true;
+      if (key === "entry_mode" && (needle === "i" || needle === "o" || needle === "m")) {
+        return entryModeCode(row).toLowerCase() === needle;
+      }
       return rowFilterValue(row, key).indexOf(needle) !== -1;
     });
   }
@@ -585,6 +608,7 @@
     if (key === "certificate_date" || key === "transaction_date") {
       return String(row[key] || "");
     }
+    if (key === "entry_mode") return entryModeCode(row);
     return String(row[key] == null ? "" : row[key]).toLowerCase();
   }
 
@@ -785,23 +809,22 @@
     if (!els.cardDetailHead || !els.cardDetailBody) return;
     els.cardDetailHead.innerHTML =
       "<tr>" +
-      "<th>Mode</th><th>Certificate</th><th>Cert Date</th><th class=\"text-end\">Duty ₹</th>" +
-      "<th class=\"text-end\">Sale ₹</th><th>Txn Date</th><th>Customer</th>" +
-      "<th>Mobile</th><th>Payment</th><th class=\"text-end\">Daily #</th>" +
+      "<th>Payment</th><th>Customer</th><th class=\"text-end\">Duty ₹</th>" +
+      "<th class=\"text-end\">Sale ₹</th><th>Mobile</th><th>Certificate</th><th>Cert Date</th>" +
+      "<th>Mode</th><th class=\"text-end\">Daily #</th>" +
       "</tr>";
     els.cardDetailBody.innerHTML = "";
     rows.forEach(function (row) {
       const tr = document.createElement("tr");
       tr.innerHTML =
-        "<td>" + escapeHtml(row.entry_mode || "Manual") + "</td>" +
-        "<td>" + escapeHtml(row.certificate_number || "") + "</td>" +
-        "<td>" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
+        "<td>" + escapeHtml(row.payment_mode || "") + "</td>" +
+        "<td>" + escapeHtml(row.customer_name || "") + "</td>" +
         "<td class=\"text-end\">" + escapeHtml(row.stamp_duty_amount || "") + "</td>" +
         "<td class=\"text-end\">" + escapeHtml(row.sale_amount || "") + "</td>" +
-        "<td>" + escapeHtml(formatDisplayDate(row.transaction_date)) + "</td>" +
-        "<td>" + escapeHtml(row.customer_name || "") + "</td>" +
         "<td>" + escapeHtml(row.mobile_number || "") + "</td>" +
-        "<td>" + escapeHtml(row.payment_mode || "") + "</td>" +
+        "<td>" + escapeHtml(row.certificate_number || "") + "</td>" +
+        "<td>" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
+        "<td title=\"" + escapeHtml(entryModeTitle(row)) + "\">" + escapeHtml(entryModeCode(row)) + "</td>" +
         "<td class=\"text-end\">" + escapeHtml(row.transaction_id != null ? String(row.transaction_id) : "") + "</td>";
       els.cardDetailBody.appendChild(tr);
     });
@@ -839,7 +862,7 @@
     if (els.cardDetailTotal) els.cardDetailTotal.textContent = "";
     if (els.cardDetailBody) {
       els.cardDetailBody.innerHTML =
-        "<tr><td colspan=\"11\" class=\"text-muted\">Loading...</td></tr>";
+        "<tr><td colspan=\"9\" class=\"text-muted\">Loading...</td></tr>";
     }
     els.cardDetailEmpty?.classList.add("d-none");
     cardDetailModal.show();
@@ -884,7 +907,7 @@
       if (els.cardDetailSub) els.cardDetailSub.textContent = err.message || "Load failed";
       if (els.cardDetailBody) {
         els.cardDetailBody.innerHTML =
-          "<tr><td colspan=\"10\" class=\"text-danger\">" +
+          "<tr><td colspan=\"9\" class=\"text-danger\">" +
           escapeHtml(err.message || "Load failed") +
           "</td></tr>";
       }
@@ -1052,24 +1075,23 @@
         tr.classList.add("stamp-row-ocr");
       }
       const actionsHtml =
-        "<td class=\"text-end stamp-grid-actions-col\">" +
+        "<td class=\"stamp-grid-actions-col\">" +
         "<button type=\"button\" class=\"btn btn-outline-primary btn-sm stamp-grid-action-btn me-1 stamp-grid-edit-btn\" title=\"Edit\">" +
         "<i class=\"bi bi-pencil\"></i></button>" +
         "<button type=\"button\" class=\"btn btn-outline-danger btn-sm stamp-grid-action-btn stamp-grid-delete-btn\" title=\"Delete\">" +
         "<i class=\"bi bi-trash\"></i></button>" +
         "</td>";
       tr.innerHTML =
-        "<td class=\"stamp-col-mode\" title=\"" + escapeHtml(row.website_reference || row.entry_mode || "") + "\">" + escapeHtml(row.entry_mode || "Manual") + "</td>" +
-        "<td class=\"stamp-col-cert\" title=\"" + escapeHtml(row.certificate_number || "") + "\">" + escapeHtml(row.certificate_number || "") + "</td>" +
-        "<td class=\"stamp-col-date\">" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
+        actionsHtml +
+        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(row.payment_mode || "") + "\">" + escapeHtml(row.payment_mode || "") + "</td>" +
+        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "\">" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "</td>" +
         "<td class=\"text-end stamp-col-num\">" + escapeHtml(row.stamp_duty_amount || "") + "</td>" +
         "<td class=\"text-end stamp-col-num\">" + escapeHtml(row.sale_amount || "") + "</td>" +
-        "<td class=\"stamp-col-date\">" + escapeHtml(formatDisplayDate(row.transaction_date)) + "</td>" +
-        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "\">" + escapeHtml(sanitizeOcrValue(row.customer_name || "")) + "</td>" +
         "<td class=\"stamp-col-mobile\">" + escapeHtml(row.mobile_number || "") + "</td>" +
-        "<td class=\"stamp-col-grow\" title=\"" + escapeHtml(row.payment_mode || "") + "\">" + escapeHtml(row.payment_mode || "") + "</td>" +
-        "<td class=\"text-end stamp-col-daily\">" + escapeHtml(row.transaction_id != null ? String(row.transaction_id) : "") + "</td>" +
-        actionsHtml;
+        "<td class=\"stamp-col-cert\" title=\"" + escapeHtml(row.certificate_number || "") + "\">" + escapeHtml(row.certificate_number || "") + "</td>" +
+        "<td class=\"stamp-col-date\">" + escapeHtml(formatDisplayDate(row.certificate_date)) + "</td>" +
+        "<td class=\"stamp-col-mode\" title=\"" + escapeHtml(entryModeTitle(row)) + "\">" + escapeHtml(entryModeCode(row)) + "</td>" +
+        "<td class=\"text-end stamp-col-daily\">" + escapeHtml(row.transaction_id != null ? String(row.transaction_id) : "") + "</td>";
       tr.addEventListener("click", function (e) {
         if (e.target.closest(".stamp-grid-action-btn")) return;
         Array.from(els.dataGridBody.querySelectorAll("tr")).forEach(function (r) {
@@ -3212,7 +3234,7 @@
     });
   });
 
-  const COL_WIDTH_KEY = "stamp-grid-col-widths-v3";
+  const COL_WIDTH_KEY = "stamp-grid-col-widths-v4";
   let columnResizeMoved = false;
 
   function readStoredColWidths() {
