@@ -639,13 +639,33 @@ class ECourtService:
         return total
 
     @staticmethod
+    def _sell_total_from_lookup(sold_receipt_numbers: list[str], lookup: dict) -> Decimal:
+        """Sum each daily sale once, using the preloaded grid lookup."""
+        seen: set[int] = set()
+        total = Decimal("0")
+        for raw in sold_receipt_numbers:
+            info = lookup.get((raw or "").strip().upper())
+            if not info:
+                continue
+            daily_id = info.get("daily_id")
+            if not daily_id or int(daily_id) in seen:
+                continue
+            seen.add(int(daily_id))
+            amount = info.get("sale_amount")
+            if amount is not None:
+                total += amount
+        return total
+
+    @staticmethod
     def _money_text(value: Decimal) -> str:
         quantized = value.quantize(Decimal("0.01"))
         if quantized == quantized.to_integral_value():
             return str(int(quantized))
         return format(quantized, "f")
 
-    def _attach_group_sale_values(self, group: dict, receipts: list[dict]) -> None:
+    def _attach_group_sale_values(
+        self, group: dict, receipts: list[dict], lookup: dict | None = None
+    ) -> None:
         sold_receipts = [row for row in receipts if row["sale_status"] == self.SOLD]
         sold_numbers = [row["receipt_no"] for row in sold_receipts if row.get("receipt_no")]
         summary = group.get("summary_status")
@@ -677,13 +697,21 @@ class ECourtService:
         group["total_buy_value"] = self._money_text(buy_total)
 
         if summary == self.SOLD:
-            sell_total = self._group_sell_amount(sold_numbers)
+            sell_total = (
+                self._sell_total_from_lookup(sold_numbers, lookup)
+                if lookup is not None
+                else self._group_sell_amount(sold_numbers)
+            )
             group["total_sell_value"] = self._money_text(sell_total)
             return
 
         if summary == self.PARTIALLY_SOLD:
             sold_buy = sum(self._decimal(row.get("amount") or "0") for row in sold_receipts)
-            sell_total = self._group_sell_amount(sold_numbers)
+            sell_total = (
+                self._sell_total_from_lookup(sold_numbers, lookup)
+                if lookup is not None
+                else self._group_sell_amount(sold_numbers)
+            )
             group["sold_buy_value"] = self._money_text(sold_buy)
             group["sold_sell_value"] = self._money_text(sell_total)
             group["remaining_receipts"] = group.get("not_sold_count", 0)
@@ -696,19 +724,17 @@ class ECourtService:
         if not lines:
             return [], 0
 
-        receipt_numbers = [line.ReceiptNo for line in lines]
-        sold_set = {(value or "").strip().upper() for value in self.repo.sold_receipt_numbers(receipt_numbers)}
-        txn_dates = self.repo.transaction_dates_by_receipt(receipt_numbers)
-        account_map = self.repo.account_numbers_by_receipt(receipt_numbers)
+        lookup = self.repo.grid_sale_lookup()
         grouped: dict[str, list[dict]] = {}
 
         for line in lines:
             stationery = (line.StationeryNumber or "").strip() or "(blank)"
             receipt_key = (line.ReceiptNo or "").strip().upper()
-            is_sold = receipt_key in sold_set
+            sale_info = lookup.get(receipt_key)
+            is_sold = sale_info is not None
             receipt_date = line.ReceiptDate.isoformat() if line.ReceiptDate else ""
-            transaction_date = txn_dates.get(receipt_key, "") if is_sold else ""
-            account_number = account_map.get(receipt_key, "") if is_sold else ""
+            transaction_date = (sale_info or {}).get("transaction_date") or "" if is_sold else ""
+            account_number = (sale_info or {}).get("account_number") or "" if is_sold else ""
             grouped.setdefault(stationery, []).append(
                 {
                     "receipt_no": line.ReceiptNo,
@@ -738,7 +764,7 @@ class ECourtService:
                 "summary_status": self._summary_status(sold_count, total),
                 "receipts": receipts,
             }
-            self._attach_group_sale_values(group, receipts)
+            self._attach_group_sale_values(group, receipts, lookup)
             groups.append(group)
 
         return groups, len(lines)

@@ -114,6 +114,23 @@ def test_trading_group_uses_chart_hierarchy() -> None:
     assert engine.is_trading_group(5, by_id) is False
     assert engine._nature_from_group(by_id[5], by_id) == "Asset"
     assert engine._nature_from_group(by_id[2], by_id) == "Income"
+    # Saved Chart of Group nature wins over the old hardcoded name list.
+    override = {
+        "GroupID": 6,
+        "GroupName": "Current Assets",
+        "ParentGroupID": None,
+        "GroupNature": "Liability",
+        "UnderType": "Assets",
+    }
+    assert engine._nature_from_group(override, {6: override}) == "Liability"
+    child = {
+        "GroupID": 7,
+        "GroupName": "Custom Fees",
+        "ParentGroupID": 1,
+        "GroupNature": "",
+        "UnderType": "Liabilities",
+    }
+    assert engine._nature_from_group(child, {**by_id, 7: child}) == "Income"
 
 
 def test_live_reports() -> dict:

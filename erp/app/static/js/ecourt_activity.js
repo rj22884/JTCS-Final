@@ -844,6 +844,7 @@
     );
     if (!parent) return null;
     const gi = parent.dataset.group;
+    ensureGroupChildren(gi);
     els.gridBody.querySelectorAll(".ecourt-tree-child-" + gi).forEach(function (tr) {
       tr.classList.remove("d-none");
     });
@@ -1124,10 +1125,100 @@
     }
   }
 
+  let lastPrepared = [];
+
+  function renderGroupChildren(gi, receipts) {
+    if (!els.gridBody || !receipts || !receipts.length) return;
+    const parent = els.gridBody.querySelector('tr.ecourt-tree-parent[data-group="' + gi + '"]');
+    if (!parent || els.gridBody.querySelector(".ecourt-tree-child-" + gi)) return;
+    const group = (lastPrepared[gi] && lastPrepared[gi].group) || {};
+    const fragment = document.createDocumentFragment();
+    receipts.forEach(function (row) {
+      const childTr = document.createElement("tr");
+      const sold = row.sale_status === "Sold";
+      const manualRow = isManualReceiptRow(row);
+      childTr.className =
+        "ecourt-tree-child ecourt-tree-child-" + gi +
+        (manualRow ? " ecourt-row-manual" : " ecourt-row-imported") +
+        (sold ? " ecourt-row-sold" : "");
+      childTr.dataset.receiptNo = row.receipt_no || "";
+      childTr.dataset.stationery = row.stationerynumber || group.stationerynumber || "";
+
+      let selectCell = "<td></td>";
+      let actionCell = "";
+      const editChildBtn =
+        "<button type=\"button\" class=\"btn btn-warning btn-sm ecourt-edit-btn\" " +
+        "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
+        "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
+        "data-receipt-date=\"" + escapeHtml(row.receipt_date || "") + "\" " +
+        "data-amount=\"" + escapeHtml(row.amount || "") + "\" " +
+        "data-sale-status=\"" + escapeHtml(row.sale_status || "") + "\" " +
+        "title=\"Edit Manual Entry\">Edit</button>";
+      if (!sold) {
+        selectCell =
+          "<td class=\"text-center\">" +
+          "<input type=\"checkbox\" class=\"form-check-input ecourt-receipt-select\" " +
+          "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
+          "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
+          "data-receipt-date=\"" + escapeHtml(row.receipt_date) + "\" " +
+          "data-amount=\"" + escapeHtml(row.amount) + "\">" +
+          "</td>";
+        actionCell =
+          "<td class=\"text-end ecourt-actions-cell\">" +
+          "<button type=\"button\" class=\"btn btn-outline-success btn-sm ecourt-sell-one-btn\" " +
+          "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
+          "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
+          "data-receipt-date=\"" + escapeHtml(row.receipt_date) + "\" " +
+          "data-amount=\"" + escapeHtml(row.amount) + "\">Sell</button> " +
+          editChildBtn +
+          "</td>";
+      } else {
+        selectCell =
+          "<td class=\"text-center\">" +
+          "<input type=\"checkbox\" class=\"form-check-input\" checked disabled title=\"Already sold\">" +
+          "</td>";
+        actionCell =
+          "<td class=\"text-end ecourt-actions-cell\">" +
+          editChildBtn + " " +
+          "<button type=\"button\" class=\"btn btn-outline-warning btn-sm ecourt-unsell-btn\" " +
+          "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
+          "title=\"Roll back this sold receipt\">Unsold</button></td>";
+      }
+
+      const childAccountCell = sold ? escapeHtml(row.account_number || "") : "";
+      const childSoldDate = sold
+        ? escapeHtml(displayDate(row.transaction_date || row.display_date || ""))
+        : "";
+
+      childTr.innerHTML =
+        selectCell +
+        "<td></td>" +
+        "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
+        escapeHtml(row.sale_status) + "</span></td>" +
+        actionCell +
+        "<td>" + escapeHtml(row.receipt_no) + "</td>" +
+        "<td>" + escapeHtml(displayDate(row.receipt_date || "")) + "</td>" +
+        "<td>" + childSoldDate + "</td>" +
+        "<td class=\"text-end\">" + escapeHtml(row.amount) + "</td>" +
+        "<td></td>" +
+        "<td></td>" +
+        "<td>" + childAccountCell + "</td>";
+      fragment.appendChild(childTr);
+    });
+    parent.after(fragment);
+  }
+
+  function ensureGroupChildren(gi) {
+    const item = lastPrepared[Number(gi)];
+    if (!item) return;
+    renderGroupChildren(gi, item.receipts || []);
+  }
+
   function renderImportTree(data, options) {
     options = options || {};
     lastTreeOptions = options;
     const prepared = prepareTreeGroups(data.groups || []);
+    lastPrepared = prepared;
     if (!els.gridBody) return;
 
     els.gridBody.innerHTML = "";
@@ -1251,82 +1342,7 @@
         "<td class=\"text-center\">" + soldRemainingCell + "</td>" +
         "<td>" + parentAccountCell + "</td>";
       els.gridBody.appendChild(parentTr);
-
-      receipts.forEach(function (row) {
-        const childTr = document.createElement("tr");
-        const sold = row.sale_status === "Sold";
-        const manualRow = isManualReceiptRow(row);
-        childTr.className =
-          "ecourt-tree-child ecourt-tree-child-" + gi +
-          (expanded ? "" : " d-none") +
-          (manualRow ? " ecourt-row-manual" : " ecourt-row-imported") +
-          (sold ? " ecourt-row-sold" : "");
-        childTr.dataset.receiptNo = row.receipt_no || "";
-        childTr.dataset.stationery = row.stationerynumber || group.stationerynumber || "";
-
-        let selectCell = "<td></td>";
-        let actionCell = "";
-        const editChildBtn =
-          "<button type=\"button\" class=\"btn btn-warning btn-sm ecourt-edit-btn\" " +
-          "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
-          "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
-          "data-receipt-date=\"" + escapeHtml(row.receipt_date || "") + "\" " +
-          "data-amount=\"" + escapeHtml(row.amount || "") + "\" " +
-          "data-sale-status=\"" + escapeHtml(row.sale_status || "") + "\" " +
-          "title=\"Edit Manual Entry\">Edit</button>";
-        if (!sold) {
-          selectCell =
-            "<td class=\"text-center\">" +
-            "<input type=\"checkbox\" class=\"form-check-input ecourt-receipt-select\" " +
-            "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
-            "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
-            "data-receipt-date=\"" + escapeHtml(row.receipt_date) + "\" " +
-            "data-amount=\"" + escapeHtml(row.amount) + "\">" +
-            "</td>";
-          actionCell =
-            "<td class=\"text-end ecourt-actions-cell\">" +
-            "<button type=\"button\" class=\"btn btn-outline-success btn-sm ecourt-sell-one-btn\" " +
-            "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
-            "data-stationery=\"" + escapeHtml(row.stationerynumber || group.stationerynumber || "") + "\" " +
-            "data-receipt-date=\"" + escapeHtml(row.receipt_date) + "\" " +
-            "data-amount=\"" + escapeHtml(row.amount) + "\">Sell</button> " +
-            editChildBtn +
-            "</td>";
-        } else {
-          selectCell =
-            "<td class=\"text-center\">" +
-            "<input type=\"checkbox\" class=\"form-check-input\" checked disabled title=\"Already sold\">" +
-            "</td>";
-          actionCell =
-            "<td class=\"text-end ecourt-actions-cell\">" +
-            editChildBtn + " " +
-            "<button type=\"button\" class=\"btn btn-outline-warning btn-sm ecourt-unsell-btn\" " +
-            "data-receipt-no=\"" + escapeHtml(row.receipt_no) + "\" " +
-            "title=\"Roll back this sold receipt\">Unsold</button></td>";
-        }
-
-        const childAccountCell = sold
-          ? escapeHtml(row.account_number || "")
-          : "";
-        const childSoldDate = sold
-          ? escapeHtml(displayDate(row.transaction_date || row.display_date || ""))
-          : "";
-
-        childTr.innerHTML =
-          selectCell +
-          "<td></td>" +
-          "<td><span class=\"badge " + (sold ? "ecourt-badge-sold" : "ecourt-badge-not-sold") + "\">" +
-          escapeHtml(row.sale_status) + "</span></td>" +
-          actionCell +
-          "<td>" + escapeHtml(row.receipt_no) + "</td>" +
-          "<td>" + escapeHtml(displayDate(row.receipt_date || "")) + "</td>" +
-          "<td>" + childSoldDate + "</td>" +
-          "<td class=\"text-end\">" + escapeHtml(row.amount) + "</td>" +
-          "<td></td>" +
-          "<td></td>" +
-          "<td>" + childAccountCell + "</td>";
-        els.gridBody.appendChild(childTr);
-      });
+      if (expanded) renderGroupChildren(gi, receipts);
 
       if (expandStationery && group.stationerynumber === expandStationery) {
         setSummary({
@@ -1350,9 +1366,20 @@
   }
 
   function toggleTreeGroup(groupIndex) {
-    const children = els.gridBody?.querySelectorAll(".ecourt-tree-child-" + groupIndex);
     const btn = els.gridBody?.querySelector('.ecourt-tree-toggle[data-group="' + groupIndex + '"]');
-    if (!children || !children.length || !btn) return;
+    if (!btn) return;
+    let children = els.gridBody?.querySelectorAll(".ecourt-tree-child-" + groupIndex);
+    if (!children || !children.length) {
+      ensureGroupChildren(groupIndex);
+      children = els.gridBody?.querySelectorAll(".ecourt-tree-child-" + groupIndex);
+      if (children && children.length) {
+        children.forEach(function (tr) {
+          tr.classList.remove("d-none");
+        });
+      }
+      btn.textContent = "−";
+      return;
+    }
     const willExpand = children[0].classList.contains("d-none");
     children.forEach(function (tr) {
       tr.classList.toggle("d-none", !willExpand);
@@ -1637,6 +1664,7 @@
   async function loadImportTree(importId, options) {
     const params = new URLSearchParams();
     if (importId) params.set("import_id", String(importId));
+    const summaryTask = loadActivitySummary();
     try {
       const res = await fetch(window.ECOURT_URLS.importLines + "?" + params.toString(), {
         headers: { "X-Requested-With": "XMLHttpRequest" },
@@ -1645,7 +1673,7 @@
       if (!res.ok || !data.ok) throw new Error(data.error || "Could not load imported data.");
       lastTreeData = data;
       renderImportTree(data, options || {});
-      loadActivitySummary();
+      await summaryTask;
       return data;
     } catch (err) {
       alert(err.message || String(err));

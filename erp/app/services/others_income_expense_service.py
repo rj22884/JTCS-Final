@@ -1149,17 +1149,6 @@ class OthersIncomeExpenseService:
             raise ValueError("Income / expense record not found.")
 
         bill_no = row.BillNo
-        if bool(getattr(row, "PaymentReceived", False)):
-            raise ValueError("Remove Payment Received in Edit before deleting this entry.")
-        daily = self._find_daily_for_bill(bill_no)
-        if daily:
-            for line in self._load_payment_lines(daily):
-                try:
-                    amount = Decimal(str(line.get("amount") or "0"))
-                except (InvalidOperation, ValueError):
-                    amount = Decimal("0")
-                if amount > 0:
-                    raise ValueError("Remove the payment in Edit before deleting this entry.")
         tally_no = (getattr(row, "TallyBillNo", None) or "").strip()
         from app.services.gst_invoice_service import GstInvoiceService
 

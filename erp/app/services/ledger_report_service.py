@@ -1222,74 +1222,43 @@ class LedgerReportService:
                         w.WorkID,
                         w.LedgerKind,
                         ISNULL(SUM(CASE
-                            WHEN d.TransactionDate < :date_from
-                            THEN ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)
-                            ELSE 0
-                        END), 0) AS prior_income,
+                            WHEN m.WorkDate <= :date_to
+                             AND w.LedgerKind = N'Expense'
+                            THEN ISNULL(d.Amount, 0) ELSE 0
+                        END), 0) AS debit_amt,
                         ISNULL(SUM(CASE
-                            WHEN d.TransactionDate < :date_from
-                            THEN ISNULL(d.ExpenseAmount, 0)
-                            ELSE 0
-                        END), 0) AS prior_expense,
-                        ISNULL(SUM(CASE
-                            WHEN d.TransactionDate < :date_from
-                            THEN ISNULL(pay.paid_amt, 0)
-                            ELSE 0
-                        END), 0) AS prior_paid,
-                        ISNULL(SUM(CASE
-                            WHEN d.TransactionDate >= :date_from
-                            THEN ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)
-                            ELSE 0
-                        END), 0) AS period_income,
-                        ISNULL(SUM(CASE
-                            WHEN d.TransactionDate >= :date_from
-                            THEN ISNULL(d.ExpenseAmount, 0)
-                            ELSE 0
-                        END), 0) AS period_expense,
-                        ISNULL(SUM(CASE
-                            WHEN d.TransactionDate >= :date_from
-                            THEN ISNULL(pay.paid_amt, 0)
-                            ELSE 0
-                        END), 0) AS period_paid
+                            WHEN m.WorkDate <= :date_to
+                             AND w.LedgerKind IN (N'Income', N'Misc.')
+                            THEN ISNULL(d.Amount, 0) ELSE 0
+                        END), 0) AS credit_amt
                     FROM dbo.WorkMaster w
-                    LEFT JOIN dbo.JTCSDailyTransaction d
-                        ON d.Status = N'Posted'
-                       AND d.TransactionDate <= :date_to
-                       AND (
-                            d.WorkType = w.WorkName
-                         OR d.SubWorkType = w.WorkName
-                         OR d.SubWorkType LIKE N'%' + w.WorkName + N'%'
-                       )
-                    LEFT JOIN (
-                        SELECT TransactionID, SUM(Amount) AS paid_amt
-                        FROM dbo.JTCSDailyTransactionPayment
-                        GROUP BY TransactionID
-                    ) pay ON pay.TransactionID = d.TransactionID
+                    LEFT JOIN dbo.OthersIncomeExpenseDetail d ON d.WorkID = w.WorkID
+                    LEFT JOIN dbo.OthersIncomeExpenseMaster m
+                        ON m.EntryID = d.EntryID
+                       AND ISNULL(m.IsActive, 1) = 1
                     WHERE w.WorkID IN ({id_sql})
                     GROUP BY w.WorkID, w.LedgerKind
                     """
                 ),
-                {"date_from": date(2000, 1, 1), "date_to": as_of},
+                {"date_to": as_of},
             ).mappings().all()
         except Exception:
             db.session.rollback()
             return {}
         result: dict[tuple[str, int], dict[str, Any]] = {}
         for row in rows:
-            ledger_kind = (row["LedgerKind"] or "").strip().upper()
-            if ledger_kind.startswith("E"):
-                prior = self._money(row["prior_expense"]) - self._money(row["prior_paid"])
-                closing = self._money(
-                    prior + self._money(row["period_expense"]) - self._money(row["period_paid"])
-                )
-            else:
-                prior = self._money(row["prior_income"]) - self._money(row["prior_paid"])
-                closing = self._money(
-                    prior + self._money(row["period_paid"]) - self._money(row["period_income"])
-                )
+            credit_normal = self._work_credit_normal(row["LedgerKind"] or "")
+            if credit_normal is None:
+                credit_normal = False
+            closing = self._work_apply(
+                Decimal("0.00"),
+                self._money(row["debit_amt"]),
+                self._money(row["credit_amt"]),
+                credit_normal=credit_normal,
+            )
             result[("work", int(row["WorkID"]))] = {
                 "amount": closing,
-                "dr_cr": self._dr_cr_side(closing),
+                "dr_cr": self._dr_cr_side(closing, credit_normal=credit_normal),
             }
         return result
 
@@ -1728,6 +1697,75 @@ class LedgerReportService:
             **period,
         }
 
+    @staticmethod
+    def _work_credit_normal(ledger_kind: str) -> bool | None:
+        """Expense increases on debit. Income and Misc. increase on credit.
+
+        Same sides as the Balance Sheet / Profit & Loss posting for a work ledger.
+        """
+        kind = (ledger_kind or "").strip().lower()
+        if kind.startswith("e"):
+            return False
+        if kind.startswith("i") or kind.startswith("m"):
+            return True
+        return None
+
+    def _work_closing_label(self, amount: Decimal, *, credit_normal: bool) -> str:
+        side = self._dr_cr_side(amount, credit_normal=credit_normal)
+        text = f"{abs(self._money(amount)):,.2f}"
+        return f"{text} {side}".strip()
+
+    def _work_apply(
+        self,
+        running: Decimal,
+        debit: Decimal,
+        credit: Decimal,
+        *,
+        credit_normal: bool,
+    ) -> Decimal:
+        if credit_normal:
+            return self._money(running + credit - debit)
+        return self._money(running + debit - credit)
+
+    def _work_opening_signed(
+        self,
+        amount,
+        dr_cr: str | None,
+        *,
+        credit_normal: bool,
+    ) -> Decimal:
+        amt = abs(self._money(amount))
+        if amt == 0:
+            return Decimal("0.00")
+        token = (dr_cr or "").strip().lower()
+        is_dr = token in {"", "dr", "d", "debit"}
+        if credit_normal:
+            return self._money(-amt if is_dr else amt)
+        return self._money(amt if is_dr else -amt)
+
+    def _work_oie_link(self, entry_id: int, ledger_kind: str) -> dict[str, Any]:
+        from flask import has_request_context, url_for
+
+        is_misc = (ledger_kind or "").strip().lower().startswith("m")
+        module = "miscellaneous" if is_misc else "income_expense"
+        endpoint = "miscellaneous.index" if is_misc else "others_income_expense.index"
+        fallback = (
+            f"/activities/miscellaneous?load_entry={int(entry_id)}"
+            if is_misc
+            else f"/others/income-expense?load_entry={int(entry_id)}"
+        )
+        source_url = fallback
+        if has_request_context():
+            source_url = url_for(endpoint, load_entry=int(entry_id))
+        return {
+            "source_module": module,
+            "source_module_id": int(entry_id),
+            "source_url": source_url,
+            "can_open": True,
+            "work_type": "Others",
+            "sub_work_type": "Income / Expense",
+        }
+
     def _work_ledger_data(
         self,
         work_id: int,
@@ -1750,72 +1788,193 @@ class LedgerReportService:
 
         date_from, date_to = self._resolve_period(date_from, date_to)
         work_name = (work["WorkName"] or "").strip()
-        ledger_kind = (work["LedgerKind"] or "").strip().upper()
+        ledger_kind = (work["LedgerKind"] or "").strip()
+        credit_normal_raw = self._work_credit_normal(ledger_kind)
+        post_oie = credit_normal_raw is not None
+        credit_normal = bool(credit_normal_raw)
 
-        # SQL Server forbids SUM( (SELECT SUM(...)) ); join payment totals instead.
-        prior = db.session.execute(
+        coa = db.session.execute(
             text(
                 """
-                SELECT
-                    ISNULL(SUM(ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0)), 0) AS income_amt,
-                    ISNULL(SUM(ISNULL(d.ExpenseAmount, 0)), 0) AS expense_amt,
-                    ISNULL(SUM(ISNULL(pay.paid_amt, 0)), 0) AS paid_amt
-                FROM dbo.JTCSDailyTransaction d
-                LEFT JOIN (
-                    SELECT TransactionID, SUM(Amount) AS paid_amt
-                    FROM dbo.JTCSDailyTransactionPayment
-                    GROUP BY TransactionID
-                ) pay ON pay.TransactionID = d.TransactionID
-                WHERE d.Status = N'Posted'
-                  AND d.TransactionDate < :date_from
-                  AND (
-                    d.WorkType = :work_name
-                    OR d.SubWorkType = :work_name
-                    OR d.SubWorkType LIKE N'%' + :work_name + N'%'
-                  )
+                SELECT TOP 1 AccountID, OpeningBalance, OpeningBalanceDrCr, OpeningBalanceDate
+                FROM dbo.ChartOfAccountMaster
+                WHERE WorkID = :work_id AND ISNULL(IsActive, 1) = 1
+                ORDER BY AccountID
                 """
             ),
-            {"work_name": work_name, "date_from": date_from},
+            {"work_id": work_id},
         ).mappings().first()
+        coa_key = f"coa-{int(coa['AccountID'])}" if coa and coa.get("AccountID") else ""
 
-        prior_income = self._money(prior["income_amt"] if prior else 0)
-        prior_expense = self._money(prior["expense_amt"] if prior else 0)
-        prior_paid = self._money(prior["paid_amt"] if prior else 0)
-        # Income/Misc → credit nature; Expense → debit nature
-        if ledger_kind.startswith("E"):
-            opening = self._money(prior_expense - prior_paid)
-        else:
-            opening = self._money(prior_income - prior_paid)
+        opening = Decimal("0.00")
+        if coa:
+            ob_date = coa.get("OpeningBalanceDate")
+            if isinstance(ob_date, datetime):
+                ob_date = ob_date.date()
+            if ob_date is None or ob_date <= date_from:
+                opening = self._work_opening_signed(
+                    coa.get("OpeningBalance"),
+                    coa.get("OpeningBalanceDrCr"),
+                    credit_normal=credit_normal,
+                )
 
-        rows = db.session.execute(
-            text(
-                """
-                SELECT
-                    d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
-                    d.StampID, d.ReferenceNo, d.Description, d.Remarks,
-                    ISNULL(d.SaleAmount, 0) AS SaleAmount,
-                    ISNULL(d.IncomeAmount, 0) AS IncomeAmount,
-                    ISNULL(d.ExpenseAmount, 0) AS ExpenseAmount,
-                    (
-                        SELECT ISNULL(SUM(p.Amount), 0)
-                        FROM dbo.JTCSDailyTransactionPayment p
-                        WHERE p.TransactionID = d.TransactionID
-                    ) AS PaymentTotal
-                FROM dbo.JTCSDailyTransaction d
-                WHERE d.Status = N'Posted'
-                  AND d.TransactionDate >= :date_from
-                  AND d.TransactionDate <= :date_to
-                  AND (
-                    d.WorkType = :work_name
-                    OR d.SubWorkType = :work_name
-                    OR d.SubWorkType LIKE N'%' + :work_name + N'%'
-                  )
-                ORDER BY d.TransactionDate ASC, d.TransactionID ASC
-                """
-            ),
-            {"work_name": work_name, "date_from": date_from, "date_to": date_to},
-        ).mappings().all()
+        if post_oie:
+            prior_oie = db.session.execute(
+                text(
+                    """
+                    SELECT ISNULL(SUM(ISNULL(d.Amount, 0)), 0) AS amt
+                    FROM dbo.OthersIncomeExpenseDetail d
+                    INNER JOIN dbo.OthersIncomeExpenseMaster m ON m.EntryID = d.EntryID
+                    WHERE d.WorkID = :work_id
+                      AND ISNULL(m.IsActive, 1) = 1
+                      AND m.WorkDate < :date_from
+                    """
+                ),
+                {"work_id": work_id, "date_from": date_from},
+            ).scalar()
+            prior_amt = self._money(prior_oie)
+            opening = self._work_apply(
+                opening,
+                prior_amt if not credit_normal else Decimal("0.00"),
+                prior_amt if credit_normal else Decimal("0.00"),
+                credit_normal=credit_normal,
+            )
 
+        if coa_key:
+            prior_obc = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        ISNULL(SUM(CASE WHEN DebitLedgerKey = :k THEN ISNULL(Amount, 0) ELSE 0 END), 0) AS dr,
+                        ISNULL(SUM(CASE WHEN CreditLedgerKey = :k THEN ISNULL(Amount, 0) ELSE 0 END), 0) AS cr
+                    FROM dbo.OthersBankCashTransaction
+                    WHERE ISNULL(IsActive, 1) = 1
+                      AND WorkDate < :date_from
+                      AND (DebitLedgerKey = :k OR CreditLedgerKey = :k)
+                    """
+                ),
+                {"k": coa_key, "date_from": date_from},
+            ).mappings().first()
+            opening = self._work_apply(
+                opening,
+                self._money(prior_obc["dr"] if prior_obc else 0),
+                self._money(prior_obc["cr"] if prior_obc else 0),
+                credit_normal=credit_normal,
+            )
+
+        events: list[dict[str, Any]] = []
+        if post_oie:
+            oie_rows = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        m.EntryID, m.WorkDate, m.BillNo, m.CustomerName, m.Remarks,
+                        ISNULL(d.Amount, 0) AS Amount,
+                        ISNULL(wt.SubWorkType, N'') AS SubWork
+                    FROM dbo.OthersIncomeExpenseDetail d
+                    INNER JOIN dbo.OthersIncomeExpenseMaster m ON m.EntryID = d.EntryID
+                    LEFT JOIN dbo.WorkTypeMaster wt ON wt.WorkTypeID = d.WorkTypeID
+                    WHERE d.WorkID = :work_id
+                      AND ISNULL(m.IsActive, 1) = 1
+                      AND m.WorkDate >= :date_from
+                      AND m.WorkDate <= :date_to
+                    ORDER BY m.WorkDate, m.EntryID, d.LineSequence
+                    """
+                ),
+                {"work_id": work_id, "date_from": date_from, "date_to": date_to},
+            ).mappings().all()
+            for row in oie_rows:
+                amount = self._money(row["Amount"])
+                if amount == 0:
+                    continue
+                debit = Decimal("0.00") if credit_normal else amount
+                credit = amount if credit_normal else Decimal("0.00")
+                bits = [
+                    "Income / Expense",
+                    work_name,
+                    (row["SubWork"] or "").strip(),
+                    (row["CustomerName"] or "").strip(),
+                    (row["BillNo"] or "").strip(),
+                    (row["Remarks"] or "").strip(),
+                ]
+                txn_date = row["WorkDate"]
+                events.append(
+                    {
+                        "sort": (
+                            txn_date.isoformat() if txn_date else "",
+                            int(row["EntryID"] or 0),
+                            0,
+                        ),
+                        "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
+                        "description": " · ".join([b for b in bits if b]),
+                        "debit": debit,
+                        "credit": credit,
+                        "link": self._work_oie_link(int(row["EntryID"]), ledger_kind),
+                    }
+                )
+
+        if coa_key:
+            obc_rows = db.session.execute(
+                text(
+                    """
+                    SELECT EntryID, WorkDate, VoucherNo, Purpose, Remarks, ISNULL(Amount, 0) AS Amount,
+                           DebitLedgerKey, CreditLedgerKey
+                    FROM dbo.OthersBankCashTransaction
+                    WHERE ISNULL(IsActive, 1) = 1
+                      AND WorkDate >= :date_from
+                      AND WorkDate <= :date_to
+                      AND (DebitLedgerKey = :k OR CreditLedgerKey = :k)
+                    ORDER BY WorkDate, EntryID
+                    """
+                ),
+                {"k": coa_key, "date_from": date_from, "date_to": date_to},
+            ).mappings().all()
+            from flask import has_request_context
+
+            dash = self._dash() if has_request_context() else None
+            for row in obc_rows:
+                amount = self._money(row["Amount"])
+                if amount == 0:
+                    continue
+                debit = amount if (row.get("DebitLedgerKey") or "") == coa_key else Decimal("0.00")
+                credit = amount if (row.get("CreditLedgerKey") or "") == coa_key else Decimal("0.00")
+                txn_date = row["WorkDate"]
+                bits = [
+                    "Other Bank/Cash",
+                    (row["Purpose"] or "").strip(),
+                    (row["VoucherNo"] or "").strip(),
+                    (row["Remarks"] or "").strip(),
+                ]
+                events.append(
+                    {
+                        "sort": (
+                            txn_date.isoformat() if txn_date else "",
+                            int(row["EntryID"] or 0),
+                            1,
+                        ),
+                        "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
+                        "description": " · ".join([b for b in bits if b]),
+                        "debit": debit,
+                        "credit": credit,
+                        "link": (
+                            dash._source_link_for_bank_cash_entry(int(row["EntryID"]))
+                            if dash is not None
+                            else {
+                                "source_module": "bank_cash",
+                                "source_module_id": int(row["EntryID"]),
+                                "source_url": (
+                                    "/others/bank-cash-transactions?load_entry="
+                                    + str(int(row["EntryID"]))
+                                ),
+                                "can_open": True,
+                                "work_type": "Others",
+                                "sub_work_type": "Other Bank/Cash Transactions",
+                            }
+                        ),
+                    }
+                )
+
+        events.sort(key=lambda item: item["sort"])
         lines: list[dict[str, Any]] = []
         running = opening
         lines.append(
@@ -1830,52 +1989,24 @@ class LedgerReportService:
                 }
             )
         )
-
-        dash = self._dash()
-        for row in rows:
-            income = self._money(row["SaleAmount"]) + self._money(row["IncomeAmount"])
-            expense = self._money(row["ExpenseAmount"])
-            payment = self._money(row["PaymentTotal"])
-            if ledger_kind.startswith("E"):
-                debit = expense
-                credit = payment
-            else:
-                debit = payment
-                credit = income
-            if debit == 0 and credit == 0:
-                # Fallback: show whichever amount exists
-                if income > 0:
-                    credit = income
-                elif expense > 0:
-                    debit = expense
-            running = self._money(running + debit - credit)
-            work_label = (row["WorkType"] or "").strip()
-            sub = (row["SubWorkType"] or "").strip()
-            if sub:
-                work_label = f"{work_label} / {sub}" if work_label else sub
-            desc_bits = [
-                (row["Description"] or row["Remarks"] or "").strip(),
-                work_label,
-                (row["ReferenceNo"] or "").strip() or f"TXN-{row['TransactionID']}",
-            ]
-            txn_date = row["TransactionDate"]
+        for event in events:
+            running = self._work_apply(
+                running,
+                event["debit"],
+                event["credit"],
+                credit_normal=credit_normal,
+            )
             lines.append(
                 self._decorate_line(
                     {
-                        "date": txn_date.strftime("%d/%m/%Y") if txn_date else "",
-                        "description": " · ".join([b for b in desc_bits if b]) or "Transaction",
-                        "debit": debit,
-                        "credit": credit,
+                        "date": event["date"],
+                        "description": event["description"],
+                        "debit": event["debit"],
+                        "credit": event["credit"],
                         "balance": running,
                         "kind": "txn",
                     },
-                    link=dash._source_link_for_daily(
-                        transaction_id=row["TransactionID"],
-                        work_type=row["WorkType"],
-                        sub_work_type=row["SubWorkType"],
-                        stamp_id=row["StampID"],
-                        reference=row["ReferenceNo"],
-                    ),
+                    link=event.get("link"),
                 )
             )
 
@@ -1889,6 +2020,10 @@ class LedgerReportService:
                 ("Work / Category", work_name),
                 ("Ledger Kind", (work["LedgerKind"] or "").strip() or "—"),
                 ("Period", f"{date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}"),
+                (
+                    f"Closing Balance as of {date_to.strftime('%d/%m/%Y')}",
+                    self._work_closing_label(running, credit_normal=credit_normal),
+                ),
             ],
             "headers": ["Date", "Description", "Debit", "Credit", "Closing Balance"],
             "lines": lines,

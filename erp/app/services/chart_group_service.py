@@ -23,26 +23,22 @@ class ChartGroupService:
         return {int(r.GroupID): r for r in self.repo.list_all()}
 
     def _resolved_nature(self, row, by_id: dict) -> str:
-        from app.services.financial_statements.engine import NATURE_BY_NAME
+        from app.services.financial_statements.engine import FinancialReportEngine
 
-        cur = row
-        hops = 0
-        seen: set[int] = set()
-        while cur is not None and hops < 40:
-            gid = int(cur.GroupID)
-            if gid in seen:
-                break
-            seen.add(gid)
-            mapped = NATURE_BY_NAME.get((cur.GroupName or "").strip())
-            if mapped:
-                return mapped
-            stored = (getattr(cur, "GroupNature", None) or "").strip()
-            if stored in {"Asset", "Liability", "Income", "Expense"}:
-                return stored
-            pid = getattr(cur, "ParentGroupID", None)
-            cur = by_id.get(int(pid)) if pid else None
-            hops += 1
-        return "Asset" if (row.UnderType or "") == "Assets" else "Liability"
+        chart = {
+            int(item.GroupID): {
+                "GroupID": int(item.GroupID),
+                "GroupName": item.GroupName or "",
+                "ParentGroupID": int(item.ParentGroupID) if item.ParentGroupID else None,
+                "GroupNature": (getattr(item, "GroupNature", None) or "").strip(),
+                "UnderType": item.UnderType or "",
+            }
+            for item in by_id.values()
+        }
+        current = chart.get(int(row.GroupID))
+        if current is None:
+            return "Asset" if (row.UnderType or "") == "Assets" else "Liability"
+        return FinancialReportEngine.chart_nature(current, chart)
 
     def _serialize(self, row, by_id: dict | None = None) -> dict:
         by_id = by_id if by_id is not None else self._parent_lookup()
@@ -74,8 +70,6 @@ class ChartGroupService:
         ]
 
     def list_active_for_dropdown(self) -> list[dict]:
-        from app.services.financial_statements.engine import NATURE_BY_NAME
-
         by_id = self._parent_lookup()
         rows = []
         for row in self.repo.list_all(active_only=True):
@@ -85,27 +79,7 @@ class ChartGroupService:
                 if parent is not None:
                     parent_name = parent.GroupName or ""
             under = parent_name or row.UnderType or ""
-            nature = ""
-            cur = row
-            hops = 0
-            seen: set[int] = set()
-            while cur is not None and hops < 40:
-                gid = int(cur.GroupID)
-                if gid in seen:
-                    break
-                seen.add(gid)
-                mapped = NATURE_BY_NAME.get((cur.GroupName or "").strip())
-                if mapped:
-                    nature = mapped
-                    break
-                stored = (getattr(cur, "GroupNature", None) or "").strip()
-                if stored in {"Asset", "Liability", "Income", "Expense"}:
-                    nature = stored
-                    break
-                cur = by_id.get(int(cur.ParentGroupID)) if cur.ParentGroupID else None
-                hops += 1
-            if nature not in {"Asset", "Liability", "Income", "Expense"}:
-                nature = "Asset" if (row.UnderType or "") == "Assets" else "Liability"
+            nature = self._resolved_nature(row, by_id)
             rows.append(
                 {
                     "group_id": row.GroupID,

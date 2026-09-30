@@ -309,46 +309,13 @@ class FinancialReportEngine:
         FinancialReportEngine._schema_ready = True
 
     def _backfill_group_hierarchy(self) -> None:
-        rows = db.session.execute(
-            text(
-                """
-                SELECT GroupID, GroupName, UnderType, ParentGroupID, GroupNature
-                FROM dbo.ChartOfGroupMaster
-                """
-            )
-        ).mappings().all()
-        by_name = {(r["GroupName"] or "").strip(): dict(r) for r in rows}
-        for name, row in by_name.items():
-            nature = NATURE_BY_NAME.get(name)
-            if not nature:
-                nature = "Asset" if (row.get("UnderType") or "") == "Assets" else "Liability"
-            parent_name = PARENT_MAP.get(name)
-            parent_id = None
-            if parent_name and parent_name in by_name:
-                parent_id = by_name[parent_name]["GroupID"]
-            need_nature = not (row.get("GroupNature") or "").strip()
-            need_parent = row.get("ParentGroupID") is None and parent_id is not None
-            if need_nature or need_parent:
-                db.session.execute(
-                    text(
-                        """
-                        UPDATE dbo.ChartOfGroupMaster
-                        SET GroupNature = COALESCE(NULLIF(GroupNature, N''), :nature),
-                            ParentGroupID = CASE
-                                WHEN ParentGroupID IS NULL THEN :parent_id
-                                ELSE ParentGroupID
-                            END,
-                            UpdatedDate = SYSUTCDATETIME()
-                        WHERE GroupID = :gid
-                        """
-                    ),
-                    {
-                        "nature": nature,
-                        "parent_id": parent_id,
-                        "gid": row["GroupID"],
-                    },
-                )
-        db.session.commit()
+        """Do not rewrite Chart of Group Master.
+
+        Parent and nature saved on the group are the source for Balance Sheet
+        and Profit & Loss. The old backfill filled blanks from a hardcoded
+        name list and could place a group on the wrong side.
+        """
+        return
 
     def load_groups(self, *, active_only: bool = True) -> list[dict[str, Any]]:
         self.ensure_schema()
@@ -357,9 +324,7 @@ class FinancialReportEngine:
             return cached
         sql = """
             SELECT GroupID, GroupName, UnderType, ParentGroupID,
-                   ISNULL(NULLIF(GroupNature, N''),
-                          CASE WHEN UnderType = N'Assets' THEN N'Asset' ELSE N'Liability' END
-                   ) AS GroupNature,
+                   NULLIF(GroupNature, N'') AS GroupNatureRaw,
                    IsActive
             FROM dbo.ChartOfGroupMaster
         """
@@ -367,6 +332,9 @@ class FinancialReportEngine:
             sql += " WHERE IsActive = 1"
         sql += " ORDER BY GroupName"
         rows = [dict(r) for r in db.session.execute(text(sql)).mappings().all()]
+        by_id = {int(g["GroupID"]): g for g in rows}
+        for row in rows:
+            row["GroupNature"] = self.chart_nature(row, by_id)
         self._groups_cache[active_only] = rows
         return rows
 
@@ -395,29 +363,51 @@ class FinancialReportEngine:
         roots.sort(key=lambda n: (n.get("GroupName") or "").lower())
         return roots
 
-    def _nature_from_group(self, group: dict | None, by_id: dict[int, dict]) -> str:
+    @staticmethod
+    def _stored_nature(group: dict) -> str:
+        if "GroupNatureRaw" in group:
+            return (group.get("GroupNatureRaw") or "").strip()
+        return (group.get("GroupNature") or "").strip()
+
+    @classmethod
+    def chart_nature(cls, group: dict | None, by_id: dict[int, dict]) -> str:
+        """Nature from Chart of Group Master, then parent, then name, then Under.
+
+        A nature saved on the group (or its parent in the chart) wins over the
+        old hardcoded group-name list.
+        """
         if not group:
             return "Asset"
-        cur = group
-        seen: set[int] = set()
-        hops = 0
-        while cur and hops < 40:
-            gid = int(cur["GroupID"])
-            if gid in seen:
-                break
-            seen.add(gid)
-            name = (cur.get("GroupName") or "").strip()
-            mapped = NATURE_BY_NAME.get(name)
-            if mapped:
-                return mapped
-            n = (cur.get("GroupNature") or "").strip()
-            if n in {"Asset", "Liability", "Income", "Expense"}:
-                return n
-            pid = cur.get("ParentGroupID")
-            cur = by_id.get(int(pid)) if pid else None
-            hops += 1
-        under = ((group or {}).get("UnderType") or "").strip()
+        valid = {"Asset", "Liability", "Income", "Expense"}
+
+        def walk(read):
+            cur = group
+            seen: set[int] = set()
+            hops = 0
+            while cur and hops < 40:
+                gid = int(cur["GroupID"])
+                if gid in seen:
+                    break
+                seen.add(gid)
+                found = read(cur)
+                if found:
+                    return found
+                pid = cur.get("ParentGroupID")
+                cur = by_id.get(int(pid)) if pid else None
+                hops += 1
+            return ""
+
+        stored = walk(lambda cur: cls._stored_nature(cur) if cls._stored_nature(cur) in valid else "")
+        if stored:
+            return stored
+        named = walk(lambda cur: NATURE_BY_NAME.get((cur.get("GroupName") or "").strip(), ""))
+        if named:
+            return named
+        under = (group.get("UnderType") or "").strip()
         return "Asset" if under == "Assets" else "Liability"
+
+    def _nature_from_group(self, group: dict | None, by_id: dict[int, dict]) -> str:
+        return self.chart_nature(group, by_id)
 
     def _ancestor_names(self, group: dict | None, by_id: dict[int, dict]) -> list[str]:
         names: list[str] = []
@@ -738,14 +728,8 @@ class FinancialReportEngine:
             name = (r.get("BankName") or "").strip()
             if (r.get("AccountNumber") or "").strip():
                 name = f"{name} ({r['AccountNumber']})"
-            nature = (r.get("GroupNature") or "Asset").strip()
-            # Prefer UnderType when group nature is missing/odd so banks stay
-            # on the correct BS side for their ChartGroupID placement.
-            under = (r.get("UnderType") or "").strip()
-            if under == "Assets":
-                nature = "Asset"
-            elif under == "Liabilities":
-                nature = "Liability"
+            placed_bank = groups_by_id.get(int(r["ChartGroupID"])) if r.get("ChartGroupID") else None
+            nature = self._nature_from_group(placed_bank, groups_by_id) if placed_bank else "Asset"
             ledgers.append(
                 {
                     "ledger_key": f"bank-{r['JtcsBankAccountID']}",
@@ -1316,15 +1300,9 @@ class FinancialReportEngine:
                     b.JtcsBankAccountID,
                     b.OpeningBalance,
                     b.OpeningBalanceDate,
+                    b.ChartGroupID,
                     g.UnderType,
-                    ISNULL(
-                        NULLIF(g.GroupNature, N''),
-                        CASE
-                            WHEN g.UnderType = N'Liabilities' THEN N'Liability'
-                            WHEN g.UnderType = N'Assets' THEN N'Asset'
-                            ELSE N'Asset'
-                        END
-                    ) AS GroupNature
+                    NULLIF(g.GroupNature, N'') AS GroupNature
                 FROM dbo.JtcsBankAccountMaster b
                 LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = b.ChartGroupID
                 """
@@ -1352,6 +1330,7 @@ class FinancialReportEngine:
             ).mappings().all()
             if r.get("JtcsBankAccountID")
         }
+        groups_by_id = {int(g["GroupID"]): g for g in self.load_groups(active_only=False)}
         out: dict[int, Decimal] = {}
         for row in masters:
             bid = int(row["JtcsBankAccountID"])
@@ -1360,13 +1339,13 @@ class FinancialReportEngine:
             if ob_date is None or ob_date <= date_from:
                 opening = self.money(row.get("OpeningBalance"))
             prior = priors.get(bid)
+            group = groups_by_id.get(int(row["ChartGroupID"])) if row.get("ChartGroupID") else None
+            nature = self._nature_from_group(group, groups_by_id) if group else (row.get("GroupNature") or "Asset")
             out[bid] = apply_account_running(
                 opening,
                 self.money(prior["prior_debit"] if prior else 0),
                 self.money(prior["prior_credit"] if prior else 0),
-                credit_normal=is_credit_normal_nature(
-                    row.get("GroupNature"), row.get("UnderType")
-                ),
+                credit_normal=is_credit_normal_nature(nature, row.get("UnderType")),
             )
         return out
 
