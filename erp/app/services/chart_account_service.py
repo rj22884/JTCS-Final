@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.extensions import db
 from app.repositories.chart_account_repository import ChartAccountRepository
 from app.repositories.chart_group_repository import ChartGroupRepository
+from app.repositories.customer_repository import CustomerRepository
 from app.utils.db_session import persist
 from app.utils.opening_balance import default_dr_cr_for_under_type, parse_opening_balance_fields
 from app.utils.master_delete_guard import (
-    assert_master_unused,
+    MasterInUseError,
+    find_master_usage,
     raise_if_integrity_in_use,
 )
+from app.utils.master_ledger_delete import purge_clear_ledger_refs
 
 MAX_GROUPS = 5
 
@@ -206,6 +212,16 @@ class ChartAccountService:
             works = [r for r in works if r["is_active"]]
         combined = customers + works + manuals
         combined.sort(key=lambda r: (r.get("account_name") or "").lower())
+        busy_customers = self._customer_ids_with_entries()
+        busy_works = self._work_ids_with_entries()
+        busy_accounts = self._manual_account_ids_with_entries()
+        for row in combined:
+            if row.get("source") == "customer":
+                row["has_entries"] = int(row.get("customer_id") or 0) in busy_customers
+            elif row.get("source") == "work":
+                row["has_entries"] = int(row.get("work_id") or 0) in busy_works
+            else:
+                row["has_entries"] = int(row.get("account_id") or 0) in busy_accounts
         return combined
 
     def _linked_record_from_row(self, row) -> dict:
@@ -551,29 +567,59 @@ class ChartAccountService:
         row = self.repo.get_by_id(account_id)
         if row is None:
             raise ValueError("Account not found.")
-        name = row.AccountName or "Account"
-        linked = bool(row.CustomerID or row.WorkID)
-        assert_master_unused(
-            table="ChartOfAccountMaster",
-            pk_column="AccountID",
-            pk_value=account_id,
-            display_name=name,
-            skip_tables={"ChartOfAccountGroupLink"},
-            extra_checks=[
-                {
-                    "table": "OthersBankCashTransaction",
-                    "where": "CreditLedgerKey = :key OR DebitLedgerKey = :key",
-                    "params": {"key": f"coa-{int(account_id)}"},
-                    "label": "Bank / Cash Transaction",
-                },
-            ],
-        )
+        if row.CustomerID:
+            return self.permanent_delete_customer(int(row.CustomerID))
+        if row.WorkID:
+            return self.permanent_delete_work(int(row.WorkID))
+        return self._permanent_delete_manual(row)
+
+    def clear_customer_group(self, customer_id: int) -> str:
+        return self.permanent_delete_customer(customer_id)
+
+    def clear_work_group(self, work_id: int) -> str:
+        return self.permanent_delete_work(work_id)
+
+    def row_usage(
+        self,
+        *,
+        source: str,
+        account_id: int | None = None,
+        customer_id: int | None = None,
+        work_id: int | None = None,
+    ) -> dict:
+        kind = (source or "").strip().lower()
+        if kind == "customer" and customer_id:
+            return self._customer_usage(int(customer_id), account_id)
+        if kind == "work" and work_id:
+            return self._work_usage(int(work_id))
+        if account_id:
+            row = self.repo.get_by_id(int(account_id))
+            if row is None:
+                raise ValueError("Account not found.")
+            if row.CustomerID:
+                return self._customer_usage(int(row.CustomerID), row.AccountID)
+            if row.WorkID:
+                return self._work_usage(int(row.WorkID))
+            return self._manual_usage(row)
+        raise ValueError("Account is missing.")
+
+    def permanent_delete_customer(self, customer_id: int) -> str:
+        name = self.repo.get_customer_name(customer_id) or "Customer"
+        usage = self._customer_usage(int(customer_id), None)
+        if not usage["can_delete"]:
+            raise MasterInUseError(
+                f"Stop: '{name}' has entries in other modules and cannot be deleted.",
+                links=usage["links"],
+                usage=usage,
+            )
+        chart = self.repo.get_by_customer_id(int(customer_id))
 
         def _write() -> str:
-            self.repo.delete(row)
-            if linked:
-                return f"Group assignment cleared for '{name}'."
-            return f"Account '{name}' deleted."
+            if chart is not None:
+                self._drop_account(chart.AccountID)
+            purge_clear_ledger_refs("customer", int(customer_id))
+            CustomerRepository().purge(int(customer_id))
+            return f"'{name}' permanently deleted. This cannot be recovered."
 
         try:
             return persist(_write)
@@ -581,14 +627,439 @@ class ChartAccountService:
             raise_if_integrity_in_use(exc, name)
             raise
 
-    def clear_customer_group(self, customer_id: int) -> str:
-        row = self.repo.get_by_customer_id(customer_id)
-        if row is None:
-            raise ValueError("No group assigned for this customer.")
-        return self.delete_record(row.AccountID)
+    def permanent_delete_work(self, work_id: int) -> str:
+        info = self.repo.get_work_info(work_id) or {}
+        name = (info.get("work_name") or "Work").strip() or "Work"
+        usage = self._work_usage(int(work_id))
+        if not usage["can_delete"]:
+            raise MasterInUseError(
+                f"Stop: '{name}' has entries in other modules and cannot be deleted.",
+                links=usage["links"],
+                usage=usage,
+            )
+        chart = self.repo.get_by_work_id(int(work_id))
 
-    def clear_work_group(self, work_id: int) -> str:
-        row = self.repo.get_by_work_id(work_id)
-        if row is None:
-            raise ValueError("No group assigned for this Income/Expense work type.")
-        return self.delete_record(row.AccountID)
+        def _write() -> str:
+            if chart is not None:
+                self._drop_account(chart.AccountID)
+            self.repo.session.execute(
+                text("DELETE FROM dbo.WorkMaster WHERE WorkID = :id"),
+                {"id": int(work_id)},
+            )
+            return f"'{name}' permanently deleted. This cannot be recovered."
+
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, name)
+            raise
+
+    def _permanent_delete_manual(self, row) -> str:
+        name = row.AccountName or "Account"
+        usage = self._manual_usage(row)
+        if not usage["can_delete"]:
+            raise MasterInUseError(
+                f"Stop: '{name}' has entries in other modules and cannot be deleted.",
+                links=usage["links"],
+                usage=usage,
+            )
+
+        def _write() -> str:
+            self._drop_account(row.AccountID)
+            return f"Account '{name}' permanently deleted. This cannot be recovered."
+
+        try:
+            return persist(_write)
+        except IntegrityError as exc:
+            raise_if_integrity_in_use(exc, name)
+            raise
+
+    def _drop_account(self, account_id: int) -> None:
+        self.repo.replace_group_links(int(account_id), [])
+        current = self.repo.get_by_id(int(account_id))
+        if current is not None:
+            self.repo.delete(current)
+
+    _SKIP_CUSTOMER_TABLES = {
+        "ChartOfAccountMaster",
+        "ChartOfAccountGroupLink",
+        "CustomerDynFieldValue",
+        "CustomerPortalLoginLog",
+        "CustomerIncomeExpenseWorkLink",
+    }
+
+    def _customer_ids_with_entries(self) -> set[int]:
+        try:
+            tables = [
+                table
+                for table in CustomerRepository()._linked_customer_tables()
+                if table not in self._SKIP_CUSTOMER_TABLES
+            ]
+        except Exception:
+            db.session.rollback()
+            tables = []
+        parts = [
+            f"SELECT CustomerID AS id FROM dbo.[{table}] WHERE CustomerID IS NOT NULL"
+            for table in tables
+        ]
+        parts.append(
+            "SELECT CustomerID AS id FROM dbo.CustomerMaster "
+            "WHERE ABS(ISNULL(OpeningBalance, 0)) > 0.0001"
+        )
+        parts.append(
+            "SELECT CustomerID AS id FROM dbo.ChartOfAccountMaster "
+            "WHERE CustomerID IS NOT NULL AND ABS(ISNULL(OpeningBalance, 0)) > 0.0001"
+        )
+        return self._id_union(parts)
+
+    def _work_ids_with_entries(self) -> set[int]:
+        parts = [
+            "SELECT WorkID AS id FROM dbo.OthersIncomeExpenseDetail WHERE WorkID IS NOT NULL",
+            "SELECT WorkID AS id FROM dbo.OthersIncomeExpenseMaster WHERE WorkID IS NOT NULL",
+            "SELECT WorkID AS id FROM dbo.PrintingScanMaster WHERE WorkID IS NOT NULL",
+            "SELECT WorkID AS id FROM dbo.WorkMaster WHERE ABS(ISNULL(OpeningBalance, 0)) > 0.0001",
+            """
+            SELECT w.WorkID AS id
+            FROM dbo.WorkMaster w
+            WHERE EXISTS (
+                SELECT 1 FROM dbo.JTCSDailyTransaction d
+                WHERE LTRIM(RTRIM(ISNULL(d.WorkType, N''))) = LTRIM(RTRIM(w.WorkName))
+            )
+            OR EXISTS (
+                SELECT 1 FROM dbo.WorkTypeMaster t
+                WHERE LTRIM(RTRIM(ISNULL(t.WorkTypeName, N''))) = LTRIM(RTRIM(w.WorkName))
+            )
+            """,
+        ]
+        return self._id_union(parts)
+
+    def _manual_account_ids_with_entries(self) -> set[int]:
+        parts = [
+            """
+            SELECT AccountID AS id FROM dbo.ChartOfAccountMaster
+            WHERE CustomerID IS NULL AND WorkID IS NULL
+              AND ABS(ISNULL(OpeningBalance, 0)) > 0.0001
+            """,
+            """
+            SELECT TRY_CAST(REPLACE(CreditLedgerKey, N'coa-', N'') AS int) AS id
+            FROM dbo.OthersBankCashTransaction
+            WHERE CreditLedgerKey LIKE N'coa-%'
+            UNION
+            SELECT TRY_CAST(REPLACE(DebitLedgerKey, N'coa-', N'') AS int)
+            FROM dbo.OthersBankCashTransaction
+            WHERE DebitLedgerKey LIKE N'coa-%'
+            """,
+        ]
+        ids = self._id_union(parts)
+        for table, column in self._account_id_columns():
+            ids |= self._id_union(
+                [f"SELECT [{column}] AS id FROM dbo.[{table}] WHERE [{column}] IS NOT NULL"]
+            )
+        return ids
+
+    def _account_id_columns(self) -> list[tuple[str, str]]:
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT t.name AS table_name, c.name AS column_name
+                    FROM sys.columns c
+                    INNER JOIN sys.tables t ON t.object_id = c.object_id
+                    INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
+                    WHERE s.name = N'dbo'
+                      AND c.name IN (N'AccountID', N'ChartAccountID')
+                      AND t.name NOT IN (N'ChartOfAccountMaster', N'ChartOfAccountGroupLink')
+                    """
+                )
+            ).mappings().all()
+        except SQLAlchemyError:
+            db.session.rollback()
+            return []
+        out = []
+        for row in rows:
+            table = str(row.get("table_name") or "")
+            column = str(row.get("column_name") or "")
+            if table.isidentifier() and column.isidentifier():
+                out.append((table, column))
+        return out
+
+    def _id_union(self, parts: list[str]) -> set[int]:
+        if not parts:
+            return set()
+        sql = " UNION ".join(f"SELECT id FROM ({part}) q WHERE id IS NOT NULL" for part in parts)
+        try:
+            rows = db.session.execute(text(sql)).fetchall()
+        except SQLAlchemyError:
+            db.session.rollback()
+            found: set[int] = set()
+            for part in parts:
+                try:
+                    rows = db.session.execute(
+                        text(f"SELECT id FROM ({part}) q WHERE id IS NOT NULL")
+                    ).fetchall()
+                except SQLAlchemyError:
+                    db.session.rollback()
+                    continue
+                for row in rows:
+                    if row[0] is not None:
+                        found.add(int(row[0]))
+            return found
+        return {int(row[0]) for row in rows if row[0] is not None}
+
+    def _customer_usage(self, customer_id: int, account_id: int | None) -> dict:
+        usage = CustomerRepository().get_usage(int(customer_id))
+        links = [
+            item
+            for item in (usage.get("links") or [])
+            if item.get("table") not in self._SKIP_CUSTOMER_TABLES
+        ]
+        transactions = list(usage.get("transactions") or [])
+        opening = self._customer_opening_line(int(customer_id), account_id)
+        if opening:
+            transactions.append(opening)
+            links.append({"table": "opening", "label": "Opening Balance", "count": 1})
+        transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
+        return {
+            "can_delete": not links,
+            "links": links,
+            "transactions": transactions[:200],
+        }
+
+    def _customer_opening_line(self, customer_id: int, account_id: int | None) -> dict | None:
+        amount = Decimal("0")
+        txn_date = ""
+        try:
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT OpeningBalance, OpeningBalanceDate
+                    FROM dbo.CustomerMaster WHERE CustomerID = :id
+                    """
+                ),
+                {"id": customer_id},
+            ).mappings().first()
+            if row and row.get("OpeningBalance") is not None:
+                amount = Decimal(str(row["OpeningBalance"]))
+                if row.get("OpeningBalanceDate"):
+                    txn_date = str(row["OpeningBalanceDate"])[:10]
+        except SQLAlchemyError:
+            db.session.rollback()
+        chart = self.repo.get_by_customer_id(customer_id) if account_id is None else self.repo.get_by_id(int(account_id))
+        if chart is not None and chart.OpeningBalance is not None:
+            chart_amt = Decimal(str(chart.OpeningBalance))
+            if abs(chart_amt) > abs(amount):
+                amount = chart_amt
+                if chart.OpeningBalanceDate:
+                    txn_date = chart.OpeningBalanceDate.isoformat()
+        if abs(amount) <= Decimal("0.0001"):
+            return None
+        return {
+            "txn_date": txn_date,
+            "work": "Opening Balance",
+            "amount": float(amount),
+            "reference": "",
+            "source": "Opening Balance",
+        }
+
+    def _work_usage(self, work_id: int) -> dict:
+        info = self.repo.get_work_info(work_id) or {}
+        name = (info.get("work_name") or "").strip()
+        transactions: list[dict] = []
+        transactions.extend(
+            self._detail_rows(
+                """
+                SELECT CONVERT(varchar(10), m.WorkDate, 23) AS txn_date,
+                       ISNULL(w.WorkName, N'Income / Expense') AS work,
+                       CAST(ISNULL(d.Amount, 0) AS decimal(18, 2)) AS amount,
+                       ISNULL(m.BillNo, N'') AS reference,
+                       N'Income / Expense' AS source
+                FROM dbo.OthersIncomeExpenseDetail d
+                INNER JOIN dbo.OthersIncomeExpenseMaster m ON m.EntryID = d.EntryID
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = d.WorkID
+                WHERE d.WorkID = :id AND ISNULL(m.IsActive, 1) = 1
+                """,
+                {"id": work_id},
+            )
+        )
+        transactions.extend(
+            self._detail_rows(
+                """
+                SELECT CONVERT(varchar(10), WorkDate, 23) AS txn_date,
+                       N'Printing & Scanning' AS work,
+                       CAST(ISNULL(SaleAmount, 0) AS decimal(18, 2)) AS amount,
+                       ISNULL(BillNo, N'') AS reference,
+                       N'Printing & Scanning' AS source
+                FROM dbo.PrintingScanMaster
+                WHERE WorkID = :id AND ISNULL(IsActive, 1) = 1
+                """,
+                {"id": work_id},
+            )
+        )
+        if name:
+            transactions.extend(
+                self._detail_rows(
+                    """
+                    SELECT CONVERT(varchar(10), TransactionDate, 23) AS txn_date,
+                           LTRIM(RTRIM(ISNULL(WorkType, N'')
+                               + CASE WHEN NULLIF(LTRIM(RTRIM(SubWorkType)), N'') IS NULL THEN N''
+                                      ELSE N' / ' + SubWorkType END)) AS work,
+                           CAST(
+                               CASE
+                                   WHEN ISNULL(TotalAmount, 0) <> 0 THEN TotalAmount
+                                   ELSE ISNULL(IncomeAmount, 0) + ISNULL(ExpenseAmount, 0)
+                                      + ISNULL(SaleAmount, 0) + ISNULL(PurchaseAmount, 0)
+                               END AS decimal(18, 2)
+                           ) AS amount,
+                           ISNULL(ReferenceNo, N'') AS reference,
+                           N'Daily Transaction' AS source
+                    FROM dbo.JTCSDailyTransaction
+                    WHERE LTRIM(RTRIM(ISNULL(WorkType, N''))) = :name
+                    """,
+                    {"name": name},
+                )
+            )
+            transactions.extend(
+                self._detail_rows(
+                    """
+                    SELECT N'' AS txn_date,
+                           ISNULL(SubWorkType, N'') AS work,
+                           CAST(NULL AS decimal(18, 2)) AS amount,
+                           ISNULL(WorkTypeName, N'') AS reference,
+                           N'Sub Work Master' AS source
+                    FROM dbo.WorkTypeMaster
+                    WHERE LTRIM(RTRIM(ISNULL(WorkTypeName, N''))) = :name
+                    """,
+                    {"name": name},
+                )
+            )
+        opening = self._scalar_opening(
+            "SELECT OpeningBalance, OpeningBalanceDate FROM dbo.WorkMaster WHERE WorkID = :id",
+            {"id": work_id},
+        )
+        links = []
+        if transactions:
+            by_source: dict[str, int] = {}
+            for item in transactions:
+                label = item.get("source") or "Entry"
+                by_source[label] = by_source.get(label, 0) + 1
+            links = [
+                {"table": label, "label": label, "count": count}
+                for label, count in sorted(by_source.items())
+            ]
+        if opening:
+            transactions.append(opening)
+            links.append({"table": "opening", "label": "Opening Balance", "count": 1})
+        transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
+        extra = find_master_usage(
+            table="WorkMaster",
+            pk_column="WorkID",
+            pk_value=work_id,
+            skip_tables={"ChartOfAccountMaster", "ChartOfAccountGroupLink"},
+        )
+        known = {item["label"] for item in links}
+        for item in extra:
+            if item.get("label") not in known and item.get("table") not in {
+                "OthersIncomeExpenseDetail",
+                "OthersIncomeExpenseMaster",
+                "PrintingScanMaster",
+            }:
+                links.append(item)
+        return {
+            "can_delete": not links,
+            "links": links,
+            "transactions": transactions[:200],
+        }
+
+    def _manual_usage(self, row) -> dict:
+        account_id = int(row.AccountID)
+        links = find_master_usage(
+            table="ChartOfAccountMaster",
+            pk_column="AccountID",
+            pk_value=account_id,
+            column_aliases=["AccountID", "ChartAccountID"],
+            skip_tables={"ChartOfAccountGroupLink"},
+            extra_checks=[
+                {
+                    "table": "OthersBankCashTransaction",
+                    "where": "CreditLedgerKey = :key OR DebitLedgerKey = :key",
+                    "params": {"key": f"coa-{account_id}"},
+                    "label": "Bank / Cash Transaction",
+                },
+            ],
+        )
+        transactions = self._detail_rows(
+            """
+            SELECT CONVERT(varchar(10), WorkDate, 23) AS txn_date,
+                   CASE
+                       WHEN CreditLedgerKey = :key THEN N'Credit'
+                       ELSE N'Debit'
+                   END AS work,
+                   CAST(ISNULL(Amount, 0) AS decimal(18, 2)) AS amount,
+                   ISNULL(Remarks, N'') AS reference,
+                   N'Bank / Cash' AS source
+            FROM dbo.OthersBankCashTransaction
+            WHERE ISNULL(IsActive, 1) = 1
+              AND (CreditLedgerKey = :key OR DebitLedgerKey = :key)
+            """,
+            {"key": f"coa-{account_id}"},
+        )
+        if row.OpeningBalance is not None and abs(Decimal(str(row.OpeningBalance))) > Decimal("0.0001"):
+            transactions.append(
+                {
+                    "txn_date": row.OpeningBalanceDate.isoformat() if row.OpeningBalanceDate else "",
+                    "work": "Opening Balance",
+                    "amount": float(row.OpeningBalance),
+                    "reference": row.OpeningBalanceDrCr or "",
+                    "source": "Opening Balance",
+                }
+            )
+            if not any(item.get("label") == "Opening Balance" for item in links):
+                links.append({"table": "opening", "label": "Opening Balance", "count": 1})
+        transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
+        return {
+            "can_delete": not links,
+            "links": links,
+            "transactions": transactions[:200],
+        }
+
+    def _scalar_opening(self, sql: str, params: dict) -> dict | None:
+        try:
+            row = db.session.execute(text(sql), params).mappings().first()
+        except SQLAlchemyError:
+            db.session.rollback()
+            return None
+        if not row or row.get("OpeningBalance") is None:
+            return None
+        amount = Decimal(str(row["OpeningBalance"]))
+        if abs(amount) <= Decimal("0.0001"):
+            return None
+        txn_date = ""
+        if row.get("OpeningBalanceDate"):
+            txn_date = str(row["OpeningBalanceDate"])[:10]
+        return {
+            "txn_date": txn_date,
+            "work": "Opening Balance",
+            "amount": float(amount),
+            "reference": "",
+            "source": "Opening Balance",
+        }
+
+    def _detail_rows(self, sql: str, params: dict) -> list[dict]:
+        try:
+            rows = db.session.execute(text(sql), params).mappings().all()
+        except SQLAlchemyError:
+            db.session.rollback()
+            return []
+        out = []
+        for row in rows:
+            amount = row.get("amount")
+            out.append(
+                {
+                    "txn_date": str(row.get("txn_date") or "")[:10],
+                    "work": (row.get("work") or "").strip(),
+                    "amount": float(amount) if amount is not None else None,
+                    "reference": (row.get("reference") or "").strip(),
+                    "source": (row.get("source") or "").strip(),
+                }
+            )
+        return out

@@ -1996,11 +1996,7 @@
           '" title="Edit"><i class="bi bi-pencil"></i></button> ' +
           '<button type="button" class="btn btn-outline-danger btn-sm oie-grid-delete-btn" data-id="' +
           row.entry_id +
-          '"' +
-          (row.payment_received
-            ? ' disabled title="Remove Payment Received in Edit, then Delete will enable"'
-            : ' title="Delete"') +
-          '><i class="bi bi-trash"></i></button>' +
+          '" title="Delete"><i class="bi bi-trash"></i></button>' +
           "</td>" +
           "</tr>"
         );
@@ -2115,6 +2111,28 @@
         setEntryFieldsLocked(true);
         if (entryModal) entryModal.show();
       });
+  }
+
+  async function gridDeleteAllowed(row) {
+    const billNo = ((row && (row.tally_bill_no || row.bill_no)) || "").trim();
+    const maybeBilled = !!(row && (row.tally_bill_generated || row.sale_invoice));
+    if (!maybeBilled || !billNo || !window.OIE_INVOICE_STATUS_URL) return true;
+    try {
+      const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.found || !data.record || !data.record.bill_approved) return true;
+      const paid = !!(row && row.payment_received) || !!(data.record && data.record.payment_received);
+      const message = paid
+        ? "Payment aa chuki hai aur admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao."
+        : "Admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+      else alert(message);
+      return false;
+    } catch (_err) {
+      return true;
+    }
   }
 
   async function deleteEntry(entryId) {
@@ -2540,8 +2558,15 @@
       }
       const deleteBtn = event.target.closest(".oie-grid-delete-btn");
       if (deleteBtn) {
-        if (deleteBtn.disabled) return;
-        deleteEntry(deleteBtn.getAttribute("data-id"));
+        event.preventDefault();
+        const entryId = deleteBtn.getAttribute("data-id");
+        const row = allGridRows.find(function (item) {
+          return String(item.entry_id) === String(entryId);
+        });
+        gridDeleteAllowed(row).then(function (allowed) {
+          if (!allowed) return;
+          deleteEntry(entryId);
+        });
       }
     });
   }

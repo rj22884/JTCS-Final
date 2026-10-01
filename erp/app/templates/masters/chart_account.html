@@ -37,23 +37,79 @@
   </p>
   <div id="camStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
-  <div class="table-responsive">
-    <table class="table table-sm table-hover table-striped align-middle mb-0" id="camGrid">
-      <thead>
-        <tr>
-          <th>Source</th>
-          <th>Account Name</th>
-          <th>Chart of Account Group</th>
-          <th>Under</th>
-          <th>Status</th>
-          <th class="text-end">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="camGridBody"></tbody>
-    </table>
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <div class="table-responsive">
+        <table class="table table-sm table-hover table-striped align-middle mb-0" id="camGrid">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Account Name</th>
+              <th>Chart of Account Group</th>
+              <th>Under</th>
+              <th>Status</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="camGridBody"></tbody>
+        </table>
+      </div>
+      <div id="camEmpty" class="small text-muted py-3 d-none">No accounts found.</div>
+    </div>
+    <div class="col-lg-4">
+      <aside class="cam-entry-panel" id="camEntryPanel" aria-live="polite">
+        <div class="cam-entry-title">Entries</div>
+        <p class="small text-muted mb-2" id="camEntryHint">Select an account. Entries from every module show here, newest first.</p>
+        <div id="camEntryName" class="fw-semibold mb-2 d-none"></div>
+        <div id="camEntryClear" class="alert alert-success py-2 small d-none mb-2">No entries in any module. Delete is allowed.</div>
+        <div id="camEntryBlocked" class="d-none">
+          <p class="small text-danger mb-2">Entries exist, so Delete is disabled.</p>
+          <div id="camEntryLinks" class="cam-entry-links mb-2"></div>
+          <div class="table-responsive cam-entry-table-wrap">
+            <table class="table table-sm mb-0">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Entry</th>
+                  <th class="text-end">Amount</th>
+                </tr>
+              </thead>
+              <tbody id="camEntryRows"></tbody>
+            </table>
+          </div>
+          <div id="camEntryNone" class="small text-muted mt-2 d-none">Linked records found, but no dated lines to list.</div>
+        </div>
+      </aside>
+    </div>
   </div>
-  <div id="camEmpty" class="small text-muted py-3 d-none">No accounts found.</div>
 </div>
+<style>
+  .cam-entry-panel {
+    position: sticky;
+    top: 0.75rem;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    padding: 0.85rem 1rem;
+    min-height: 180px;
+  }
+  .cam-entry-title { font-weight: 700; margin-bottom: 0.25rem; }
+  .cam-entry-links { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .cam-entry-chip {
+    display: inline-block;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
+    font-size: 11px;
+    color: #9a3412;
+    font-weight: 600;
+  }
+  .cam-entry-table-wrap { max-height: 62vh; overflow: auto; }
+  #camGrid tbody tr { cursor: pointer; }
+  #camGrid .cam-delete:disabled { pointer-events: none; }
+  #camGrid tbody tr.cam-row-selected { outline: 2px solid #0d6efd; outline-offset: -2px; }
+</style>
 
 <div class="modal fade" id="camModal" tabindex="-1" aria-labelledby="camModalTitle" aria-hidden="true" data-bs-backdrop="static">
   <div class="modal-dialog">
@@ -136,10 +192,11 @@
     create: {{ url_for('masters_chart_account.create_record') | tojson }},
     update: {{ url_for('masters_chart_account.update_record', account_id=0) | tojson }},
     delete: {{ url_for('masters_chart_account.delete_record', account_id=0) | tojson }},
+    usage: {{ url_for('masters_chart_account.row_usage') | tojson }},
     groups: {{ url_for('masters_chart_group.list_active') | tojson }}
   };
   window.CHART_ACCOUNT_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.CHART_ACCOUNT_CSRF = {{ csrf_token() | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/chart_account_master.js') }}?v=20260804obdrcr"></script>
+<script src="{{ url_for('static', filename='js/chart_account_master.js') }}?v=20261001camdel"></script>
 {% endblock %}

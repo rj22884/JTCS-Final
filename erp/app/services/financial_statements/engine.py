@@ -751,6 +751,7 @@ class FinancialReportEngine:
                 }
             )
         self._append_fixed_asset_item_ledgers(ledgers, groups_by_id)
+        self._append_income_item_ledgers(ledgers, groups_by_id)
         return ledgers
 
     def _append_fixed_asset_item_ledgers(
@@ -816,6 +817,61 @@ class FinancialReportEngine:
                     "purchase_date": r.get("PurchaseDate") or r.get("OpeningBalanceDate"),
                     "depreciation_rate": r.get("DepreciationRate"),
                     "appreciation_rate": r.get("AppreciationRate"),
+                }
+            )
+
+    def _append_income_item_ledgers(
+        self, ledgers: list[dict[str, Any]], groups_by_id: dict[int, dict]
+    ) -> None:
+        """Item Master rows under an Income group. Tally-bill sales post here."""
+        present = {str(led.get("ledger_key") or "") for led in ledgers}
+        try:
+            items = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        i.ItemID, i.ItemCode, i.ItemName, i.ChartGroupID,
+                        g.GroupName
+                    FROM dbo.ItemMaster i
+                    INNER JOIN dbo.ChartOfGroupMaster g ON g.GroupID = i.ChartGroupID
+                    WHERE ISNULL(i.IsActive, 1) = 1
+                      AND i.ChartGroupID IS NOT NULL
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return
+        for r in items:
+            gid = int(r["ChartGroupID"])
+            placed = groups_by_id.get(gid)
+            nature = self._nature_from_group(placed, groups_by_id) if placed else ""
+            if nature != "Income":
+                continue
+            key = f"saleitem-{int(r['ItemID'])}"
+            if key in present:
+                continue
+            code = (r.get("ItemCode") or "").strip()
+            name = (r.get("ItemName") or "").strip() or code or f"Item #{r['ItemID']}"
+            ledgers.append(
+                {
+                    "ledger_key": key,
+                    "source": "sales-item",
+                    "account_id": None,
+                    "bank_account_id": None,
+                    "customer_id": None,
+                    "work_id": None,
+                    "item_id": int(r["ItemID"]),
+                    "ledger_name": f"{name} ({code})" if code and code.lower() not in name.lower() else name,
+                    "group_id": gid,
+                    "group_name": (placed or {}).get("GroupName") or (r.get("GroupName") or ""),
+                    "nature": "Income",
+                    "opening_raw": 0,
+                    "opening_date": None,
+                    "opening_dr_cr": "Cr",
+                    "purchase_date": None,
+                    "depreciation_rate": 0,
+                    "appreciation_rate": 0,
                 }
             )
 
@@ -1146,6 +1202,7 @@ class FinancialReportEngine:
 
         self._merge_obc_coa_movements(moves, date_from, date_to)
         self._merge_item_invoice_movements(moves, date_from, date_to)
+        self._merge_followup_tally_sales(moves, date_from, date_to)
         return moves
 
     def _merge_item_invoice_movements(
@@ -1177,6 +1234,66 @@ class FinancialReportEngine:
             if not r.get("ItemID"):
                 continue
             moves[f"item-{int(r['ItemID'])}"]["credit"] += self.money(r["CreditAmt"])
+
+    def _merge_followup_tally_sales(
+        self,
+        moves: dict[str, dict[str, Decimal]],
+        date_from: date,
+        date_to: date,
+    ) -> None:
+        """Tally Bill Generated follow-up invoices credit the item's Sales ledger.
+
+        Lines with no item use the Item Master whose code is the follow-up module
+        (ITR, GST, DSC). Bills already posted through Income/Expense work ledgers
+        are left there. Other modules are not touched.
+        """
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT COALESCE(l.ItemID, im.ItemID) AS ItemID,
+                           SUM(ISNULL(l.TaxableValue, 0)) AS CreditAmt
+                    FROM dbo.GstInvoiceLine l
+                    INNER JOIN dbo.GstInvoice inv ON inv.InvoiceID = l.InvoiceID
+                    INNER JOIN dbo.FollowupEntryMaster f
+                      ON UPPER(LTRIM(RTRIM(ISNULL(f.BillNo, N''))))
+                         = UPPER(LTRIM(RTRIM(ISNULL(inv.TallyBillNo, N''))))
+                     AND ISNULL(f.IsActive, 1) = 1
+                     AND LTRIM(RTRIM(ISNULL(inv.TallyBillNo, N''))) <> N''
+                    INNER JOIN dbo.FollowupEntryStage es ON es.EntryID = f.EntryID
+                    INNER JOIN dbo.FollowupWorkflowStage s
+                      ON s.StageID = es.StageID
+                     AND s.StageCode = N'tally_bill_generated'
+                    LEFT JOIN dbo.ItemMaster im
+                      ON l.ItemID IS NULL
+                     AND im.ItemCode = f.ModuleCode
+                     AND ISNULL(im.IsActive, 1) = 1
+                    WHERE inv.InvoiceDate >= :d1
+                      AND inv.InvoiceDate <= :d2
+                      AND COALESCE(l.ItemID, im.ItemID) IS NOT NULL
+                      AND NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.OthersIncomeExpenseMaster m
+                            WHERE ISNULL(m.IsActive, 1) = 1
+                              AND (
+                                UPPER(LTRIM(RTRIM(ISNULL(m.TallyBillNo, N''))))
+                                  = UPPER(LTRIM(RTRIM(inv.TallyBillNo)))
+                                OR UPPER(LTRIM(RTRIM(ISNULL(m.BillNo, N''))))
+                                  = UPPER(LTRIM(RTRIM(inv.TallyBillNo)))
+                              )
+                      )
+                    GROUP BY COALESCE(l.ItemID, im.ItemID)
+                    """
+                ),
+                {"d1": date_from, "d2": date_to},
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            return
+        for r in rows:
+            if not r.get("ItemID"):
+                continue
+            moves[f"saleitem-{int(r['ItemID'])}"]["credit"] += self.money(r["CreditAmt"])
 
     def _obc_ledger_keys_ready(self) -> bool:
         cached = FinancialReportEngine._obc_keys_ready
@@ -1632,6 +1749,14 @@ class FinancialReportEngine:
             )
         self._apply_item_depreciation(result, date_from, date_to)
         self._apply_item_appreciation(result, date_from, date_to)
+        result = [
+            led
+            for led in result
+            if led.get("source") != "sales-item"
+            or abs(self.money(led.get("closing"))) >= Decimal("0.01")
+            or abs(self.money(led.get("debit"))) >= Decimal("0.01")
+            or abs(self.money(led.get("credit"))) >= Decimal("0.01")
+        ]
         return result
 
     def _item_prior_credits(self, item_ids: list[int], date_from: date) -> dict[int, Decimal]:
