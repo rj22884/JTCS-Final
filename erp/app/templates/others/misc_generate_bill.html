@@ -154,6 +154,7 @@
       csrf: {{ csrf_token() | tojson }}
     };
   </script>
+  <script src="{{ url_for('static', filename='js/jtcs_ledger_notify.js') }}?v=20261001dash1"></script>
   <script src="{{ url_for('static', filename='js/jtcs_dialog.js') }}?v=20260925convertpop"></script>
   <script src="{{ url_for('static', filename='js/misc_generate_bill.js') }}?v=20260925convertpop"></script>
 </body>

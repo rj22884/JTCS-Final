@@ -397,4 +397,8 @@
   } else {
     load();
   }
+
+  document.addEventListener("jtcs-dashboard-data-changed", function () {
+    load();
+  });
 })();

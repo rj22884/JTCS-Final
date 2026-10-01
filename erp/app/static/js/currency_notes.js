@@ -29,7 +29,7 @@
 
   function syncMatchEmojis() {
     const cashEl = document.querySelector('[data-metric-value="cash_closing_balance"]');
-    const notesEl = els.cardTotal;
+    const notesEl = document.getElementById("dashCurrencyNotesTotal");
     const cashEmoji = document.getElementById("dashCashCloseEmoji");
     const notesEmoji = document.getElementById("dashNotesCloseEmoji");
     const cash = parseAmount(cashEl);
@@ -48,7 +48,8 @@
       '.dash-today-closing[data-metric="cash_closing_balance"]'
     );
     if (cashBtn) cashBtn.classList.toggle("is-notes-mismatch", !match);
-    if (btn) btn.classList.toggle("is-notes-mismatch", !match);
+    const notesBtn = document.getElementById("dashCurrencyNotesBtn");
+    if (notesBtn) notesBtn.classList.toggle("is-notes-mismatch", !match);
   }
 
   window.JTCSCurrencyNotesMatch = { sync: syncMatchEmojis };
@@ -165,8 +166,9 @@
         return res.json().then(function (data) {
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to save notes.");
           renderLines(data.lines || []);
-          if (els.cardTotal && iso === (cfg.systemDate || iso)) {
-            els.cardTotal.textContent = formatMoney(data.total_amount);
+          const cardTotal = document.getElementById("dashCurrencyNotesTotal");
+          if (cardTotal && iso === (cfg.systemDate || iso)) {
+            cardTotal.textContent = formatMoney(data.total_amount);
           }
           syncMatchEmojis();
           if (window.JTCSDialog && JTCSDialog.alert) {
@@ -187,7 +189,9 @@
       });
   }
 
-  btn.addEventListener("click", function (ev) {
+  document.addEventListener("click", function (ev) {
+    const hit = ev.target.closest && ev.target.closest("#dashCurrencyNotesBtn");
+    if (!hit) return;
     ev.preventDefault();
     ev.stopPropagation();
     const iso = cfg.systemDate || (els.date && els.date.value) || "";

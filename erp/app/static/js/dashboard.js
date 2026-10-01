@@ -1056,6 +1056,76 @@
     openSourceEntry(row);
   }
 
+  let dashRefreshTimer = null;
+  let dashRefreshRunning = false;
+  let dashRefreshAgain = false;
+
+  function swapDashNode(selector, doc) {
+    const next = doc.querySelector(selector);
+    const current = document.querySelector(selector);
+    if (!next || !current) return;
+    current.replaceWith(document.importNode(next, true));
+  }
+
+  function runDashboardRefresh() {
+    if (!document.querySelector(".dash-page")) return Promise.resolve();
+    if (dashRefreshRunning) {
+      dashRefreshAgain = true;
+      return Promise.resolve();
+    }
+    dashRefreshAgain = false;
+    dashRefreshRunning = true;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const url = new URL(window.location.href);
+    url.searchParams.set("_", String(Date.now()));
+    return fetch(url.toString(), {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "text/html",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cache-Control": "no-cache",
+      },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Dashboard refresh failed.");
+        return res.text();
+      })
+      .then(function (html) {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        if (!doc.querySelector(".dash-today-metrics")) return;
+        swapDashNode(".dash-today-metrics", doc);
+        swapDashNode("#dashMetricCards", doc);
+        const nextTxn = doc.querySelector(".dash-today-txn");
+        const txn = document.querySelector(".dash-today-txn");
+        if (nextTxn && txn) txn.textContent = nextTxn.textContent;
+        const nextRecent = doc.querySelector("#dashRecentBody");
+        const recent = document.getElementById("dashRecentBody");
+        if (nextRecent && recent) recent.innerHTML = nextRecent.innerHTML;
+        if (window.JTCSIcons && typeof window.JTCSIcons.scan === "function") {
+          const page = document.querySelector(".dash-page");
+          if (page) window.JTCSIcons.scan(page);
+        }
+        if (window.JTCSCurrencyNotesMatch && typeof window.JTCSCurrencyNotesMatch.sync === "function") {
+          window.JTCSCurrencyNotesMatch.sync();
+        }
+        window.scrollTo(scrollX, scrollY);
+        document.dispatchEvent(new CustomEvent("jtcs-dashboard-data-changed"));
+      })
+      .catch(function () {})
+      .finally(function () {
+        dashRefreshRunning = false;
+        if (dashRefreshAgain) window.jtcsRefreshDashboard();
+      });
+  }
+
+  window.jtcsRefreshDashboard = function () {
+    dashRefreshAgain = true;
+    clearTimeout(dashRefreshTimer);
+    dashRefreshTimer = setTimeout(runDashboardRefresh, 150);
+  };
+
   const recentBody = document.getElementById("dashRecentBody");
   if (recentBody) {
     recentBody.addEventListener("click", function (event) {
@@ -1072,32 +1142,30 @@
     });
   }
 
-  document.querySelectorAll(".dash-metric-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      openMetric(btn.getAttribute("data-metric"), btn.getAttribute("data-label"));
-    });
-  });
-
-  document.querySelectorAll(".dash-today-metric-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      openTodayActivity(
-        btn.getAttribute("data-today-metric"),
-        btn.getAttribute("data-label"),
-        btn.getAttribute("data-account-id")
-      );
-    });
-  });
-
-  document.querySelectorAll(".dash-pending-sale-val").forEach(function (btn) {
-    btn.addEventListener("click", function () {
+  document.querySelector(".dash-page")?.addEventListener("click", function (event) {
+    const pending = event.target.closest(".dash-pending-sale-val");
+    if (pending) {
       openTodayActivity(
         "pending_sale",
-        btn.getAttribute("data-label"),
+        pending.getAttribute("data-label"),
         "",
-        btn.getAttribute("data-sale-part"),
-        btn.getAttribute("data-sale-scope")
+        pending.getAttribute("data-sale-part"),
+        pending.getAttribute("data-sale-scope")
       );
-    });
+      return;
+    }
+    const todayBtn = event.target.closest(".dash-today-metric-btn");
+    if (todayBtn) {
+      openTodayActivity(
+        todayBtn.getAttribute("data-today-metric"),
+        todayBtn.getAttribute("data-label"),
+        todayBtn.getAttribute("data-account-id")
+      );
+      return;
+    }
+    const metricBtn = event.target.closest(".dash-metric-btn");
+    if (!metricBtn) return;
+    openMetric(metricBtn.getAttribute("data-metric"), metricBtn.getAttribute("data-label"));
   });
 
   els.grid?.addEventListener("click", function (event) {
