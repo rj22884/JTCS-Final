@@ -2,19 +2,19 @@
 
 {% block ribbon_toolbar %}
 <div class="jtcs-ribbon-group">
-  <button type="button" class="jtcs-ribbon-btn" id="waEditBtn" title="Edit">
+  <button type="button" class="jtcs-ribbon-btn" data-wa-action="edit" title="Edit">
     <i class="bi bi-pencil-square"></i>
     <span>Edit</span>
   </button>
-  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="waSaveBtn" title="Save">
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" data-wa-action="save" title="Save">
     <i class="bi bi-save"></i>
     <span>Save</span>
   </button>
-  <button type="button" class="jtcs-ribbon-btn" id="waDeleteBtn" title="Delete">
+  <button type="button" class="jtcs-ribbon-btn" data-wa-action="delete" title="Delete">
     <i class="bi bi-trash"></i>
     <span>Delete</span>
   </button>
-  <button type="button" class="jtcs-ribbon-btn" id="waTestBtn" title="Test">
+  <button type="button" class="jtcs-ribbon-btn" data-wa-action="test" title="Test">
     <i class="bi bi-plug"></i>
     <span>Test</span>
   </button>
@@ -40,6 +40,24 @@
       </p>
     </div>
     <span class="badge text-bg-secondary" id="waStatusBadge">{{ state.status }}</span>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <button type="button" class="btn btn-outline-primary" data-wa-action="edit">
+      <i class="bi bi-pencil-square"></i> Edit
+    </button>
+    <button type="button" class="btn btn-primary" data-wa-action="save">
+      <i class="bi bi-save"></i> Save
+    </button>
+    <button type="button" class="btn btn-outline-danger" data-wa-action="delete">
+      <i class="bi bi-trash"></i> Delete
+    </button>
+    <button type="button" class="btn btn-outline-success" data-wa-action="test">
+      <i class="bi bi-plug"></i> Test
+    </button>
+    <a href="{{ inbox_url }}" class="btn btn-outline-secondary">
+      <i class="bi bi-inbox"></i> Staff inbox
+    </a>
   </div>
 
   <form id="waForm" autocomplete="off">
@@ -125,5 +143,5 @@
     webhookUrl: {{ webhook_url | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/whatsapp_cloud.js') }}?v=20261002wa1"></script>
+<script src="{{ url_for('static', filename='js/whatsapp_cloud.js') }}?v=20261002wa2"></script>
 {% endblock %}

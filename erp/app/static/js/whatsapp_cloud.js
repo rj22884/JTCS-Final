@@ -4,10 +4,14 @@
   if (!form || !cfg.saveUrl) return;
 
   const fields = form.querySelectorAll("[data-wa-field]");
-  const editBtn = document.getElementById("waEditBtn");
-  const saveBtn = document.getElementById("waSaveBtn");
-  const deleteBtn = document.getElementById("waDeleteBtn");
-  const testBtn = document.getElementById("waTestBtn");
+  function actionButtons(name) {
+    return Array.from(document.querySelectorAll('[data-wa-action="' + name + '"]'));
+  }
+  function setActionDisabled(name, disabled) {
+    actionButtons(name).forEach(function (btn) {
+      btn.disabled = disabled;
+    });
+  }
   const generateBtn = document.getElementById("waGenerateToken");
   const copyBtn = document.getElementById("waCopyWebhook");
   const result = document.getElementById("waResult");
@@ -33,8 +37,8 @@
     fields.forEach(function (el) {
       el.disabled = !on;
     });
-    if (saveBtn) saveBtn.disabled = !on;
-    if (editBtn) editBtn.disabled = on;
+    setActionDisabled("save", !on);
+    setActionDisabled("edit", on);
   }
 
   function applyValues(data) {
@@ -68,7 +72,7 @@
       secrets.app_secret ||
       secrets.webhook_verify_token
     );
-    if (deleteBtn) deleteBtn.disabled = !hasSaved;
+    setActionDisabled("delete", !hasSaved);
     return hasSaved;
   }
 
@@ -106,18 +110,18 @@
     return values;
   }
 
-  setEditing(!cfg.hasSaved);
-  if (deleteBtn) deleteBtn.disabled = !cfg.hasSaved;
+  setEditing(true);
+  setActionDisabled("delete", !cfg.hasSaved);
 
-  if (editBtn) {
+  actionButtons("edit").forEach(function (editBtn) {
     editBtn.addEventListener("click", function () {
       setEditing(true);
     });
-  }
+  });
 
-  if (saveBtn) {
+  actionButtons("save").forEach(function (saveBtn) {
     saveBtn.addEventListener("click", async function () {
-      saveBtn.disabled = true;
+      setActionDisabled("save", true);
       try {
         const data = await postJson(cfg.saveUrl, { values: collectValues() });
         applyValues(data);
@@ -125,17 +129,17 @@
         showResult(data.message || "Credentials saved.", true);
       } catch (err) {
         showResult(err.message || "Save failed.", false);
-        saveBtn.disabled = false;
+        setActionDisabled("save", false);
       }
     });
-  }
+  });
 
-  if (deleteBtn) {
+  actionButtons("delete").forEach(function (deleteBtn) {
     deleteBtn.addEventListener("click", async function () {
       if (!window.confirm("Saved WhatsApp token, App Secret, aur Phone Number ID is app se delete ho jayenge. Continue?")) {
         return;
       }
-      deleteBtn.disabled = true;
+      setActionDisabled("delete", true);
       try {
         const data = await postJson(cfg.deleteUrl, {});
         applyValues(data);
@@ -145,14 +149,14 @@
         showResult(data.message || "Credentials deleted.", true);
       } catch (err) {
         showResult(err.message || "Delete failed.", false);
-        deleteBtn.disabled = false;
+        setActionDisabled("delete", false);
       }
     });
-  }
+  });
 
-  if (testBtn) {
+  actionButtons("test").forEach(function (testBtn) {
     testBtn.addEventListener("click", async function () {
-      testBtn.disabled = true;
+      setActionDisabled("test", true);
       try {
         const data = await postJson(cfg.testUrl, {
           send_test_message: !!document.getElementById("send_test_message").checked,
@@ -168,10 +172,10 @@
       } catch (err) {
         showResult(err.message || "Test failed.", false);
       } finally {
-        testBtn.disabled = false;
+        setActionDisabled("test", false);
       }
     });
-  }
+  });
 
   if (generateBtn) {
     generateBtn.addEventListener("click", async function () {
