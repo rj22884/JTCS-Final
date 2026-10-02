@@ -1,0 +1,129 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn" id="waEditBtn" title="Edit">
+    <i class="bi bi-pencil-square"></i>
+    <span>Edit</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn jtcs-ribbon-btn-primary" id="waSaveBtn" title="Save">
+    <i class="bi bi-save"></i>
+    <span>Save</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="waDeleteBtn" title="Delete">
+    <i class="bi bi-trash"></i>
+    <span>Delete</span>
+  </button>
+  <button type="button" class="jtcs-ribbon-btn" id="waTestBtn" title="Test">
+    <i class="bi bi-plug"></i>
+    <span>Test</span>
+  </button>
+  <a href="{{ inbox_url }}" class="jtcs-ribbon-btn" title="Staff inbox">
+    <i class="bi bi-inbox"></i>
+    <span>Staff inbox</span>
+  </a>
+  <a href="{{ url_for('dashboard.index') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+      <h1 class="h5 mb-1">WhatsApp Cloud API</h1>
+      <p class="small text-muted mb-0">
+        Access token, Phone Number ID, aur webhook yahin save hote hain.
+        Public website par token mat rakho. Meta is URL ko call karta hai.
+      </p>
+    </div>
+    <span class="badge text-bg-secondary" id="waStatusBadge">{{ state.status }}</span>
+  </div>
+
+  <form id="waForm" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="mb-3">
+      <label class="form-label" for="waWebhookUrl">Webhook URL</label>
+      <div class="input-group">
+        <input type="text" class="form-control" id="waWebhookUrl" value="{{ webhook_url }}" readonly>
+        <button type="button" class="btn btn-outline-secondary" id="waCopyWebhook">Copy</button>
+      </div>
+      <div class="form-text">Meta Developer → WhatsApp → Configuration → Callback URL.</div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label" for="app_id">Facebook App ID *</label>
+        <input class="form-control" id="app_id" data-wa-field name="app_id" value="{{ state.values.app_id or '' }}" maxlength="80">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="app_secret">Facebook App Secret *</label>
+        <input class="form-control" id="app_secret" data-wa-field data-wa-secret name="app_secret" type="password" value="{{ state.values.app_secret or '' }}" autocomplete="new-password">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="phone_number">WhatsApp phone number</label>
+        <input class="form-control" id="phone_number" data-wa-field name="phone_number" value="{{ state.values.phone_number or '' }}" placeholder="{{ preferred_phone }}" maxlength="30">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="phone_number_id">Phone Number ID *</label>
+        <input class="form-control" id="phone_number_id" data-wa-field name="phone_number_id" value="{{ state.values.phone_number_id or '' }}" maxlength="40">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="waba_id">WhatsApp Business Account ID</label>
+        <input class="form-control" id="waba_id" data-wa-field name="waba_id" value="{{ state.values.waba_id or '' }}" placeholder="{{ preferred_waba }}" maxlength="40">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="graph_api_version">Graph API version</label>
+        <input class="form-control" id="graph_api_version" data-wa-field name="graph_api_version" value="{{ state.values.graph_api_version or 'v21.0' }}" maxlength="20">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="access_token">Access token *</label>
+        <input class="form-control" id="access_token" data-wa-field data-wa-secret name="access_token" type="password" value="{{ state.values.access_token or '' }}" autocomplete="new-password">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="webhook_verify_token">Webhook verify token</label>
+        <div class="input-group">
+          <input class="form-control" id="webhook_verify_token" data-wa-field data-wa-secret name="webhook_verify_token" type="password" value="{{ state.values.webhook_verify_token or '' }}" autocomplete="new-password">
+          <button type="button" class="btn btn-outline-secondary" id="waGenerateToken">Generate</button>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="test_to_number">Test mobile (optional)</label>
+        <input class="form-control" id="test_to_number" name="test_to_number" placeholder="91XXXXXXXXXX" maxlength="20">
+      </div>
+      <div class="col-md-6 d-flex align-items-end">
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" id="send_test_message">
+          <label class="form-check-label" for="send_test_message">Test par ek message bhi bhejo</label>
+        </div>
+      </div>
+    </div>
+
+    <p class="small text-muted mt-3 mb-2">
+      Khali secret Save par purana token rehta hai. Poora hataane ke liye Delete.
+      Test last saved credentials use karta hai.
+    </p>
+    <div id="waMissing" class="small text-warning mb-2 {% if not state.missing_labels %}d-none{% endif %}">
+      {% if state.missing_labels %}Abhi baaki: {{ state.missing_labels | join(', ') }}{% endif %}
+    </div>
+    <div id="waResult" class="small border rounded p-2 bg-light d-none"></div>
+  </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.WA_CLOUD = {
+    hasSaved: {{ state.has_saved | tojson }},
+    saveUrl: {{ url_for('whatsapp_cloud.save') | tojson }},
+    deleteUrl: {{ url_for('whatsapp_cloud.delete') | tojson }},
+    testUrl: {{ url_for('integration_settings.api_test_whatsapp_connection') | tojson }},
+    generateUrl: {{ url_for('integration_settings.api_generate_verify_token') | tojson }},
+    webhookUrl: {{ webhook_url | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/whatsapp_cloud.js') }}?v=20261002wa1"></script>
+{% endblock %}

@@ -24,6 +24,8 @@ WHATSAPP_PREFERRED_PHONE_NUMBER = "+91 84770 05566"
 WHATSAPP_PREFERRED_PHONE_DIGITS = "8477005566"
 WHATSAPP_PREFERRED_BUSINESS_ID = "1050633393832558"
 WHATSAPP_PREFERRED_WABA_ID = "12967889023654318"
+# Meta calls this URL on the app host. Do not put the token on the public website.
+WHATSAPP_PUBLIC_WEBHOOK_URL = "https://app.jtcsxpert.com/webhooks/whatsapp"
 
 # Keys that must be encrypted at rest and masked on read.
 SECRET_KEYS: frozenset[str] = frozenset(
