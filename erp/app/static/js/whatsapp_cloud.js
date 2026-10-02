@@ -49,7 +49,13 @@
         el.value = "v21.0";
         return;
       }
-      el.value = values[el.name] == null ? "" : String(values[el.name]);
+      const next = values[el.name] == null ? "" : String(values[el.name]);
+      if (!next && el.value) return;
+      if (el.getAttribute("data-wa-secret") != null && next && /^[*]+$/.test(next)) {
+        el.placeholder = "Saved. Blank chhodo to purana secret rahega.";
+        return;
+      }
+      el.value = next;
     });
     const status = (values.connection_status || "").trim() || "Not Configured";
     if (badge) badge.textContent = status;
@@ -120,18 +126,25 @@
   });
 
   actionButtons("save").forEach(function (saveBtn) {
-    saveBtn.addEventListener("click", async function () {
-      setActionDisabled("save", true);
-      try {
-        const data = await postJson(cfg.saveUrl, { values: collectValues() });
-        applyValues(data);
-        setEditing(false);
-        showResult(data.message || "Credentials saved.", true);
-      } catch (err) {
-        showResult(err.message || "Save failed.", false);
-        setActionDisabled("save", false);
-      }
+    if (saveBtn.type === "submit") return;
+    saveBtn.addEventListener("click", function () {
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
     });
+  });
+
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    setActionDisabled("save", true);
+    try {
+      const data = await postJson(cfg.saveUrl, { values: collectValues() });
+      applyValues(data);
+      setEditing(true);
+      showResult(data.message || "Credentials saved.", true);
+    } catch (err) {
+      showResult(err.message || "Save failed.", false);
+    } finally {
+      setActionDisabled("save", false);
+    }
   });
 
   actionButtons("delete").forEach(function (deleteBtn) {

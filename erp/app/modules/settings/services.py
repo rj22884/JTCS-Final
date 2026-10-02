@@ -177,6 +177,10 @@ class IntegrationSettingsService:
                 if key == "smtp_password":
                     password_updated = True
             else:
+                # WhatsApp: an empty box means "keep what is already saved".
+                # Delete is the action that clears credentials.
+                if provider == "whatsapp_meta" and not value.strip():
+                    continue
                 stored = encrypt_value(value)
 
             old = self.repository.get_encrypted_value(provider, key)

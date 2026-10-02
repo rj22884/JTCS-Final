@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, render_template, request, session, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 from sqlalchemy import text
 
 from app.decorators import admin_required, login_required
 from app.extensions import db
 from app.modules.settings.models import (
+    WHATSAPP_PREFERRED_APP_ID,
+    WHATSAPP_PREFERRED_BUSINESS_ID,
     WHATSAPP_PREFERRED_PHONE_NUMBER,
     WHATSAPP_PREFERRED_WABA_ID,
     WHATSAPP_PUBLIC_WEBHOOK_URL,
@@ -109,27 +111,60 @@ def index():
         page_title="WhatsApp Cloud API",
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         webhook_url=WHATSAPP_PUBLIC_WEBHOOK_URL,
+        preferred_app_id=WHATSAPP_PREFERRED_APP_ID,
         preferred_phone=WHATSAPP_PREFERRED_PHONE_NUMBER,
         preferred_waba=WHATSAPP_PREFERRED_WABA_ID,
+        preferred_business=WHATSAPP_PREFERRED_BUSINESS_ID,
         inbox_url=url_for("crm.inbox_page"),
         state=state,
     )
+
+
+def _posted_values() -> dict:
+    payload = request.get_json(silent=True) or {}
+    if isinstance(payload.get("values"), dict):
+        return payload["values"]
+    keys = (
+        "app_id",
+        "app_secret",
+        "phone_number",
+        "phone_number_id",
+        "waba_id",
+        "business_id",
+        "graph_api_version",
+        "access_token",
+        "webhook_verify_token",
+    )
+    return {key: request.form.get(key, "") for key in keys}
+
+
+def _wants_json() -> bool:
+    return bool(request.is_json) or request.headers.get("X-Requested-With") == "XMLHttpRequest"
 
 
 @bp.route("/api/save", methods=["POST"])
 @login_required
 @admin_required
 def save():
-    payload = request.get_json(silent=True) or {}
-    values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+    values = _posted_values()
     try:
         result = IntegrationSettingsService().save_provider_settings(PROVIDER, values)
-        return jsonify({"ok": True, **result, "webhook_url": WHATSAPP_PUBLIC_WEBHOOK_URL})
     except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
+        if _wants_json():
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        flash(str(exc), "danger")
+        return redirect(url_for("whatsapp_cloud.index"))
     except Exception:
         db.session.rollback()
-        return jsonify({"ok": False, "error": "Unable to save WhatsApp credentials."}), 500
+        if _wants_json():
+            return jsonify({"ok": False, "error": "Unable to save WhatsApp credentials."}), 500
+        flash("Unable to save WhatsApp credentials.", "danger")
+        return redirect(url_for("whatsapp_cloud.index"))
+    message = result.get("message") or "Credentials saved."
+    if _wants_json():
+        return jsonify({"ok": True, **result, "webhook_url": WHATSAPP_PUBLIC_WEBHOOK_URL, "message": message})
+    flash(message, "success")
+    return redirect(url_for("whatsapp_cloud.index"))
 
 
 @bp.route("/api/delete", methods=["POST"])

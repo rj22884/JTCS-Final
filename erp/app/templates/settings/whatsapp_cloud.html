@@ -42,26 +42,26 @@
     <span class="badge text-bg-secondary" id="waStatusBadge">{{ state.status }}</span>
   </div>
 
-  <div class="d-flex flex-wrap gap-2 mb-3">
-    <button type="button" class="btn btn-outline-primary" data-wa-action="edit">
-      <i class="bi bi-pencil-square"></i> Edit
-    </button>
-    <button type="button" class="btn btn-primary" data-wa-action="save">
-      <i class="bi bi-save"></i> Save
-    </button>
-    <button type="button" class="btn btn-outline-danger" data-wa-action="delete">
-      <i class="bi bi-trash"></i> Delete
-    </button>
-    <button type="button" class="btn btn-outline-success" data-wa-action="test">
-      <i class="bi bi-plug"></i> Test
-    </button>
-    <a href="{{ inbox_url }}" class="btn btn-outline-secondary">
-      <i class="bi bi-inbox"></i> Staff inbox
-    </a>
-  </div>
-
-  <form id="waForm" autocomplete="off">
+  <form id="waForm" method="post" action="{{ url_for('whatsapp_cloud.save') }}" autocomplete="off">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <button type="button" class="btn btn-outline-primary" data-wa-action="edit">
+        <i class="bi bi-pencil-square"></i> Edit
+      </button>
+      <button type="submit" class="btn btn-primary" data-wa-action="save">
+        <i class="bi bi-save"></i> Save
+      </button>
+      <button type="button" class="btn btn-outline-danger" data-wa-action="delete">
+        <i class="bi bi-trash"></i> Delete
+      </button>
+      <button type="button" class="btn btn-outline-success" data-wa-action="test">
+        <i class="bi bi-plug"></i> Test
+      </button>
+      <a href="{{ inbox_url }}" class="btn btn-outline-secondary">
+        <i class="bi bi-inbox"></i> Staff inbox
+      </a>
+    </div>
 
     <div class="mb-3">
       <label class="form-label" for="waWebhookUrl">Webhook URL</label>
@@ -75,15 +75,15 @@
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label" for="app_id">Facebook App ID *</label>
-        <input class="form-control" id="app_id" data-wa-field name="app_id" value="{{ state.values.app_id or '' }}" maxlength="80">
+        <input class="form-control" id="app_id" data-wa-field name="app_id" value="{{ state.values.app_id or preferred_app_id }}" maxlength="80">
       </div>
       <div class="col-md-6">
         <label class="form-label" for="app_secret">Facebook App Secret *</label>
-        <input class="form-control" id="app_secret" data-wa-field data-wa-secret name="app_secret" type="password" value="{{ state.values.app_secret or '' }}" autocomplete="new-password">
+        <input class="form-control" id="app_secret" data-wa-field data-wa-secret name="app_secret" type="password" value="" autocomplete="new-password" placeholder="{{ 'Saved. Blank chhodo to purana secret rahega.' if state.secrets.app_secret else '' }}">
       </div>
       <div class="col-md-6">
         <label class="form-label" for="phone_number">WhatsApp phone number</label>
-        <input class="form-control" id="phone_number" data-wa-field name="phone_number" value="{{ state.values.phone_number or '' }}" placeholder="{{ preferred_phone }}" maxlength="30">
+        <input class="form-control" id="phone_number" data-wa-field name="phone_number" value="{{ state.values.phone_number or preferred_phone }}" maxlength="30">
       </div>
       <div class="col-md-6">
         <label class="form-label" for="phone_number_id">Phone Number ID *</label>
@@ -91,7 +91,11 @@
       </div>
       <div class="col-md-6">
         <label class="form-label" for="waba_id">WhatsApp Business Account ID</label>
-        <input class="form-control" id="waba_id" data-wa-field name="waba_id" value="{{ state.values.waba_id or '' }}" placeholder="{{ preferred_waba }}" maxlength="40">
+        <input class="form-control" id="waba_id" data-wa-field name="waba_id" value="{{ state.values.waba_id or preferred_waba }}" maxlength="40">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="business_id">Business ID</label>
+        <input class="form-control" id="business_id" data-wa-field name="business_id" value="{{ state.values.business_id or preferred_business }}" maxlength="40">
       </div>
       <div class="col-md-6">
         <label class="form-label" for="graph_api_version">Graph API version</label>
@@ -99,12 +103,12 @@
       </div>
       <div class="col-md-6">
         <label class="form-label" for="access_token">Access token *</label>
-        <input class="form-control" id="access_token" data-wa-field data-wa-secret name="access_token" type="password" value="{{ state.values.access_token or '' }}" autocomplete="new-password">
+        <input class="form-control" id="access_token" data-wa-field data-wa-secret name="access_token" type="password" value="" autocomplete="new-password" placeholder="{{ 'Saved. Blank chhodo to purana token rahega.' if state.secrets.access_token else '' }}">
       </div>
       <div class="col-md-6">
         <label class="form-label" for="webhook_verify_token">Webhook verify token</label>
         <div class="input-group">
-          <input class="form-control" id="webhook_verify_token" data-wa-field data-wa-secret name="webhook_verify_token" type="password" value="{{ state.values.webhook_verify_token or '' }}" autocomplete="new-password">
+          <input class="form-control" id="webhook_verify_token" data-wa-field data-wa-secret name="webhook_verify_token" type="password" value="" autocomplete="new-password" placeholder="{{ 'Saved. Blank chhodo to purana token rahega.' if state.secrets.webhook_verify_token else '' }}">
           <button type="button" class="btn btn-outline-secondary" id="waGenerateToken">Generate</button>
         </div>
       </div>
@@ -143,5 +147,5 @@
     webhookUrl: {{ webhook_url | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/whatsapp_cloud.js') }}?v=20261002wa2"></script>
+<script src="{{ url_for('static', filename='js/whatsapp_cloud.js') }}?v=20261002wa3"></script>
 {% endblock %}
