@@ -585,15 +585,23 @@ class GstInvoicePdfService:
         story.append(cust_table)
         story.append(Spacer(1, 8))
 
+        item_head = ParagraphStyle(
+            "ItemHead",
+            parent=cell,
+            fontName="Helvetica-Bold",
+            fontSize=7.5,
+            leading=9,
+            textColor=colors.white,
+        )
         table_data = [
             [
-                Paragraph("<b>Sr.</b>", cell),
-                Paragraph("<b>Particulars</b>", cell),
-                Paragraph("<b>HSN / SAC</b>", cell),
-                Paragraph("<b>Unit(s)</b>", cell),
-                Paragraph("<b>Rate</b>", cell),
-                Paragraph("<b>Discount</b>", cell),
-                Paragraph("<b>Taxable Value</b>", cell),
+                Paragraph("Sr.", item_head),
+                Paragraph("Particulars", item_head),
+                Paragraph("HSN / SAC", item_head),
+                Paragraph("Unit(s)", item_head),
+                Paragraph("Rate", item_head),
+                Paragraph("Discount", item_head),
+                Paragraph("Taxable Value", item_head),
             ]
         ]
         for line in data.get("lines") or []:
@@ -661,8 +669,9 @@ class GstInvoicePdfService:
         )
         value_cell_b = ParagraphStyle("TotValB", parent=value_cell, fontName="Helvetica-Bold")
         round_off = float(data.get("round_off") or 0)
-        show_round = abs(round_off) >= 0.005
-        round_txt = f"{'+' if round_off > 0 else '-'}{self._fmt(abs(round_off))}"
+        if abs(round_off) < 0.005:
+            round_off = 0.0
+        round_txt = f"{'+' if round_off >= 0 else '-'}{self._fmt(abs(round_off))}"
         if data.get("tax_type") == "CGST_SGST":
             tot_headers = [
                 Paragraph("List Price", header_cell),
@@ -691,9 +700,8 @@ class GstInvoicePdfService:
                 Paragraph(self._fmt(data["taxable_value"]), value_cell),
                 Paragraph(self._fmt(data["igst_amount"]), value_cell),
             ]
-        if show_round:
-            tot_headers.append(Paragraph("Round off", header_cell))
-            tot_values.append(Paragraph(round_txt, value_cell))
+        tot_headers.append(Paragraph("Round off", header_cell))
+        tot_values.append(Paragraph(round_txt, value_cell))
         tot_headers.append(Paragraph("Invoice Value", header_cell))
         tot_values.append(Paragraph(self._fmt(data["invoice_value"]), value_cell_b))
         n_tot = len(tot_headers)

@@ -20,6 +20,12 @@
   font-weight: 600;
 }
 
+.fu-thank-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 .fu-bill-prompts {
   display: flex;
   flex-wrap: wrap;
@@ -108,6 +114,71 @@ button.fu-stat-card {
 
 .fu-filter-card {
   height: 100%;
+}
+
+.fu-dsc-toolbar-row {
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.fu-dsc-inline-filters input[type="date"],
+.fu-dsc-inline-filters select.form-select {
+  width: 8.4rem;
+}
+
+.fu-module-title {
+  flex: 0 0 auto;
+}
+
+.fu-dsc-inline-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fu-dsc-inline-filters .fu-inline-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fu-dsc-inline-filters .fu-inline-field:first-child {
+  flex: 0 1 9rem;
+}
+
+.fu-dsc-inline-filters .fu-dsc-assist {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.fu-dsc-inline-filters .fu-dsc-assist-field {
+  flex: 1 1 11rem;
+  margin-top: 0;
+}
+
+.fu-dsc-inline-filters .form-label {
+  margin-bottom: 0.12rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.fu-dsc-inline-filters .fu-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.fu-dsc-top-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .fu-dsc-assist {

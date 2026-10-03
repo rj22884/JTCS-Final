@@ -169,6 +169,41 @@
     });
   }
 
+  async function sendThankYouWhatsApp(button) {
+    if (!button || button.disabled) return;
+    const entryId = button.getAttribute("data-id");
+    const name = (button.getAttribute("data-name") || "customer").trim();
+    const template = window.FU_API && window.FU_API.thank_you_whatsapp;
+    if (!entryId || !template) return;
+    const ask = "Thank You letter image " + name + " ke WhatsApp par bhej dein?";
+    const ok = window.confirm(ask);
+    if (!ok) return;
+    button.disabled = true;
+    try {
+      const res = await fetch(apiUrl(template, entryId), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": window.FU_CSRF || csrfToken(),
+        },
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to send the Thank You letter.");
+      }
+      const message = data.message || "Thank You letter image WhatsApp par chali gayi.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "success");
+      else alert(message);
+    } catch (err) {
+      const message = err.message || "Unable to send the Thank You letter.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "error");
+      else alert(message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function canDownloadThankYou(row) {
     // ITR: thank-you letter only after Payment Received is ticked.
     if (isItrModule) return rowHasPaymentReceived(row);
@@ -1675,9 +1710,15 @@
         : "";
       const paymentLocked = isItrPaymentReceivedLocked(row);
       const thankYouCell = canDownloadThankYou(row)
-        ? '<a class="btn btn-outline-success btn-sm fu-thank-btn" href="' +
+        ? '<span class="fu-thank-actions">' +
+          '<a class="btn btn-outline-success btn-sm fu-thank-btn" href="' +
           escapeHtml(apiUrl(window.FU_API.thank_you_letter, row.entry_id) + "?format=png") +
-          '" title="Download Thank You Letter (PNG)"><i class="bi bi-download"></i> PNG</a>'
+          '" title="Download Thank You Letter (PNG)"><i class="bi bi-download"></i> PNG</a>' +
+          '<button type="button" class="btn btn-success btn-sm fu-thank-wa" data-id="' +
+          row.entry_id +
+          '" data-name="' + escapeHtml(row.customer_name || "") +
+          '" title="Send Thank You letter image on WhatsApp"><i class="bi bi-whatsapp"></i></button>' +
+          "</span>"
         : '<span class="text-muted" title="' +
           (isItrModule ? "Available after Payment Received" : "Available after Tally Bill Generated") +
           '">—</span>';
@@ -2803,6 +2844,12 @@
   }
 
   els.gridBody?.addEventListener("click", function (event) {
+    const thankWaBtn = event.target.closest(".fu-thank-wa");
+    if (thankWaBtn) {
+      event.preventDefault();
+      sendThankYouWhatsApp(thankWaBtn);
+      return;
+    }
     const videoCopyBtn = event.target.closest(".fu-video-link-copy");
     if (videoCopyBtn) {
       event.preventDefault();

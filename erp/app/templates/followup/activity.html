@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20261003payblink">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20261003dsctop">
 {% endblock %}
 
 {% block content %}
@@ -12,13 +12,74 @@
      data-has-return-type="{{ '1' if module_meta.has_return_type else '0' }}"
      data-has-tds-period-split="{{ '1' if module_meta.get('has_tds_period_split') else '0' }}"
      data-has-gst-fields="{{ '1' if module_meta.get('has_gst_fields') else '0' }}">
-  <div class="jtcs-card mb-2 py-2 px-3">
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <h5 class="mb-0 me-2">{{ module_meta.title }}</h5>
+  <div class="jtcs-card mb-2 py-2 px-3{% if module_code == 'DSC' %} fu-dsc-toolbar{% endif %}">
+    <div class="d-flex flex-wrap align-items-end gap-2{% if module_code == 'DSC' %} fu-dsc-toolbar-row{% endif %}">
+      <div class="fu-module-title">
+        <h5 class="mb-0">{{ module_meta.title }}</h5>
+        {% if module_code == 'DSC' %}
+        <p class="small text-muted mb-0">{{ module_meta.subtitle }}</p>
+        {% endif %}
+      </div>
       <button type="button" class="btn btn-primary btn-sm" id="fuNewEntryBtn">
         <i class="bi bi-plus-lg"></i> New Entry
       </button>
-      <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+      {% if module_code == 'DSC' %}
+      <div class="fu-dsc-inline-filters">
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuSearchInput">Filters</label>
+          <input type="search" class="form-control form-control-sm" id="fuSearchInput"
+                 placeholder="Type name, mobile, PAN or email">
+        </div>
+        <div class="fu-dsc-assist" id="fuDscAssist">
+          <div class="fu-dsc-assist-field fu-inline-field" data-assist-key="idsign_business_id">
+            <label class="form-label" for="fuDscBusinessId">Enter your Business Id: (ID-Sign)</label>
+            <div class="fu-dsc-assist-row">
+              <input type="text" class="form-control form-control-sm" id="fuDscBusinessId" maxlength="80" autocomplete="off">
+              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
+              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
+                <i class="bi bi-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="fu-dsc-assist-field fu-inline-field" data-assist-key="customer_video_link">
+            <label class="form-label" for="fuDscVideoLink">Video link for Customer:</label>
+            <div class="fu-dsc-assist-row">
+              <input type="text" class="form-control form-control-sm" id="fuDscVideoLink" maxlength="500" autocomplete="off" placeholder="https://">
+              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
+              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
+                <i class="bi bi-copy"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuStatusFilter">Workflow Status</label>
+          <select class="form-select form-select-sm" id="fuStatusFilter">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="payment_pending">Payment Pending</option>
+            {% for stage in workflow_stages %}
+            <option value="{{ stage.stage_code }}">{{ stage.stage_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateFromFilter">Date From</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateFromFilter">
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateToFilter">Date To</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateToFilter">
+        </div>
+        <div class="fu-inline-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="fuSearchBtn">Search</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="fuClearFilterBtn" title="Clear filters">Clear</button>
+        </div>
+      </div>
+      {% endif %}
+      <div class="d-flex flex-wrap align-items-center gap-2{% if module_code != 'DSC' %} ms-auto{% else %} fu-dsc-top-actions{% endif %}">
         {% if module_code == 'DSC' %}
         <a class="btn btn-success btn-sm" href="http://applydsc.idsign.app" target="_blank" rel="noopener noreferrer"
            title="http://applydsc.idsign.app">
@@ -45,7 +106,9 @@
         </button>
       </div>
     </div>
+    {% if module_code != 'DSC' %}
     <p class="small text-muted mb-0 mt-1">{{ module_meta.subtitle }}</p>
+    {% endif %}
   </div>
 
   <div class="fu-stats-row mb-2" id="fuStatsRow">
@@ -108,38 +171,13 @@
   </div>
 
   <div class="row g-2 mb-2">
+    {% if module_code != 'DSC' %}
     <div class="col-lg-3">
       <div class="jtcs-card fu-filter-card p-3">
         <div class="fw-semibold mb-2">Filters</div>
         <label class="form-label" for="fuSearchInput">Search</label>
         <input type="search" class="form-control form-control-sm mb-2" id="fuSearchInput"
-               placeholder="{% if module_code == 'DSC' %}Type name, mobile, PAN or email{% else %}Type name, mobile or PAN{% endif %}">
-        {% if module_code == 'DSC' %}
-        <div class="fu-dsc-assist" id="fuDscAssist">
-          <div class="fu-dsc-assist-field" data-assist-key="idsign_business_id">
-            <label class="form-label" for="fuDscBusinessId">Enter your Business Id: (ID-Sign)</label>
-            <div class="fu-dsc-assist-row">
-              <input type="text" class="form-control form-control-sm" id="fuDscBusinessId" maxlength="80" autocomplete="off">
-              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
-              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
-                <i class="bi bi-copy"></i>
-              </button>
-            </div>
-          </div>
-          <div class="fu-dsc-assist-field" data-assist-key="customer_video_link">
-            <label class="form-label" for="fuDscVideoLink">Video link for Customer:</label>
-            <div class="fu-dsc-assist-row">
-              <input type="text" class="form-control form-control-sm" id="fuDscVideoLink" maxlength="500" autocomplete="off" placeholder="https://">
-              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
-              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
-              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
-                <i class="bi bi-copy"></i>
-              </button>
-            </div>
-          </div>
-        </div>
-        {% endif %}
+               placeholder="Type name, mobile or PAN">
         {% if module_code == 'ITR' %}
         <label class="form-label" for="fuPeriodFilter">Period</label>
         <select class="form-select form-select-sm mb-2" id="fuPeriodFilter">
@@ -188,7 +226,8 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-9">
+    {% endif %}
+    <div class="{% if module_code == 'DSC' %}col-12{% else %}col-lg-9{% endif %}">
       <div class="jtcs-card fu-grid-panel p-2">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div class="small text-muted" id="fuGridMeta">Total: 0 | Pending: 0</div>
@@ -663,5 +702,5 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261003billwin"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261003thankwa"></script>
 {% endblock %}

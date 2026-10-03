@@ -47,6 +47,10 @@
     lineBody: document.getElementById("mgbLineBody"),
     addLineBtn: document.getElementById("mgbAddLine"),
     customerList: document.getElementById("mgbCustomerList"),
+    roundOffAmt: document.getElementById("mgbRoundOffAmt"),
+    roundOffSign: document.getElementById("mgbRoundOffSign"),
+    roundOffAdd: document.getElementById("mgbRoundOffAdd"),
+    roundOffSub: document.getElementById("mgbRoundOffSub"),
   };
 
   const items = Array.isArray(cfg.items) ? cfg.items : [];
@@ -63,6 +67,36 @@
 
   function fmt(n) {
     return money(n).toFixed(2);
+  }
+
+  function roundOffMagnitude() {
+    return Math.abs(parseFloat(els.roundOffAmt?.value || "0") || 0);
+  }
+
+  function roundOffSigned() {
+    const mag = roundOffMagnitude();
+    const sign = (els.roundOffSign?.value || "").toLowerCase();
+    if (sign === "add") return mag;
+    if (sign === "sub") return -mag;
+    return 0;
+  }
+
+  function setRoundOffSign(sign) {
+    const next = sign === "add" || sign === "sub" ? sign : "";
+    if (els.roundOffSign) els.roundOffSign.value = next;
+    els.roundOffAdd?.classList.toggle("is-on", next === "add");
+    els.roundOffSub?.classList.toggle("is-on", next === "sub");
+  }
+
+  function applyRoundOff(sign) {
+    if (!roundOffMagnitude()) {
+      showError("Round off value enter karein, phir + ya − dabayein.");
+      els.roundOffAmt?.focus();
+      return;
+    }
+    showError("");
+    setRoundOffSign(sign);
+    computeTaxes();
   }
 
   function showError(msg) {
@@ -521,7 +555,8 @@
         else if (linePct !== gstPct) mixedGst = true;
       }
     });
-    const invoiceValue = money(taxable + gstAmt);
+    const roundOff = roundOffSigned();
+    const invoiceValue = money(Math.max(0, taxable + gstAmt + roundOff));
     if (els.placeCode) els.placeCode.value = placeCode;
     if (els.gstRate) els.gstRate.value = mixedGst ? "" : gstPct ? String(gstPct) : "0";
     if (els.cgst) els.cgst.value = cgstAmt ? fmt(cgstAmt) : "0.00";
@@ -548,7 +583,8 @@
         fmt(gstAmt) +
         " = ₹" +
         fmt(invoiceValue) +
-        (intra ? " (CGST + SGST)." : " (IGST).");
+        (intra ? " (CGST + SGST)" : " (IGST)") +
+        (roundOff ? " · Round off " + (roundOff > 0 ? "+" : "") + fmt(roundOff) + "." : ".");
     }
     return {
       taxable,
@@ -557,6 +593,7 @@
       cgstAmt,
       sgstAmt,
       igstAmt,
+      roundOff,
       invoiceValue,
       placeCode,
     };
@@ -645,6 +682,8 @@
       tally_bill_no: (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim(),
       bill_source: "Miscellaneous",
       gst_inclusive: false,
+      round_off_amount: String(roundOffMagnitude()),
+      round_off_sign: (els.roundOffSign?.value || "").trim(),
       payment_bank_account_ids: selectedBankIds(),
       lines: lines,
     };
@@ -930,6 +969,16 @@
     }
   }
 
+  els.roundOffAmt?.addEventListener("input", function () {
+    if (!roundOffMagnitude()) setRoundOffSign("");
+    computeTaxes();
+  });
+  els.roundOffAdd?.addEventListener("click", function () {
+    applyRoundOff("add");
+  });
+  els.roundOffSub?.addEventListener("click", function () {
+    applyRoundOff("sub");
+  });
   els.rate?.addEventListener("input", computeTaxes);
   els.gstRate?.addEventListener("input", computeTaxes);
   els.state?.addEventListener("change", computeTaxes);
@@ -1049,6 +1098,19 @@
       }
     }
     setSelectedBanks(rec.payment_bank_account_ids || []);
+    if (dscMode) {
+      const signed = Number(rec.round_off != null ? rec.round_off : 0) || 0;
+      const mag = Math.abs(
+        Number(rec.round_off_amount != null ? rec.round_off_amount : signed) || 0
+      );
+      let sign = (rec.round_off_sign || "").toLowerCase();
+      if (!sign) {
+        if (signed > 0) sign = "add";
+        else if (signed < 0) sign = "sub";
+      }
+      if (els.roundOffAmt) els.roundOffAmt.value = mag ? mag.toFixed(2) : "";
+      setRoundOffSign(sign);
+    }
     computeTaxes();
     showOk("Bill loaded for edit. Preview or Download saves the changes.");
   }
