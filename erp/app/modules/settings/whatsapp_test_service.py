@@ -131,7 +131,7 @@ class WhatsAppTestService:
                     access_token=cfg["access_token"],
                 )
             )
-            checks.append(self._check_subscribed_apps(client, cfg.get("waba_id") or ""))
+            checks.append(self._check_subscribed_apps(client, cfg))
             if send_test_message:
                 checks.append(
                     self._check_send_message(
@@ -364,7 +364,8 @@ class WhatsAppTestService:
             "detail": f"Webhook URL + verify token OK ({url})",
         }
 
-    def _check_subscribed_apps(self, client: WhatsAppMetaClient, waba_id: str) -> dict[str, Any]:
+    def _check_subscribed_apps(self, client: WhatsAppMetaClient, cfg: dict[str, str]) -> dict[str, Any]:
+        waba_id = (cfg.get("waba_id") or "").strip()
         if not waba_id:
             return {
                 "name": "Webhook subscription",
@@ -378,24 +379,30 @@ class WhatsAppTestService:
                 getattr(client, "version", ""),
             )
             apps = client.list_subscribed_apps(waba_id)
-            if apps:
-                labels = []
-                for a in apps[:5]:
-                    labels.append(str(a.get("id") or a.get("name") or "app"))
-                self._set_plain(
-                    "webhook_subscribed_fields",
-                    "messages, message_deliveries, message_reads, message_template_status_update",
-                )
+            if not apps:
                 return {
                     "name": "Webhook subscription",
-                    "ok": True,
-                    "detail": f"App subscribed on WABA ({len(apps)}): {', '.join(labels)}",
+                    "ok": False,
+                    "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
                 }
+            from app.modules.settings.whatsapp_health_service import WhatsAppHealthService
+
+            registered = WhatsAppHealthService(self.settings, self.repository).subscribe_webhooks()
+            labels = []
+            for a in apps[:5]:
+                labels.append(str(a.get("id") or a.get("name") or "app"))
+            callback = registered.get("webhook_url") or cfg.get("webhook_url") or ""
             return {
                 "name": "Webhook subscription",
-                "ok": False,
-                "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
+                "ok": True,
+                "detail": (
+                    f"messages webhook registered ({callback}). "
+                    f"App subscribed on WABA ({len(apps)}): {', '.join(labels)}. "
+                    "Send a new WhatsApp message; older chats are not copied."
+                ),
             }
+        except ValueError as exc:
+            return {"name": "Webhook subscription", "ok": False, "detail": str(exc)}
         except MetaGraphError as exc:
             logger.warning(
                 "WhatsApp subscribed_apps check failed waba_id=%s err=%s",
