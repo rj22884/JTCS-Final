@@ -338,6 +338,10 @@ class WhatsAppWebhookService:
             return reply.get("title") or "[Interactive]", "interactive", None, None, None
         return f"[{mtype}]", mtype, None, None, None
 
+    def recover_media(self, media_id: str, filename_hint: str | None = None) -> dict:
+        """Download a WhatsApp media id again when the inbox file is missing."""
+        return self._download_and_store(media_id, filename_hint=filename_hint)
+
     def _download_and_store(self, media_id: str, *, filename_hint: str | None = None) -> dict:
         try:
             from app.modules.settings.services import IntegrationSettingsService

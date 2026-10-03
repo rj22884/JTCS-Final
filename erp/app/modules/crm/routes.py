@@ -235,6 +235,7 @@ def inbox_page():
             "list": url_for("crm_api.conversations_list"),
             "detail": url_for("crm_api.conversation_detail", conversation_id=0),
             "messages": url_for("crm_api.conversation_messages", conversation_id=0),
+            "message_file": url_for("crm_api.message_file", message_id=0),
             "reply": url_for("crm_api.conversation_reply", conversation_id=0),
             "update": url_for("crm_api.conversation_update", conversation_id=0),
             "attachments": url_for("crm_api.conversation_attachments", conversation_id=0),
@@ -606,18 +607,27 @@ def conversations_list():
 def conversation_detail(conversation_id: int):
     row = CommunicationService().get_conversation(conversation_id)
     if not row:
-        return jsonify({"ok": False, "error": "Not found"}), 404
+        return jsonify({"ok": False, "error": "Yeh chat nahi mili."}), 404
     CommunicationService().mark_read(conversation_id)
     row["UnreadCount"] = 0
     mobile = row.get("WhatsAppNumber") or row.get("MobileNumber") or row.get("LeadMobile")
     row["wa_url"] = wa_me_url(mobile or row.get("ContactMobile"))
-    row["labels"] = LabelService().conversation_labels(conversation_id)
-    link = CustomerLinkService()
-    candidates = link.find_customers_by_mobile(row.get("ContactMobile") or mobile)
-    hint = link.find_whatsapp_mapping(
-        row.get("ContactMobile") or mobile,
-        conversation_id=conversation_id,
-    )
+    try:
+        row["labels"] = LabelService().conversation_labels(conversation_id)
+    except Exception:
+        current_app.logger.exception("Conversation labels failed")
+        row["labels"] = []
+    try:
+        link = CustomerLinkService()
+        candidates = link.find_customers_by_mobile(row.get("ContactMobile") or mobile)
+        hint = link.find_whatsapp_mapping(
+            row.get("ContactMobile") or mobile,
+            conversation_id=conversation_id,
+        )
+    except Exception:
+        current_app.logger.exception("Conversation customer match failed")
+        candidates = []
+        hint = None
     row["match_candidates"] = candidates
     row["match_count"] = len(candidates)
     row["suggested_customer_id"] = (
@@ -625,20 +635,99 @@ def conversation_detail(conversation_id: int):
         if row.get("CustomerID")
         else (hint.get("customer_id") if hint else None)
     )
-    timeline = TimelineService().list_events(
-        customer_id=row.get("CustomerID"),
-        lead_id=row.get("LeadID"),
-        page_size=20,
-    )
-    return jsonify({"ok": True, "conversation": row, "timeline": timeline.get("rows", [])})
+    try:
+        timeline = TimelineService().list_events(
+            conversation_id=conversation_id,
+            page_size=20,
+        )
+        timeline_rows = timeline.get("rows", [])
+    except Exception:
+        current_app.logger.exception("Conversation timeline failed")
+        timeline_rows = []
+    return jsonify({"ok": True, "conversation": row, "timeline": timeline_rows})
 
 
 @crm_api_bp.route("/conversations/<int:conversation_id>/messages", methods=["GET"])
 @login_required
 def conversation_messages(conversation_id: int):
     if not CommunicationService().get_conversation(conversation_id):
-        return jsonify({"ok": False, "error": "Conversation not found"}), 404
+        return jsonify({"ok": False, "error": "Yeh chat nahi mili."}), 404
     return jsonify({"ok": True, "rows": CommunicationService().list_messages(conversation_id)})
+
+
+def _stored_upload_file(stored: str | None):
+    from pathlib import Path
+
+    raw = (stored or "").strip().replace("\\", "/")
+    if not raw or raw.lower().startswith(("http://", "https://")):
+        return None
+    upload_root = Path(current_app.config["UPLOAD_FOLDER"]).resolve()
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        full = candidate.resolve()
+    else:
+        rel = raw.lstrip("/")
+        if rel.startswith("uploads/"):
+            rel = rel[len("uploads/") :]
+        full = (upload_root / rel).resolve()
+    try:
+        full.relative_to(upload_root)
+    except ValueError:
+        return None
+    return full
+
+
+def _media_id_from_name(name: str | None) -> str | None:
+    head = ((name or "").replace("\\", "/").rsplit("/", 1)[-1]).split("_", 1)[0]
+    if head.isdigit() and len(head) >= 6:
+        return head
+    return None
+
+
+@crm_api_bp.route("/messages/<int:message_id>/file", methods=["GET"])
+@login_required
+def message_file(message_id: int):
+    from flask import send_file
+
+    comm = CommunicationService()
+    msg = comm.get_message(message_id)
+    if not msg or not comm.get_conversation(int(msg["ConversationID"])):
+        return jsonify({"ok": False, "error": "Yeh file nahi mili."}), 404
+
+    full = _stored_upload_file(msg.get("AttachmentPath"))
+    if full is None or not full.is_file():
+        media_id = _media_id_from_name(msg.get("AttachmentPath")) or _media_id_from_name(
+            msg.get("AttachmentName")
+        )
+        saved = {}
+        if media_id:
+            try:
+                saved = WhatsAppWebhookService().recover_media(
+                    media_id,
+                    filename_hint=msg.get("AttachmentName"),
+                )
+            except Exception:
+                current_app.logger.exception("WhatsApp media recover failed")
+                saved = {}
+        recovered = _stored_upload_file((saved or {}).get("path"))
+        if recovered is not None and recovered.is_file():
+            full = recovered
+            comm.update_message_attachment(
+                message_id,
+                attachment_path=saved.get("path"),
+                attachment_name=saved.get("filename") or msg.get("AttachmentName"),
+                attachment_mime_type=saved.get("mime_type") or msg.get("AttachmentMimeType"),
+                attachment_size_bytes=saved.get("size"),
+            )
+        else:
+            return jsonify({
+                "ok": False,
+                "error": "Yeh file server par nahi mili. Customer se document dubara bhejwaein.",
+            }), 404
+
+    download_name = msg.get("AttachmentName") or full.name
+    mime = msg.get("AttachmentMimeType") or None
+    return send_file(full, mimetype=mime, download_name=download_name, as_attachment=False)
 
 
 def _whatsapp_send_error(message: str | None) -> str:

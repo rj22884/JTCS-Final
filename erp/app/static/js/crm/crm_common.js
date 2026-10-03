@@ -71,7 +71,8 @@
   }
 
   function urlTemplate(template, id) {
-    return String(template || "").replace(/\/0(\/|$|\?)/, "/" + id + "$1").replace(/0$/, String(id));
+    const value = encodeURIComponent(String(id));
+    return String(template || "").replace(/\/0(?=\/|$|\?)/, "/" + value);
   }
 
   function showAlert(message, type) {

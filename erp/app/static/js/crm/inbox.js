@@ -8,6 +8,7 @@
     list: page.dataset.apiList,
     detail: page.dataset.apiDetail,
     messages: page.dataset.apiMessages,
+    messageFile: page.dataset.apiMessageFile,
     reply: page.dataset.apiReply,
     update: page.dataset.apiUpdate,
     attachments: page.dataset.apiAttachments,
@@ -58,8 +59,25 @@
 
   function staticUrl(path) {
     if (!path) return "";
-    if (path.indexOf("http") === 0 || path.indexOf("/") === 0) return path;
-    return "/static/" + path.replace(/^uploads\//, "uploads/");
+    const normalized = String(path).replace(/\\/g, "/");
+    if (normalized.indexOf("http") === 0 || normalized.indexOf("/") === 0) return encodeURI(normalized);
+    return encodeURI("/static/" + normalized.replace(/^uploads\//, "uploads/"));
+  }
+
+  function messageFileUrl(messageId) {
+    if (!api.messageFile || !messageId) return "";
+    return CrmCommon.urlTemplate(api.messageFile, messageId);
+  }
+
+  function fileHref(message) {
+    return messageFileUrl(message.MessageID) || staticUrl(message.AttachmentPath);
+  }
+
+  function isBrowserImage(message) {
+    const mime = (message.AttachmentMimeType || "").toLowerCase();
+    const name = (message.AttachmentName || message.AttachmentPath || "").toLowerCase();
+    if (mime.indexOf("image/tiff") === 0 || name.endsWith(".tif") || name.endsWith(".tiff")) return false;
+    return mime.indexOf("image/") === 0 || (message.MediaType || "") === "image";
   }
 
   function statusTicks(status, error) {
@@ -148,30 +166,25 @@
             "wa-msg" +
             (isNote ? " wa-msg--note" : outbound ? " wa-msg--out" : "");
           let mediaHtml = "";
-          if (m.AttachmentPath) {
-            const url = staticUrl(m.AttachmentPath);
+          if (m.AttachmentPath || m.AttachmentName) {
+            const url = fileHref(m);
             const mime = (m.AttachmentMimeType || "").toLowerCase();
-            if (mime.indexOf("image/") === 0 || (m.MediaType || "") === "image") {
+            const safeUrl = CrmCommon.escapeHtml(url);
+            if (url && isBrowserImage(m)) {
               mediaHtml =
-                '<a href="' +
-                CrmCommon.escapeHtml(url) +
+                '<a class="wa-file-link" href="' +
+                safeUrl +
                 '" target="_blank" rel="noopener"><img class="wa-attach" src="' +
-                CrmCommon.escapeHtml(url) +
+                safeUrl +
                 '" alt=""></a>';
-            } else if (mime.indexOf("audio/") === 0 || (m.MediaType || "") === "audio") {
+            } else if (url && (mime.indexOf("audio/") === 0 || (m.MediaType || "") === "audio")) {
+              mediaHtml = '<audio class="wa-attach" controls src="' + safeUrl + '"></audio>';
+            } else if (url && (mime.indexOf("video/") === 0 || (m.MediaType || "") === "video")) {
+              mediaHtml = '<video class="wa-attach" controls src="' + safeUrl + '"></video>';
+            } else if (url) {
               mediaHtml =
-                '<audio class="wa-attach" controls src="' +
-                CrmCommon.escapeHtml(url) +
-                '"></audio>';
-            } else if (mime.indexOf("video/") === 0 || (m.MediaType || "") === "video") {
-              mediaHtml =
-                '<video class="wa-attach" controls src="' +
-                CrmCommon.escapeHtml(url) +
-                '"></video>';
-            } else {
-              mediaHtml =
-                '<a class="small" href="' +
-                CrmCommon.escapeHtml(url) +
+                '<a class="small wa-file-link" href="' +
+                safeUrl +
                 '" target="_blank" rel="noopener"><i class="bi bi-file-earmark"></i> ' +
                 CrmCommon.escapeHtml(m.AttachmentName || "Attachment") +
                 "</a>";
@@ -328,8 +341,12 @@
   }
 
   async function selectConversation(id) {
-    activeConvId = id;
-    const detailUrl = CrmCommon.urlTemplate(api.detail, id);
+    const numericId = parseInt(id, 10);
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      throw new Error("Yeh chat nahi khul rahi.");
+    }
+    activeConvId = numericId;
+    const detailUrl = CrmCommon.urlTemplate(api.detail, numericId);
     const data = await CrmCommon.apiFetch(detailUrl);
     const conv = data.conversation || {};
     subjectEl.textContent =
@@ -338,7 +355,7 @@
     replyWrap.classList.remove("d-none");
     setContactActions(conv);
     renderTimeline(data.timeline || []);
-    const msgData = await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.messages, id));
+    const msgData = await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.messages, numericId));
     renderMessages(msgData.rows || []);
     loadConversations();
   }
@@ -435,6 +452,42 @@
     selectConversation(parseInt(btn.dataset.id, 10)).catch(function (err) {
       CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
     });
+  });
+
+  msgThread.addEventListener("click", async function (e) {
+    const link = e.target.closest("a.wa-file-link");
+    if (!link) return;
+    e.preventDefault();
+    const popup = window.open("about:blank", "_blank");
+    try {
+      const resp = await fetch(link.getAttribute("href"), { credentials: "same-origin" });
+      const ct = resp.headers.get("content-type") || "";
+      if (!resp.ok) {
+        if (popup) popup.close();
+        let message = "Yeh file nahi mili.";
+        if (ct.indexOf("application/json") !== -1) {
+          const data = await resp.json();
+          message = (data && data.error) || message;
+        }
+        CrmCommon.showAlert(message, "danger");
+        return;
+      }
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      if (popup) {
+        popup.location = objectUrl;
+        return;
+      }
+      const download = document.createElement("a");
+      download.href = objectUrl;
+      download.download = (link.textContent || "file").trim() || "file";
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+    } catch (err) {
+      if (popup) popup.close();
+      CrmCommon.showAlert(err.message || "Yeh file nahi khul saki.", "danger");
+    }
   });
 
   const pendingFiles = [];
