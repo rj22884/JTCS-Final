@@ -505,6 +505,26 @@
   font-weight: 700;
 }
 
+.inv-filter-row th {
+  background: #f8fafc;
+  vertical-align: top;
+  min-width: 7.2rem;
+}
+
+.inv-col-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.inv-filter-op,
+.inv-filter-q {
+  font-size: 0.72rem;
+  min-width: 0;
+  padding-top: 0.1rem;
+  padding-bottom: 0.1rem;
+}
+
 /* HTML preview — A4 sheet (same as PDF) */
 .inv-html-preview {
   color: #1c2833;

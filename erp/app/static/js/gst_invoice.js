@@ -76,7 +76,6 @@
 
   let previewTimer = null;
   let searchTimer = null;
-  let gridTimer = null;
   let editingId = null;
   let currentBillSource = "Manual";
   let lastTallyLookup = "";
@@ -1080,6 +1079,105 @@
     window.open(url, "_blank");
   }
 
+  let gridRows = [];
+
+  function taxLabel(row) {
+    return row.tax_type === "CGST_SGST"
+      ? "CGST+SGST"
+      : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
+  }
+
+  function gridFieldText(row, key) {
+    if (key === "invoice_no") return row.invoice_no || "";
+    if (key === "date") return fmtDate(row.invoice_date);
+    if (key === "customer") return row.customer_name || "";
+    if (key === "mobile") return row.contact_mobile || "";
+    if (key === "tax") return taxLabel(row);
+    if (key === "source") return (row.bill_source || "Manual").toString();
+    if (key === "bill_status") return billStatusLabel(row);
+    if (key === "payment") return paymentReceivedLabel(row);
+    if (key === "value") return money(row.invoice_value);
+    return "";
+  }
+
+  function gridFieldHay(row, key) {
+    const shown = gridFieldText(row, key);
+    if (key === "date") return shown + " " + (row.invoice_date || "");
+    if (key === "mobile") return shown + " " + digitsOnly(shown);
+    if (key === "value") {
+      const raw = Number(row.invoice_value || 0);
+      return shown + " " + raw.toFixed(2) + " " + String(raw);
+    }
+    return shown;
+  }
+
+  function matchFilter(row, key, query, op) {
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return true;
+    const shown = gridFieldText(row, key).toLowerCase();
+    const hay = gridFieldHay(row, key).toLowerCase();
+    if (op === "equals") {
+      if (shown === needle) return true;
+      return hay.split(/\s+/).some(function (part) { return part === needle; });
+    }
+    if (op === "starts") return shown.indexOf(needle) === 0;
+    if (op === "ends") return shown.length >= needle.length && shown.slice(-needle.length) === needle;
+    if (op === "not") return hay.indexOf(needle) < 0;
+    return hay.indexOf(needle) >= 0;
+  }
+
+  function columnFilters() {
+    const filters = [];
+    document.querySelectorAll(".inv-filter-q").forEach(function (input) {
+      const key = input.getAttribute("data-key");
+      const query = (input.value || "").trim();
+      if (!key || !query) return;
+      const opEl = document.querySelector('.inv-filter-op[data-key="' + key + '"]');
+      filters.push({ key: key, query: query, op: opEl ? opEl.value : "contains" });
+    });
+    return filters;
+  }
+
+  function rowMatchesFilters(row) {
+    const global = (els.gridSearch?.value || "").trim().toLowerCase();
+    if (global) {
+      const blob = ["invoice_no", "date", "customer", "mobile", "tax", "source", "bill_status", "payment", "value"]
+        .map(function (key) { return gridFieldHay(row, key); })
+        .join(" ")
+        .toLowerCase();
+      if (blob.indexOf(global) < 0) return false;
+    }
+    return columnFilters().every(function (filter) {
+      return matchFilter(row, filter.key, filter.query, filter.op);
+    });
+  }
+
+  function fillFilterLists(rows) {
+    const keys = {};
+    document.querySelectorAll(".inv-filter-q").forEach(function (input) {
+      const key = input.getAttribute("data-key");
+      if (key) keys[key] = [];
+    });
+    rows.forEach(function (row) {
+      Object.keys(keys).forEach(function (key) {
+        const value = gridFieldText(row, key).trim();
+        if (value && keys[key].indexOf(value) < 0) keys[key].push(value);
+      });
+    });
+    Object.keys(keys).forEach(function (key) {
+      const list = document.getElementById("invFilter-" + key);
+      if (!list) return;
+      keys[key].sort(function (a, b) { return a.localeCompare(b, "en", { numeric: true }); });
+      list.innerHTML = keys[key].map(function (value) {
+        return '<option value="' + escapeHtml(value) + '"></option>';
+      }).join("");
+    });
+  }
+
+  function applyGridFilters() {
+    renderGrid(gridRows.filter(rowMatchesFilters), gridRows.length);
+  }
+
   function billStatusLabel(row) {
     if (String(row.bill_source || "") !== "Miscellaneous") return "—";
     return row.bill_approved ? "Approved" : "Approve pending";
@@ -1235,23 +1333,28 @@
     }
   }
 
-  function renderGrid(rows) {
+  function renderGrid(rows, totalCount) {
     if (!els.gridBody) return;
     els.gridBody.innerHTML = "";
+    const total = typeof totalCount === "number" ? totalCount : rows.length;
     if (!rows.length) {
       els.gridEmpty?.classList.remove("d-none");
-      if (els.gridCount) els.gridCount.textContent = "0 invoices";
+      if (els.gridEmpty) {
+        els.gridEmpty.textContent = total
+          ? "No invoices match these filters."
+          : "No saved invoices yet. Save a bill to see it here.";
+      }
+      if (els.gridCount) els.gridCount.textContent = total ? "0 of " + total + " invoices" : "0 invoices";
       return;
     }
     els.gridEmpty?.classList.add("d-none");
     if (els.gridCount) {
-      els.gridCount.textContent = rows.length + " invoice" + (rows.length === 1 ? "" : "s");
+      const noun = rows.length === 1 ? "invoice" : "invoices";
+      els.gridCount.textContent = rows.length === total
+        ? rows.length + " " + noun
+        : rows.length + " of " + total + " invoices";
     }
     rows.forEach(function (row) {
-      const taxLabel =
-        row.tax_type === "CGST_SGST"
-          ? "CGST+SGST"
-          : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
       const billSource = (row.bill_source || "Manual").toString();
       const tr = document.createElement("tr");
       if (billSource.toLowerCase() === "automatic") {
@@ -1275,7 +1378,7 @@
         escapeHtml(row.contact_mobile || "—") +
         "</td>" +
         "<td>" +
-        escapeHtml(taxLabel) +
+        escapeHtml(taxLabel(row)) +
         "</td>" +
         "<td><span class=\"inv-bill-source inv-bill-source-" +
         escapeHtml(billSource.toLowerCase()) +
@@ -1354,13 +1457,13 @@
 
   async function loadGrid() {
     const url = new URL(api.list, window.location.origin);
-    const q = (els.gridSearch?.value || "").trim();
-    if (q) url.searchParams.set("search", q);
     if (voucherType) url.searchParams.set("voucher_type", voucherType);
     const res = await fetch(url.toString(), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Grid load failed");
-    renderGrid(data.rows || []);
+    gridRows = data.rows || [];
+    fillFilterLists(gridRows);
+    applyGridFilters();
   }
 
   async function searchCustomers(q) {
@@ -1763,12 +1866,17 @@
   });
 
   els.gridSearch?.addEventListener("input", function () {
-    clearTimeout(gridTimer);
-    gridTimer = setTimeout(function () {
-      loadGrid().catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
-    }, 300);
+    applyGridFilters();
+  });
+
+  document.querySelector(".inv-grid-card")?.addEventListener("input", function (event) {
+    if (!event.target.classList.contains("inv-filter-q")) return;
+    applyGridFilters();
+  });
+
+  document.querySelector(".inv-grid-card")?.addEventListener("change", function (event) {
+    if (!event.target.classList.contains("inv-filter-op") && !event.target.classList.contains("inv-filter-q")) return;
+    applyGridFilters();
   });
 
   const reviewBar = document.getElementById("invReviewBar");

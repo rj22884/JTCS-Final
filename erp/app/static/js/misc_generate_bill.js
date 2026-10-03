@@ -906,9 +906,16 @@
       enableDscMode();
       rememberEntryCustomer();
       computeTaxes();
-      ensureCustomerFromMaster().catch(function () {
-        /* customer list is optional until the user types */
-      });
+      ensureCustomerFromMaster()
+        .catch(function () {
+          /* customer list is optional until the user types */
+        })
+        .finally(function () {
+          if (!seed.open_edit) return;
+          editInvoice().catch(function (err) {
+            showError(err.message || "Unable to edit bill.");
+          });
+        });
       return;
     }
     computeTaxes();

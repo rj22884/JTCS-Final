@@ -5,7 +5,7 @@
 {% set party_label = 'Supplier' if is_purchase else 'Customer' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20260925review2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20261003invfilter1">
 {% endblock %}
 
 {# Ribbon left empty so the toolbar row collapses and bill moves up. #}
@@ -280,7 +280,7 @@
       <h6 class="mb-0 me-auto">Saved {{ 'Purchase' if is_purchase else 'Sale / Service' }} Invoices</h6>
       <div>
         <input type="search" class="form-control form-control-sm inv-fw-lg" id="invGridSearch"
-               placeholder="Search invoice / {{ party_label|lower }}...">
+               placeholder="Search all columns...">
       </div>
       <button type="button" class="btn btn-inv-outline btn-sm" id="invGridRefresh">
         <i class="bi bi-arrow-clockwise"></i> Refresh
@@ -303,6 +303,36 @@
             {% endif %}
             <th class="text-end">Invoice Value</th>
             <th class="text-end">Actions</th>
+          </tr>
+          <tr class="inv-filter-row">
+            {% macro inv_col_filter(key, label) -%}
+            <th>
+              <div class="inv-col-filter">
+                <select class="form-select form-select-sm inv-filter-op" data-key="{{ key }}" aria-label="{{ label }} match">
+                  <option value="contains" selected>Contains</option>
+                  <option value="equals">Equals</option>
+                  <option value="starts">Starts with</option>
+                  <option value="ends">Ends with</option>
+                  <option value="not">Not contains</option>
+                </select>
+                <input type="search" class="form-control form-control-sm inv-filter-q" data-key="{{ key }}"
+                       list="invFilter-{{ key }}" placeholder="Search / select" aria-label="{{ label }} filter" autocomplete="off">
+                <datalist id="invFilter-{{ key }}"></datalist>
+              </div>
+            </th>
+            {%- endmacro %}
+            {{ inv_col_filter('invoice_no', 'Invoice number') }}
+            {{ inv_col_filter('date', 'Date') }}
+            {{ inv_col_filter('customer', party_label) }}
+            {{ inv_col_filter('mobile', 'Mobile') }}
+            {{ inv_col_filter('tax', 'Tax') }}
+            {{ inv_col_filter('source', 'Source') }}
+            {% if not is_purchase %}
+            {{ inv_col_filter('bill_status', 'Bill status') }}
+            {{ inv_col_filter('payment', 'Payment received') }}
+            {% endif %}
+            {{ inv_col_filter('value', 'Invoice value') }}
+            <th></th>
           </tr>
         </thead>
         <tbody id="invGridBody"></tbody>
@@ -370,5 +400,5 @@
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261003contact1"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261003invfilter1"></script>
 {% endblock %}
