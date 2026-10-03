@@ -62,9 +62,16 @@
     return "/static/" + path.replace(/^uploads\//, "uploads/");
   }
 
-  function statusTicks(status) {
+  function statusTicks(status, error) {
     const s = (status || "").toLowerCase();
-    if (s === "failed") return '<span class="wa-ticks is-failed" title="Failed">!</span>';
+    const reason = (error || "").trim();
+    if (s === "failed") {
+      return (
+        '<span class="wa-ticks is-failed" title="' +
+        CrmCommon.escapeHtml(reason || "Not delivered") +
+        '">!</span>'
+      );
+    }
     if (s === "read") return '<span class="wa-ticks is-read" title="Read">✓✓</span>';
     if (s === "delivered") return '<span class="wa-ticks" title="Delivered">✓✓</span>';
     if (s === "sent" || s === "queued") return '<span class="wa-ticks" title="Sent">✓</span>';
@@ -182,8 +189,12 @@
             mediaHtml +
             '<div class="wa-msg-time">' +
             CrmCommon.formatDate(m.CreatedDate || m.SentAt) +
-            (outbound && !isNote ? statusTicks(m.DeliveryStatus) : "") +
-            "</div></div></div>"
+            (outbound && !isNote ? statusTicks(m.DeliveryStatus, m.ErrorDetail) : "") +
+            "</div>" +
+            (outbound && !isNote && (m.DeliveryStatus || "").toLowerCase() === "failed" && m.ErrorDetail
+              ? '<div class="wa-fail-reason">' + CrmCommon.escapeHtml(m.ErrorDetail) + "</div>"
+              : "") +
+            "</div></div>"
           );
         })
         .join("") +

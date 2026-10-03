@@ -30,7 +30,11 @@ from app.modules.communication.services import CommunicationService
 from app.modules.communication.sms_provider import SmsGatewayProvider
 from app.modules.communication.template_service import TemplateService
 from app.modules.communication.webhook_service import WhatsAppWebhookService
-from app.modules.communication.whatsapp_provider import get_whatsapp_provider, is_cloud_api_configured
+from app.modules.communication.whatsapp_provider import (
+    get_whatsapp_provider,
+    is_cloud_api_configured,
+    whatsapp_to_number,
+)
 from app.modules.crm.customer360_service import Customer360Service
 from app.modules.crm.followup_service import CrmFollowUpService
 from app.modules.crm.lead_service import CrmLeadService
@@ -637,6 +641,21 @@ def conversation_messages(conversation_id: int):
     return jsonify({"ok": True, "rows": CommunicationService().list_messages(conversation_id)})
 
 
+def _whatsapp_send_error(message: str | None) -> str:
+    text_msg = (message or "").strip()
+    low = text_msg.lower()
+    if "131047" in low or "re-engagement" in low or "24 hour" in low or "24-hour" in low:
+        return (
+            "WhatsApp ne deliver nahi kiya. Customer ne pichhle 24 ghante mein "
+            "message nahi kiya, isliye plain text nahi ja sakta."
+        )
+    if "131026" in low or "undeliverable" in low:
+        return "WhatsApp ne deliver nahi kiya. Number WhatsApp par nahi hai, ya customer ne block kar diya."
+    if "is chat par whatsapp number nahi mila" in low or "invalid mobile" in low:
+        return "Is chat par WhatsApp number nahi mila. New se sahi number choose karo."
+    return text_msg or "WhatsApp ne message deliver nahi kiya."
+
+
 @crm_api_bp.route("/conversations/<int:conversation_id>/reply", methods=["POST"])
 @login_required
 @require_crm_capability("crm.reply")
@@ -670,14 +689,17 @@ def conversation_reply(conversation_id: int):
     body = TemplateService.interpolate(body, vars_map)
 
     if not is_note and channel == "WhatsApp":
-        mobile = (
-            conv.get("ContactMobile")
-            or conv.get("WhatsAppNumber")
-            or conv.get("MobileNumber")
-            or conv.get("LeadMobile")
+        mobile = whatsapp_to_number(
+            conv.get("ExternalThreadKey"),
+            conv.get("ContactMobile"),
+            conv.get("WhatsAppNumber"),
+            conv.get("MobileNumber"),
+            conv.get("LeadMobile"),
         )
         provider = get_whatsapp_provider()
         send_result = provider.send_message(mobile or "", body)
+        if send_result.get("error"):
+            send_result["error"] = _whatsapp_send_error(send_result.get("error"))
         if send_result.get("ok"):
             external_id = send_result.get("external_message_id")
             delivery_status = "Sent"
@@ -795,11 +817,12 @@ def conversation_attachments(conversation_id: int):
     delivery_status = None
     error_detail = None
     if channel == "WhatsApp":
-        mobile = (
-            conv.get("ContactMobile")
-            or conv.get("WhatsAppNumber")
-            or conv.get("MobileNumber")
-            or conv.get("LeadMobile")
+        mobile = whatsapp_to_number(
+            conv.get("ExternalThreadKey"),
+            conv.get("ContactMobile"),
+            conv.get("WhatsAppNumber"),
+            conv.get("MobileNumber"),
+            conv.get("LeadMobile"),
         )
         provider = get_whatsapp_provider()
         # Prefer media upload + id when Cloud API
@@ -827,7 +850,7 @@ def conversation_attachments(conversation_id: int):
             delivery_status = "Sent"
         else:
             delivery_status = "Failed"
-            error_detail = send_result.get("error")
+            error_detail = _whatsapp_send_error(send_result.get("error"))
 
     msg_id = CommunicationService().add_message(
         conversation_id,

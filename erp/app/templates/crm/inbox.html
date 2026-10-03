@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260818">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261003wa">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261003wa3">
 {% endblock %}
 
 {% block content %}
@@ -50,7 +50,7 @@
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong class="wa-brand">JTCS Inbox</strong>
           <div class="btn-group btn-group-sm">
-            <button type="button" class="btn btn-success" id="crmNewMessageBtn" title="New WhatsApp message"><i class="bi bi-plus-lg"></i></button>
+            <button type="button" class="btn btn-success" id="crmNewMessageBtn" title="New or existing customer">New</button>
             <button type="button" class="btn btn-outline-secondary" id="crmEmailSyncBtn" title="Sync IMAP"><i class="bi bi-arrow-repeat"></i></button>
             <button type="button" class="btn btn-outline-secondary" id="crmNotifyEnableBtn" title="Desktop notifications"><i class="bi bi-bell"></i></button>
           </div>
@@ -124,35 +124,37 @@
             <option value="">Templates…</option>
           </select>
         </div>
-        <form id="crmInboxReplyForm">
-          <div class="d-flex gap-2 mb-2 flex-wrap">
-            <select class="form-select form-select-sm crm-reply-channel" id="crmReplyChannel" style="max-width:9rem">
+        <form id="crmInboxReplyForm" class="wa-compose">
+          <div class="wa-compose-tools">
+            <select class="form-select form-select-sm crm-reply-channel" id="crmReplyChannel">
               <option value="WhatsApp">WhatsApp</option>
               <option value="Email">Email</option>
               <option value="Internal">Internal</option>
               <option value="Phone">Phone</option>
               <option value="SMS">SMS</option>
             </select>
-            <label class="btn btn-outline-secondary btn-sm mb-0" title="Attach files">
-              <i class="bi bi-paperclip"></i>
-              <input type="file" id="crmReplyFile" class="d-none" multiple accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt">
-            </label>
-            <label class="btn btn-outline-secondary btn-sm mb-0" title="Attach folder">
-              <i class="bi bi-folder2-open"></i>
-              <input type="file" id="crmReplyFolder" class="d-none" webkitdirectory directory multiple>
-            </label>
-            <button type="button" class="btn btn-outline-secondary btn-sm mb-0" id="crmReplyPaste" title="Paste copied file (Ctrl+V)">
-              <i class="bi bi-clipboard"></i> Paste
-            </button>
-            <div class="form-check mb-0 align-self-center">
+            <button type="button" class="btn btn-link btn-sm wa-tool-link" id="crmReplyPaste" title="Paste copied file (Ctrl+V)">Paste</button>
+            <div class="form-check mb-0">
               <input class="form-check-input" type="checkbox" id="crmReplyNote">
               <label class="form-check-label small" for="crmReplyNote">Internal note</label>
             </div>
           </div>
           <div id="crmAttachPreview" class="wa-attach-preview d-none"></div>
-          <div class="input-group">
-            <textarea class="form-control" id="crmReplyBody" rows="2" placeholder="Type a message…  Enter to send"></textarea>
-            <button type="submit" class="btn btn-success px-3" id="crmReplySendBtn"><i class="bi bi-send-fill"></i></button>
+          <div class="wa-compose-bar">
+            <label class="wa-attach-btn" title="Attach">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="#1a73e8" d="M16.5 6.5v9.2a4.5 4.5 0 1 1-9 0V5.8a3 3 0 1 1 6 0v9.1a1.5 1.5 0 1 1-3 0V6.5H9v8.4a3 3 0 1 0 6 0V5.8a4.5 4.5 0 1 0-9 0v9.9a6 6 0 1 0 12 0V6.5h-1.5z"/>
+              </svg>
+              <span>Attach</span>
+              <input type="file" id="crmReplyFile" class="d-none" multiple accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt">
+            </label>
+            <textarea class="form-control wa-compose-input" id="crmReplyBody" rows="1" placeholder="Type a message"></textarea>
+            <button type="submit" class="wa-send-btn" id="crmReplySendBtn" title="Send" aria-label="Send">
+              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M3.2 11.2 L20.8 3.2 L13.2 20.8 L10.6 13.4 Z"/>
+                <path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M20.8 3.2 L10.6 13.4"/>
+              </svg>
+            </button>
           </div>
         </form>
       </div>
@@ -356,5 +358,5 @@
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260823dmy1"></script>
-<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261003wa2"></script>
+<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261003wa3"></script>
 {% endblock %}

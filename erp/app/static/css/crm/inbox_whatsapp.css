@@ -167,6 +167,93 @@
 .wa-composer {
   background: #f0f2f5 !important;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 0.45rem 0.65rem 0.6rem !important;
+}
+
+.wa-compose-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.35rem;
+}
+
+.wa-compose-tools .crm-reply-channel {
+  max-width: 8.5rem;
+  border-radius: 999px;
+  border-color: transparent;
+  background: #fff;
+}
+
+.wa-tool-link {
+  color: #54656f;
+  text-decoration: none;
+  padding: 0;
+}
+
+.wa-compose-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.wa-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  margin: 0 0 0.15rem;
+  padding: 0.35rem 0.15rem;
+  color: #1a73e8;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wa-attach-btn span {
+  line-height: 1;
+}
+
+.wa-compose-input {
+  border: 0 !important;
+  border-radius: 8px !important;
+  min-height: 42px;
+  max-height: 120px;
+  resize: none;
+  box-shadow: none !important;
+  padding: 0.65rem 0.75rem !important;
+}
+
+.wa-compose-input:focus {
+  box-shadow: none !important;
+}
+
+.wa-send-btn {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 0;
+  border-radius: 50%;
+  background: #00a884;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.05rem;
+}
+
+.wa-send-btn:hover {
+  background: #008069;
+}
+
+.wa-send-btn:disabled {
+  opacity: 0.6;
+}
+
+.wa-fail-reason {
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: #ea0038;
 }
 
 .wa-quick-row {
