@@ -13,6 +13,15 @@
         {{ render_flyout(item.children, true) }}
       </li>
     {% else %}
+      {% if item.disabled %}
+      <li class="jtcs-menu-item is-disabled">
+        <span class="jtcs-menu-link disabled" aria-disabled="true" title="Disabled">
+          <i class="bi {{ item.icon }}"></i>
+          <span>{{ item.name }}</span>
+          <i class="bi bi-lock-fill jtcs-menu-lock"></i>
+        </span>
+      </li>
+      {% else %}
       {% if item.url == '/logout' %}
         {% set href = url_for('auth.logout') %}
       {% elif item.url and item.url.startswith('/') %}
@@ -26,6 +35,7 @@
           <span>{{ item.name }}</span>
         </a>
       </li>
+      {% endif %}
     {% endif %}
   {% endfor %}
 </ul>
@@ -53,6 +63,15 @@
           </div>
         </li>
       {% else %}
+        {% if item.disabled %}
+        <li class="jtcs-top-item is-disabled" data-menu-key="{{ menu_key }}">
+          <span class="jtcs-top-link disabled" aria-disabled="true" title="Disabled"{% if item_style %} style="{{ item_style }}"{% endif %}>
+            <i class="bi {{ item.icon }}"></i>
+            <span>{{ item.name }}</span>
+            <i class="bi bi-lock-fill jtcs-menu-lock"></i>
+          </span>
+        </li>
+        {% else %}
         {% set href = url_for('auth.logout') if item.url == '/logout' else (item.url if item.url and item.url.startswith('/') else '#') %}
         <li class="jtcs-top-item" data-menu-key="{{ menu_key }}">
           <a href="{{ href }}" class="jtcs-top-link{% if is_active %} active{% endif %}{% if href == '#' %} disabled{% endif %}"{% if href == '#' %} aria-disabled="true" tabindex="-1"{% endif %}{% if item_style %} style="{{ item_style }}"{% endif %}>
@@ -60,6 +79,7 @@
             <span>{{ item.name }}</span>
           </a>
         </li>
+        {% endif %}
       {% endif %}
     {% endfor %}
   </ul>

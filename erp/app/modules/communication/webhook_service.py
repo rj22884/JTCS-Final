@@ -54,6 +54,26 @@ class WhatsAppWebhookService:
                     except Exception as exc:
                         logger.exception("WhatsApp message handler failed")
                         errors.append(str(exc))
+                for block in value.get("history") or []:
+                    if not isinstance(block, dict):
+                        continue
+                    for thread in block.get("threads") or []:
+                        if not isinstance(thread, dict):
+                            continue
+                        customer = str(thread.get("id") or "")
+                        customer_key = last10_digits(customer)
+                        for msg in thread.get("messages") or []:
+                            if not isinstance(msg, dict):
+                                continue
+                            sender_key = last10_digits(str(msg.get("from") or ""))
+                            if customer_key and sender_key and sender_key != customer_key:
+                                continue
+                            try:
+                                if self._handle_message(msg, contacts):
+                                    messages_in += 1
+                            except Exception as exc:
+                                logger.exception("WhatsApp history handler failed")
+                                errors.append(str(exc))
 
         return {
             "ok": True,
@@ -317,6 +337,10 @@ class WhatsAppWebhookService:
             reply = interactive.get("button_reply") or interactive.get("list_reply") or {}
             return reply.get("title") or "[Interactive]", "interactive", None, None, None
         return f"[{mtype}]", mtype, None, None, None
+
+    def recover_media(self, media_id: str, filename_hint: str | None = None) -> dict:
+        """Download a WhatsApp media id again when the inbox file is missing."""
+        return self._download_and_store(media_id, filename_hint=filename_hint)
 
     def _download_and_store(self, media_id: str, *, filename_hint: str | None = None) -> dict:
         try:

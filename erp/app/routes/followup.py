@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import io
+import uuid
 from datetime import date
+from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request, send_file, session, url_for
+from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session, url_for
 
 from app.customer_master.constants import COUNTRIES
 from app.decorators import login_required, require_delete_reauth
@@ -25,6 +27,111 @@ from app.services.payment_reminder_service import PaymentReminderService
 from app.services.thank_you_letter_service import ThankYouLetterService
 
 
+def _record_has_payment_received(record: dict) -> bool:
+    stage_codes = {
+        (s.get("StageCode") or "").lower()
+        for s in record.get("completed_stages", [])
+    }
+    return (
+        "payment_received" in stage_codes
+        or record.get("workflow_status") == "Payment Received"
+        or bool(record.get("payment_received"))
+    )
+
+
+def _thank_you_block_reason(module_code: str, record: dict) -> str | None:
+    stage_codes = {
+        (s.get("StageCode") or "").lower()
+        for s in record.get("completed_stages", [])
+    }
+    if module_code in {"ITR", "DSC"}:
+        if not _record_has_payment_received(record):
+            return "Thank You letter is available only after Payment Received."
+        return None
+    has_tally = (
+        "tally_bill_generated" in stage_codes
+        or bool(record.get("bill_no"))
+        or record.get("workflow_status") == "Tally Bill Generated"
+    )
+    if not has_tally:
+        return "Tally bill is not generated for this entry."
+    return None
+
+
+def _thank_you_letter_file(module_code: str, record: dict, fmt: str) -> tuple[bytes, str, str]:
+    letter_amount = (
+        FollowupService.received_amount_for_letter(record)
+        if module_code == "ITR"
+        else (record.get("bill_amount") or 0)
+    )
+    kwargs = {
+        "customer_name": record.get("customer_name") or "",
+        "amount": letter_amount,
+        "bill_date": None,
+        "invoice_no": record.get("bill_no") or "",
+    }
+    pay_svc = FollowupPaymentService(module_code)
+    account = pay_svc.payment_account_for_letter(record.get("bill_no") or "")
+    if not (account or "").strip():
+        labels = []
+        for payment in record.get("payments") or []:
+            label = (
+                payment.get("label")
+                or payment.get("masked_account_number")
+                or payment.get("account_number")
+                or payment.get("bank_name")
+                or ""
+            ).strip()
+            if label and label != "Udhaar" and label not in labels:
+                labels.append(label)
+        account = ", ".join(labels)
+    payments = [row for row in (record.get("payments") or []) if not row.get("is_udhaar")]
+    cash_paid = bool(payments) and all(
+        str(
+            row.get("label")
+            or row.get("bank_name")
+            or row.get("account_number")
+            or row.get("masked_account_number")
+            or ""
+        ).strip().lower()
+        == "cash"
+        for row in payments
+    )
+    formatted_account = ThankYouLetterService.format_payment_account(account)
+    if cash_paid and formatted_account in {"—", "-", "–", ""}:
+        formatted_account = "Cash"
+    kwargs["payment_account"] = formatted_account
+    if module_code == "ITR":
+        udhaar_amt = FollowupService.udhaar_amount_for_record(record)
+        if udhaar_amt > 0.001:
+            try:
+                udhaar_disp = (
+                    f"{int(round(udhaar_amt)):,}"
+                    if abs(udhaar_amt - round(udhaar_amt)) < 0.001
+                    else f"{udhaar_amt:,.2f}"
+                )
+            except (TypeError, ValueError):
+                udhaar_disp = str(udhaar_amt)
+            kwargs["payment_note"] = f"Partial payment received. Balance: Rs. {udhaar_disp}"
+    raw_date = record.get("bill_date")
+    if raw_date:
+        try:
+            kwargs["bill_date"] = date.fromisoformat(str(raw_date)[:10])
+        except ValueError:
+            kwargs["bill_date"] = date.today()
+    if fmt == "png":
+        data = ThankYouLetterService.generate_png(**kwargs)
+        mime = "image/png"
+        ext = "png"
+    else:
+        data = ThankYouLetterService.generate_jpg(**kwargs)
+        mime = "image/jpeg"
+        ext = "jpg"
+    safe_name = (record.get("customer_name") or "Customer").replace(" ", "_")[:40]
+    filename = f"Thanking_Letter_{safe_name}_{record.get('tax_period') or 'FY'}.{ext}"
+    return data, mime, filename
+
+
 def _followup_api_urls(blueprint_name: str, module_code: str, allow_customer_create: bool) -> dict:
     urls = {
         "grid": url_for(f"{blueprint_name}.grid"),
@@ -35,9 +142,17 @@ def _followup_api_urls(blueprint_name: str, module_code: str, allow_customer_cre
         "billing": url_for(f"{blueprint_name}.billing_page"),
         "next_bill_no": url_for(f"{blueprint_name}.next_bill_no"),
         "thank_you_letter": url_for(f"{blueprint_name}.thank_you_letter", entry_id=0),
+        "thank_you_whatsapp": url_for(f"{blueprint_name}.thank_you_whatsapp", entry_id=0),
     }
     if module_code == "DSC":
         urls["sync_status"] = url_for(f"{blueprint_name}.sync_idsign_status", entry_id=0)
+        urls["assist"] = url_for(f"{blueprint_name}.dsc_assist")
+        try:
+            from app.utils.url_helpers import external_url_for
+
+            urls["public_resume"] = external_url_for("pages.public_dsc_resume")
+        except Exception:
+            urls["public_resume"] = "/resume"
     if module_code == "ITR":
         urls["itr_sync_start"] = url_for(f"{blueprint_name}.itr_sync_start")
         urls["itr_sync_job"] = url_for(f"{blueprint_name}.itr_sync_job", job_id="__JOB__")
@@ -175,6 +290,25 @@ def _make_activity_blueprint(
             except Exception as exc:
                 return jsonify({"ok": False, "error": f"Unable to sync ID Sign status: {exc}"}), 500
 
+        @bp.route("/assist", methods=["GET", "POST"], strict_slashes=False)
+        @login_required
+        def dsc_assist():
+            service = FollowupService(module_code)
+            if request.method == "GET":
+                return jsonify({"ok": True, "values": service.get_dsc_assist()})
+            payload = request.get_json(silent=True) or request.form.to_dict()
+            try:
+                values = service.save_dsc_assist(
+                    payload.get("key") or "",
+                    payload.get("value") or "",
+                    modified_by=session.get("user_name", "System"),
+                )
+                return jsonify({"ok": True, "values": values, "message": "Saved."})
+            except ValueError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            except Exception as exc:
+                return jsonify({"ok": False, "error": str(exc) or "Unable to save."}), 500
+
     if module_code == "ITR":
 
         @bp.route("/api/verify-edit-reauth", methods=["POST"], strict_slashes=False)
@@ -270,95 +404,112 @@ def _make_activity_blueprint(
             record = service.get_entry(entry_id)
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404
-        stage_codes = {
-            (s.get("StageCode") or "").lower()
-            for s in record.get("completed_stages", [])
-        }
-        # ITR: thank-you letter only after Payment Received; other modules keep tally-bill rule.
-        if module_code == "ITR":
-            has_payment = (
-                "payment_received" in stage_codes
-                or record.get("workflow_status") == "Payment Received"
-            )
-            if not has_payment:
-                return jsonify(
-                    {
-                        "ok": False,
-                        "error": "Thank You letter is available only after Payment Received.",
-                    }
-                ), 400
-        else:
-            has_tally = (
-                "tally_bill_generated" in stage_codes
-                or bool(record.get("bill_no"))
-                or record.get("workflow_status") == "Tally Bill Generated"
-            )
-            if not has_tally:
-                return jsonify({"ok": False, "error": "Tally bill is not generated for this entry."}), 400
+        blocked = _thank_you_block_reason(module_code, record)
+        if blocked:
+            return jsonify({"ok": False, "error": blocked}), 400
         fmt = (request.args.get("format") or "jpg").strip().lower()
-        letter_amount = (
-            FollowupService.received_amount_for_letter(record)
-            if module_code == "ITR"
-            else (record.get("bill_amount") or 0)
-        )
-        kwargs = {
-            "customer_name": record.get("customer_name") or "",
-            "amount": letter_amount,
-            "bill_date": None,
-            "invoice_no": record.get("bill_no") or "",
-        }
-        if module_code == "ITR":
-            pay_svc = FollowupPaymentService(module_code)
-            account = pay_svc.payment_account_for_letter(record.get("bill_no") or "")
-            if not (account or "").strip():
-                labels = []
-                for payment in record.get("payments") or []:
-                    label = (
-                        payment.get("label")
-                        or payment.get("masked_account_number")
-                        or payment.get("account_number")
-                        or payment.get("bank_name")
-                        or ""
-                    ).strip()
-                    if label and label != "Udhaar" and label not in labels:
-                        labels.append(label)
-                account = ", ".join(labels)
-            kwargs["payment_account"] = ThankYouLetterService.format_payment_account(account)
-            udhaar_amt = FollowupService.udhaar_amount_for_record(record)
-            if udhaar_amt > 0.001:
-                try:
-                    udhaar_disp = (
-                        f"{int(round(udhaar_amt)):,}"
-                        if abs(udhaar_amt - round(udhaar_amt)) < 0.001
-                        else f"{udhaar_amt:,.2f}"
-                    )
-                except (TypeError, ValueError):
-                    udhaar_disp = str(udhaar_amt)
-                kwargs["payment_note"] = (
-                    f"Partial payment received. Balance: Rs. {udhaar_disp}"
-                )
-        raw_date = record.get("bill_date")
-        if raw_date:
-            try:
-                kwargs["bill_date"] = date.fromisoformat(str(raw_date)[:10])
-            except ValueError:
-                kwargs["bill_date"] = date.today()
-        if fmt == "png":
-            data = ThankYouLetterService.generate_png(**kwargs)
-            mime = "image/png"
-            ext = "png"
-        else:
-            data = ThankYouLetterService.generate_jpg(**kwargs)
-            mime = "image/jpeg"
-            ext = "jpg"
-        safe_name = (record.get("customer_name") or "Customer").replace(" ", "_")[:40]
-        filename = f"Thanking_Letter_{safe_name}_{record.get('tax_period') or 'FY'}.{ext}"
+        data, mime, filename = _thank_you_letter_file(module_code, record, fmt)
         return send_file(
             io.BytesIO(data),
             mimetype=mime,
             as_attachment=True,
             download_name=filename,
         )
+
+    @bp.route("/records/<int:entry_id>/thank-you-letter/whatsapp", methods=["POST"], strict_slashes=False)
+    @login_required
+    def thank_you_whatsapp(entry_id: int):
+        """Send the Thank You letter image on the customer's WhatsApp from this app."""
+        from app.modules.communication.services import CommunicationService
+        from app.modules.communication.whatsapp_provider import (
+            WhatsAppCloudApiProvider,
+            get_whatsapp_provider,
+            is_cloud_api_configured,
+            whatsapp_to_number,
+        )
+
+        service = FollowupService(module_code)
+        try:
+            record = service.get_entry(entry_id)
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 404
+        blocked = _thank_you_block_reason(module_code, record)
+        if blocked:
+            return jsonify({"ok": False, "error": blocked}), 400
+        mobile = whatsapp_to_number(record.get("mobile_number") or "")
+        if not mobile:
+            return jsonify({"ok": False, "error": "Customer mobile number is not available."}), 400
+        if not is_cloud_api_configured():
+            return jsonify({"ok": False, "error": "WhatsApp is not configured in the app."}), 400
+        provider = get_whatsapp_provider()
+        if not isinstance(provider, WhatsAppCloudApiProvider):
+            return jsonify({"ok": False, "error": "WhatsApp is not configured in the app."}), 400
+
+        data, mime, filename = _thank_you_letter_file(module_code, record, "png")
+        folder = Path(current_app.config["UPLOAD_FOLDER"]) / "whatsapp_media"
+        folder.mkdir(parents=True, exist_ok=True)
+        dest = folder / f"{uuid.uuid4().hex}_{filename}"
+        dest.write_bytes(data)
+        caption = "Thank you."
+        try:
+            uploaded = provider._client().upload_media(
+                provider._phone_number_id(),
+                dest,
+                mime_type=mime,
+            )
+            media_id = (uploaded or {}).get("id")
+            if not media_id:
+                return jsonify({"ok": False, "error": "WhatsApp could not accept the letter image."}), 502
+            send_result = provider.send_media(
+                mobile,
+                media_type="image",
+                media_id=media_id,
+                caption=caption,
+                filename=filename,
+            )
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc) or "Unable to send the letter on WhatsApp."}), 502
+        if not send_result.get("ok"):
+            return jsonify(
+                {"ok": False, "error": send_result.get("error") or "Unable to send the letter on WhatsApp."}
+            ), 502
+
+        try:
+            rel = dest.relative_to(Path(current_app.config["UPLOAD_FOLDER"]))
+            store_path = f"uploads/{rel.as_posix()}"
+        except ValueError:
+            store_path = str(dest)
+        customer_id = record.get("customer_id")
+        try:
+            customer_id = int(customer_id) if customer_id else None
+        except (TypeError, ValueError):
+            customer_id = None
+        comm = CommunicationService()
+        conversation_id = comm.find_or_open_conversation(
+            channel="WhatsApp",
+            subject=(record.get("customer_name") or "Thank You")[:255],
+            customer_id=customer_id,
+            contact_mobile=mobile,
+            external_thread_key=mobile,
+        )
+        comm.add_message(
+            conversation_id,
+            body=caption,
+            channel="WhatsApp",
+            direction="Outbound",
+            attachment_path=store_path,
+            attachment_name=filename,
+            attachment_mime_type=mime,
+            attachment_size_bytes=dest.stat().st_size,
+            media_type="image",
+            external_message_id=send_result.get("external_message_id"),
+            delivery_status="Sent",
+            user_id=session.get("user_id"),
+            user_name=session.get("user_name"),
+            bump_unread=False,
+        )
+        name = (record.get("customer_name") or "customer").strip()
+        return jsonify({"ok": True, "message": f"Thank You letter image {name} ke WhatsApp par chali gayi."})
 
     if module_code == "ITR":
 

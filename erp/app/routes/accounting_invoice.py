@@ -12,6 +12,7 @@ from flask import (
 )
 
 from app.decorators import login_required, require_delete_reauth
+from app.utils.roles import has_converted_invoice_tick_role
 from app.services.bank_master_service import BankMasterService
 from app.services.gst_invoice_pdf_service import GstInvoicePdfService
 from app.services.gst_invoice_service import GstInvoiceService
@@ -152,6 +153,7 @@ def _render_invoice_form(*, voucher_type: str, page_title: str):
         service_quarters=_SERVICE_QUARTERS,
         quarter_months=_QUARTER_MONTHS,
         voucher_type=vt,
+        can_tick_converted=has_converted_invoice_tick_role(session.get("role")),
     )
 
 
@@ -437,6 +439,26 @@ def api_update_invoice(invoice_id: int):
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 
+@bp.route("/api/invoices/<int:invoice_id>/workflow", methods=["POST"], strict_slashes=False)
+@login_required
+def api_invoice_workflow(invoice_id: int):
+    if not has_converted_invoice_tick_role(session.get("role")):
+        return jsonify(
+            {
+                "ok": False,
+                "error": "Only Manager and Administrator can change Bill Status or Payment Received.",
+            }
+        ), 403
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = GstInvoiceService().update_workflow_flags(invoice_id, payload)
+        return jsonify({"ok": True, "record": record, "message": "Bill status updated."})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
 @bp.route("/api/invoices/navigate", methods=["GET"], strict_slashes=False)
 @login_required
 def api_navigate_invoice():
@@ -455,7 +477,7 @@ def api_navigate_invoice():
 @bp.route("/api/invoices/tally-bill", methods=["GET"], strict_slashes=False)
 @login_required
 def api_tally_bill_lookup():
-    """Fill invoice customer / date / amount from GST, TDS, DSC, or ITR Followup."""
+    """Fill invoice from Followup (GST/TDS/DSC/ITR) or Others Income/Expense Misc."""
     bill_no = (request.args.get("bill_no") or request.args.get("q") or "").strip()
     if not bill_no:
         return jsonify({"ok": False, "found": False, "error": "Enter Tally Bill Number."}), 400
@@ -466,25 +488,39 @@ def api_tally_bill_lookup():
                 {
                     "ok": False,
                     "found": False,
-                    "error": "Tally Bill Number followup (GST / TDS / DSC / ITR) mein nahi mila.",
+                    "error": (
+                        "Tally Bill Number followup (GST / TDS / DSC / ITR), "
+                        "Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
+                    ),
                 }
             ), 404
         existing = GstInvoiceService().find_invoice_for_tally_bill(bill_no)
         if existing:
-            return jsonify(
-                {
-                    "ok": False,
-                    "found": True,
-                    "duplicate": True,
-                    "error": (
-                        f"Tally Bill Number {bill_no} par invoice pehle se hai "
-                        f"({existing.get('invoice_no') or existing.get('invoice_id')}). "
-                        "Duplicate allow nahi hai."
-                    ),
-                    "existing_invoice": existing,
-                    "record": rec,
-                }
-            ), 409
+            inv = GstInvoiceService().repo.get_by_id(int(existing["invoice_id"]))
+            bill_source = GstInvoiceService.normalize_bill_source(
+                getattr(inv, "BillSource", None) if inv is not None else None
+            )
+            if bill_source != GstInvoiceService.BILL_SOURCE_AUTOMATIC:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "found": True,
+                        "duplicate": True,
+                        "error": (
+                            f"Tally Bill Number {bill_no} par invoice pehle se hai "
+                            f"({existing.get('invoice_no') or existing.get('invoice_id')}). "
+                            "Duplicate allow nahi hai."
+                        ),
+                        "existing_invoice": existing,
+                        "record": rec,
+                    }
+                ), 409
+            rec = {
+                **rec,
+                "existing_invoice_id": existing.get("invoice_id"),
+                "existing_invoice_no": existing.get("invoice_no") or "",
+                "bill_source": bill_source,
+            }
         return jsonify({"ok": True, "found": True, "record": rec})
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
@@ -515,8 +551,18 @@ def api_next_invoice_no():
 @login_required
 @require_delete_reauth
 def api_delete_invoice(invoice_id: int):
+    payload = request.get_json(silent=True) or {}
     try:
-        message = GstInvoiceService().delete_record(invoice_id)
+        svc = GstInvoiceService()
+        inv = svc.repo.get_by_id(invoice_id)
+        if (
+            inv is not None
+            and svc.normalize_bill_source(getattr(inv, "BillSource", None))
+            == svc.BILL_SOURCE_MISCELLANEOUS
+            and not svc._form_flag(payload, "from_source")
+        ):
+            return jsonify({"ok": False, "error": svc.converted_edit_message(inv)}), 400
+        message = svc.delete_record(invoice_id)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

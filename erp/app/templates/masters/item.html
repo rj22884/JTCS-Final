@@ -15,6 +15,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831ob1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dynamic_master_fields.css') }}?v=20260906dyn1">
 <style>
   .itm-hsn-suggest {
     position: absolute;
@@ -44,7 +45,9 @@
   </div>
 
   <p class="small text-muted mb-3">
-    GST Item Master — HSN/SAC, unit rate, and GST %. Used in <strong>Accounting → Generate Invoice</strong>.
+    Item Master = GST items + Sub Work Master (invoice ke liye).
+    Sub Work se linked rows me <strong>Sub Work Type</strong> dikhta hai (name read-only).
+    Naya Sub Work Masters → Sub Work Master se add karein — yahan auto aa jayega.
   </p>
   <div id="itmStatus" class="alert py-2 small d-none mb-3" role="alert"></div>
 
@@ -55,6 +58,8 @@
           <th>ID</th>
           <th>Code</th>
           <th>Item Name</th>
+          <th>Sub Work Type</th>
+          <th>Chart of Account Group</th>
           <th>HSN/SAC</th>
           <th>Type</th>
           <th>Unit</th>
@@ -90,6 +95,11 @@
               <label class="form-label" for="itmName">Item Name *</label>
               <input type="text" class="form-control" id="itmName" maxlength="200" required>
             </div>
+            <div class="col-12 d-none" id="itmSubWorkWrap">
+              <label class="form-label" for="itmSubWorkType">Sub Work Type</label>
+              <input type="text" class="form-control" id="itmSubWorkType" readonly>
+              <div class="form-text">Linked from Sub Work Master — not editable here. Change it in Masters → Sub Work Master.</div>
+            </div>
             <div class="col-md-4 position-relative">
               <label class="form-label" for="itmHsn">HSN / SAC *</label>
               <input type="text" class="form-control" id="itmHsn" maxlength="20"
@@ -113,7 +123,11 @@
               <select class="form-select" id="itmChartGroup" required>
                 <option value="">— Select Group —</option>
                 {% for g in chart_groups|default([]) %}
-                <option value="{{ g.group_id }}">{{ g.label or g.group_name }}</option>
+                <option value="{{ g.group_id }}"
+                        data-group-name="{{ g.group_name or '' }}"
+                        data-dyn-profile="{{ g.dyn_profile or '' }}"
+                        data-fixed-asset="{{ 1 if g.is_fixed_asset else 0 }}"
+                        data-investment="{{ 1 if g.is_investment else 0 }}">{{ g.label or g.group_name }}</option>
                 {% endfor %}
               </select>
               <div class="form-text">
@@ -122,8 +136,9 @@
                 (same list as Customer Master).
               </div>
             </div>
+            <div class="col-12 jtcs-dyn-master-fields d-none" id="itmDynFields"></div>
             <div class="col-md-4">
-              <label class="form-label" for="itmRate">Default Rate</label>
+              <label class="form-label" for="itmRate" id="itmRateLabel">Default Rate</label>
               <input type="number" class="form-control" id="itmRate" step="0.01" min="0" value="0">
             </div>
             <div class="col-md-4">
@@ -189,11 +204,13 @@
     create: {{ url_for('masters_item.create_record') | tojson }},
     update: {{ url_for('masters_item.update_record', item_id=0) | tojson }},
     delete: {{ url_for('masters_item.delete_record', item_id=0) | tojson }},
-    hsnSearch: {{ url_for('masters_item.hsn_search') | tojson }}
+    hsnSearch: {{ url_for('masters_item.hsn_search') | tojson }},
+    depRateSync: {{ url_for('masters_item.depreciation_rate_sync') | tojson }}
   };
   window.ITEM_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.ITEM_MASTER_CSRF = {{ csrf_token() | tojson }};
 </script>
 {% include 'ledger_report/_embed.html' %}
-<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260831ob1"></script>
+{% include 'masters/_dynamic_master_fields_js.html' %}
+<script src="{{ url_for('static', filename='js/item_master.js') }}?v=20260915sw1"></script>
 {% endblock %}

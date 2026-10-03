@@ -11,11 +11,52 @@
   --wa-meta: #667781;
 }
 
+.jtcs-app-shell:has(.wa-inbox) {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.jtcs-workspace:has(.wa-inbox) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.jtcs-content:has(.wa-inbox) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem 0.5rem 0.4rem;
+}
+
+html.jtcs-embed .jtcs-workspace:has(.wa-inbox) .jtcs-page-head {
+  display: none;
+}
+
+html.jtcs-embed .jtcs-content:has(.wa-inbox) {
+  padding: 0;
+}
+
+.wa-inbox {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
 .wa-channel-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-bottom: 0.75rem;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.35rem 0.55rem 0.3rem;
+  flex: 0 0 auto;
 }
 
 .wa-channel-tab {
@@ -38,11 +79,34 @@
   color: #fff;
 }
 
-.wa-shell {
-  min-height: calc(100vh - 210px);
-  border-radius: 12px;
+.crm-inbox-shell.wa-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  border-radius: 10px;
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(11, 20, 26, 0.08);
+  box-shadow: 0 1px 4px rgba(11, 20, 26, 0.08);
+}
+
+.crm-inbox-shell.wa-shell > .crm-inbox-panel {
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wa-panel-middle {
+  min-height: 0;
+}
+
+.wa-panel-middle .crm-inbox-panel-head {
+  padding: 0.4rem 0.7rem;
+}
+
+.wa-panel-middle .wa-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .wa-panel-left {
@@ -167,12 +231,107 @@
 .wa-composer {
   background: #f0f2f5 !important;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 0.3rem 0.55rem 0.35rem !important;
+  flex: 0 0 auto;
+}
+
+.wa-compose-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.wa-compose-tools .crm-reply-channel {
+  max-width: 8.5rem;
+  border-radius: 999px;
+  border-color: transparent;
+  background: #fff;
+}
+
+.wa-tool-link {
+  color: #54656f;
+  text-decoration: none;
+  padding: 0;
+}
+
+.wa-compose-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.wa-attach-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  margin: 0 0 0.15rem;
+  padding: 0.35rem 0.15rem;
+  color: #1a73e8;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.wa-attach-btn span {
+  line-height: 1;
+}
+
+.wa-compose-input {
+  border: 0 !important;
+  border-radius: 8px !important;
+  min-height: 38px;
+  max-height: 96px;
+  resize: none;
+  box-shadow: none !important;
+  padding: 0.45rem 0.7rem !important;
+}
+
+.wa-compose-input:focus {
+  box-shadow: none !important;
+}
+
+.wa-send-btn {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border: 0;
+  border-radius: 50%;
+  background: #00a884;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.05rem;
+}
+
+.wa-send-btn:hover {
+  background: #008069;
+}
+
+.wa-send-btn:disabled {
+  opacity: 0.6;
+}
+
+.wa-fail-reason {
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: #ea0038;
 }
 
 .wa-quick-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem !important;
+}
+
+.wa-quick-row .form-select {
+  font-size: 0.75rem;
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
 }
 
 .wa-composer .btn-success {
@@ -183,6 +342,48 @@
 .wa-composer .btn-success:hover {
   background: var(--wa-green-dark);
   border-color: var(--wa-green-dark);
+}
+
+.wa-attach-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.wa-attach-folder {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0b3a66;
+}
+
+.wa-attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.15rem 0.15rem 0.35rem;
+  background: #f4f7fb;
+  border-radius: 6px;
+}
+
+.wa-attach-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-attach-chip button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #667781;
+  line-height: 1;
+  padding: 0 0.35rem;
 }
 
 @media (max-width: 991.98px) {

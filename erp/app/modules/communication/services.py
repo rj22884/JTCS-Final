@@ -576,7 +576,7 @@ class CommunicationService:
                 LEFT JOIN dbo.CustomerMaster cm ON cm.CustomerID = c.CustomerID
                 LEFT JOIN dbo.CrmLead l ON l.LeadID = c.LeadID
                 LEFT JOIN dbo.Users u ON u.UserID = c.AssignedUserID
-                WHERE c.ConversationID = :id AND c.IsActive = 1
+                WHERE c.ConversationID = :id
                 """
             ),
             {"id": conversation_id},
@@ -602,6 +602,52 @@ class CommunicationService:
             {"id": conversation_id},
         ).mappings().all()
         return [dict(r) for r in rows]
+
+    def get_message(self, message_id: int) -> dict | None:
+        ensure_crm_schema()
+        row = db.session.execute(
+            text(
+                """
+                SELECT MessageID, ConversationID, Direction, Channel, Body, AttachmentPath,
+                       AttachmentName, AttachmentMimeType, AttachmentSizeBytes, MediaType
+                FROM dbo.CrmMessage
+                WHERE MessageID = :id
+                """
+            ),
+            {"id": message_id},
+        ).mappings().first()
+        return dict(row) if row else None
+
+    def update_message_attachment(
+        self,
+        message_id: int,
+        *,
+        attachment_path: str | None = None,
+        attachment_name: str | None = None,
+        attachment_mime_type: str | None = None,
+        attachment_size_bytes: int | None = None,
+    ) -> None:
+        ensure_crm_schema()
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.CrmMessage
+                SET AttachmentPath = COALESCE(:path, AttachmentPath),
+                    AttachmentName = COALESCE(:name, AttachmentName),
+                    AttachmentMimeType = COALESCE(:mime, AttachmentMimeType),
+                    AttachmentSizeBytes = COALESCE(:size, AttachmentSizeBytes)
+                WHERE MessageID = :id
+                """
+            ),
+            {
+                "id": message_id,
+                "path": attachment_path,
+                "name": (attachment_name or "")[:240] or None,
+                "mime": (attachment_mime_type or "")[:100] or None,
+                "size": attachment_size_bytes,
+            },
+        )
+        db.session.commit()
 
     def mark_read(self, conversation_id: int) -> None:
         ensure_crm_schema()

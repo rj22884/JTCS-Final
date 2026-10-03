@@ -19,11 +19,14 @@
     id: document.getElementById("itmId"),
     code: document.getElementById("itmCode"),
     name: document.getElementById("itmName"),
+    subWorkWrap: document.getElementById("itmSubWorkWrap"),
+    subWorkType: document.getElementById("itmSubWorkType"),
     hsn: document.getElementById("itmHsn"),
     hsnSuggest: document.getElementById("itmHsnSuggest"),
     hsnType: document.getElementById("itmHsnType"),
     unit: document.getElementById("itmUnit"),
     chartGroup: document.getElementById("itmChartGroup"),
+    rateLabel: document.getElementById("itmRateLabel"),
     rate: document.getElementById("itmRate"),
     gstApplicable: document.getElementById("itmGstApplicable"),
     gst: document.getElementById("itmGst"),
@@ -37,6 +40,30 @@
   };
 
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
+  const itmDynFields = window.JTCSDynamicMasterFields
+    ? window.JTCSDynamicMasterFields.bind({
+        select: els.chartGroup,
+        mount: document.getElementById("itmDynFields"),
+        config: window.JTCS_DYN_MASTER_FIELDS,
+        getEntityName: function () {
+          return (els.code?.value || "").trim() || (els.name?.value || "").trim();
+        },
+        entityNameEl: els.code,
+        openingDateEl: els.openingDate,
+        depRateSyncUrl: api.depRateSync,
+        idPrefix: "itmDyn",
+        getSyncParams: function () {
+          return {
+            item_code: (els.code?.value || "").trim(),
+            item_name: (els.name?.value || "").trim(),
+            hsn: (els.hsn?.value || "").trim(),
+          };
+        },
+        onError: function (err) {
+          showStatus(err.message || String(err), "danger");
+        },
+      })
+    : null;
   let searchTimer = null;
   let hsnTimer = null;
   let hsnSeq = 0;
@@ -182,6 +209,16 @@
         escapeHtml(row.item_name) +
         "</td>" +
         "<td>" +
+        (row.sub_work_type
+          ? '<span class="badge text-bg-light border">' +
+            escapeHtml(row.sub_work_type) +
+            "</span>"
+          : "—") +
+        "</td>" +
+        "<td>" +
+        escapeHtml(row.chart_group_name || "—") +
+        "</td>" +
+        "<td>" +
         escapeHtml(row.hsn_sac || "—") +
         "</td>" +
         "<td>" +
@@ -191,7 +228,13 @@
         escapeHtml(row.unit || "NOS") +
         "</td>" +
         '<td class="text-end">' +
-        escapeHtml(row.default_rate) +
+        escapeHtml(
+          row.is_fixed_asset
+            ? (row.depreciation_rate || "0") + "%"
+            : row.is_investment
+              ? (row.appreciation_rate || "0") + "%"
+              : row.default_rate
+        ) +
         "</td>" +
         '<td class="text-end">' +
         escapeHtml(gstLabel) +
@@ -213,6 +256,18 @@
     });
   }
 
+  function syncSubWorkUi(row) {
+    const fromSub = !!(row && row.from_sub_work && row.sub_work_type);
+    if (els.subWorkWrap) els.subWorkWrap.classList.toggle("d-none", !fromSub);
+    if (els.subWorkType) {
+      els.subWorkType.value = fromSub ? row.sub_work_type || "" : "";
+    }
+    if (els.name) {
+      els.name.readOnly = fromSub;
+      if (fromSub) els.name.value = row.sub_work_type || row.item_name || "";
+    }
+  }
+
   function clearForm() {
     els.form?.reset();
     if (els.id) els.id.value = "";
@@ -231,6 +286,8 @@
     hideHsnSuggest();
     syncGstRateEnabled();
     syncOpeningBalance();
+    syncSubWorkUi(null);
+    if (itmDynFields) itmDynFields.apply({});
   }
 
   function openAdd() {
@@ -247,6 +304,7 @@
     if (els.id) els.id.value = String(row.item_id || "");
     if (els.code) els.code.value = row.item_code || "";
     if (els.name) els.name.value = row.item_name || "";
+    syncSubWorkUi(row);
     if (els.hsn) els.hsn.value = row.hsn_sac || "";
     if (els.hsnType) els.hsnType.value = row.hsn_sac_type || "SAC";
     if (els.unit) els.unit.value = row.unit || "NOS";
@@ -256,6 +314,7 @@
           ? String(row.chart_group_id)
           : "";
     }
+    if (itmDynFields) itmDynFields.apply(row);
     if (els.rate) els.rate.value = row.default_rate || "0";
     if (els.gstApplicable) els.gstApplicable.checked = row.gst_applicable !== false;
     if (els.gst) els.gst.value = row.gst_rate_percent || "0";
@@ -267,6 +326,7 @@
     if (els.isActive) els.isActive.checked = !!row.is_active;
     syncGstRateEnabled();
     syncOpeningBalance();
+    if (itmDynFields) itmDynFields.sync();
     if (els.modalTitle) els.modalTitle.textContent = "Edit Item";
     modal?.show();
   }
@@ -336,7 +396,6 @@
   els.gstApplicable?.addEventListener("change", syncGstRateEnabled);
   els.openingQty?.addEventListener("input", syncOpeningBalance);
   els.openingRate?.addEventListener("input", syncOpeningBalance);
-
   els.hsn?.addEventListener("input", function () {
     clearTimeout(hsnTimer);
     hsnTimer = setTimeout(function () {
@@ -392,14 +451,28 @@
       return;
     }
     syncOpeningBalance();
+    const extras = itmDynFields
+      ? itmDynFields.collect()
+      : { purchase_date: "", depreciation_rate: "0", appreciation_rate: "0" };
+    const dynErrors = itmDynFields ? itmDynFields.validate() : [];
+    if (dynErrors.length) {
+      showStatus(dynErrors[0], "danger");
+      return;
+    }
     const payload = {
       item_code: els.code?.value || "",
-      item_name: els.name?.value || "",
+      item_name:
+        !(els.subWorkWrap?.classList.contains("d-none")) && (els.subWorkType?.value || "").trim()
+          ? els.subWorkType.value.trim()
+          : els.name?.value || "",
       hsn_sac: hsn,
       hsn_sac_type: els.hsnType?.value || "SAC",
       unit: els.unit?.value || "NOS",
       chart_group_id: chartGroupId,
       default_rate: els.rate?.value || "0",
+      depreciation_rate: extras.depreciation_rate,
+      appreciation_rate: extras.appreciation_rate,
+      purchase_date: extras.purchase_date,
       gst_applicable: els.gstApplicable?.checked ? "1" : "0",
       gst_rate_percent: els.gstApplicable?.checked ? els.gst?.value || "18" : "0",
       opening_qty: els.openingQty?.value || "0",
@@ -433,5 +506,6 @@
 
   syncGstRateEnabled();
   syncOpeningBalance();
+  if (itmDynFields) itmDynFields.sync();
   renderRows(window.ITEM_MASTER_INITIAL_ROWS || []);
 })();

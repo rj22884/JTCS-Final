@@ -22,6 +22,7 @@ from app.modules.settings.crypto import (
 from app.modules.settings.models import (
     PROVIDER_FIELDS,
     PROVIDERS,
+    WHATSAPP_PUBLIC_WEBHOOK_URL,
     WHATSAPP_SEND_REQUIRED_KEYS,
     get_providers_catalog,
     is_secret_key,
@@ -176,6 +177,10 @@ class IntegrationSettingsService:
                 if key == "smtp_password":
                     password_updated = True
             else:
+                # WhatsApp: an empty box means "keep what is already saved".
+                # Delete is the action that clears credentials.
+                if provider == "whatsapp_meta" and not value.strip():
+                    continue
                 stored = encrypt_value(value)
 
             old = self.repository.get_encrypted_value(provider, key)
@@ -197,6 +202,7 @@ class IntegrationSettingsService:
 
         if provider == "whatsapp_meta":
             self.refresh_whatsapp_status_from_fields()
+            self._store_public_webhook_url()
         elif provider == "smtp":
             self.refresh_smtp_status_from_fields()
             self._log_smtp_audit(
@@ -237,6 +243,64 @@ class IntegrationSettingsService:
                 )
             else:
                 result["message"] = "Settings saved successfully."
+        return result
+
+    def _store_public_webhook_url(self) -> None:
+        """Keep the Meta callback on the app host, never a marketing page."""
+        stored = encrypt_value(WHATSAPP_PUBLIC_WEBHOOK_URL)
+        self.repository.upsert(
+            provider="whatsapp_meta",
+            setting_key="webhook_url",
+            value_encrypted=stored,
+            description="whatsapp_meta.webhook_url",
+        )
+
+    def clear_whatsapp_credentials(self) -> dict[str, Any]:
+        """Remove saved WhatsApp secrets and IDs. The public webhook URL stays."""
+        keys = (
+            "app_id",
+            "app_secret",
+            "phone_number",
+            "phone_number_id",
+            "waba_id",
+            "access_token",
+            "webhook_verify_token",
+            "business_id",
+            "token_expires_at",
+            "business_name",
+            "display_name",
+            "quality_rating",
+            "messaging_limit",
+            "account_status",
+            "profile_photo_url",
+            "graph_api_version",
+            "webhook_subscribed_fields",
+            "last_sync_at",
+            "connection_status",
+        )
+        blank = encrypt_value("")
+        status = encrypt_value(STATUS_NOT_CONFIGURED)
+        for key in keys:
+            old = self.repository.get_encrypted_value("whatsapp_meta", key)
+            value = status if key == "connection_status" else blank
+            self.repository.upsert(
+                provider="whatsapp_meta",
+                setting_key=key,
+                value_encrypted=value,
+                description=f"whatsapp_meta.{key}",
+            )
+            try:
+                self.audit.log_change(
+                    provider="whatsapp_meta",
+                    setting_key=key,
+                    old_cipher=old,
+                    new_cipher=value,
+                )
+            except Exception:
+                logger.exception("Audit failed while clearing %s", key)
+        self._store_public_webhook_url()
+        result = self.get_provider_settings_masked("whatsapp_meta")
+        result["message"] = "WhatsApp credentials deleted from this app."
         return result
 
     def validate_whatsapp_payload(

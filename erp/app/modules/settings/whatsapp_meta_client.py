@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import re
+import socket
 import time
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_GRAPH_VERSION = "v21.0"
 GRAPH_BASE = "https://graph.facebook.com"
 OAUTH_DIALOG = "https://www.facebook.com"
+SUBSCRIBED_APPS_TIMEOUT = 60
 
 
 class MetaGraphError(Exception):
@@ -165,6 +167,8 @@ class WhatsAppMetaClient:
         return self.get(f"/{waba_id}", {"fields": "id,name,account_review_status"})
 
     def get_phone(self, phone_number_id: str) -> dict[str, Any]:
+        # WhatsApp Cloud phone node — do not request whatsapp_business_account
+        # (Graph #100: nonexistent field on PHONE_NUMBER_ID).
         return self.get(
             f"/{phone_number_id}",
             {
@@ -172,8 +176,7 @@ class WhatsAppMetaClient:
                     "id,display_phone_number,verified_name,quality_rating,"
                     "code_verification_status,platform_type,throughput,"
                     "messaging_limit_tier,name_status,new_name_status,"
-                    "is_official_business_account,account_mode,"
-                    "whatsapp_business_account{id,name}"
+                    "is_official_business_account,account_mode"
                 )
             },
         )
@@ -199,9 +202,96 @@ class WhatsAppMetaClient:
         url = f"{GRAPH_BASE}/{ver}/oauth/access_token?{urlencode(params)}"
         return self._http_get_json(url, timeout=self.timeout)
 
-    def subscribe_app_to_waba(self, waba_id: str) -> dict[str, Any]:
-        """POST /{WABA-ID}/subscribed_apps — Bearer token, no query-string secret."""
-        return self._subscribed_apps_http("POST", waba_id, body={})
+    def subscribe_app_to_waba(
+        self,
+        waba_id: str,
+        *,
+        override_callback_uri: str | None = None,
+        verify_token: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /{WABA-ID}/subscribed_apps — Bearer token, no query-string secret.
+
+        override_callback_uri makes Meta deliver this WABA's events to our URL
+        even when the app dashboard callback is blank or points elsewhere.
+        """
+        body: dict[str, Any] = {}
+        uri = (override_callback_uri or "").strip()
+        token = (verify_token or "").strip()
+        if uri and token:
+            body["override_callback_uri"] = uri
+            body["verify_token"] = token
+        return self._subscribed_apps_http("POST", waba_id, body=body)
+
+    def register_messages_webhook(
+        self,
+        *,
+        app_id: str,
+        app_secret: str,
+        callback_url: str,
+        verify_token: str,
+        fields: str = "messages",
+    ) -> dict[str, Any]:
+        """Subscribe the Meta app to the messages webhook field.
+
+        subscribed_apps alone does not turn on message delivery. Without this
+        call, chats stay in WhatsApp and never reach the CRM inbox.
+        """
+        app_id = (app_id or "").strip()
+        app_secret = (app_secret or "").strip()
+        callback_url = (callback_url or "").strip()
+        verify_token = (verify_token or "").strip()
+        if not app_id or not app_secret:
+            raise MetaGraphError("App ID and App Secret are required to register the webhook.")
+        if not callback_url.startswith("https://"):
+            raise MetaGraphError("Webhook URL must be a public https address.")
+        if not verify_token:
+            raise MetaGraphError("Webhook verify token is required.")
+        form = urlencode(
+            {
+                "object": "whatsapp_business_account",
+                "callback_url": callback_url,
+                "verify_token": verify_token,
+                "fields": (fields or "messages").strip() or "messages",
+                "access_token": f"{app_id}|{app_secret}",
+            }
+        ).encode("utf-8")
+        url = f"{GRAPH_BASE}/{self.version}/{app_id}/subscriptions"
+        req = urllib.request.Request(
+            url,
+            data=form,
+            method="POST",
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "User-Agent": "JTCS-ERP-WhatsApp/1.0",
+            },
+        )
+        logger.info(
+            "WhatsApp app webhook subscribe url=%s fields=%s callback_set=%s",
+            url,
+            fields or "messages",
+            True,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=max(self.timeout, 30)) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {"success": True}
+        except urllib.error.HTTPError as exc:
+            body_txt = exc.read().decode("utf-8", errors="replace")
+            try:
+                payload = json.loads(body_txt) if body_txt else {}
+            except json.JSONDecodeError:
+                payload = {"raw": body_txt}
+            err = payload.get("error") or {}
+            msg = err.get("message") or body_txt or str(exc)
+            logger.warning(
+                "WhatsApp app webhook subscribe failed status=%s body=%s",
+                exc.code,
+                self._redact_log_text(body_txt)[:2000],
+            )
+            raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
+        except urllib.error.URLError as exc:
+            raise MetaGraphError(f"Network error reaching Meta Graph API: {exc.reason}") from exc
 
     def unsubscribe_app_from_waba(self, waba_id: str) -> dict[str, Any]:
         return self._subscribed_apps_http("DELETE", waba_id)
@@ -240,8 +330,9 @@ class WhatsAppMetaClient:
             raise MetaGraphError("Access token is required for subscribed_apps.")
         path = f"/{self.version}/{waba}/subscribed_apps"
         url = f"{GRAPH_BASE}{path}"
-        # This WhatsApp edge is slower than node GETs used by other Test checks.
-        wait = max(30, int(self.timeout or 30))
+        # Dedicated wait: Test Connection uses a short client timeout for node GETs.
+        # subscribed_apps is slower and must not inherit that 12s/30s cap.
+        wait = max(SUBSCRIBED_APPS_TIMEOUT, int(self.timeout or 0))
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self.access_token}",
@@ -295,7 +386,7 @@ class WhatsAppMetaClient:
                 self._redact_log_text(body_txt)[:2000],
             )
             raise MetaGraphError(msg, status=exc.code, payload=payload) from exc
-        except TimeoutError as exc:
+        except (TimeoutError, socket.timeout) as exc:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             logger.warning(
                 "WhatsApp subscribed_apps timeout method=%s url=%s timeout_s=%s elapsed_ms=%s reason=%s",
@@ -311,7 +402,10 @@ class WhatsAppMetaClient:
         except urllib.error.URLError as exc:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             reason = exc.reason
-            timed_out = isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
+            timed_out = (
+                isinstance(reason, (TimeoutError, socket.timeout))
+                or "timed out" in str(reason).lower()
+            )
             logger.warning(
                 "WhatsApp subscribed_apps network_error method=%s url=%s elapsed_ms=%s timeout=%s reason=%s",
                 method,

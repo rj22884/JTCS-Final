@@ -71,6 +71,11 @@
     itrFiledDate: document.getElementById("fuItrFiledDate"),
     tallyBillWrap: document.getElementById("fuTallyBillWrap"),
     billNo: document.getElementById("fuBillNo"),
+    generateBillYes: document.getElementById("fuGenerateBillYes"),
+    generateBillNo: document.getElementById("fuGenerateBillNo"),
+    approveInvoiceYes: document.getElementById("fuApproveInvoiceYes"),
+    approveInvoiceNo: document.getElementById("fuApproveInvoiceNo"),
+    invoiceStatus: document.getElementById("fuInvoiceStatus"),
     billDate: document.getElementById("fuBillDate"),
     billAmount: document.getElementById("fuBillAmount"),
     autoBillBtn: document.getElementById("fuAutoBillBtn"),
@@ -84,6 +89,9 @@
     applicationNumber: document.getElementById("fuApplicationNumber"),
     location: document.getElementById("fuLocation"),
     introducedBy: document.getElementById("fuIntroducedBy"),
+    dscType: document.getElementById("fuDscType"),
+    dscClass: document.getElementById("fuDscClass"),
+    dscYear: document.getElementById("fuDscYear"),
     customerEmail: document.getElementById("fuCustomerEmail"),
     saveBtn: document.getElementById("fuSaveBtn"),
     returnType: document.getElementById("fuReturnType"),
@@ -117,7 +125,10 @@
   // ITR default: entry date/time ascending (oldest first).
   let gridSortKey = isItrModule ? "created_date" : null;
   let gridSortDir = "asc";
-  const bankAccounts = window.FU_BANK_ACCOUNTS || [];
+  const bankAccounts = (window.FU_BANK_ACCOUNTS || []).filter(function (item) {
+    const flag = item && item.qr_bill_received;
+    return flag === true || flag === 1 || flag === "1";
+  });
   const KDK_USER_KEY = "jtcs_itr_kdk_userid";
   const KDK_PASS_KEY = "jtcs_itr_kdk_password";
   const KDK_SAVE_KEY = "jtcs_itr_kdk_save";
@@ -158,10 +169,80 @@
     });
   }
 
+  async function sendThankYouWhatsApp(button) {
+    if (!button || button.disabled) return;
+    const entryId = button.getAttribute("data-id");
+    const name = (button.getAttribute("data-name") || "customer").trim();
+    const template = window.FU_API && window.FU_API.thank_you_whatsapp;
+    if (!entryId || !template) return;
+    const ask = "Thank You letter image " + name + " ke WhatsApp par bhej dein?";
+    const ok = window.confirm(ask);
+    if (!ok) return;
+    button.disabled = true;
+    try {
+      const res = await fetch(apiUrl(template, entryId), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          Accept: "application/json",
+          "X-CSRFToken": window.FU_CSRF || csrfToken(),
+        },
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to send the Thank You letter.");
+      }
+      const message = data.message || "Thank You letter image WhatsApp par chali gayi.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "success");
+      else alert(message);
+    } catch (err) {
+      const message = err.message || "Unable to send the Thank You letter.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "error");
+      else alert(message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function canDownloadThankYou(row) {
-    // ITR: thank-you letter only after Payment Received is ticked.
-    if (isItrModule) return rowHasPaymentReceived(row);
+    // ITR and DSC: thank-you letter only after Payment Received is ticked.
+    if (isItrModule || isDscModule) return rowHasPaymentReceived(row);
     return rowHasTallyBill(row);
+  }
+
+  function thankYouCellHtml(row) {
+    const ready = canDownloadThankYou(row);
+    const pngTitle = ready
+      ? "Download Thank You Letter (PNG)"
+      : "Available after Payment Received";
+    const waTitle = ready
+      ? "Send Thank You letter image on WhatsApp"
+      : "Available after Payment Received";
+    if (isDscModule || ready) {
+      const pngHref = ready
+        ? escapeHtml(apiUrl(window.FU_API.thank_you_letter, row.entry_id) + "?format=png")
+        : "#";
+      return (
+        '<span class="fu-thank-actions">' +
+        '<a class="btn btn-outline-success btn-sm fu-thank-btn' +
+        (ready ? "" : " disabled") +
+        '" href="' + pngHref + '" title="' + pngTitle + '"' +
+        (ready ? "" : ' aria-disabled="true" tabindex="-1"') +
+        '><i class="bi bi-download"></i> PNG</a>' +
+        '<button type="button" class="btn btn-success btn-sm fu-thank-wa" data-id="' +
+        row.entry_id +
+        '" data-name="' + escapeHtml(row.customer_name || "") +
+        '" title="' + waTitle + '"' +
+        (ready ? "" : " disabled") +
+        '><i class="bi bi-whatsapp"></i></button>' +
+        "</span>"
+      );
+    }
+    return (
+      '<span class="text-muted" title="' +
+      (isItrModule ? "Available after Payment Received" : "Available after Tally Bill Generated") +
+      '">—</span>'
+    );
   }
 
   function isItrPaymentReceivedLocked(row) {
@@ -178,6 +259,30 @@
     if (!rowHasTallyBill(row)) return false;
     if (rowHasPaymentReceived(row)) return false;
     return !!(window.FU_API && window.FU_API.payment_reminder);
+  }
+
+  function currentCustomerVideoBase() {
+    const input = document.getElementById("fuDscVideoLink");
+    const field = input ? input.closest(".fu-dsc-assist-field") : null;
+    const saved = field && field.dataset.savedValue != null ? String(field.dataset.savedValue).trim() : "";
+    const typed = input ? String(input.value || "").trim() : "";
+    return typed || saved;
+  }
+
+  function buildDscRowVideoLink(applicationId, mobile) {
+    const base = currentCustomerVideoBase();
+    const app = String(applicationId == null ? "" : applicationId).trim();
+    const mob = String(mobile == null ? "" : mobile).trim();
+    if (!base || !app || !mob) return "";
+    try {
+      const url = new URL(base);
+      url.searchParams.set("applicationId", app);
+      url.searchParams.set("mobile", mob);
+      return url.toString();
+    } catch (err) {
+      const sep = base.indexOf("?") >= 0 ? "&" : "?";
+      return base + sep + "applicationId=" + encodeURIComponent(app) + "&mobile=" + encodeURIComponent(mob);
+    }
   }
 
   function copyableCell(value) {
@@ -215,6 +320,106 @@
       return;
     }
     fallbackCopy(value, done);
+  }
+
+  function dscAssistUrl() {
+    return window.FU_API.assist || "/dsc/followup/assist";
+  }
+
+  function setDscAssistMode(field, savedValue) {
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const editBtn = field.querySelector(".fu-dsc-assist-edit");
+    const copyBtn = field.querySelector(".fu-dsc-assist-copy");
+    const hasSaved = !!(savedValue || "").trim();
+    field.dataset.savedValue = savedValue || "";
+    if (input) {
+      input.value = savedValue || "";
+      input.readOnly = hasSaved;
+      input.classList.toggle("fu-dsc-assist-readonly", hasSaved);
+    }
+    saveBtn?.classList.toggle("d-none", hasSaved);
+    editBtn?.classList.toggle("d-none", !hasSaved);
+    copyBtn?.classList.toggle("d-none", !hasSaved);
+  }
+
+  function startDscAssistEdit(field) {
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const editBtn = field.querySelector(".fu-dsc-assist-edit");
+    const copyBtn = field.querySelector(".fu-dsc-assist-copy");
+    if (input) {
+      input.readOnly = false;
+      input.classList.remove("fu-dsc-assist-readonly");
+      input.focus();
+      input.select();
+    }
+    saveBtn?.classList.remove("d-none");
+    editBtn?.classList.add("d-none");
+    copyBtn?.classList.add("d-none");
+  }
+
+  async function saveDscAssistField(field) {
+    const key = field.dataset.assistKey;
+    const input = field.querySelector("input");
+    const saveBtn = field.querySelector(".fu-dsc-assist-save");
+    const value = (input?.value || "").trim();
+    if (!key) return;
+    if (saveBtn) saveBtn.disabled = true;
+    try {
+      const res = await fetch(dscAssistUrl(), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken(),
+        },
+        body: JSON.stringify({ key: key, value: value, csrf_token: csrfToken() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to save.");
+      }
+      const saved = (data.values && data.values[key]) || value;
+      setDscAssistMode(field, saved);
+    } catch (err) {
+      alert(err.message || String(err));
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+    }
+  }
+
+  function initDscAssist() {
+    const box = document.getElementById("fuDscAssist");
+    if (!box || !isDscModule) return;
+    box.querySelectorAll(".fu-dsc-assist-field").forEach(function (field) {
+      field.querySelector(".fu-dsc-assist-save")?.addEventListener("click", function () {
+        saveDscAssistField(field);
+      });
+      field.querySelector(".fu-dsc-assist-edit")?.addEventListener("click", function () {
+        startDscAssistEdit(field);
+      });
+      field.querySelector(".fu-dsc-assist-copy")?.addEventListener("click", function () {
+        const value = field.dataset.savedValue || field.querySelector("input")?.value || "";
+        copyTextToClipboard(value, this);
+      });
+      field.querySelector("input")?.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (!this.readOnly) saveDscAssistField(field);
+        }
+      });
+    });
+    fetch(dscAssistUrl(), { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        const values = data.values || {};
+        box.querySelectorAll(".fu-dsc-assist-field").forEach(function (field) {
+          setDscAssistMode(field, values[field.dataset.assistKey] || "");
+        });
+      })
+      .catch(function () { /* keep empty editable fields */ });
   }
 
   function fallbackCopy(text, done) {
@@ -430,7 +635,17 @@
     removeBtn.className = "btn btn-outline-danger btn-sm fu-payment-remove";
     removeBtn.innerHTML = '<i class="bi bi-trash"></i>';
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".fu-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".fu-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".fu-payment-amount");
+        const date = line.querySelector(".fu-payment-date");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        if (date) date.value = defaultPaymentDate();
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentSummary();
     });
@@ -775,6 +990,9 @@
     if (isDscApplicationStageChecked() && !isStageChecked("documents_received") && !applicationNo && !locked) {
       return "Application number is required when Application No. is checked.";
     }
+    if (!(els.dscType?.value || "").trim()) return "DSC type is required.";
+    if (!(els.dscClass?.value || "").trim()) return "DSC class is required.";
+    if (!(els.dscYear?.value || "").trim()) return "Year is required.";
     if (!(els.location?.value || "").trim()) {
       return "Location is required.";
     }
@@ -785,21 +1003,404 @@
       if (!(els.billNo?.value || "").trim()) {
         return "Tally bill number is required when Tally Bill Generated is checked.";
       }
-      const billAmount = parseFloat(els.billAmount?.value || "0");
-      if (!billAmount || billAmount <= 0) {
-        return "Bill amount is required when Tally Bill Generated is checked.";
-      }
     }
     if (isStageChecked("payment_received")) {
       if (!(els.billNo?.value || "").trim()) {
         return "Tally bill number is required before marking Payment Received.";
       }
-      const billAmount = parseFloat(els.billAmount?.value || "0");
-      if (!billAmount || billAmount <= 0) {
-        return "Bill amount is required for Payment Received.";
+      const payTotal = getPaymentTotal();
+      if (!payTotal || payTotal <= 0) {
+        return "Add at least one payment amount for Payment Received.";
       }
     }
     return null;
+  }
+
+  let lastSaleRecord = null;
+  let approveInFlight = false;
+  let autoApproveFor = 0;
+
+  function sourcePaymentReceived() {
+    return isStageChecked("payment_received") || getPaymentTotal() > 0;
+  }
+
+  function saleStatusText(record) {
+    if (!record) return "";
+    const approved = record.bill_approved ? "Approved" : "Approve pending";
+    const paid = sourcePaymentReceived() ? "Yes" : "No";
+    const no = record.invoice_no ? record.invoice_no + " — " : "";
+    let text = "Sale invoice " + no + approved + " · Payment Received: " + paid;
+    if (isDscModule) {
+      const amount = Number(record.invoice_value);
+      if (Number.isFinite(amount)) {
+        text +=
+          " · Total Invoice Amount: ₹" +
+          amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    }
+    return text;
+  }
+
+  function paintInvoiceStatus(record) {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    box.classList.remove("fu-pay-no", "fu-pay-yes");
+    if (!record) {
+      box.textContent = "";
+      box.classList.add("d-none");
+      return;
+    }
+    box.textContent = saleStatusText(record);
+    box.classList.remove("d-none");
+    if (!isDscModule) return;
+    if (sourcePaymentReceived()) box.classList.add("fu-pay-yes");
+    else box.classList.add("fu-pay-no");
+  }
+
+  function saleIsApproved() {
+    return !!(lastSaleRecord && lastSaleRecord.bill_approved);
+  }
+
+  let entryFieldsLocked = false;
+
+  function approvedEditMessage() {
+    const paid = isStageChecked("payment_received") || !!(lastSaleRecord && lastSaleRecord.payment_received);
+    if (paid) {
+      return "Payment aa chuki hai aur admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+    }
+    return "Admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+  }
+
+  async function ensureEntryChangeAllowed() {
+    await refreshInvoiceStatus();
+    if (!saleIsApproved()) return true;
+    const message = approvedEditMessage();
+    if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+    else alert(message);
+    return false;
+  }
+
+  function syncEntryActionButtons() {
+    const existing = !!(els.entryId && (els.entryId.value || "").trim());
+    const editBtn = document.getElementById("fuEditBtn");
+    const deleteBtn = document.getElementById("fuDeleteBtn");
+    if (editBtn) editBtn.classList.toggle("d-none", !existing);
+    if (deleteBtn) deleteBtn.classList.toggle("d-none", !existing);
+  }
+
+  function setEntryFieldsLocked(locked) {
+    entryFieldsLocked = !!locked;
+    const entryForm = document.getElementById("fuEntryForm");
+    entryForm?.querySelectorAll("input, select, textarea, button").forEach(function (el) {
+      if (el.type === "hidden") return;
+      el.disabled = !!locked;
+    });
+    if (els.saveBtn) els.saveBtn.disabled = !!locked;
+    if (!locked) syncWorkflowPanels();
+    syncEntryActionButtons();
+  }
+
+  function hasCreditPayment() {
+    const lines = els.paymentLines?.querySelectorAll(".fu-payment-line") || [];
+    for (let i = 0; i < lines.length; i++) {
+      const select = lines[i].querySelector("select");
+      const text =
+        (select && select.selectedOptions && select.selectedOptions[0] && select.selectedOptions[0].textContent) ||
+        "";
+      if (/credit/i.test(text)) return true;
+    }
+    return false;
+  }
+
+  function syncGenerateBillPrompt(lookupDone) {
+    const label = document.getElementById("fuGenerateBillLabel");
+    if (label) label.textContent = "Do you want generate bill here?";
+    const approved = saleIsApproved();
+    if (els.generateBillYes) els.generateBillYes.disabled = approved || entryFieldsLocked;
+    if (els.generateBillNo) els.generateBillNo.disabled = approved || entryFieldsLocked;
+    if (isDscModule) {
+      const paymentOn = isStageChecked("payment_received");
+      const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
+      const lockApprove = paymentOn || entryFieldsLocked;
+      if (els.approveInvoiceYes) els.approveInvoiceYes.disabled = lockApprove;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.disabled = lockApprove;
+      if (approved) {
+        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+      } else if (!paymentOn) {
+        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+      } else if (autoApproveFor === 0) {
+        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+      }
+      if (lookupDone && paymentOn && !approved && !approveInFlight) {
+        const token = invoiceId || -1;
+        if (autoApproveFor !== token) {
+          autoApproveFor = token;
+          if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+          if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+          approveInvoiceHere();
+        }
+      }
+      if (!paymentOn) autoApproveFor = 0;
+    }
+    const creditOpen = approved && hasCreditPayment() && !entryFieldsLocked;
+    const lockPayments = entryFieldsLocked || (approved && !creditOpen);
+    els.paymentWrap?.querySelectorAll("input, select, button, textarea").forEach(function (input) {
+      if (lockPayments) {
+        if (!input.dataset.approvalLocked) {
+          input.dataset.approvalWasDisabled = input.disabled ? "1" : "0";
+        }
+        input.dataset.approvalLocked = "1";
+        input.disabled = true;
+      } else if (input.dataset.approvalLocked) {
+        input.disabled = creditOpen ? false : input.dataset.approvalWasDisabled === "1";
+        if (!creditOpen) {
+          delete input.dataset.approvalLocked;
+          delete input.dataset.approvalWasDisabled;
+        }
+      } else if (creditOpen) {
+        input.disabled = false;
+      }
+    });
+  }
+
+  async function refreshInvoiceStatus() {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    const billNo = (els.billNo?.value || "").trim();
+    if (!isStageChecked("tally_bill_generated") || !billNo || !window.FU_INVOICE_STATUS_URL) {
+      lastSaleRecord = null;
+      paintInvoiceStatus(null);
+      syncGenerateBillPrompt(true);
+      return;
+    }
+    try {
+      const url = new URL(window.FU_INVOICE_STATUS_URL, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.found || !data.record) {
+        lastSaleRecord = null;
+        paintInvoiceStatus(null);
+        syncGenerateBillPrompt(true);
+        return;
+      }
+      lastSaleRecord = data.record;
+      paintInvoiceStatus(data.record);
+      syncGenerateBillPrompt(true);
+    } catch (_err) {
+      paintInvoiceStatus(null);
+      syncGenerateBillPrompt(true);
+    }
+  }
+
+  function resetGenerateBillChoice() {
+    if (els.generateBillYes) els.generateBillYes.checked = false;
+    if (els.generateBillNo) els.generateBillNo.checked = true;
+  }
+
+  function keepGenerateBillYes() {
+    if (els.generateBillYes) els.generateBillYes.checked = true;
+    if (els.generateBillNo) els.generateBillNo.checked = false;
+  }
+
+  async function lookupGeneratedInvoice(billNo) {
+    if (!billNo || !window.FU_INVOICE_STATUS_URL) return null;
+    const url = new URL(window.FU_INVOICE_STATUS_URL, window.location.origin);
+    url.searchParams.set("bill_no", billNo);
+    const res = await fetch(url.toString(), { credentials: "same-origin" });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!data.ok || !data.found || !data.record) return null;
+    return data.record;
+  }
+
+  async function declineGeneratedBill() {
+    const billNo = (els.billNo?.value || "").trim();
+    const record = await lookupGeneratedInvoice(billNo);
+    if (!record) return;
+    keepGenerateBillYes();
+    const sure = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?",
+          { title: "Delete related bills", okLabel: "Yes", cancelLabel: "No", type: "warning" }
+        )
+      : window.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?"
+        );
+    if (!sure) return;
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: "Enter your User ID and password to delete the invoices related to this bill.",
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    }
+    if (!creds || !creds.user_id || !creds.password) return;
+    const permanent = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "This will permanently delete all invoices related to this bill.",
+          { title: "Permanently delete", okLabel: "Yes", cancelLabel: "No", type: "danger" }
+        )
+      : window.confirm("This will permanently delete all invoices related to this bill.");
+    if (!permanent) return;
+    const res = await fetch(window.FU_INVOICE_DELETE_URL, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": window.FU_CSRF || csrfToken(),
+      },
+      body: JSON.stringify({
+        bill_no: billNo,
+        user_id: creds.user_id,
+        password: creds.password,
+      }),
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok) {
+      const message = data.error || "Unable to delete the related invoices.";
+      if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+      else alert(message);
+      return;
+    }
+    resetGenerateBillChoice();
+    paintInvoiceStatus(null);
+    if (window.JTCSDialog?.alert) {
+      window.JTCSDialog.alert(data.message || "Related invoices deleted.", "success");
+    }
+  }
+
+  function followupItemLabel() {
+    const bits = [workTypeLabel];
+    const formType = els.formType && els.formType.selectedIndex >= 0
+      ? (els.formType.options[els.formType.selectedIndex].textContent || "").trim()
+      : "";
+    const quarter = els.quarter && els.quarter.selectedIndex >= 0
+      ? (els.quarter.options[els.quarter.selectedIndex].textContent || "").trim()
+      : "";
+    if (formType && formType !== "— Select —" && !formType.startsWith("Select")) bits.push(formType);
+    if (quarter && quarter !== "— Select —" && !quarter.startsWith("Select")) bits.push(quarter);
+    return bits.filter(Boolean).join(" / ").slice(0, 200);
+  }
+
+  function openGenerateBillPopup() {
+    if (!isStageChecked("tally_bill_generated")) return;
+    const billNo = (els.billNo?.value || "").trim();
+    const customerName = (els.customerSearch?.value || "").trim();
+    if (!billNo) {
+      alert("Tally Bill Number is required before generating bill.");
+      resetGenerateBillChoice();
+      els.billNo?.focus();
+      return;
+    }
+    if (!customerName) {
+      alert("Please enter Customer Name before generating bill.");
+      resetGenerateBillChoice();
+      els.customerSearch?.focus();
+      return;
+    }
+    const seed = {
+      date: (els.workDate?.value || "").trim(),
+      tax_year: (els.taxPeriod?.value || "").trim(),
+      invoice_no: billNo,
+      bill_no: billNo,
+      tally_bill_no: billNo,
+      customer_id: (els.customerId?.value || "").trim(),
+      customer_name: customerName,
+      item: followupItemLabel(),
+      sub_work: followupItemLabel(),
+      gst_rate_percent: "18",
+      unit: "NOS",
+      rate: (els.billAmount?.value || "").trim(),
+      state_code: "05",
+    };
+    if (isDscModule) {
+      seed.source = "DSC";
+      if (lastSaleRecord && lastSaleRecord.invoice_id) {
+        seed.open_edit = true;
+        seed.invoice_id = lastSaleRecord.invoice_id;
+      }
+    }
+    try {
+      sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
+    } catch (_err) {
+      /* ignore quota errors */
+    }
+    const url = window.FU_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
+    if (isDscModule) {
+      const host = window.top || window;
+      if (typeof host.jtcsOpenPageWindow === "function") {
+        let existing = null;
+        try {
+          const path = new URL(url, window.location.origin);
+          const key = path.pathname.replace(/\/+$/, "") + path.search;
+          existing = host.document.querySelector(
+            '.jtcs-page-win[data-key="' + key.replace(/"/g, "") + '"]'
+          );
+        } catch (_err) {
+          existing = null;
+        }
+        host.jtcsOpenPageWindow(url, "Generate Bill");
+        if (existing && seed.open_edit) {
+          const frame = existing.querySelector("iframe");
+          if (frame) frame.src = url;
+        }
+        return;
+      }
+    }
+    const width = Math.round((isDscModule ? 14.4 : 9.4) * 96);
+    const height = Math.round((isDscModule ? 9.1 : 7.2) * 96);
+    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
+    const features = [
+      "width=" + width,
+      "height=" + height,
+      "left=" + left,
+      "top=" + top,
+      "menubar=no",
+      "toolbar=no",
+      "location=no",
+      "status=no",
+      "resizable=yes",
+      "scrollbars=yes",
+    ].join(",");
+    const win = window.open(url, "oieMiscGenerateBillWindow", features);
+    if (!win) {
+      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      win.focus();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function fetchNextTallyBillNo() {
+    const api = window.FU_API && window.FU_API.next_bill_no;
+    if (!api || !els.billNo || (els.billNo.value || "").trim()) return;
+    if (!isStageChecked("tally_bill_generated")) return;
+    const workDate = (els.workDate?.value || "").trim();
+    const url = api + (api.indexOf("?") >= 0 ? "&" : "?") + "work_date=" + encodeURIComponent(workDate);
+    fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.ok && els.billNo && !(els.billNo.value || "").trim() && isStageChecked("tally_bill_generated")) {
+          els.billNo.value = data.bill_no || "";
+        }
+      })
+      .catch(function () { /* server fills the number on save */ });
   }
 
   function syncWorkflowPanels() {
@@ -808,7 +1409,8 @@
     const paymentChecked = isStageChecked("payment_received");
     els.itrFiledWrap?.classList.toggle("d-none", !itrChecked);
     els.tallyBillWrap?.classList.toggle("d-none", !tallyChecked);
-    els.autoBillBtn?.classList.toggle("d-none", !tallyChecked);
+    if (!tallyChecked) resetGenerateBillChoice();
+    refreshInvoiceStatus();
     els.paymentWrap?.classList.toggle("d-none", !paymentChecked);
     if (paymentChecked && !els.paymentLines?.querySelector(".fu-payment-line")) {
       resetPaymentLines([]);
@@ -819,8 +1421,12 @@
     if (tallyChecked && els.billDate && !els.billDate.value) {
       els.billDate.value = window.FU_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
     }
+    if (tallyChecked && els.billNo && !(els.billNo.value || "").trim()) {
+      fetchNextTallyBillNo();
+    }
     syncUnverifiedPanel();
     syncDscApplicationField();
+    syncGenerateBillPrompt();
   }
 
   function syncUnverifiedPanel() {
@@ -899,6 +1505,9 @@
     }
     if (els.location) els.location.value = "";
     if (els.introducedBy) els.introducedBy.value = "";
+    if (els.dscType) els.dscType.value = "";
+    if (els.dscClass) els.dscClass.value = "";
+    if (els.dscYear) els.dscYear.value = "";
     clearCustomerSelection();
     els.workflowChecks?.querySelectorAll(".fu-stage-check").forEach(function (cb) {
       cb.checked = false;
@@ -1122,9 +1731,40 @@
     renderGrid();
   }
 
+  function compareDscWorkDateDesc(a, b) {
+    const av = String(a.work_date || a.WorkDate || "").slice(0, 10);
+    const bv = String(b.work_date || b.WorkDate || "").slice(0, 10);
+    if (av && bv && av !== bv) {
+      if (av < bv) return 1;
+      if (av > bv) return -1;
+    } else if (av && !bv) {
+      return -1;
+    } else if (!av && bv) {
+      return 1;
+    }
+    const aid = parseInt(a.entry_id || a.EntryID || 0, 10) || 0;
+    const bid = parseInt(b.entry_id || b.EntryID || 0, 10) || 0;
+    return bid - aid;
+  }
+
+  function applyDscGridSort(dataRows) {
+    if (!isDscModule) return dataRows;
+    return dataRows.slice().sort(function (a, b) {
+      const aLocked = rowHasPaymentReceived(a) ? 1 : 0;
+      const bLocked = rowHasPaymentReceived(b) ? 1 : 0;
+      if (aLocked !== bLocked) return aLocked - bLocked;
+      return compareDscWorkDateDesc(a, b);
+    });
+  }
+
+  function applyGridSort(dataRows) {
+    if (isDscModule) return applyDscGridSort(dataRows);
+    return applyItrGridSort(dataRows);
+  }
+
   function renderGrid(data) {
     if (data) rawGridRows = data;
-    rows = applyItrGridSort(rawGridRows);
+    rows = applyGridSort(rawGridRows);
     if (!els.gridBody) return;
     if (!rows.length) {
       els.gridBody.innerHTML = "";
@@ -1156,13 +1796,7 @@
            "<td>" + escapeHtml(row.return_type || "—") + "</td>")
         : "";
       const paymentLocked = isItrPaymentReceivedLocked(row);
-      const thankYouCell = canDownloadThankYou(row)
-        ? '<a class="btn btn-outline-success btn-sm fu-thank-btn" href="' +
-          escapeHtml(apiUrl(window.FU_API.thank_you_letter, row.entry_id) + "?format=png") +
-          '" title="Download Thank You Letter (PNG)"><i class="bi bi-download"></i> PNG</a>'
-        : '<span class="text-muted" title="' +
-          (isItrModule ? "Available after Payment Received" : "Available after Tally Bill Generated") +
-          '">—</span>';
+      const thankYouCell = thankYouCellHtml(row);
       const paymentReminderCell = isItrModule
         ? (canDownloadPaymentReminder(row)
           ? '<td class="text-center">' +
@@ -1202,11 +1836,49 @@
           '><i class="bi bi-arrow-repeat"></i></button>' +
           "</td>"
         : "<td>" + escapeHtml(workTypeLabel) + "</td>";
-      const deleteDisabledAttrs = ' title="Delete"';
+      const videoLocked = isDscModule && rowHasPaymentReceived(row);
+      const videoLinkCell = isDscModule
+        ? '<td class="fu-copy-cell fu-video-link-cell">' +
+          '<button type="button" class="fu-copy-btn fu-video-link-copy' +
+          (videoLocked ? " fu-video-link-locked" : "") +
+          '" title="' +
+          (videoLocked ? "Video Link locked after Payment Received" : "Copy Video Link") +
+          '" aria-label="' +
+          (videoLocked ? "Video Link locked" : "Copy Video Link") +
+          '" data-app-no="' +
+          escapeHtml(appNo) +
+          '" data-mobile="' +
+          escapeHtml(row.mobile_number || "") +
+          '"' +
+          (videoLocked ? " disabled" : "") +
+          '><i class="' +
+          (videoLocked ? "bi bi-x-lg" : "bi bi-copy") +
+          '"></i></button></td>'
+        : "";
+      const deleteDisabledAttrs = rowHasPaymentReceived(row)
+        ? ' disabled title="Remove Payment Received in Edit, then Delete will enable"'
+        : ' title="Delete"';
       const editTitle = "Edit";
       const appNoValue = isDscModule
         ? (row.application_number || row.bill_no || "")
         : (row.bill_no || "");
+      const dscMix = [row.dsc_type, row.dsc_class, row.dsc_year]
+        .map(function (part) { return String(part || "").trim(); })
+        .filter(Boolean)
+        .join(" / ");
+      const actionsCell =
+        '<td class="text-nowrap fu-grid-actions">' +
+        '<button type="button" class="btn btn-outline-primary btn-sm fu-edit-btn" data-id="' +
+        row.entry_id +
+        '" title="' +
+        editTitle +
+        '"><i class="bi bi-pencil"></i></button> ' +
+        '<button type="button" class="btn btn-outline-danger btn-sm fu-delete-btn" data-id="' +
+        row.entry_id +
+        '"' +
+        deleteDisabledAttrs +
+        '><i class="bi bi-trash"></i></button>' +
+        "</td>";
       const mobileCell = isDscModule
         ? copyableCell(row.mobile_number)
         : "<td>" + escapeHtml(row.mobile_number || "—") + "</td>";
@@ -1219,20 +1891,37 @@
         : "<td>" + escapeHtml(appNoValue || "—") + "</td>";
       return (
         '<tr' + (paymentLocked ? ' class="fu-payment-received-row"' : "") + ">" +
+        (isDscModule ? actionsCell : "") +
         "<td>" + escapeHtml(formatDate(row.work_date)) + "</td>" +
+        (isDscModule ? "<td>" + escapeHtml(dscMix || "—") + "</td>" : "") +
         periodCol +
         tdsPeriodCols +
         gstFieldCols +
-        "<td><strong>" + escapeHtml(row.customer_name) + "</strong></td>" +
+        (isDscModule
+          ? copyableCell(row.customer_name)
+          : "<td><strong>" + escapeHtml(row.customer_name) + "</strong></td>") +
+        (isDscModule ? copyableCell(row.employee_code) : "") +
+        (isDscModule
+          ? copyableCell(row.date_of_birth ? formatDate(row.date_of_birth) : "")
+          : "") +
         mobileCell +
         emailCell +
         panCell +
         appOrBillCell +
         "<td>" + escapeHtml(formatDate(row.bill_date)) + "</td>" +
         workOrCheckCell +
+        videoLinkCell +
         returnCol +
         filingCols +
-        '<td><span class="fu-status-badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + "</span></td>" +
+        '<td><span class="fu-status-badge ' + statusBadgeClass(status) + '">' + escapeHtml(status) + "</span>" +
+        (row.sale_invoice
+          ? '<div class="small mt-1">' +
+            escapeHtml(row.sale_invoice.bill_status) +
+            " · Payment " +
+            escapeHtml(row.sale_invoice.payment_received) +
+            "</div>"
+          : "") +
+        "</td>" +
         (isItrModule
           ? "<td>" + escapeHtml(formatPaymentReceiveDateCell(row)) + "</td>"
           : "") +
@@ -1240,18 +1929,7 @@
         paymentReminderCell +
         rowSyncCell +
         "<td>" + thankYouCell + "</td>" +
-        '<td class="text-end fu-grid-actions">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm fu-edit-btn" data-id="' +
-        row.entry_id +
-        '" title="' +
-        editTitle +
-        '"><i class="bi bi-pencil"></i></button> ' +
-        '<button type="button" class="btn btn-outline-danger btn-sm fu-delete-btn" data-id="' +
-        row.entry_id +
-        '"' +
-        deleteDisabledAttrs +
-        '><i class="bi bi-trash"></i></button>' +
-        "</td>" +
+        (isDscModule ? "" : actionsCell) +
         "</tr>"
       );
     }).join("");
@@ -1297,6 +1975,7 @@
 
   function openNewEntry() {
     resetEntryForm();
+    setEntryFieldsLocked(false);
     entryModal?.show();
   }
 
@@ -1330,6 +2009,9 @@
     }
     if (els.location) els.location.value = record.location || "";
     if (els.introducedBy) els.introducedBy.value = record.introduced_by || "";
+    if (els.dscType) els.dscType.value = record.dsc_type || "";
+    if (els.dscClass) els.dscClass.value = record.dsc_class || "";
+    if (els.dscYear) els.dscYear.value = record.dsc_year || "";
     if (els.itrFiledDate) els.itrFiledDate.value = (record.itr_filed_date || "").slice(0, 10);
     if (!isDscModule && els.billNo) els.billNo.value = record.bill_no || "";
     if (els.billDate) els.billDate.value = (record.bill_date || "").slice(0, 10);
@@ -1365,6 +2047,7 @@
       if (cb) cb.checked = true;
     });
     syncWorkflowPanels();
+    setEntryFieldsLocked(true);
     if (els.entryModalTitle) {
       els.entryModalTitle.textContent = workTypeLabel + " — Edit Entry";
     }
@@ -1458,6 +2141,7 @@
   }
 
   function saveEntry() {
+    if (entryFieldsLocked) return;
     const customerId = parseInt(els.customerId?.value || "", 10);
     if (!customerId) {
       alert("Please select a customer.");
@@ -1500,6 +2184,9 @@
       }
       payload.location = (els.location?.value || "").trim();
       payload.introduced_by = (els.introducedBy?.value || "").trim();
+      payload.dsc_type = (els.dscType?.value || "").trim();
+      payload.dsc_class = (els.dscClass?.value || "").trim();
+      payload.dsc_year = (els.dscYear?.value || "").trim();
       payload.email_id = (els.customerEmail?.value || "").trim();
     }
     appendBillingPayload(payload);
@@ -1576,6 +2263,7 @@
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
         if (!data.ok) throw new Error(data.error || "Delete failed.");
+        entryModal?.hide();
         loadGrid();
       })
       .catch(function (err) {
@@ -1685,6 +2373,20 @@
   els.exportExcelBtn?.addEventListener("click", exportItrGridExcel);
   els.searchBtn?.addEventListener("click", loadGrid);
   els.saveBtn?.addEventListener("click", saveEntry);
+  document.getElementById("fuEditBtn")?.addEventListener("click", function () {
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      setEntryFieldsLocked(false);
+    });
+  });
+  document.getElementById("fuDeleteBtn")?.addEventListener("click", function () {
+    const entryId = (els.entryId?.value || "").trim();
+    if (!entryId) return;
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      deleteEntry(entryId);
+    });
+  });
 
   function itrSyncJobUrl(jobId) {
     const template = (window.FU_API && window.FU_API.itr_sync_job) || "/api/itr/sync-status/__JOB__";
@@ -2010,7 +2712,108 @@
     if (event.target.classList.contains("fu-stage-check")) syncWorkflowPanels();
   });
 
-  els.autoBillBtn?.addEventListener("click", openBillingPage);
+  els.billNo?.addEventListener("change", refreshInvoiceStatus);
+  els.billNo?.addEventListener("blur", refreshInvoiceStatus);
+  window.jtcsRefreshInvoiceStatus = refreshInvoiceStatus;
+  window.addEventListener("focus", refreshInvoiceStatus);
+
+  els.paymentLines?.addEventListener("change", function (ev) {
+    if (!ev.target.closest("select")) return;
+    if (saleIsApproved()) syncGenerateBillPrompt();
+  });
+
+  els.paymentLines?.addEventListener("input", function () {
+    if (!lastSaleRecord || !els.invoiceStatus) return;
+    paintInvoiceStatus(lastSaleRecord);
+  });
+
+  async function approveInvoiceHere() {
+    if (!isDscModule || !els.approveInvoiceYes?.checked) return;
+    if (saleIsApproved() || approveInFlight) return;
+    const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
+    if (!invoiceId || !window.FU_INVOICE_WORKFLOW_URL) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+      const message = "Pehle invoice generate karein, phir approve karein.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+      else alert(message);
+      return;
+    }
+    const url = String(window.FU_INVOICE_WORKFLOW_URL).replace("/0/", "/" + invoiceId + "/");
+    approveInFlight = true;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRFToken": window.FU_CSRF || csrfToken(),
+        },
+        body: JSON.stringify({ bill_approved: true }),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to approve this invoice.");
+      }
+      await refreshInvoiceStatus();
+    } catch (err) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+      const message = err.message || "Unable to approve this invoice.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "error");
+      else alert(message);
+    } finally {
+      approveInFlight = false;
+    }
+  }
+
+  els.approveInvoiceYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      approveInvoiceHere();
+    }, 0);
+  });
+
+  els.approveInvoiceNo?.addEventListener("click", function () {
+    if (!saleIsApproved()) return;
+    if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+    if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+  });
+
+  els.generateBillYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (!els.generateBillYes || !els.generateBillYes.checked) return;
+      if (!isDscModule) {
+        openGenerateBillPopup();
+        return;
+      }
+      const billNo = (els.billNo?.value || "").trim();
+      lookupGeneratedInvoice(billNo)
+        .then(function (record) {
+          lastSaleRecord = record || null;
+          openGenerateBillPopup();
+        })
+        .catch(function () {
+          openGenerateBillPopup();
+        });
+    }, 0);
+  });
+
+  els.generateBillNo?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (!els.generateBillNo || !els.generateBillNo.checked) return;
+      declineGeneratedBill().catch(function (err) {
+        keepGenerateBillYes();
+        const message = err.message || String(err);
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+        else alert(message);
+      });
+    }, 0);
+  });
+
+  // Automated bill generation removed — Sales Invoice module is separate.
   els.addPaymentBtn?.addEventListener("click", function () { addPaymentLine({}); });
   els.billAmount?.addEventListener("input", updatePaymentSummary);
 
@@ -2132,6 +2935,34 @@
   }
 
   els.gridBody?.addEventListener("click", function (event) {
+    const thankWaBtn = event.target.closest(".fu-thank-wa");
+    if (thankWaBtn) {
+      event.preventDefault();
+      sendThankYouWhatsApp(thankWaBtn);
+      return;
+    }
+    const videoCopyBtn = event.target.closest(".fu-video-link-copy");
+    if (videoCopyBtn) {
+      event.preventDefault();
+      if (videoCopyBtn.disabled) return;
+      const appNo = (videoCopyBtn.getAttribute("data-app-no") || "").trim();
+      const mobile = (videoCopyBtn.getAttribute("data-mobile") || "").trim();
+      if (!currentCustomerVideoBase()) {
+        alert("Set Video link for Customer first.");
+        return;
+      }
+      if (!appNo || !mobile) {
+        alert("Application No. and Mobile are required to copy the Video Link.");
+        return;
+      }
+      const url = buildDscRowVideoLink(appNo, mobile);
+      if (!url) return;
+      copyTextToClipboard(url, videoCopyBtn);
+      if (window.JTCSDialog && typeof JTCSDialog.alert === "function") {
+        JTCSDialog.alert("Video Link Copied", "success");
+      }
+      return;
+    }
     const copyBtn = event.target.closest(".fu-copy-btn");
     if (copyBtn) {
       if (!isDscModule) return;
@@ -2218,6 +3049,7 @@
 
   applyItrDefaultStatusFilter();
   syncStatCardActive();
+  initDscAssist();
 
   loadGrid().finally(function () {
     if (!window.FU_AUTO_LOAD_ENTRY_ID) return;

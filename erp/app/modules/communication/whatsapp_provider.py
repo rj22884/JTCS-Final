@@ -19,9 +19,22 @@ def _normalize_e164(mobile: str) -> str:
     digits = re.sub(r"\D", "", mobile or "")
     if digits.startswith("00"):
         digits = digits[2:]
+    if digits.startswith("0") and len(digits) >= 11:
+        digits = digits.lstrip("0")
     if len(digits) == 10:
         digits = "91" + digits
+    if len(digits) > 12 and digits.startswith("91"):
+        digits = digits[-12:]
     return digits
+
+
+def whatsapp_to_number(*candidates: str | None) -> str:
+    """Pick the first value that is a real WhatsApp number and return 91XXXXXXXXXX."""
+    for raw in candidates:
+        digits = _normalize_e164(raw or "")
+        if len(digits) >= 11:
+            return digits
+    return ""
 
 
 class WaMeProvider:
@@ -73,9 +86,9 @@ class WhatsAppCloudApiProvider:
     def send_message(self, mobile: str, body: str) -> dict:
         try:
             client = self._client()
-            to = _normalize_e164(mobile)
+            to = whatsapp_to_number(mobile)
             if not to:
-                return {"ok": False, "error": "Invalid mobile number"}
+                return {"ok": False, "error": "Is chat par WhatsApp number nahi mila."}
             data = client.send_text(self._phone_number_id(), to, body)
             messages = data.get("messages") or []
             wamid = (messages[0] or {}).get("id") if messages else None

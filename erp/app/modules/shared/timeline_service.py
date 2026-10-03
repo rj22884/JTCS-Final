@@ -89,6 +89,7 @@ class TimelineService:
         *,
         customer_id: int | None = None,
         lead_id: int | None = None,
+        conversation_id: int | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> dict:
@@ -98,6 +99,19 @@ class TimelineService:
         offset = (page - 1) * page_size
         clauses = ["1=1"]
         params: dict = {"limit": page_size, "offset": offset}
+        if conversation_id:
+            clauses.append(
+                """(
+                    (EntityType = N'CrmConversation' AND EntityID = :conv)
+                    OR (
+                        EntityType = N'CrmMessage'
+                        AND EntityID IN (
+                            SELECT MessageID FROM dbo.CrmMessage WHERE ConversationID = :conv
+                        )
+                    )
+                )"""
+            )
+            params["conv"] = int(conversation_id)
         if customer_id:
             clauses.append("CustomerID = :customer_id")
             params["customer_id"] = customer_id

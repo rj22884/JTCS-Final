@@ -16,7 +16,12 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -47,7 +52,11 @@ class BankMasterService:
         try:
             from app.services.chart_group_service import ChartGroupService
 
-            return ChartGroupService().list_active_for_dropdown()
+            from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+            return DynamicMasterFieldService().annotate_groups(
+                ChartGroupService().list_active_for_dropdown()
+            )
         except Exception:
             return []
 
@@ -189,6 +198,16 @@ class BankMasterService:
             under = (allowed_groups.get(chart_group_id) or {}).get("under_type") or ""
             ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under)
 
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        dyn = DynamicMasterFieldService()
+        dyn.validate_required(form, chart_group_id)
+        extras = dyn.extra_db_values(
+            form,
+            chart_group_id,
+            opening_date=ob_fields.get("OpeningBalanceDate"),
+        )
+
         return {
             "BankName": bank_name,
             "AccountNumber": account_number,
@@ -206,6 +225,7 @@ class BankMasterService:
             "DisplayOrder": display_order,
             "UpiId": upi_id,
             "ChartGroupID": chart_group_id,
+            **extras,
         }
 
     def _serialize(self, row) -> dict:
@@ -222,6 +242,8 @@ class BankMasterService:
                     group_name = item.get("group_name") or ""
                     under_type = item.get("under_type") or ""
                     break
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
         return {
             "account_id": row.JtcsBankAccountID,
             "bank_name": row.BankName or "",
@@ -248,6 +270,7 @@ class BankMasterService:
             "chart_group_id": int(chart_group_id) if chart_group_id else None,
             "under_group": group_name,
             "under_type": under_type,
+            **DynamicMasterFieldService().extra_serialize(row),
             "is_cash": is_cash,
             "created_date": row.CreatedDate.isoformat() if isinstance(row.CreatedDate, datetime) else "",
             "modified_date": row.ModifiedDate.isoformat() if isinstance(row.ModifiedDate, datetime) else "",
@@ -406,6 +429,17 @@ class BankMasterService:
                 raise ValueError("Bank account not found.")
             label = (row.BankName or "").strip() or "Bank account"
             ledger = ledger_payload("bank", account_id)
+            if is_ledger_clear("bank", account_id):
+                self._unlink_unused_payment_modes(account_id)
+                self._detach_inactive_bank_cash(account_id)
+                purge_clear_ledger_refs("bank", account_id)
+                try:
+                    self.repo.delete(row)
+                except IntegrityError as exc:
+                    raise_if_integrity_in_use(exc, label, ledger=ledger)
+                    raise
+                return "Bank account permanently deleted from the database."
+
             raise_if_ledger_in_use("bank", account_id, label)
             self._unlink_unused_payment_modes(account_id)
             self._detach_inactive_bank_cash(account_id)

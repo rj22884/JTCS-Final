@@ -35,10 +35,7 @@ def test_customer_group_filter() -> None:
         usage=usage,
         nature_by_chart_id=natures,
     )
-    assert "ITR" in asset_codes
-    assert "TDS" in asset_codes
-    assert "MISC" in asset_codes  # unused stays available
-    assert "GST" not in asset_codes  # used only with Income
+    assert asset_codes == ["ITR", "GST", "TDS", "MISC"]
 
     income_codes = fn(
         active_codes=["ITR", "GST", "TDS", "MISC"],
@@ -47,9 +44,7 @@ def test_customer_group_filter() -> None:
         usage=usage,
         nature_by_chart_id=natures,
     )
-    assert "GST" in income_codes
-    assert "ITR" not in income_codes
-    assert "MISC" in income_codes
+    assert income_codes == ["ITR", "GST", "TDS", "MISC"]
 
     none = fn(
         active_codes=["ITR"],
@@ -66,8 +61,10 @@ def test_customer_group_filter() -> None:
         chart_nature="Asset",
         usage=usage,
         nature_by_chart_id=natures,
-        include_code="GST",
+        include_code="OLD",
     )
+    assert "OLD" in legacy
+    assert "ITR" in legacy
     assert "GST" in legacy
 
 
@@ -117,6 +114,23 @@ def test_trading_group_uses_chart_hierarchy() -> None:
     assert engine.is_trading_group(5, by_id) is False
     assert engine._nature_from_group(by_id[5], by_id) == "Asset"
     assert engine._nature_from_group(by_id[2], by_id) == "Income"
+    # Saved Chart of Group nature wins over the old hardcoded name list.
+    override = {
+        "GroupID": 6,
+        "GroupName": "Current Assets",
+        "ParentGroupID": None,
+        "GroupNature": "Liability",
+        "UnderType": "Assets",
+    }
+    assert engine._nature_from_group(override, {6: override}) == "Liability"
+    child = {
+        "GroupID": 7,
+        "GroupName": "Custom Fees",
+        "ParentGroupID": 1,
+        "GroupNature": "",
+        "UnderType": "Liabilities",
+    }
+    assert engine._nature_from_group(child, {**by_id, 7: child}) == "Income"
 
 
 def test_live_reports() -> dict:

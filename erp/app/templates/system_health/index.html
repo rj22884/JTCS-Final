@@ -18,7 +18,6 @@
      data-api-clear-cache="{{ url_for('system_health.api_clear_cache') }}"
      data-api-backup="{{ url_for('system_health.api_backup') }}"
      data-api-refresh-config="{{ url_for('system_health.api_refresh_config') }}"
-     data-url-integration-health="{{ url_for('integration_settings.index') }}?tab=health"
      data-url-backup="{{ url_for('backup.data_backup_page') }}">
 
   <div class="alert d-none" data-sh-status role="status"></div>
@@ -110,12 +109,6 @@
         </div>
         <div class="col-lg-6">
           <div class="sh-panel">
-            <h3><i class="bi bi-plug"></i> API Health <span class="small text-muted">(Integration Health)</span></h3>
-            <div data-sh-api></div>
-          </div>
-        </div>
-        <div class="col-lg-6">
-          <div class="sh-panel">
             <h3><i class="bi bi-shield-lock"></i> Security Monitoring</h3>
             <div data-sh-security></div>
           </div>
@@ -181,7 +174,6 @@
           <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="clear-cache">Clear Cache</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="backup">Manual Backup</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-sh-action="refresh-config">Refresh Config</button>
-          <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('integration_settings.index') }}?tab=health">Integration Health</a>
           <a class="btn btn-sm btn-outline-secondary" href="/admin/backup/data">Backup Module</a>
         </div>
       </div>
@@ -201,5 +193,5 @@
 
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/system_health.js') }}?v=20260823dmy1"></script>
+<script src="{{ url_for('static', filename='js/system_health.js') }}?v=20260921noint1"></script>
 {% endblock %}

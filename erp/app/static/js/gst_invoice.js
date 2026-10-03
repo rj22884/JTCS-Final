@@ -40,6 +40,14 @@
     id: document.getElementById("invId"),
     rcm: document.getElementById("invRcm"),
     notes: document.getElementById("invNotes"),
+    billStatusWrap: document.getElementById("invBillStatusWrap"),
+    billApproved: document.getElementById("invBillApproved"),
+    billStatusValue: document.getElementById("invBillStatusValue"),
+    unapproveReason: document.getElementById("invUnapproveReason"),
+    payReceivedWrap: document.getElementById("invPayReceivedWrap"),
+    payReceivedYes: document.getElementById("invPayReceivedYes"),
+    payReceivedNo: document.getElementById("invPayReceivedNo"),
+    payRemoveReason: document.getElementById("invPayRemoveReason"),
     payBank: document.getElementById("invPayBank"),
     payDate: document.getElementById("invPayDate"),
     amountPaid: document.getElementById("invAmountPaid"),
@@ -68,9 +76,13 @@
 
   let previewTimer = null;
   let searchTimer = null;
-  let gridTimer = null;
   let editingId = null;
+  let currentBillSource = "Manual";
   let lastTallyLookup = "";
+  let savedBillApproved = false;
+  let savedPaymentReceived = false;
+  let statusAuth = null;
+  let applyingTallyStatus = false;
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -477,6 +489,178 @@
     previewTimer = setTimeout(runTotalsPreview, 350);
   }
 
+  function tallyStatusVisible() {
+    return voucherType !== "PURCHASE" && currentBillSource === "Miscellaneous";
+  }
+
+  function paymentReceivedYes() {
+    return !!(els.payReceivedYes && els.payReceivedYes.checked);
+  }
+
+  function updateBillStatusLabel() {
+    if (!els.billStatusValue) return;
+    const approved = !!(els.billApproved && els.billApproved.checked);
+    els.billStatusValue.textContent = approved ? "Approved" : "Approve pending";
+  }
+
+  function showReason(input, text) {
+    if (!input) return;
+    input.classList.remove("d-none");
+    if (text != null) input.value = text;
+  }
+
+  function hideReason(input, clear) {
+    if (!input) return;
+    input.classList.add("d-none");
+    if (clear) input.value = "";
+  }
+
+  function canTickConverted() {
+    return !!api.canTickConverted;
+  }
+
+  function showAwaitPaymentPopup() {
+    const message = "Bill Status can be changed only after Payment Received is Yes.";
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Payment Received is No",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
+  function showTickRightsPopup() {
+    const message = "Only Manager and Administrator can change Bill Status on a converted invoice.";
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Not allowed",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
+  function syncTallyStatusVisibility() {
+    const show = tallyStatusVisible();
+    els.billStatusWrap?.classList.toggle("d-none", !show);
+    els.payReceivedWrap?.classList.toggle("d-none", !show);
+    if (els.billApproved) els.billApproved.disabled = !show || !canTickConverted();
+    if (els.payReceivedYes) els.payReceivedYes.disabled = true;
+    if (els.payReceivedNo) els.payReceivedNo.disabled = true;
+    if (!show) {
+      statusAuth = null;
+    }
+  }
+
+  function applyTallyStatus(record) {
+    applyingTallyStatus = true;
+    savedBillApproved = !!(record && record.bill_approved);
+    savedPaymentReceived = !!(record && record.payment_received);
+    statusAuth = null;
+    if (els.billApproved) els.billApproved.checked = savedBillApproved;
+    updateBillStatusLabel();
+    if (els.payReceivedYes) els.payReceivedYes.checked = savedPaymentReceived;
+    if (els.payReceivedNo) els.payReceivedNo.checked = !savedPaymentReceived;
+    const unapprove = (record && record.bill_unapprove_reason) || "";
+    const removePay = (record && record.payment_remove_reason) || "";
+    if (!savedBillApproved && unapprove) showReason(els.unapproveReason, unapprove);
+    else hideReason(els.unapproveReason, true);
+    if (!savedPaymentReceived && removePay) showReason(els.payRemoveReason, removePay);
+    else hideReason(els.payRemoveReason, true);
+    applyingTallyStatus = false;
+    syncTallyStatusVisibility();
+  }
+
+  function resetTallyStatus() {
+    applyTallyStatus({
+      bill_approved: false,
+      payment_received: false,
+      bill_unapprove_reason: "",
+      payment_remove_reason: "",
+    });
+  }
+
+  function waitForDeleteModalHidden() {
+    return new Promise(function (resolve) {
+      const modal = document.getElementById("jtcsDeleteConfirmModal");
+      if (!modal || !modal.classList.contains("show")) {
+        resolve();
+        return;
+      }
+      let settled = false;
+      const done = function () {
+        if (settled) return;
+        settled = true;
+        modal.removeEventListener("hidden.bs.modal", done);
+        resolve();
+      };
+      modal.addEventListener("hidden.bs.modal", done);
+      setTimeout(done, 500);
+    });
+  }
+
+  async function askReason(reasonLabel) {
+    const title = reasonLabel || "Reason";
+    if (window.JTCSDialog?.prompt) {
+      const value = await window.JTCSDialog.prompt("Enter the reason. It is saved with this invoice.", "", {
+        title: title,
+        type: "warning",
+        okLabel: "OK",
+        cancelLabel: "Cancel",
+        placeholder: title,
+      });
+      if (value == null) return null;
+      return String(value).trim();
+    }
+    const fallback = window.prompt(title);
+    if (fallback == null) return null;
+    return String(fallback).trim();
+  }
+
+  async function confirmProtectedChange(message, reasonLabel) {
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: message,
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    } else {
+      const userId = window.prompt("User ID");
+      if (!userId) return null;
+      const password = window.prompt("Password");
+      if (!password) return null;
+      creds = { user_id: userId.trim(), password: password };
+    }
+    if (!creds || !creds.user_id || !creds.password) return null;
+    await waitForDeleteModalHidden();
+    let reason = "";
+    while (!reason) {
+      reason = await askReason(reasonLabel);
+      if (reason == null) return null;
+    }
+    return {
+      user_id: creds.user_id,
+      password: creds.password,
+      reason: reason,
+    };
+  }
+
+  function clearStatusAuthIfIdle() {
+    const removingApproval = savedBillApproved && !(els.billApproved && els.billApproved.checked);
+    const removingPayment = savedPaymentReceived && !paymentReceivedYes();
+    if (!removingApproval && !removingPayment) statusAuth = null;
+  }
+
   function collectPayload() {
     const lines = [];
     els.body.querySelectorAll(".inv-line").forEach(function (tr) {
@@ -494,7 +678,7 @@
         gst_rate_percent: tr.querySelector(".inv-gst")?.value || "18",
       });
     });
-    return {
+    const payload = {
       invoice_no: els.no?.value || "",
       invoice_date: els.date?.value || "",
       invoice_kind: selectedInvoiceKind(),
@@ -518,8 +702,16 @@
       amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
         ? ""
         : els.amountPaid.value,
+      bill_source: currentBillSource || "Manual",
       lines: lines,
     };
+    if (tallyStatusVisible()) {
+      payload.bill_approved = !!(els.billApproved && els.billApproved.checked);
+      payload.payment_received = paymentReceivedYes();
+      payload.bill_unapprove_reason = (els.unapproveReason?.value || "").trim();
+      payload.payment_remove_reason = (els.payRemoveReason?.value || "").trim();
+    }
+    return payload;
   }
 
   function applyTotals(t) {
@@ -573,6 +765,8 @@
 
   function fillRecord(record) {
     editingId = record.invoice_id || null;
+    currentBillSource = record.bill_source || "Manual";
+    applyTallyStatus(record);
     if (els.id) els.id.value = String(record.invoice_id || "");
     if (els.no) els.no.value = record.invoice_no || "";
     setInvoiceKind(record.invoice_kind || "NON_GST", true);
@@ -580,7 +774,7 @@
     if (els.customerId) els.customerId.value = record.customer_id || "";
     if (els.customerSearch) els.customerSearch.value = record.customer_name || "";
     if (els.customerName) els.customerName.value = record.customer_name || "";
-    if (els.contactPerson) els.contactPerson.value = record.contact_person || "";
+    if (els.contactPerson) els.contactPerson.value = record.contact_person || record.customer_name || "";
     if (els.gstin) els.gstin.value = record.customer_gstin || "";
     if (els.address) els.address.value = record.billing_address || "";
     if (els.mobile) els.mobile.value = record.contact_mobile || "";
@@ -659,6 +853,8 @@
 
   async function startNew() {
     editingId = null;
+    currentBillSource = "Manual";
+    resetTallyStatus();
     if (els.id) els.id.value = "";
     setInvoiceKind("NON_GST", false);
     if (els.customerId) els.customerId.value = "";
@@ -750,14 +946,31 @@
       showStatus("Add at least one line item.", "danger");
       return;
     }
-    if (!payload.payment_bank_account_id) {
-      showStatus("Payment Bank Account is required.", "danger");
-      els.payBank?.focus();
-      return;
-    }
     if (!(await servicePeriodReviewWarning())) {
       showStatus("Save cancelled. Select Tax Year / Quarter / Month for service item review.", "warning");
       return;
+    }
+    if (tallyStatusVisible()) {
+      const removingApproval = savedBillApproved && !payload.bill_approved;
+      const removingPayment = savedPaymentReceived && !payload.payment_received;
+      if (removingApproval && !payload.bill_unapprove_reason) {
+        showStatus("Enter the reason for removing approval.", "danger");
+        els.unapproveReason?.focus();
+        return;
+      }
+      if (removingPayment && !payload.payment_remove_reason) {
+        showStatus("Enter the reason for removing Payment Received.", "danger");
+        els.payRemoveReason?.focus();
+        return;
+      }
+      if ((removingApproval || removingPayment) && (!statusAuth || !statusAuth.user_id || !statusAuth.password)) {
+        showStatus("User ID and password are required to remove approval or Payment Received.", "danger");
+        return;
+      }
+      if (statusAuth && (removingApproval || removingPayment)) {
+        payload.user_id = statusAuth.user_id;
+        payload.password = statusAuth.password;
+      }
     }
     showStatus("Saving...", "info");
     const url = editingId ? apiUrl(api.update, editingId) : api.create;
@@ -777,10 +990,31 @@
     await startNew();
   }
 
+  function showOriginPopup(path) {
+    const message =
+      "This bill came from Convert to Invoice.\n\n" +
+      "Edit and delete it from this path:\n\n" +
+      (path || "Activities → Miscellaneous → Edit Entry");
+    if (window.JTCSDialog?.show) {
+      window.JTCSDialog.show({
+        message: message,
+        type: "warning",
+        title: "Edit and delete from the source",
+        okLabel: "OK",
+      });
+      return;
+    }
+    window.alert(message);
+  }
+
   async function loadForEdit(id) {
     const res = await fetch(apiUrl(api.get, id), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Load failed");
+    if (data.record && data.record.converted_invoice) {
+      showOriginPopup(data.record.origin_path);
+      return;
+    }
     fillRecord(data.record);
     showStatus("Editing " + (data.record.invoice_no || ""), "info");
   }
@@ -845,24 +1079,291 @@
     window.open(url, "_blank");
   }
 
-  function renderGrid(rows) {
+  let gridRows = [];
+
+  function taxLabel(row) {
+    return row.tax_type === "CGST_SGST"
+      ? "CGST+SGST"
+      : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
+  }
+
+  function gridFieldText(row, key) {
+    if (key === "invoice_no") return row.invoice_no || "";
+    if (key === "date") return fmtDate(row.invoice_date);
+    if (key === "customer") return row.customer_name || "";
+    if (key === "mobile") return row.contact_mobile || "";
+    if (key === "tax") return taxLabel(row);
+    if (key === "source") return (row.bill_source || "Manual").toString();
+    if (key === "bill_status") return billStatusLabel(row);
+    if (key === "payment") return paymentReceivedLabel(row);
+    if (key === "value") return money(row.invoice_value);
+    return "";
+  }
+
+  function gridFieldHay(row, key) {
+    const shown = gridFieldText(row, key);
+    if (key === "date") return shown + " " + (row.invoice_date || "");
+    if (key === "mobile") return shown + " " + digitsOnly(shown);
+    if (key === "value") {
+      const raw = Number(row.invoice_value || 0);
+      return shown + " " + raw.toFixed(2) + " " + String(raw);
+    }
+    return shown;
+  }
+
+  function matchFilter(row, key, query, op) {
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return true;
+    const shown = gridFieldText(row, key).toLowerCase();
+    const hay = gridFieldHay(row, key).toLowerCase();
+    if (op === "equals") {
+      if (shown === needle) return true;
+      return hay.split(/\s+/).some(function (part) { return part === needle; });
+    }
+    if (op === "starts") return shown.indexOf(needle) === 0;
+    if (op === "ends") return shown.length >= needle.length && shown.slice(-needle.length) === needle;
+    if (op === "not") return hay.indexOf(needle) < 0;
+    return hay.indexOf(needle) >= 0;
+  }
+
+  function columnFilters() {
+    const filters = [];
+    document.querySelectorAll(".inv-filter-q").forEach(function (input) {
+      const key = input.getAttribute("data-key");
+      const query = (input.value || "").trim();
+      if (!key || !query) return;
+      const opEl = document.querySelector('.inv-filter-op[data-key="' + key + '"]');
+      filters.push({ key: key, query: query, op: opEl ? opEl.value : "contains" });
+    });
+    return filters;
+  }
+
+  function rowMatchesFilters(row) {
+    const global = (els.gridSearch?.value || "").trim().toLowerCase();
+    if (global) {
+      const blob = ["invoice_no", "date", "customer", "mobile", "tax", "source", "bill_status", "payment", "value"]
+        .map(function (key) { return gridFieldHay(row, key); })
+        .join(" ")
+        .toLowerCase();
+      if (blob.indexOf(global) < 0) return false;
+    }
+    return columnFilters().every(function (filter) {
+      return matchFilter(row, filter.key, filter.query, filter.op);
+    });
+  }
+
+  function fillFilterLists(rows) {
+    const keys = {};
+    document.querySelectorAll(".inv-filter-q").forEach(function (input) {
+      const key = input.getAttribute("data-key");
+      if (key) keys[key] = [];
+    });
+    rows.forEach(function (row) {
+      Object.keys(keys).forEach(function (key) {
+        const value = gridFieldText(row, key).trim();
+        if (value && keys[key].indexOf(value) < 0) keys[key].push(value);
+      });
+    });
+    Object.keys(keys).forEach(function (key) {
+      const list = document.getElementById("invFilter-" + key);
+      if (!list) return;
+      keys[key].sort(function (a, b) { return a.localeCompare(b, "en", { numeric: true }); });
+      list.innerHTML = keys[key].map(function (value) {
+        return '<option value="' + escapeHtml(value) + '"></option>';
+      }).join("");
+    });
+  }
+
+  function applyGridFilters() {
+    renderGrid(gridRows.filter(rowMatchesFilters), gridRows.length);
+  }
+
+  function billStatusLabel(row) {
+    if (String(row.bill_source || "") !== "Miscellaneous") return "—";
+    return row.bill_approved ? "Approved" : "Approve pending";
+  }
+
+  function paymentReceivedLabel(row) {
+    if (String(row.bill_source || "") !== "Miscellaneous") return "—";
+    return row.payment_received ? "Yes" : "No";
+  }
+
+  function isConvertedRow(row) {
+    return String(row.bill_source || "") === "Miscellaneous" || !!row.converted_invoice;
+  }
+
+  function workflowCells(row) {
+    if (voucherType === "PURCHASE") return "";
+    if (!isConvertedRow(row)) {
+      return (
+        "<td>" +
+        escapeHtml(billStatusLabel(row)) +
+        "</td><td>" +
+        escapeHtml(paymentReceivedLabel(row)) +
+        "</td>"
+      );
+    }
+    const approvedOn = !!row.bill_approved;
+    const paidOn = !!row.payment_received;
+    const canApprove = canTickConverted();
+    const approveClass = canApprove ? "" : " is-readonly";
+    const approveDisabled = canApprove ? "" : " disabled";
+    const approveTip = canApprove
+      ? ""
+      : ' title="Only Manager and Administrator can change Bill Status"';
+    return (
+      '<td><label class="inv-grid-tick' +
+      approveClass +
+      '"' +
+      approveTip +
+      ">" +
+      '<input type="checkbox" class="inv-g-approve" data-id="' +
+      row.invoice_id +
+      '" data-saved="' +
+      (approvedOn ? "1" : "0") +
+      '" data-paid="' +
+      (paidOn ? "1" : "0") +
+      '"' +
+      (approvedOn ? " checked" : "") +
+      approveDisabled +
+      ">" +
+      '<span class="' +
+      (approvedOn ? "inv-tick-yes" : "inv-tick-pending") +
+      '">' +
+      (approvedOn ? "Approved" : "Approve pending") +
+      "</span></label></td>" +
+      '<td><label class="inv-grid-tick is-source" title="Payment Received comes from the source entry">' +
+      '<input type="checkbox" class="inv-g-paid" data-id="' +
+      row.invoice_id +
+      '" data-saved="' +
+      (paidOn ? "1" : "0") +
+      '"' +
+      (paidOn ? " checked" : "") +
+      " disabled>" +
+      '<span class="' +
+      (paidOn ? "inv-tick-yes" : "inv-tick-no") +
+      '">' +
+      (paidOn ? "Yes" : "No") +
+      "</span></label></td>"
+    );
+  }
+
+  function syncTickLabel(box) {
+    const span = box.parentElement?.querySelector("span");
+    if (!span) return;
+    if (box.classList.contains("inv-g-approve")) {
+      span.textContent = box.checked ? "Approved" : "Approve pending";
+      span.className = box.checked ? "inv-tick-yes" : "inv-tick-pending";
+    } else {
+      span.textContent = box.checked ? "Yes" : "No";
+      span.className = box.checked ? "inv-tick-yes" : "inv-tick-no";
+    }
+  }
+
+  async function saveGridWorkflow(tr) {
+    const approve = tr.querySelector(".inv-g-approve");
+    const paid = tr.querySelector(".inv-g-paid");
+    if (!approve || !paid) return;
+    if (!canTickConverted()) {
+      approve.checked = approve.dataset.saved === "1";
+      paid.checked = paid.dataset.saved === "1";
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showTickRightsPopup();
+      return;
+    }
+    const wasApproved = approve.dataset.saved === "1";
+    const wasPaid = paid.dataset.saved === "1";
+    const nowApproved = !!approve.checked;
+    const removingApproval = wasApproved && !nowApproved;
+    let auth = null;
+    if (removingApproval) {
+      auth = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!auth) {
+        approve.checked = wasApproved;
+        syncTickLabel(approve);
+        return;
+      }
+    }
+    const payload = {
+      bill_approved: nowApproved,
+      payment_received: wasPaid,
+    };
+    if (auth) {
+      payload.user_id = auth.user_id;
+      payload.password = auth.password;
+      payload.bill_unapprove_reason = auth.reason;
+    }
+    approve.disabled = true;
+    paid.disabled = true;
+    try {
+      const res = await fetch(apiUrl(api.update, approve.getAttribute("data-id")) + "/workflow", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": api.csrf || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update bill status.");
+      const record = data.record || {};
+      approve.checked = !!record.bill_approved;
+      paid.checked = !!record.payment_received;
+      approve.dataset.saved = approve.checked ? "1" : "0";
+      paid.dataset.saved = paid.checked ? "1" : "0";
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showStatus(data.message || "Bill status updated.", "success");
+    } catch (err) {
+      approve.checked = wasApproved;
+      paid.checked = wasPaid;
+      syncTickLabel(approve);
+      syncTickLabel(paid);
+      showStatus(err.message || String(err), "danger");
+    } finally {
+      approve.disabled = false;
+      paid.disabled = false;
+    }
+  }
+
+  function renderGrid(rows, totalCount) {
     if (!els.gridBody) return;
     els.gridBody.innerHTML = "";
+    const total = typeof totalCount === "number" ? totalCount : rows.length;
     if (!rows.length) {
       els.gridEmpty?.classList.remove("d-none");
-      if (els.gridCount) els.gridCount.textContent = "0 invoices";
+      if (els.gridEmpty) {
+        els.gridEmpty.textContent = total
+          ? "No invoices match these filters."
+          : "No saved invoices yet. Save a bill to see it here.";
+      }
+      if (els.gridCount) els.gridCount.textContent = total ? "0 of " + total + " invoices" : "0 invoices";
       return;
     }
     els.gridEmpty?.classList.add("d-none");
     if (els.gridCount) {
-      els.gridCount.textContent = rows.length + " invoice" + (rows.length === 1 ? "" : "s");
+      const noun = rows.length === 1 ? "invoice" : "invoices";
+      els.gridCount.textContent = rows.length === total
+        ? rows.length + " " + noun
+        : rows.length + " of " + total + " invoices";
     }
     rows.forEach(function (row) {
-      const taxLabel =
-        row.tax_type === "CGST_SGST"
-          ? "CGST+SGST"
-          : "IGST " + Number(row.igst_rate || 0).toFixed(0) + "%";
+      const billSource = (row.bill_source || "Manual").toString();
       const tr = document.createElement("tr");
+      if (billSource.toLowerCase() === "automatic") {
+        tr.className = "inv-row-automatic";
+      } else if (billSource.toLowerCase() === "import") {
+        tr.className = "inv-row-import";
+      } else if (billSource.toLowerCase() === "miscellaneous") {
+        tr.className = "inv-row-miscellaneous";
+      }
       tr.innerHTML =
         "<td><code>" +
         escapeHtml(row.invoice_no) +
@@ -877,18 +1378,55 @@
         escapeHtml(row.contact_mobile || "—") +
         "</td>" +
         "<td>" +
-        escapeHtml(taxLabel) +
+        escapeHtml(taxLabel(row)) +
         "</td>" +
+        "<td><span class=\"inv-bill-source inv-bill-source-" +
+        escapeHtml(billSource.toLowerCase()) +
+        '">' +
+        escapeHtml(billSource) +
+        "</span></td>" +
+        workflowCells(row) +
         '<td class="text-end fw-semibold">' +
         money(row.invoice_value) +
         "</td>" +
         '<td class="text-end text-nowrap">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm me-1 inv-g-edit" data-id="' +
+        (isConvertedRow(row)
+          ? '<button type="button" class="btn btn-outline-dark btn-sm me-1 inv-g-review" data-id="' +
+            row.invoice_id +
+            '" data-no="' +
+            escapeHtml(row.invoice_no || "") +
+            '" data-paid="' +
+            (row.payment_received ? "1" : "0") +
+            '" data-approved="' +
+            (row.bill_approved ? "1" : "0") +
+            '" title="Review, then update Bill Status"><i class="bi bi-clipboard-check"></i></button>'
+          : "") +
+        '<button type="button" class="btn btn-outline-primary btn-sm me-1 inv-g-edit' +
+        (isConvertedRow(row) ? " is-locked" : "") +
+        '" data-id="' +
         row.invoice_id +
-        '" title="Edit"><i class="bi bi-pencil"></i></button>' +
-        '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del" data-id="' +
+        '"' +
+        (isConvertedRow(row)
+          ? ' data-origin="' +
+            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
+            '"'
+          : "") +
+        ' title="' +
+        (isConvertedRow(row) ? "Edit from the source screen" : "Edit") +
+        '"><i class="bi bi-pencil"></i></button>' +
+        '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del' +
+        (isConvertedRow(row) ? " is-locked" : "") +
+        '" data-id="' +
         row.invoice_id +
-        '" title="Delete"><i class="bi bi-trash"></i></button>' +
+        '"' +
+        (isConvertedRow(row)
+          ? ' data-origin="' +
+            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
+            '"'
+          : "") +
+        ' title="' +
+        (isConvertedRow(row) ? "Delete from the source screen" : "Delete") +
+        '"><i class="bi bi-trash"></i></button>' +
         '<button type="button" class="btn btn-outline-info btn-sm me-1 inv-g-preview" data-id="' +
         row.invoice_id +
         '" data-no="' +
@@ -919,13 +1457,13 @@
 
   async function loadGrid() {
     const url = new URL(api.list, window.location.origin);
-    const q = (els.gridSearch?.value || "").trim();
-    if (q) url.searchParams.set("search", q);
     if (voucherType) url.searchParams.set("voucher_type", voucherType);
     const res = await fetch(url.toString(), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Grid load failed");
-    renderGrid(data.rows || []);
+    gridRows = data.rows || [];
+    fillFilterLists(gridRows);
+    applyGridFilters();
   }
 
   async function searchCustomers(q) {
@@ -973,8 +1511,23 @@
   }
 
   function applyTallyAmount(rec) {
-    const item = findItemForModule(rec.module_code);
-    const gst = item && item.gst_rate_percent != null ? item.gst_rate_percent : 18;
+    const moduleCode = String(rec.module_code || "").toUpperCase();
+    const isOie =
+      moduleCode === "OIE" ||
+      moduleCode === "RCF" ||
+      (rec.source || "") === "income_expense" ||
+      (rec.source || "") === "ration_card_followup";
+    if (isOie) {
+      const nonGst = document.getElementById("invKindNonGst");
+      if (nonGst) nonGst.checked = true;
+    }
+    const item = isOie ? null : findItemForModule(rec.module_code);
+    const gst =
+      isOie
+        ? 0
+        : item && item.gst_rate_percent != null
+          ? item.gst_rate_percent
+          : 18;
     const split = splitGstInclusive(rec.bill_amount != null ? rec.bill_amount : 0, gst);
     clearLines();
     addLine({
@@ -1026,6 +1579,20 @@
 
   async function applyTallyBill(rec) {
     if (!rec) return;
+    if (rec.bill_no && els.tallyBillNo) {
+      els.tallyBillNo.value = rec.bill_no;
+      lastTallyLookup = String(rec.bill_no).trim();
+    }
+    if (rec.existing_invoice_id) {
+      editingId = parseInt(rec.existing_invoice_id, 10) || null;
+      currentBillSource = rec.bill_source || "Automatic";
+      if (editingId) {
+        setModeBadge(true);
+        if (els.saveBtn) {
+          els.saveBtn.innerHTML = '<i class="bi bi-save"></i> Update Invoice';
+        }
+      }
+    }
     if (rec.invoice_date && els.date) {
       els.date.value = String(rec.invoice_date).slice(0, 10);
       await refreshInvoiceNo().catch(function () {});
@@ -1041,6 +1608,20 @@
     } else if (rec.customer_name) {
       if (els.customerName) els.customerName.value = rec.customer_name;
       if (els.customerSearch) els.customerSearch.value = rec.customer_name;
+      if (els.mobile && rec.mobile_number) els.mobile.value = rec.mobile_number;
+    }
+    if (rec.invoice_kind === "NON_GST") {
+      const nonGst = document.getElementById("invKindNonGst");
+      if (nonGst) {
+        nonGst.checked = true;
+        await refreshInvoiceNo().catch(function () {});
+      }
+    } else if (rec.invoice_kind === "GST") {
+      const gstKind = document.getElementById("invKindGst");
+      if (gstKind) {
+        gstKind.checked = true;
+        await refreshInvoiceNo().catch(function () {});
+      }
     }
     applyTallyAmount(rec);
     const amt =
@@ -1068,14 +1649,17 @@
     if (!billNo) return;
     if (!force && billNo === lastTallyLookup) return;
     lastTallyLookup = billNo;
-    showStatus("Tally Bill Number followup mein dhoondh rahe hain…", "info");
+    showStatus("Tally Bill Number followup / Income-Expense / Ration Card mein dhoondh rahe hain…", "info");
     try {
       const url = new URL(api.tallyBill, window.location.origin);
       url.searchParams.set("bill_no", billNo);
       const res = await fetch(url.toString(), { credentials: "same-origin" });
       const data = await res.json();
       if (!data.ok || !data.record) {
-        throw new Error(data.error || "Tally Bill Number nahi mila.");
+        throw new Error(
+          data.error ||
+            "Tally Bill Number followup, Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
+        );
       }
       await applyTallyBill(data.record);
     } catch (err) {
@@ -1092,7 +1676,7 @@
     els.customerId.value = r.customer_id || "";
     els.customerName.value = r.customer_name || "";
     els.customerSearch.value = r.customer_name || "";
-    els.contactPerson.value = r.contact_person || "";
+    els.contactPerson.value = r.contact_person || r.customer_name || "";
     els.gstin.value = r.customer_gstin || "";
     els.address.value = r.billing_address || "";
     els.mobile.value = r.contact_mobile || "";
@@ -1197,6 +1781,54 @@
     }
   });
 
+  els.billApproved?.addEventListener("change", async function () {
+    if (applyingTallyStatus) return;
+    updateBillStatusLabel();
+    if (savedBillApproved && !this.checked) {
+      const result = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!result) {
+        applyingTallyStatus = true;
+        this.checked = true;
+        updateBillStatusLabel();
+        applyingTallyStatus = false;
+        return;
+      }
+      statusAuth = { user_id: result.user_id, password: result.password };
+      showReason(els.unapproveReason, result.reason);
+      return;
+    }
+    if (this.checked) hideReason(els.unapproveReason, true);
+    clearStatusAuthIfIdle();
+  });
+
+  async function onPaymentReceivedChange() {
+    if (applyingTallyStatus) return;
+    if (savedPaymentReceived && !paymentReceivedYes()) {
+      const result = await confirmProtectedChange(
+        "Removing Payment Received needs your User ID and password.",
+        "Reason for removing Payment Received"
+      );
+      if (!result) {
+        applyingTallyStatus = true;
+        if (els.payReceivedYes) els.payReceivedYes.checked = true;
+        if (els.payReceivedNo) els.payReceivedNo.checked = false;
+        applyingTallyStatus = false;
+        return;
+      }
+      statusAuth = { user_id: result.user_id, password: result.password };
+      showReason(els.payRemoveReason, result.reason);
+      return;
+    }
+    if (paymentReceivedYes()) hideReason(els.payRemoveReason, true);
+    clearStatusAuthIfIdle();
+  }
+
+  els.payReceivedYes?.addEventListener("change", onPaymentReceivedChange);
+  els.payReceivedNo?.addEventListener("change", onPaymentReceivedChange);
+
   els.tallyBillNo?.addEventListener("keydown", function (ev) {
     if (ev.key === "Enter") {
       ev.preventDefault();
@@ -1234,12 +1866,155 @@
   });
 
   els.gridSearch?.addEventListener("input", function () {
-    clearTimeout(gridTimer);
-    gridTimer = setTimeout(function () {
-      loadGrid().catch(function (err) {
-        showStatus(err.message || String(err), "danger");
+    applyGridFilters();
+  });
+
+  document.querySelector(".inv-grid-card")?.addEventListener("input", function (event) {
+    if (!event.target.classList.contains("inv-filter-q")) return;
+    applyGridFilters();
+  });
+
+  document.querySelector(".inv-grid-card")?.addEventListener("change", function (event) {
+    if (!event.target.classList.contains("inv-filter-op") && !event.target.classList.contains("inv-filter-q")) return;
+    applyGridFilters();
+  });
+
+  const reviewBar = document.getElementById("invReviewBar");
+  const reviewApproved = document.getElementById("invReviewApproved");
+  const reviewStatusLabel = document.getElementById("invReviewStatusLabel");
+  const reviewSaveBtn = document.getElementById("invReviewSaveBtn");
+  let reviewState = null;
+
+  function paintReviewStatus() {
+    if (!reviewApproved || !reviewStatusLabel) return;
+    const on = !!reviewApproved.checked;
+    reviewStatusLabel.textContent = on ? "Approved" : "Approve pending";
+    reviewStatusLabel.className = "form-check-label " + (on ? "inv-tick-yes" : "inv-tick-pending");
+  }
+
+  function renderReviewTrail(steps) {
+    const box = document.getElementById("invReviewTrail");
+    if (!box) return;
+    if (!steps || !steps.length) {
+      box.classList.add("d-none");
+      box.innerHTML = "";
+      return;
+    }
+    const items = steps
+      .map(function (step) {
+        return (
+          "<li><strong>" +
+          escapeHtml(step.title || "") +
+          "</strong><span>" +
+          escapeHtml(step.detail || "") +
+          "</span></li>"
+        );
+      })
+      .join("");
+    box.innerHTML =
+      '<div class="inv-review-trail"><div class="fw-semibold">Entry review — what the user did</div><ol>' +
+      items +
+      "</ol></div>";
+    box.classList.remove("d-none");
+  }
+
+  async function loadReviewTrail(invoiceId) {
+    renderReviewTrail([]);
+    try {
+      const res = await fetch(apiUrl(api.get, invoiceId), {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
       });
-    }, 300);
+      const data = await res.json();
+      if (!data.ok || !data.record) return;
+      renderReviewTrail(data.record.review_steps || []);
+    } catch (_err) {
+      renderReviewTrail([]);
+    }
+  }
+
+  function showReviewBar(row) {
+    reviewState = {
+      id: row.invoice_id,
+      paid: !!row.paid,
+      saved: !!row.approved,
+    };
+    if (reviewApproved) {
+      reviewApproved.checked = !!row.approved;
+      reviewApproved.disabled = !canTickConverted();
+    }
+    if (reviewSaveBtn) reviewSaveBtn.disabled = !canTickConverted();
+    paintReviewStatus();
+    reviewBar?.classList.remove("d-none");
+  }
+
+  function hideReviewBar() {
+    reviewState = null;
+    reviewBar?.classList.add("d-none");
+    renderReviewTrail([]);
+  }
+
+  async function saveReviewStatus() {
+    if (!reviewState || !reviewApproved) return;
+    if (!canTickConverted()) {
+      showTickRightsPopup();
+      return;
+    }
+    const nowApproved = !!reviewApproved.checked;
+    const removingApproval = reviewState.saved && !nowApproved;
+    let auth = null;
+    if (removingApproval) {
+      auth = await confirmProtectedChange(
+        "Removing approval needs your User ID and password.",
+        "Reason for removing approval"
+      );
+      if (!auth) {
+        reviewApproved.checked = true;
+        paintReviewStatus();
+        return;
+      }
+    }
+    const payload = { bill_approved: nowApproved, payment_received: true };
+    if (auth) {
+      payload.user_id = auth.user_id;
+      payload.password = auth.password;
+      payload.bill_unapprove_reason = auth.reason;
+    }
+    reviewSaveBtn.disabled = true;
+    try {
+      const res = await fetch(apiUrl(api.update, reviewState.id) + "/workflow", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": api.csrf || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update bill status.");
+      reviewState.saved = !!(data.record && data.record.bill_approved);
+      reviewApproved.checked = reviewState.saved;
+      paintReviewStatus();
+      showStatus(data.message || "Bill status updated.", "success");
+      await loadGrid();
+      if (reviewState.saved && previewModal) previewModal.hide();
+    } catch (err) {
+      reviewApproved.checked = reviewState.saved;
+      paintReviewStatus();
+      showStatus(err.message || String(err), "danger");
+    } finally {
+      if (reviewSaveBtn) reviewSaveBtn.disabled = !canTickConverted();
+    }
+  }
+
+  reviewApproved?.addEventListener("change", paintReviewStatus);
+  reviewSaveBtn?.addEventListener("click", function () {
+    saveReviewStatus().catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
   });
 
   async function openHtmlPreview(invoiceId, invoiceNo) {
@@ -1275,19 +2050,66 @@
   }
 
   els.gridBody?.addEventListener("click", function (ev) {
+    const awaitPay = ev.target.closest(".inv-grid-tick.is-await-pay");
+    if (awaitPay) {
+      ev.preventDefault();
+      showAwaitPaymentPopup();
+      return;
+    }
+    const lockedTick = ev.target.closest(".inv-grid-tick.is-readonly");
+    if (!lockedTick) return;
+    ev.preventDefault();
+    showTickRightsPopup();
+  });
+
+  els.gridBody?.addEventListener("change", function (ev) {
+    const box = ev.target.closest(".inv-g-approve, .inv-g-paid");
+    if (!box) return;
+    const tr = box.closest("tr");
+    if (!tr) return;
+    syncTickLabel(box);
+    saveGridWorkflow(tr).catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
+  });
+
+  els.gridBody?.addEventListener("click", function (ev) {
     const editBtn = ev.target.closest(".inv-g-edit");
     const delBtn = ev.target.closest(".inv-g-del");
+    const reviewBtn = ev.target.closest(".inv-g-review");
     const previewBtn = ev.target.closest(".inv-g-preview");
+    if (reviewBtn) {
+      hideReviewBar();
+      showReviewBar({
+        invoice_id: reviewBtn.getAttribute("data-id"),
+        paid: reviewBtn.getAttribute("data-paid") === "1",
+        approved: reviewBtn.getAttribute("data-approved") === "1",
+      });
+      loadReviewTrail(reviewBtn.getAttribute("data-id"));
+      openHtmlPreview(
+        reviewBtn.getAttribute("data-id"),
+        reviewBtn.getAttribute("data-no") || ""
+      );
+    }
+    if (previewBtn) hideReviewBar();
     const waBtn = ev.target.closest(".inv-g-wa");
     if (editBtn) {
-      loadForEdit(editBtn.getAttribute("data-id")).catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
+      if (editBtn.classList.contains("is-locked")) {
+        showOriginPopup(editBtn.getAttribute("data-origin") || "");
+      } else {
+        loadForEdit(editBtn.getAttribute("data-id")).catch(function (err) {
+          showStatus(err.message || String(err), "danger");
+        });
+      }
     }
     if (delBtn) {
-      deleteInvoice(delBtn.getAttribute("data-id")).catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
+      if (delBtn.classList.contains("is-locked")) {
+        showOriginPopup(delBtn.getAttribute("data-origin") || "");
+      } else {
+        deleteInvoice(delBtn.getAttribute("data-id")).catch(function (err) {
+          showStatus(err.message || String(err), "danger");
+        });
+      }
     }
     if (previewBtn) {
       openHtmlPreview(
@@ -1313,10 +2135,25 @@
     const params = new URLSearchParams(window.location.search || "");
     const editId = (params.get("edit") || "").trim();
     const deepCustomerId = (params.get("customer_id") || "").trim();
+    const deepTallyBill = (
+      params.get("tally_bill_no") ||
+      params.get("bill_no") ||
+      ""
+    ).trim();
     if (editId) {
       await loadForEdit(editId);
     } else if (deepCustomerId) {
       await pickCustomer(deepCustomerId);
+    } else {
+      const deepCustomerName = (params.get("customer_name") || "").trim();
+      if (deepCustomerName) {
+        if (els.customerName) els.customerName.value = deepCustomerName;
+        if (els.customerSearch) els.customerSearch.value = deepCustomerName;
+      }
+    }
+    if (!editId && deepTallyBill && els.tallyBillNo) {
+      els.tallyBillNo.value = deepTallyBill;
+      await lookupTallyBill(true);
     }
   })().catch(function (err) {
     showStatus(err.message || String(err), "danger");

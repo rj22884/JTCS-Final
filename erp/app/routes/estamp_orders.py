@@ -4,7 +4,7 @@ import mimetypes
 
 from flask import Blueprint, jsonify, redirect, render_template, request, send_file, url_for
 
-from app.decorators import login_required
+from app.decorators import login_required, require_delete_reauth
 from app.services.website_estamp_service import WebsiteEStampService
 
 bp = Blueprint("estamp_orders", __name__, url_prefix="/admin/estamp-orders")
@@ -87,6 +87,17 @@ def delete_order(reference_no: str):
     try:
         WebsiteEStampService().admin_delete(reference_no)
         return jsonify({"ok": True})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@bp.route("/<reference_no>/undo", methods=["POST"])
+@login_required
+@require_delete_reauth
+def undo_generated_lock(reference_no: str):
+    try:
+        row = WebsiteEStampService().unlock_for_edit(reference_no)
+        return jsonify({"ok": True, "row": row, "message": "Unlocked for edit."})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
 

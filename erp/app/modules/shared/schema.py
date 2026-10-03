@@ -964,6 +964,7 @@ ERP_CORE_TOP_LEVEL_MENUS = (
     "Masters",
     "Accounting",
     "CRM",
+    "Public Report",
     "HR",
 )
 
@@ -1013,13 +1014,30 @@ def ensure_erp_core_nav_menus() -> None:
             WHERE MenuName IN (N'Logout', N'Log Out')
                OR LOWER(ISNULL(MenuURL, N'')) IN (N'/logout', N'/auth/logout');
 
-            /* Remove duplicate ITR Followup Master under Masters (keep Followup Master submenu). */
+            /* Followup stages are fixed on ITR/GST/DSC/TDS Followup. Remove Followup Master menus. */
+            IF OBJECT_ID(N'dbo.MenuUserAllow', N'U') IS NOT NULL
+                DELETE a
+                FROM dbo.MenuUserAllow AS a
+                INNER JOIN dbo.MenuMaster AS m ON m.MenuID = a.MenuID
+                WHERE m.MenuName IN (
+                        N'ITR Followup Master', N'DSC Followup Master',
+                        N'TDS Followup Master', N'GST Followup Master', N'Followup Master'
+                      )
+                   OR ISNULL(m.MenuURL, N'') LIKE N'/masters/followup%';
+
+            DELETE FROM dbo.MenuMaster
+            WHERE MenuName IN (
+                    N'ITR Followup Master', N'DSC Followup Master',
+                    N'TDS Followup Master', N'GST Followup Master'
+                  )
+               OR ISNULL(MenuURL, N'') LIKE N'/masters/followup%';
+
             DELETE m
             FROM dbo.MenuMaster AS m
-            INNER JOIN dbo.MenuMaster AS p ON p.MenuID = m.ParentMenuID
-            WHERE p.ParentMenuID IS NULL
-              AND p.MenuName = N'Masters'
-              AND m.MenuName = N'ITR Followup Master';
+            WHERE m.MenuName = N'Followup Master'
+              AND NOT EXISTS (
+                    SELECT 1 FROM dbo.MenuMaster AS c WHERE c.ParentMenuID = m.MenuID
+              );
 
             """
         )

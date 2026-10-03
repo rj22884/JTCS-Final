@@ -77,6 +77,7 @@
         "<td>" + escapeHtml(row.work_id) + "</td>" +
         "<td>" + escapeHtml(row.work_name) + "</td>" +
         "<td>" + escapeHtml(row.ledger_kind || window.WORK_MASTER_LEDGER_KIND) + "</td>" +
+        "<td>" + escapeHtml(row.under_group || "—") + "</td>" +
         "<td class=\"text-end\">" +
         "<button type=\"button\" class=\"btn btn-outline-primary btn-sm me-1 work-master-edit\" data-id=\"" +
         row.work_id +

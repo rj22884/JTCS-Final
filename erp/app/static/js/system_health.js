@@ -350,15 +350,10 @@
           );
         })
         .join("");
-      root.querySelector("[data-sh-api]").innerHTML =
-        '<div class="mb-2">Global API score: <strong>' +
-        esc(api.global_health_score) +
-        "% (" +
-        esc(api.global_label) +
-        ')</strong> · <a href="' +
-        esc(urls.integrationHealth) +
-        '">Open Integration Health</a></div>' +
-        (apiHtml || '<span class="text-muted small">No integration summary.</span>');
+      var apiEl = root.querySelector("[data-sh-api]");
+      if (apiEl) {
+        apiEl.innerHTML = '<span class="text-muted small">Integration settings have been removed.</span>';
+      }
 
       root.querySelector("[data-sh-security]").innerHTML = kv([
         ["Failed logins", security.failed_login_attempts],

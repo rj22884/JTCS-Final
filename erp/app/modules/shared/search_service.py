@@ -149,7 +149,7 @@ class GlobalSearchService:
     def _search_items(self, needle: str, limit: int) -> list[dict]:
         from app.services.item_master_service import ItemMasterService
 
-        rows = ItemMasterService().list_records(search=needle, active_only=False)[:limit]
+        rows = ItemMasterService().list_records(search=needle, active_only=True)[:limit]
         out = []
         for it in rows:
             code = (it.get("item_code") or "").strip()
@@ -173,6 +173,8 @@ class GlobalSearchService:
         for row in rows:
             kind = (row.get("kind") or "").strip().lower()
             if kind in {"customer", "item"}:
+                continue
+            if row.get("active") is False:
                 continue
             if kind == "bank":
                 href = "/masters/bank"

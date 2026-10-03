@@ -75,6 +75,28 @@ def pan_check():
     )
 
 
+@bp.route("/aadhaar-check", methods=["GET", "POST", "OPTIONS"], strict_slashes=False)
+def aadhaar_check():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    payload = request.get_json(silent=True) or {}
+    aadhaar = "".join(ch for ch in str(request.args.get("aadhaar") or payload.get("aadhaar") or "") if ch.isdigit())
+    if len(aadhaar) != 12:
+        return jsonify({"ok": False, "error": "Enter a valid 12-digit Aadhaar."}), 400
+    try:
+        found = dsc_documents.aadhaar_exists(aadhaar)
+        docs = dsc_documents.docs_for_aadhaar(aadhaar) if found else []
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    return jsonify(
+        {
+            "ok": True,
+            "found": found,
+            "docs": docs,
+        }
+    )
+
+
 @bp.route("/gstin-search", methods=["GET", "POST", "OPTIONS"], strict_slashes=False)
 def gstin_search():
     if request.method == "OPTIONS":

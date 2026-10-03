@@ -80,6 +80,33 @@ def index():
     )
 
 
+@bp.route("/api/usage", methods=["GET"], strict_slashes=False)
+@login_required
+def row_usage():
+    source = (request.args.get("source") or "").strip()
+    def _int_arg(name: str) -> int | None:
+        raw = (request.args.get(name) or "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+
+    try:
+        usage = ChartAccountService().row_usage(
+            source=source,
+            account_id=_int_arg("account_id"),
+            customer_id=_int_arg("customer_id"),
+            work_id=_int_arg("work_id"),
+        )
+        return jsonify({"ok": True, "usage": usage})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
 @bp.route("/api/records", methods=["GET"], strict_slashes=False)
 @login_required
 def list_records():
@@ -130,6 +157,8 @@ def clear_customer_group(customer_id: int):
     try:
         message = ChartAccountService().clear_customer_group(customer_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
@@ -165,6 +194,8 @@ def clear_work_group(work_id: int):
     try:
         message = ChartAccountService().clear_work_group(work_id)
         return jsonify({"ok": True, "message": message})
+    except MasterInUseError as exc:
+        return json_in_use_response(exc)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

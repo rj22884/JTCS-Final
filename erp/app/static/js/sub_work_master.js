@@ -161,9 +161,9 @@
   }
 
   function syncChartGroupVisibility() {
-    const misc = isMiscKind(selectedLedgerKind());
-    els.underGroupWrap?.classList.toggle("d-none", misc);
-    if (misc && els.underGroup) els.underGroup.value = "";
+    // Chart of Account always comes from Category Master (parent Work) — show for Misc too.
+    els.underGroupWrap?.classList.remove("d-none");
+    syncUnderGroupFromWork();
   }
 
   function setLedgerKind(kind) {
@@ -183,12 +183,8 @@
 
   function syncUnderGroupFromWork() {
     if (!els.underGroup || !els.workId) return;
-    if (isMiscKind(selectedLedgerKind())) {
-      els.underGroup.value = "";
-      return;
-    }
     const opt = els.workId.selectedOptions && els.workId.selectedOptions[0];
-    const label = (opt && opt.dataset.underGroup) || "";
+    const label = (opt && (opt.dataset.underGroup || opt.getAttribute("data-under-group"))) || "";
     els.underGroup.value = label || "";
   }
 
@@ -266,9 +262,8 @@
     if (!els.body) return;
     cachedRows = rows || [];
     els.body.innerHTML = "";
-    const hideChart = isMiscKind(els.filterKind?.value);
     document.querySelectorAll(".sw-col-chart").forEach(function (el) {
-      el.classList.toggle("d-none", hideChart);
+      el.classList.remove("d-none");
     });
     if (!cachedRows.length) {
       els.empty?.classList.remove("d-none");
@@ -281,10 +276,26 @@
     }
     cachedRows.forEach(function (row) {
       const tr = document.createElement("tr");
-      tr.dataset.id = String(row.work_type_id);
+      const workOnly = !!row.is_work_only || !row.work_type_id;
+      tr.dataset.id = String(row.work_type_id || "");
+      const actions = workOnly
+        ? '<button type="button" class="btn btn-outline-primary btn-sm sw-add-child"' +
+          ' data-work-id="' +
+          escapeHtml(row.work_id || "") +
+          '" data-kind="' +
+          escapeHtml(row.ledger_kind || "") +
+          '" data-work-name="' +
+          escapeHtml(row.work_name || row.work_type_name || "") +
+          '"><i class="bi bi-plus-lg"></i> Add Sub Work</button>'
+        : '<button type="button" class="btn btn-outline-primary btn-sm me-1 sw-edit" data-id="' +
+          row.work_type_id +
+          '"><i class="bi bi-pencil"></i> Edit</button>' +
+          '<button type="button" class="btn btn-outline-danger btn-sm sw-delete" data-id="' +
+          row.work_type_id +
+          '"><i class="bi bi-trash"></i> Delete</button>';
       tr.innerHTML =
         "<td>" +
-        escapeHtml(row.work_type_id) +
+        escapeHtml(workOnly ? "—" : row.work_type_id) +
         "</td>" +
         "<td>" +
         ledgerBadge(row.ledger_kind) +
@@ -293,10 +304,10 @@
         escapeHtml(row.work_name || row.work_type_name) +
         "</td>" +
         '<td class="sw-col-chart">' +
-        escapeHtml(isMiscKind(row.ledger_kind) ? "—" : row.under_group || "—") +
+        escapeHtml(row.under_group || "—") +
         "</td>" +
         "<td>" +
-        escapeHtml(row.sub_work_type) +
+        escapeHtml(row.sub_work_type || "—") +
         "</td>" +
         "<td>" +
         (row.active_status
@@ -304,26 +315,21 @@
           : '<span class="badge text-bg-secondary">Inactive</span>') +
         "</td>" +
         '<td class="text-end text-nowrap">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm me-1 sw-edit" data-id="' +
-        row.work_type_id +
-        '"><i class="bi bi-pencil"></i> Edit</button>' +
-        '<button type="button" class="btn btn-outline-danger btn-sm sw-delete" data-id="' +
-        row.work_type_id +
-        '"><i class="bi bi-trash"></i> Delete</button>' +
+        actions +
         "</td>";
       els.body.appendChild(tr);
     });
   }
 
-  function isDuplicateSubWork(workName, subWorkType, excludeId) {
-    const name = String(workName || "").trim().toLowerCase();
+  function isDuplicateSubWork(subWorkType, excludeId) {
     const sub = String(subWorkType || "").trim().toLowerCase();
-    if (!name || !sub) return false;
+    if (!sub) return false;
     return cachedRows.some(function (row) {
+      if (!row.work_type_id) return false;
+      if (row.active_status === false) return false;
       if (excludeId && String(row.work_type_id) === String(excludeId)) return false;
-      const rowName = String(row.work_name || row.work_type_name || "").trim().toLowerCase();
       const rowSub = String(row.sub_work_type || "").trim().toLowerCase();
-      return rowName === name && rowSub === sub;
+      return rowSub === sub;
     });
   }
 
@@ -345,19 +351,22 @@
       });
   }
 
-  function openAdd() {
+  function openAdd(preset) {
+    preset = preset || {};
+    const kind = normalizeKind(preset.kind || "Misc.") || "Misc.";
     if (els.id) els.id.value = "";
     if (els.subWorkType) els.subWorkType.value = "";
     if (els.underGroup) els.underGroup.value = "";
-    setLedgerKind("Misc.");
+    setLedgerKind(kind);
     if (els.modalTitle) els.modalTitle.textContent = "Add Sub Work";
-    fillWorkOptions("Misc.", null, null);
+    fillWorkOptions(kind, preset.workId || null, preset.workName || null);
     syncChartGroupVisibility();
     showModal();
-    return loadWorksFromApi("Misc.", null, null)
+    return loadWorksFromApi(kind, preset.workId || null, preset.workName || null)
       .then(function () {
         syncChartGroupVisibility();
-        els.workId?.focus();
+        if (preset.workId || preset.workName) els.subWorkType?.focus();
+        else els.workId?.focus();
       })
       .catch(function (err) {
         showStatus(err.message || "Unable to load works.", "danger");
@@ -403,7 +412,7 @@
       sub_work_type: (els.subWorkType?.value || "").trim(),
     };
     if (!payload.work_id) {
-      alert("Select Work Name (from Work Master).");
+      alert("Select Work Name (from Category Master).");
       els.workId?.focus();
       return;
     }
@@ -412,9 +421,11 @@
       els.subWorkType?.focus();
       return;
     }
-    if (isDuplicateSubWork(payload.work_name, payload.sub_work_type, id)) {
+    if (isDuplicateSubWork(payload.sub_work_type, id)) {
       alert(
-        "'" + payload.sub_work_type + "' already exists under '" + payload.work_name + "'."
+        "Sub Work Type '" +
+          payload.sub_work_type +
+          "' already exists. Duplicate Sub Work Type is not allowed."
       );
       els.subWorkType?.focus();
       return;
@@ -500,6 +511,15 @@
     searchTimer = setTimeout(loadRows, 250);
   });
   els.body?.addEventListener("click", function (event) {
+    const addChild = event.target.closest(".sw-add-child");
+    if (addChild) {
+      openAdd({
+        kind: addChild.getAttribute("data-kind") || "Misc.",
+        workId: addChild.getAttribute("data-work-id") || "",
+        workName: addChild.getAttribute("data-work-name") || "",
+      });
+      return;
+    }
     const editBtn = event.target.closest(".sw-edit");
     if (editBtn) {
       openEdit(editBtn.getAttribute("data-id"));

@@ -503,49 +503,15 @@ class SystemHealthService:
         return queues
 
     def collect_api_health(self) -> dict[str, Any]:
-        """Reuse Integration Health dashboard summary (no duplicate config)."""
-        try:
-            from app.modules.settings.integration_health_service import IntegrationHealthService
-
-            dash = IntegrationHealthService().dashboard(run_scan=False)
-            cards = []
-            for c in dash.get("integrations") or []:
-                code = c.get("code") or ""
-                # Focus summary set requested by Mission Control
-                if code in {
-                    "whatsapp_meta",
-                    "smtp",
-                    "google",
-                    "openai",
-                    "gemini",
-                    "fyers",
-                    "payment",
-                    "gst_api",
-                    "income_tax",
-                    "cloud_storage",
-                }:
-                    cards.append(
-                        {
-                            "code": code,
-                            "label": c.get("label"),
-                            "status": c.get("connection_status"),
-                            "status_code": c.get("status_code"),
-                            "score": c.get("health_score"),
-                        }
-                    )
-            return {
-                "ok": True,
-                "global_health_score": dash.get("global_health_score"),
-                "global_label": dash.get("global_label"),
-                "summary": dash.get("summary"),
-                "integrations": cards,
-                "alerts": dash.get("alerts") or [],
-                "source": "integration_health",
-                "console_url": "/admin/integrations?tab=health",
-            }
-        except Exception as exc:
-            logger.exception("Integration health reuse failed")
-            return {"ok": False, "error": str(exc), "integrations": [], "global_health_score": 0}
+        return {
+            "ok": True,
+            "global_health_score": None,
+            "global_label": "Disabled",
+            "summary": {},
+            "integrations": [],
+            "alerts": [],
+            "source": "removed",
+        }
 
     def collect_security(self) -> dict[str, Any]:
         """Security signals from Users + customer portal lockouts when present."""
@@ -726,7 +692,6 @@ class SystemHealthService:
             "modules_activated": [
                 "Accounting",
                 "CRM",
-                "Integration Settings",
                 "Communication Center",
                 "Customer Portal",
                 "Backup",

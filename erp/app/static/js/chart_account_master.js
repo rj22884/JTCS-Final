@@ -29,6 +29,13 @@
     obCr: document.getElementById("camObCr"),
     isActive: document.getElementById("camIsActive"),
     activeWrap: document.getElementById("camActiveWrap"),
+    entryHint: document.getElementById("camEntryHint"),
+    entryName: document.getElementById("camEntryName"),
+    entryClear: document.getElementById("camEntryClear"),
+    entryBlocked: document.getElementById("camEntryBlocked"),
+    entryLinks: document.getElementById("camEntryLinks"),
+    entryRows: document.getElementById("camEntryRows"),
+    entryNone: document.getElementById("camEntryNone"),
   };
 
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
@@ -196,7 +203,6 @@
       els.count.textContent = rows.length + " record" + (rows.length === 1 ? "" : "s");
     }
     rows.forEach(function (row) {
-      const linked = row.source === "customer" || row.source === "work";
       const underBadge =
         row.under_type === "Liabilities"
           ? '<span class="badge text-bg-warning">Liabilities</span>'
@@ -209,14 +215,12 @@
         ? escapeHtml(row.group_name || "")
         : '<span class="text-muted">— Select group —</span>';
       const attrs = editAttrs(row);
-      const hasAssignment = !!row.account_id;
-      const deleteBtn = hasAssignment
-        ? '<button type="button" class="btn btn-outline-danger btn-sm cam-delete" ' +
-          attrs +
-          '><i class="bi bi-trash"></i> ' +
-          (linked ? "Clear" : "Delete") +
-          "</button>"
-        : "";
+      const blocked = !!row.has_entries;
+      const deleteBtn =
+        '<button type="button" class="btn btn-outline-danger btn-sm cam-delete" ' +
+        attrs +
+        (blocked ? ' disabled title="Entries exist. Shown on the right."' : ' title="Permanent delete"') +
+        '><i class="bi bi-trash"></i> Delete</button>';
       let idHint = "";
       if (row.source === "customer" && row.customer_id) {
         idHint = ' <span class="text-muted small">#' + escapeHtml(row.customer_id) + "</span>";
@@ -224,6 +228,12 @@
         idHint = ' <span class="text-muted small">#' + escapeHtml(row.work_id) + "</span>";
       }
       const tr = document.createElement("tr");
+      tr.dataset.source = row.source || "manual";
+      tr.dataset.accountId = row.account_id != null ? String(row.account_id) : "";
+      tr.dataset.customerId = row.customer_id != null ? String(row.customer_id) : "";
+      tr.dataset.workId = row.work_id != null ? String(row.work_id) : "";
+      tr.dataset.name = row.account_name || "";
+      tr.dataset.hasEntries = blocked ? "1" : "0";
       tr.innerHTML =
         "<td>" +
         sourceBadge(row) +
@@ -453,12 +463,138 @@
       });
   }
 
+  function formatInr(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return "";
+    return "₹" + num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatEntryDate(value) {
+    const text = String(value || "").slice(0, 10);
+    const parts = text.split("-");
+    if (parts.length !== 3) return text || "—";
+    return parts[2] + "/" + parts[1] + "/" + parts[0];
+  }
+
+  function hideEntryPanel() {
+    els.entryHint?.classList.remove("d-none");
+    els.entryName?.classList.add("d-none");
+    els.entryClear?.classList.add("d-none");
+    els.entryBlocked?.classList.add("d-none");
+    if (els.entryLinks) els.entryLinks.innerHTML = "";
+    if (els.entryRows) els.entryRows.innerHTML = "";
+  }
+
+  function showEntryPanel(name, usage) {
+    if (els.entryHint) els.entryHint.classList.add("d-none");
+    if (els.entryName) {
+      els.entryName.textContent = name || "";
+      els.entryName.classList.remove("d-none");
+    }
+    const blocked = !usage || usage.can_delete === false;
+    els.entryClear?.classList.toggle("d-none", blocked);
+    els.entryBlocked?.classList.toggle("d-none", !blocked);
+    if (!blocked) return;
+    const links = (usage && usage.links) || [];
+    const txns = (usage && usage.transactions) || [];
+    if (els.entryLinks) {
+      els.entryLinks.innerHTML = links
+        .map(function (link) {
+          return (
+            '<span class="cam-entry-chip">' +
+            escapeHtml(link.label || link.table || "Entry") +
+            " (" +
+            escapeHtml(link.count) +
+            ")</span>"
+          );
+        })
+        .join("");
+    }
+    if (els.entryRows) {
+      els.entryRows.innerHTML = txns
+        .map(function (row) {
+          const work = escapeHtml(row.work || row.source || "Entry");
+          const ref = row.reference
+            ? '<span class="d-block text-muted">' + escapeHtml(row.reference) + "</span>"
+            : "";
+          const source = row.source
+            ? '<span class="d-block text-muted">' + escapeHtml(row.source) + "</span>"
+            : "";
+          const amount =
+            row.amount == null || row.amount === "" ? "—" : escapeHtml(formatInr(row.amount));
+          return (
+            "<tr><td class=\"text-nowrap\">" +
+            escapeHtml(formatEntryDate(row.txn_date)) +
+            "</td><td>" +
+            work +
+            ref +
+            source +
+            '</td><td class="text-end text-nowrap">' +
+            amount +
+            "</td></tr>"
+          );
+        })
+        .join("");
+    }
+    els.entryNone?.classList.toggle("d-none", txns.length > 0);
+  }
+
+  function usageUrl(rowEl) {
+    const params = new URLSearchParams();
+    params.set("source", rowEl.dataset.source || "manual");
+    if (rowEl.dataset.accountId) params.set("account_id", rowEl.dataset.accountId);
+    if (rowEl.dataset.customerId) params.set("customer_id", rowEl.dataset.customerId);
+    if (rowEl.dataset.workId) params.set("work_id", rowEl.dataset.workId);
+    return api.usage + "?" + params.toString();
+  }
+
+  function loadUsage(rowEl) {
+    document.querySelectorAll("#camGridBody tr.cam-row-selected").forEach(function (tr) {
+      tr.classList.remove("cam-row-selected");
+    });
+    rowEl.classList.add("cam-row-selected");
+    return fetch(usageUrl(rowEl), {
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load entries.");
+          return data.usage || { can_delete: true, links: [], transactions: [] };
+        });
+      })
+      .then(function (usage) {
+        const blocked = usage.can_delete === false;
+        rowEl.dataset.hasEntries = blocked ? "1" : "0";
+        const btn = rowEl.querySelector(".cam-delete");
+        if (btn) {
+          btn.disabled = blocked;
+          btn.title = blocked ? "Entries exist. Shown on the right." : "Permanent delete";
+        }
+        showEntryPanel(rowEl.dataset.name || "", usage);
+        return usage;
+      });
+  }
+
   async function remove(btn) {
+    const rowEl = btn.closest("tr");
+    let usage = null;
+    try {
+      usage = rowEl ? await loadUsage(rowEl) : null;
+    } catch (err) {
+      alert(err.message || "Unable to check entries.");
+      return;
+    }
+    if (usage && usage.can_delete === false) {
+      btn.disabled = true;
+      return;
+    }
     const source = btn.getAttribute("data-source") || "manual";
-    const linked = source === "customer" || source === "work";
-    const message = linked
-      ? "Clear group assignment? (Master record is not changed.)"
-      : "Delete this account?";
+    const message =
+      source === "customer"
+        ? "Permanently delete this customer account? The customer master record will also be removed. This cannot be recovered."
+        : source === "work"
+          ? "Permanently delete this income/expense account? The work master record will also be removed. This cannot be recovered."
+          : "Permanently delete this account? This cannot be recovered.";
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm(message))) return;
@@ -495,7 +631,8 @@
         });
       })
       .then(function (data) {
-        showStatus(data.message || "Deleted.", "info");
+        showStatus(data.message || "Permanently deleted.", "info");
+        hideEntryPanel();
         return loadRows();
       })
       .catch(function (err) {
@@ -525,7 +662,25 @@
       return;
     }
     const delBtn = event.target.closest(".cam-delete");
-    if (delBtn) remove(delBtn);
+    if (delBtn) {
+      if (delBtn.disabled) {
+        const rowEl = delBtn.closest("tr");
+        if (rowEl) {
+          loadUsage(rowEl).catch(function (err) {
+            alert(err.message || "Unable to load entries.");
+          });
+        }
+        return;
+      }
+      remove(delBtn);
+      return;
+    }
+    const rowEl = event.target.closest("tr");
+    if (rowEl) {
+      loadUsage(rowEl).catch(function (err) {
+        alert(err.message || "Unable to load entries.");
+      });
+    }
   });
 
   renderRows(window.CHART_ACCOUNT_INITIAL_ROWS || []);
