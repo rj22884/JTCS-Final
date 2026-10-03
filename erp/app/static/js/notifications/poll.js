@@ -91,10 +91,37 @@
       }
       lastBadgeTotal = total;
       setBadge(total);
-      renderCrmNotifications(data.rows || []);
+      const rows = data.rows || [];
+      renderCrmNotifications(rows);
+      syncWhatsAppTaskbar(rows);
     } catch (_err) {
       /* silent */
     }
+  }
+
+  function isWhatsAppNotice(item) {
+    const type = String(item.NotificationType || "");
+    const title = String(item.Title || "");
+    const link = String(item.LinkURL || "");
+    return type === "WhatsApp" || /whatsapp/i.test(title) || /channel=WhatsApp/i.test(link);
+  }
+
+  function syncWhatsAppTaskbar(rows) {
+    const host = window.top || window;
+    if (typeof host.jtcsSetTaskAlerts !== "function") return;
+    const alerts = (rows || [])
+      .filter(function (item) {
+        return item && !item.IsRead && isWhatsAppNotice(item);
+      })
+      .map(function (item) {
+        return {
+          id: item.NotificationID,
+          title: item.Title || "WhatsApp",
+          message: item.Message || "",
+          href: item.LinkURL || "/crm/inbox?channel=WhatsApp",
+        };
+      });
+    host.jtcsSetTaskAlerts(alerts);
   }
 
   setInterval(poll, pollSeconds * 1000);

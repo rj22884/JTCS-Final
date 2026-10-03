@@ -11,6 +11,7 @@
   var dragState = null;
   var windowsEl = null;
   var taskbarEl = null;
+  var taskAlerts = [];
 
   function skipUrl(href) {
     if (!href || href === "#" || href.indexOf("javascript:") === 0) return true;
@@ -146,13 +147,28 @@
     var minimized = wins.filter(function (win) {
       return win.dataset.state === "min";
     });
-    if (!minimized.length) {
+    if (!minimized.length && !taskAlerts.length) {
       taskbarEl.hidden = true;
       relayoutAll();
       if (!wins.length) return;
     } else {
       taskbarEl.hidden = false;
     }
+    taskAlerts.forEach(function (item) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "jtcs-page-task-btn is-alert";
+      var label = item.title || "WhatsApp";
+      btn.innerHTML = '<i class="bi bi-whatsapp" aria-hidden="true"></i><span></span>';
+      btn.querySelector("span").textContent = label;
+      btn.title = item.message ? label + " — " + item.message : label;
+      btn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        openTaskAlert(item);
+      });
+      taskbarEl.appendChild(btn);
+    });
     minimized.forEach(function (win) {
       var btn = document.createElement("button");
       btn.type = "button";
@@ -478,6 +494,29 @@
     },
     true
   );
+
+  function openTaskAlert(item) {
+    var href = (item && item.href) || "/crm/inbox?channel=WhatsApp";
+    var title = (item && item.title) || "WhatsApp";
+    taskAlerts = taskAlerts.filter(function (row) {
+      return !item || row.id !== item.id;
+    });
+    refreshTaskbar();
+    if (item && item.id && window.CrmCommon && typeof window.CrmCommon.apiFetch === "function") {
+      window.CrmCommon.apiFetch("/api/notifications/" + item.id + "/read", { method: "POST" }).catch(function () {});
+    }
+    if (typeof window.jtcsOpenPageWindow === "function") {
+      window.jtcsOpenPageWindow(href, title);
+      return;
+    }
+    window.location.href = href;
+  }
+
+  window.jtcsSetTaskAlerts = function (alerts) {
+    taskAlerts = Array.isArray(alerts) ? alerts : [];
+    if (!taskbarEl) ensureHosts();
+    refreshTaskbar();
+  };
 
   window.jtcsClosePageWindow = closeWindow;
 

@@ -64,6 +64,13 @@ html.jtcs-embed .stamp-erp-page {
 .jtcs-menu-bar {
   z-index: 3;
 }
+.jtcs-sticky-chrome .jtcs-app-header {
+  z-index: 6;
+  overflow: visible;
+}
+.jtcs-sticky-chrome .jtcs-menu-bar {
+  z-index: 4;
+}
 
 a.jtcs-menu-link.jtcs-menu-held,
 a.jtcs-top-link.jtcs-menu-held {
@@ -232,6 +239,16 @@ a.jtcs-top-link.jtcs-menu-held {
 
 .jtcs-page-task-btn.is-min {
   opacity: 0.75;
+}
+
+.jtcs-page-task-btn.is-alert {
+  max-width: 320px;
+  background: #0f7a4a;
+  border-color: #0b5c37;
+}
+
+.jtcs-page-task-btn.is-alert i {
+  color: #d8ffe8;
 }
 
 .modal-dialog.jtcs-win-minimized,
