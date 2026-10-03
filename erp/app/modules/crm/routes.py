@@ -246,6 +246,8 @@ def inbox_page():
             "followups": url_for("crm_api.followups_create"),
             "customer360": url_for("crm.customer_360"),
             "simulate_status": url_for("crm_api.whatsapp_simulate_status"),
+            "start": url_for("crm_api.conversation_start"),
+            "search": url_for("search_api.global_search"),
         },
     )
 
@@ -494,6 +496,56 @@ def dashboard_stats():
     return jsonify({"ok": True, **CommunicationService().dashboard_stats()})
 
 
+@crm_api_bp.route("/conversations/start", methods=["POST"])
+@login_required
+@require_crm_capability("crm.reply")
+def conversation_start():
+    """Open an existing WhatsApp chat or start one for a saved or new number."""
+    from sqlalchemy import text
+
+    from app.extensions import db
+    from app.modules.communication.customer_link_service import last10_digits
+
+    payload = request.get_json(silent=True) or {}
+    customer_id = payload.get("customer_id")
+    name = (payload.get("name") or "").strip()
+    mobile = (payload.get("mobile") or "").strip()
+    if customer_id:
+        row = db.session.execute(
+            text(
+                """
+                SELECT CustomerID, CustomerName, MobileNumber, WhatsAppNumber
+                FROM dbo.CustomerMaster
+                WHERE CustomerID = :id
+                """
+            ),
+            {"id": int(customer_id)},
+        ).mappings().first()
+        if not row:
+            return jsonify({"ok": False, "error": "Customer not found"}), 404
+        name = name or (row.get("CustomerName") or "").strip()
+        mobile = mobile or (row.get("WhatsAppNumber") or row.get("MobileNumber") or "")
+        customer_id = int(row["CustomerID"])
+    else:
+        customer_id = None
+    last10 = last10_digits(mobile)
+    if len(last10) < 10:
+        return jsonify({"ok": False, "error": "10 digit mobile number chahiye."}), 400
+    comm = CommunicationService()
+    existing = comm.find_open_whatsapp_thread(last10)
+    if existing:
+        conversation_id = int(existing["ConversationID"])
+    else:
+        conversation_id = comm.find_or_open_conversation(
+            channel="WhatsApp",
+            subject=name or f"WhatsApp {last10}",
+            customer_id=customer_id,
+            contact_mobile=last10,
+            external_thread_key=last10,
+        )
+    return jsonify({"ok": True, "conversation_id": conversation_id})
+
+
 @crm_api_bp.route("/conversations", methods=["GET"])
 @login_required
 def conversations_list():
@@ -720,6 +772,8 @@ def conversation_attachments(conversation_id: int):
                   or (Path(current_app.config["UPLOAD_FOLDER"]) / "whatsapp_media"))
     folder.mkdir(parents=True, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in f.filename)[:180]
+    shown = (request.form.get("display_name") or f.filename or safe).replace("\\", "/").strip()
+    shown = "".join(c if c.isalnum() or c in "._-/ " else "_" for c in shown)[:240] or safe
     dest = folder / f"{uuid.uuid4().hex}_{safe}"
     f.save(dest)
     mime = mimetypes.guess_type(str(dest))[0] or f.mimetype or "application/octet-stream"
@@ -777,11 +831,11 @@ def conversation_attachments(conversation_id: int):
 
     msg_id = CommunicationService().add_message(
         conversation_id,
-        body=caption or f"[{media_type}] {safe}",
+        body=caption or shown,
         channel=channel,
         direction="Outbound",
         attachment_path=store_path,
-        attachment_name=safe,
+        attachment_name=shown,
         attachment_mime_type=mime,
         attachment_size_bytes=dest.stat().st_size,
         media_type=media_type,

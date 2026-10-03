@@ -185,6 +185,48 @@
   border-color: var(--wa-green-dark);
 }
 
+.wa-attach-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.5rem;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.wa-attach-folder {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #0b3a66;
+}
+
+.wa-attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.15rem 0.15rem 0.35rem;
+  background: #f4f7fb;
+  border-radius: 6px;
+}
+
+.wa-attach-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-attach-chip button {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #667781;
+  line-height: 1;
+  padding: 0 0.35rem;
+}
+
 @media (max-width: 991.98px) {
   .wa-shell {
     min-height: auto;

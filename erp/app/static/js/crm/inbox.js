@@ -22,6 +22,8 @@
     tasks: page.dataset.apiTasks,
     followups: page.dataset.apiFollowups,
     simulateStatus: page.dataset.apiSimulateStatus,
+    start: page.dataset.apiStart,
+    search: page.dataset.apiSearch,
     customer360: page.dataset.customer360,
   };
   const testMode = page.dataset.testMode === "1";
@@ -424,35 +426,101 @@
     });
   });
 
+  const pendingFiles = [];
+  const attachPreview = document.getElementById("crmAttachPreview");
+
+  function fileLabel(file) {
+    const rel = (file.webkitRelativePath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    return rel || file.name || "file";
+  }
+
+  function addPendingFiles(fileList) {
+    Array.from(fileList || []).forEach(function (file) {
+      if (!file || !file.name) return;
+      const label = fileLabel(file);
+      const dup = pendingFiles.some(function (item) {
+        return item.label === label && item.file.size === file.size;
+      });
+      if (!dup) pendingFiles.push({ file: file, label: label });
+    });
+    renderPendingFiles();
+  }
+
+  function renderPendingFiles() {
+    if (!attachPreview) return;
+    if (!pendingFiles.length) {
+      attachPreview.classList.add("d-none");
+      attachPreview.innerHTML = "";
+      return;
+    }
+    attachPreview.classList.remove("d-none");
+    const groups = {};
+    const loose = [];
+    pendingFiles.forEach(function (item, index) {
+      const parts = item.label.split("/");
+      if (parts.length > 1) {
+        const folder = parts[0];
+        if (!groups[folder]) groups[folder] = [];
+        groups[folder].push({ item: item, index: index });
+      } else {
+        loose.push({ item: item, index: index });
+      }
+    });
+    let html = "";
+    Object.keys(groups).forEach(function (folder) {
+      html += '<div class="wa-attach-folder"><i class="bi bi-folder-fill"></i> ' + CrmCommon.escapeHtml(folder) + "</div>";
+      groups[folder].forEach(function (row) {
+        html += pendingChip(row.item.label.split("/").slice(1).join("/"), row.index);
+      });
+    });
+    loose.forEach(function (row) {
+      html += pendingChip(row.item.label, row.index);
+    });
+    attachPreview.innerHTML = html;
+  }
+
+  function pendingChip(label, index) {
+    return (
+      '<div class="wa-attach-chip"><i class="bi bi-file-earmark"></i><span>' +
+      CrmCommon.escapeHtml(label) +
+      '</span><button type="button" data-remove-file="' +
+      index +
+      '" aria-label="Remove">&times;</button></div>'
+    );
+  }
+
+  async function uploadPendingFile(item, caption) {
+    const fd = new FormData();
+    fd.append("file", item.file, item.file.name);
+    fd.append("display_name", item.label);
+    fd.append("caption", caption || "");
+    fd.append("channel", document.getElementById("crmReplyChannel").value);
+    const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+    const resp = await fetch(CrmCommon.urlTemplate(api.attachments, activeConvId), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: token ? { "X-CSRFToken": token } : {},
+      body: fd,
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.ok === false) {
+      throw Object.assign(new Error(data.error || "Upload failed"), { data: data });
+    }
+    return data;
+  }
+
   const replyForm = document.getElementById("crmInboxReplyForm");
+  const replyBody = document.getElementById("crmReplyBody");
   if (replyForm) {
     replyForm.addEventListener("submit", async function (e) {
       e.preventDefault();
       if (!activeConvId) return;
-      const body = document.getElementById("crmReplyBody").value.trim();
-      const fileInput = document.getElementById("crmReplyFile");
+      const body = replyBody.value.trim();
+      if (!body && !pendingFiles.length) return;
+      const sendBtn = document.getElementById("crmReplySendBtn");
+      if (sendBtn) sendBtn.disabled = true;
       try {
-        if (fileInput && fileInput.files && fileInput.files[0]) {
-          const fd = new FormData();
-          fd.append("file", fileInput.files[0]);
-          fd.append("caption", body);
-          fd.append("channel", document.getElementById("crmReplyChannel").value);
-          const token =
-            (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
-          const resp = await fetch(CrmCommon.urlTemplate(api.attachments, activeConvId), {
-            method: "POST",
-            credentials: "same-origin",
-            headers: token ? { "X-CSRFToken": token } : {},
-            body: fd,
-          });
-          const data = await resp.json();
-          if (!resp.ok || data.ok === false) {
-            throw Object.assign(new Error(data.error || "Upload failed"), { data: data });
-          }
-          if (data.warning) CrmCommon.showAlert(data.warning, "warning");
-          fileInput.value = "";
-        } else {
-          if (!body) return;
+        if (body) {
           const data = await CrmCommon.apiFetch(
             CrmCommon.urlTemplate(api.reply, activeConvId),
             {
@@ -466,10 +534,93 @@
           );
           if (data.warning) CrmCommon.showAlert(data.warning, "warning");
         }
-        document.getElementById("crmReplyBody").value = "";
+        const queued = pendingFiles.slice();
+        for (let i = 0; i < queued.length; i += 1) {
+          const data = await uploadPendingFile(queued[i], "");
+          if (data.warning) CrmCommon.showAlert(data.warning, "warning");
+        }
+        pendingFiles.length = 0;
+        renderPendingFiles();
+        replyBody.value = "";
+        const fileInput = document.getElementById("crmReplyFile");
+        const folderInput = document.getElementById("crmReplyFolder");
+        if (fileInput) fileInput.value = "";
+        if (folderInput) folderInput.value = "";
         selectConversation(activeConvId);
       } catch (err) {
         CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+      } finally {
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    });
+  }
+
+  if (replyBody) {
+    replyBody.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        if (replyForm) replyForm.requestSubmit();
+      }
+    });
+    replyBody.addEventListener("paste", function (e) {
+      const files = e.clipboardData && e.clipboardData.files;
+      if (!files || !files.length) return;
+      e.preventDefault();
+      addPendingFiles(files);
+    });
+  }
+
+  const fileInput = document.getElementById("crmReplyFile");
+  if (fileInput) {
+    fileInput.addEventListener("change", function () {
+      addPendingFiles(fileInput.files);
+      fileInput.value = "";
+    });
+  }
+  const folderInput = document.getElementById("crmReplyFolder");
+  if (folderInput) {
+    folderInput.addEventListener("change", function () {
+      addPendingFiles(folderInput.files);
+      folderInput.value = "";
+    });
+  }
+  if (attachPreview) {
+    attachPreview.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-remove-file]");
+      if (!btn) return;
+      const index = parseInt(btn.getAttribute("data-remove-file"), 10);
+      if (!Number.isNaN(index)) pendingFiles.splice(index, 1);
+      renderPendingFiles();
+    });
+  }
+  const pasteBtn = document.getElementById("crmReplyPaste");
+  if (pasteBtn) {
+    pasteBtn.addEventListener("click", async function () {
+      if (replyBody) replyBody.focus();
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        CrmCommon.showAlert("Copied file par Ctrl+V dabayein.", "warning");
+        return;
+      }
+      try {
+        const items = await navigator.clipboard.read();
+        const collected = [];
+        for (let i = 0; i < items.length; i += 1) {
+          const item = items[i];
+          const types = item.types || [];
+          for (let t = 0; t < types.length; t += 1) {
+            if (types[t].indexOf("text/") === 0) continue;
+            const blob = await item.getType(types[t]);
+            const ext = (types[t].split("/")[1] || "bin").split(";")[0];
+            collected.push(new File([blob], "pasted-" + Date.now() + "." + ext, { type: types[t] }));
+          }
+        }
+        if (!collected.length) {
+          CrmCommon.showAlert("Copied file par Ctrl+V dabayein.", "warning");
+          return;
+        }
+        addPendingFiles(collected);
+      } catch (_err) {
+        CrmCommon.showAlert("Copied file par Ctrl+V dabayein.", "warning");
       }
     });
   }
@@ -801,7 +952,6 @@
     });
   }
 
-  const replyBody = document.getElementById("crmReplyBody");
   if (replyBody) {
     replyBody.addEventListener("input", function () {
       const raw = replyBody.value.trim();
@@ -816,6 +966,103 @@
           replyBody.focus();
           return;
         }
+      }
+    });
+  }
+
+  const newMsgBtn = document.getElementById("crmNewMessageBtn");
+  const newMsgModalEl = document.getElementById("crmNewMessageModal");
+  const newMsgModal = newMsgModalEl ? bootstrap.Modal.getOrCreateInstance(newMsgModalEl) : null;
+  const newSearch = document.getElementById("crmNewSearch");
+  const newResults = document.getElementById("crmNewSearchResults");
+  let newSearchTimer = null;
+
+  function fillNewRecipient(name, mobile, customerId) {
+    const nameEl = document.getElementById("crmNewName");
+    const mobileEl = document.getElementById("crmNewMobile");
+    const idEl = document.getElementById("crmNewCustomerId");
+    if (nameEl) nameEl.value = name || "";
+    if (mobileEl) mobileEl.value = mobile || "";
+    if (idEl) idEl.value = customerId || "";
+  }
+
+  async function startChat(body) {
+    const data = await CrmCommon.apiFetch(api.start, { method: "POST", body: body });
+    if (newMsgModal) newMsgModal.hide();
+    if (data.conversation_id) await selectConversation(data.conversation_id);
+  }
+
+  if (newMsgBtn && newMsgModal) {
+    newMsgBtn.addEventListener("click", function () {
+      fillNewRecipient("", "", "");
+      if (newSearch) newSearch.value = "";
+      if (newResults) newResults.innerHTML = "";
+      newMsgModal.show();
+      if (newSearch) setTimeout(function () { newSearch.focus(); }, 200);
+    });
+  }
+
+  if (newSearch && newResults && api.search) {
+    newSearch.addEventListener("input", function () {
+      const q = newSearch.value.trim();
+      if (newSearchTimer) clearTimeout(newSearchTimer);
+      if (q.length < 2) {
+        newResults.innerHTML = "";
+        return;
+      }
+      newSearchTimer = setTimeout(async function () {
+        try {
+          const data = await CrmCommon.apiFetch(api.search + "?q=" + encodeURIComponent(q));
+          const rows = data.customers || [];
+          if (!rows.length) {
+            newResults.innerHTML = '<div class="text-muted px-1 py-1">Koi saved customer nahi mila. Neeche number likh kar Open chat dabao.</div>';
+            return;
+          }
+          newResults.innerHTML = rows.slice(0, 8).map(function (c) {
+            const mobile = c.mobile_number || "";
+            return (
+              '<button type="button" class="list-group-item list-group-item-action py-1" data-customer-id="' +
+              CrmCommon.escapeHtml(String(c.customer_id || "")) +
+              '" data-name="' +
+              CrmCommon.escapeHtml(c.customer_name || c.title || "") +
+              '" data-mobile="' +
+              CrmCommon.escapeHtml(mobile) +
+              '"><strong>' +
+              CrmCommon.escapeHtml(c.customer_name || c.title || "Customer") +
+              "</strong><div class=\"text-muted\">" +
+              CrmCommon.escapeHtml(mobile || "Mobile missing") +
+              "</div></button>"
+            );
+          }).join("");
+        } catch (_err) {
+          newResults.innerHTML = "";
+        }
+      }, 250);
+    });
+    newResults.addEventListener("click", function (e) {
+      const btn = e.target.closest("[data-customer-id]");
+      if (!btn) return;
+      fillNewRecipient(btn.getAttribute("data-name") || "", btn.getAttribute("data-mobile") || "", btn.getAttribute("data-customer-id") || "");
+      const form = document.getElementById("crmNewMessageForm");
+      if (form) form.requestSubmit();
+    });
+  }
+
+  const newForm = document.getElementById("crmNewMessageForm");
+  if (newForm) {
+    newForm.addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const customerId = (document.getElementById("crmNewCustomerId").value || "").trim();
+      const mobile = (document.getElementById("crmNewMobile").value || "").trim();
+      const name = (document.getElementById("crmNewName").value || "").trim();
+      try {
+        await startChat({
+          customer_id: customerId ? parseInt(customerId, 10) : null,
+          mobile: mobile,
+          name: name,
+        });
+      } catch (err) {
+        CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
       }
     });
   }
