@@ -57,6 +57,9 @@ MODULE_META = {
 
 
 DSC_APPLICATION_STAGE_CODES = frozenset({"application_received", "application_no"})
+DSC_TYPES = ("Ind.", "Org.")
+DSC_CLASSES = ("Class-II", "Class-III")
+DSC_YEARS = ("1-Year", "2-Years", "3-Years")
 
 # Pasted from Followup Master. Followup screens use these names, not the master screen.
 FIXED_WORKFLOW_STAGES = {
@@ -341,6 +344,9 @@ class FollowupService:
         introduced_by = None
         if "IntroducedBy" in available_cols:
             introduced_by = getattr(row, "IntroducedBy", None)
+        dsc_type = getattr(row, "DscType", None) if "DscType" in available_cols else None
+        dsc_class = getattr(row, "DscClass", None) if "DscClass" in available_cols else None
+        dsc_year = getattr(row, "DscYear", None) if "DscYear" in available_cols else None
         form_type = None
         if "FormType" in available_cols:
             form_type = getattr(row, "FormType", None)
@@ -359,6 +365,9 @@ class FollowupService:
             "application_number": application_number,
             "location": location,
             "introduced_by": introduced_by,
+            "dsc_type": dsc_type,
+            "dsc_class": dsc_class,
+            "dsc_year": dsc_year,
             "bill_no": row.BillNo,
             "bill_date": row.BillDate.isoformat() if row.BillDate else None,
             "bill_amount": bill_amount,
@@ -433,6 +442,7 @@ class FollowupService:
             from app.repositories.customer_repository import CustomerRepository
 
             CustomerRepository().ensure_schema()
+            self.followup_repo.ensure_dsc_extra_columns()
         # Progressive exclusive-bucket status filter (ITR + DSC).
         # Other modules keep repository tick-based status filtering.
         repo_status = None if self.module_code in {"ITR", "DSC"} else status_filter
@@ -467,6 +477,9 @@ class FollowupService:
             row["application_number"] = row.get("ApplicationNumber")
             row["location"] = row.get("Location")
             row["introduced_by"] = row.get("IntroducedBy")
+            row["dsc_type"] = row.get("DscType") or ""
+            row["dsc_class"] = row.get("DscClass") or ""
+            row["dsc_year"] = row.get("DscYear") or ""
             if self.module_code == "DSC" and not row["application_number"] and row.get("BillNo"):
                 completed_codes = {
                     (s.get("StageCode") or "").lower() for s in row.get("completed_stages", [])
@@ -825,6 +838,8 @@ class FollowupService:
     def get_entry(self, entry_id: int) -> dict:
         if self.module_code == "TDS":
             self.followup_repo.ensure_tds_period_columns()
+        if self.module_code == "DSC":
+            self.followup_repo.ensure_dsc_extra_columns()
         row = self.followup_repo.get_entry(entry_id)
         if row is None or not row.IsActive or row.ModuleCode != self.module_code:
             raise ValueError("Followup entry not found.")
@@ -1241,6 +1256,7 @@ class FollowupService:
             )
 
     def save_entry(self, payload: dict, *, created_by: str | None = None) -> dict:
+        self.followup_repo.ensure_dsc_extra_columns()
         work_date = self._parse_work_date(payload)
         tax_period = (payload.get("tax_period") or payload.get("TaxPeriod") or default_tax_period()).strip()
         if not tax_period:
@@ -1332,6 +1348,15 @@ class FollowupService:
             introduced_by = (
                 payload.get("introduced_by") or payload.get("IntroducedBy") or ""
             ).strip()
+            dsc_type = (payload.get("dsc_type") or payload.get("DscType") or "").strip()
+            dsc_class = (payload.get("dsc_class") or payload.get("DscClass") or "").strip()
+            dsc_year = (payload.get("dsc_year") or payload.get("DscYear") or "").strip()
+            if dsc_type not in DSC_TYPES:
+                raise ValueError("DSC type is required (Ind. or Org.).")
+            if dsc_class not in DSC_CLASSES:
+                raise ValueError("DSC class is required (Class-II or Class-III).")
+            if dsc_year not in DSC_YEARS:
+                raise ValueError("Year is required (1-Year, 2-Years or 3-Years).")
             if not location:
                 raise ValueError("Location is required.")
             if not introduced_by:
@@ -1340,6 +1365,9 @@ class FollowupService:
         else:
             location = None
             introduced_by = None
+            dsc_type = None
+            dsc_class = None
+            dsc_year = None
             email_id = None
 
         needs_billing = (
@@ -1411,6 +1439,9 @@ class FollowupService:
             data["Quarter"] = quarter
         if self.module_code == "DSC":
             data["ApplicationNumber"] = application_no
+            data["DscType"] = dsc_type
+            data["DscClass"] = dsc_class
+            data["DscYear"] = dsc_year
             data["Location"] = location
             data["IntroducedBy"] = introduced_by
 

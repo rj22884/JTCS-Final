@@ -8,12 +8,19 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link href="{{ url_for('static', filename='css/erp.css') }}?v=20260925reason1" rel="stylesheet">
-  <link href="{{ url_for('static', filename='css/misc_generate_bill.css') }}?v=20260925saveexit" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/misc_generate_bill.css') }}?v=20261003billwin" rel="stylesheet">
 </head>
 <body class="mgb-body">
   <div class="mgb-shell">
     <header class="mgb-header">
-      <strong>Sales Invoice — Generate Bill</strong>
+      <strong class="mgb-old-title">Sales Invoice — Generate Bill</strong>
+      <div class="mgb-inv-head d-none" id="mgbInvHead">
+        <img src="{{ url_for('static', filename='img/jtcs_invoice_logo.png') }}" alt="JTCS">
+        <div>
+          <div class="mgb-co-name">{{ company.name }}</div>
+          <div class="mgb-co-meta">GSTIN: {{ company.gstin }} · {{ company.state }} ({{ company.state_code }})</div>
+        </div>
+      </div>
       <button type="button" class="btn btn-sm btn-outline-secondary" id="mgbCloseBtn" title="Close">
         <i class="bi bi-x-lg"></i>
       </button>
@@ -29,6 +36,10 @@
       <input type="hidden" id="mgbMobile" value="">
       <input type="hidden" id="mgbInvoiceId" value="">
 
+      <div class="mgb-inv-title d-none" id="mgbInvTitle">Sale / Service Invoice</div>
+
+      <div class="mgb-workspace">
+      <div class="mgb-main">
       <div class="mgb-grid">
         <div>
           <label class="form-label" for="mgbDate">Date</label>
@@ -46,24 +57,36 @@
           <label class="form-label" for="mgbInvoiceNo">Invoice Number</label>
           <input type="text" class="form-control form-control-sm" id="mgbInvoiceNo" maxlength="50" required>
         </div>
-        <div>
+        <div class="mgb-customer">
+          <div class="mgb-cust-mode d-none" id="mgbCustomerMode">
+            <label class="mgb-radio">
+              <input type="radio" name="mgbCustMode" id="mgbBillSame" value="same" checked>
+              Same customer
+            </label>
+            <label class="mgb-radio">
+              <input type="radio" name="mgbCustMode" id="mgbBillAnother" value="another">
+              Bill generate for another customer
+            </label>
+          </div>
           <label class="form-label" for="mgbCustomerName">Customer</label>
-          <input type="text" class="form-control form-control-sm" id="mgbCustomerName" maxlength="255" required>
+          <input type="text" class="form-control form-control-sm" id="mgbCustomerName" maxlength="255" required
+                 autocomplete="off">
+          <div class="mgb-suggest d-none" id="mgbCustomerList"></div>
         </div>
-        <div>
+        <div class="mgb-single">
           <label class="form-label" for="mgbItem">Item</label>
           <input type="text" class="form-control form-control-sm" id="mgbItem" maxlength="200" required>
         </div>
-        <div class="mgb-span-2">
+        <div class="mgb-span-2 mgb-single">
           <label class="form-label" for="mgbItemDesc">Item Description</label>
           <input type="text" class="form-control form-control-sm" id="mgbItemDesc" maxlength="200"
                  placeholder="Optional description">
         </div>
-        <div>
+        <div class="mgb-single">
           <label class="form-label" for="mgbRate">Amount incl. GST (₹)</label>
           <input type="number" class="form-control form-control-sm" id="mgbRate" min="0" step="0.01" required>
         </div>
-        <div>
+        <div id="mgbStateWrap">
           <label class="form-label" for="mgbState">State</label>
           <select class="form-select form-select-sm" id="mgbState" required>
             <option value="">-- Select --</option>
@@ -75,28 +98,28 @@
             {% endfor %}
           </select>
         </div>
-        <div>
+        <div class="mgb-single">
           <label class="form-label" for="mgbGstRate">GST %</label>
           <input type="number" class="form-control form-control-sm" id="mgbGstRate" min="0" step="0.01" readonly>
         </div>
-        <div>
+        <div class="mgb-tax-field">
           <label class="form-label" for="mgbCgst">CGST</label>
           <input type="text" class="form-control form-control-sm" id="mgbCgst" readonly>
         </div>
-        <div>
+        <div class="mgb-tax-field">
           <label class="form-label" for="mgbSgst">SGST</label>
           <input type="text" class="form-control form-control-sm" id="mgbSgst" readonly>
         </div>
-        <div>
+        <div class="mgb-tax-field">
           <label class="form-label" for="mgbIgst">IGST</label>
           <input type="text" class="form-control form-control-sm" id="mgbIgst" readonly>
         </div>
-        <div class="mgb-span-4">
+        <div class="mgb-span-4" id="mgbAddressWrap">
           <label class="form-label" for="mgbAddress">Customer Address</label>
           <textarea class="form-control form-control-sm" id="mgbAddress" rows="2" readonly
                     placeholder="Customer address from master"></textarea>
         </div>
-        <div>
+        <div class="mgb-tax-field">
           <label class="form-label" for="mgbAmount">Amount (₹)</label>
           <input type="text" class="form-control form-control-sm fw-semibold" id="mgbAmount" readonly>
         </div>
@@ -115,11 +138,49 @@
         </div>
       </div>
 
+      <div class="mgb-lines d-none" id="mgbLinesWrap">
+        <div class="mgb-lines-head">
+          <span>Line Items</span>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="mgbAddLine">
+            <i class="bi bi-plus-lg"></i> Add Line
+          </button>
+        </div>
+        <table class="mgb-lines-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Item Description</th>
+              <th>Qty</th>
+              <th>Rate (₹)</th>
+              <th>GST %</th>
+              <th class="text-end">Amount (₹)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="mgbLineBody"></tbody>
+        </table>
+      </div>
+
       <div class="mgb-hint small text-muted" id="mgbTaxHint"></div>
       <div class="alert alert-danger py-1 px-2 small d-none mb-0" id="mgbError"></div>
       <div class="alert alert-success py-1 px-2 small d-none mb-0" id="mgbOk"></div>
 
+      <div class="mgb-totals d-none" id="mgbTotals">
+        <table>
+          <tbody>
+            <tr><td>Taxable Value</td><td class="text-end" id="mgbTotTaxable">0.00</td></tr>
+            <tr><td>CGST</td><td class="text-end" id="mgbTotCgst">0.00</td></tr>
+            <tr><td>SGST</td><td class="text-end" id="mgbTotSgst">0.00</td></tr>
+            <tr><td>IGST</td><td class="text-end" id="mgbTotIgst">0.00</td></tr>
+            <tr><td>Invoice Value</td><td class="text-end" id="mgbTotValue">0.00</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="mgb-actions">
+        <button type="button" class="btn btn-sm btn-primary d-none" id="mgbSaveBtn">
+          <i class="bi bi-save"></i> Save
+        </button>
         <button type="button" class="btn btn-sm btn-outline-primary" id="mgbPreviewBtn">
           <i class="bi bi-eye"></i> Preview PDF
         </button>
@@ -137,6 +198,38 @@
           <i class="bi bi-receipt"></i> Save, Exit and Convert to Invoice
         </button>
       </div>
+      </div>
+
+      <aside class="mgb-party d-none" id="mgbParty" aria-label="Party Details">
+        <div class="mgb-party-title">Party Details</div>
+        <label class="form-label" for="mgbPartyName">Customer Name</label>
+        <input type="text" class="form-control form-control-sm" id="mgbPartyName" readonly>
+        <label class="form-label" for="mgbPartyContact">Contact Person</label>
+        <input type="text" class="form-control form-control-sm" id="mgbPartyContact" readonly>
+        <label class="form-label" for="mgbPartyGstin">GSTIN</label>
+        <input type="text" class="form-control form-control-sm" id="mgbPartyGstin" readonly>
+        <div class="mgb-party-split">
+          <div>
+            <label class="form-label" for="mgbPartyMobile">Mobile</label>
+            <input type="text" class="form-control form-control-sm" id="mgbPartyMobile" readonly>
+          </div>
+          <div>
+            <label class="form-label" for="mgbPartyStateCode">State</label>
+            <input type="text" class="form-control form-control-sm" id="mgbPartyStateCode" readonly>
+          </div>
+        </div>
+        <label class="form-label" for="mgbPartyEmail">Email</label>
+        <input type="text" class="form-control form-control-sm" id="mgbPartyEmail" readonly>
+        <div id="mgbPartyPlaceSlot">
+          <label class="form-label">Place of Supply</label>
+        </div>
+        <div id="mgbPartyAddressSlot">
+          <label class="form-label">Billing Address</label>
+        </div>
+        <label class="form-label" for="mgbPartyNotes">Notes</label>
+        <input type="text" class="form-control form-control-sm" id="mgbPartyNotes" readonly>
+      </aside>
+      </div>
     </form>
   </div>
 
@@ -148,14 +241,57 @@
       createUrl: {{ create_url | tojson }},
       updateUrl: {{ update_url | tojson }},
       customerUrl: {{ customer_url | tojson }},
+      customerSearchUrl: {{ customer_search_url | tojson }},
+      customerListUrl: {{ customer_list_url | tojson }},
+      confirmUserUrl: {{ confirm_user_url | tojson }},
+      items: {{ bill_items | tojson }},
       lookupUrl: {{ lookup_url | tojson }},
       deleteUrl: {{ delete_url | tojson }},
       defaultTaxPeriod: {{ default_tax_period | tojson }},
       csrf: {{ csrf_token() | tojson }}
     };
   </script>
+  <div class="modal fade" id="jtcsDeleteConfirmModal" tabindex="-1" aria-labelledby="jtcsDeleteConfirmTitle" aria-hidden="true" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header py-2" id="jtcsDeleteConfirmHeader">
+          <h5 class="modal-title" id="jtcsDeleteConfirmTitle">Confirm</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small mb-3" id="jtcsDeleteConfirmMessage" style="white-space: pre-wrap;"></p>
+          <form id="jtcsDeleteConfirmForm" class="row g-2" autocomplete="off">
+            <div class="col-12">
+              <label class="form-label" for="jtcsDeleteConfirmUserId">User ID *</label>
+              <input type="text" class="form-control form-control-sm" id="jtcsDeleteConfirmUserId" name="user_id" required autocomplete="username" readonly>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="jtcsDeleteConfirmPassword">Password *</label>
+              <input type="password" class="form-control form-control-sm" id="jtcsDeleteConfirmPassword" name="password" required autocomplete="current-password">
+            </div>
+            <div class="col-12">
+              <div class="small text-danger d-none" id="jtcsDeleteConfirmError"></div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="jtcsDeleteConfirmCancelBtn" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-danger btn-sm" id="jtcsDeleteConfirmBtn">
+            <i class="bi bi-check-lg" id="jtcsDeleteConfirmBtnIcon"></i>
+            <span id="jtcsDeleteConfirmBtnText">Confirm</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.JTCS_CURRENT_LOGIN_ID = {{ current_login_id | tojson }};
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/jtcs_ledger_notify.js') }}?v=20261001dash1"></script>
   <script src="{{ url_for('static', filename='js/jtcs_dialog.js') }}?v=20260925convertpop"></script>
-  <script src="{{ url_for('static', filename='js/misc_generate_bill.js') }}?v=20260925convertpop"></script>
+  <script src="{{ url_for('static', filename='js/delete_confirm.js') }}?v=20260819confirm1"></script>
+  <script src="{{ url_for('static', filename='js/misc_generate_bill.js') }}?v=20261003billwin"></script>
 </body>
 </html>

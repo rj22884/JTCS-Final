@@ -1,0 +1,83 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}{% endblock %}
+
+{% block content %}
+<div class="jtcs-card" style="max-width: 920px;">
+  <p class="small text-muted mb-3">
+    Sale invoice aur Generate Bill par company GSTIN, address aur state yahi se aate hain.
+    Company name sirf Administrator badal sakta hai. Baaki fields har user edit karke save kar sakta hai.
+  </p>
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-3">
+      <div class="col-md-8">
+        <label class="form-label" for="companyName">Company name</label>
+        <input class="form-control" id="companyName" name="company_name" maxlength="200" required
+               value="{{ values.company_name }}"
+               {% if not can_edit_name %}readonly{% endif %}>
+        {% if not can_edit_name %}
+        <div class="form-text">Company name sirf Administrator change kar sakta hai.</div>
+        {% endif %}
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyGstin">GSTIN</label>
+        <input class="form-control text-uppercase" id="companyGstin" name="gstin" maxlength="15"
+               value="{{ values.gstin }}" placeholder="15-character GSTIN">
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="companyAddress">Address</label>
+        <input class="form-control" id="companyAddress" name="address" maxlength="500"
+               value="{{ values.address }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyCity">City</label>
+        <input class="form-control" id="companyCity" name="city" maxlength="100"
+               value="{{ values.city }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyPincode">PIN code</label>
+        <input class="form-control" id="companyPincode" name="pincode" maxlength="6" inputmode="numeric"
+               value="{{ values.pincode }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyState">State</label>
+        <select class="form-select" id="companyState" name="state">
+          <option value="">Select state</option>
+          {% for code, name in states %}
+          <option value="{{ name }}" {% if values.state == name %}selected{% endif %}>{{ name }} ({{ code }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyPan">PAN</label>
+        <input class="form-control text-uppercase" id="companyPan" name="pan" maxlength="10"
+               value="{{ values.pan }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyCin">CIN</label>
+        <input class="form-control text-uppercase" id="companyCin" name="cin" maxlength="30"
+               value="{{ values.cin }}">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="companyPhone">Phone</label>
+        <input class="form-control" id="companyPhone" name="phone" maxlength="20"
+               value="{{ values.phone }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="companyEmail">Email</label>
+        <input class="form-control" id="companyEmail" name="email" maxlength="254"
+               value="{{ values.email }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="companyWebsite">Website</label>
+        <input class="form-control" id="companyWebsite" name="website" maxlength="200"
+               value="{{ values.website }}">
+      </div>
+    </div>
+    <div class="mt-3">
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

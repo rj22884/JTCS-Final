@@ -118,7 +118,7 @@
       <span class="jtcs-live-clock" data-server-iso="{{ server_time_iso }}">{{ server_time }}</span>
     </span>
     {% if not is_fps_user %}
-    <a href="{{ url_for('dashboard.index') }}" class="jtcs-header-btn" title="Profile">
+    <a href="{{ url_for('auth.company_profile_page') }}" class="jtcs-header-btn" title="Profile">
       <i class="bi bi-person-gear"></i>
       <span class="d-none d-md-inline">Profile</span>
     </a>

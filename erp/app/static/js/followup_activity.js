@@ -73,6 +73,8 @@
     billNo: document.getElementById("fuBillNo"),
     generateBillYes: document.getElementById("fuGenerateBillYes"),
     generateBillNo: document.getElementById("fuGenerateBillNo"),
+    approveInvoiceYes: document.getElementById("fuApproveInvoiceYes"),
+    approveInvoiceNo: document.getElementById("fuApproveInvoiceNo"),
     invoiceStatus: document.getElementById("fuInvoiceStatus"),
     billDate: document.getElementById("fuBillDate"),
     billAmount: document.getElementById("fuBillAmount"),
@@ -87,6 +89,9 @@
     applicationNumber: document.getElementById("fuApplicationNumber"),
     location: document.getElementById("fuLocation"),
     introducedBy: document.getElementById("fuIntroducedBy"),
+    dscType: document.getElementById("fuDscType"),
+    dscClass: document.getElementById("fuDscClass"),
+    dscYear: document.getElementById("fuDscYear"),
     customerEmail: document.getElementById("fuCustomerEmail"),
     saveBtn: document.getElementById("fuSaveBtn"),
     returnType: document.getElementById("fuReturnType"),
@@ -915,6 +920,9 @@
     if (isDscApplicationStageChecked() && !isStageChecked("documents_received") && !applicationNo && !locked) {
       return "Application number is required when Application No. is checked.";
     }
+    if (!(els.dscType?.value || "").trim()) return "DSC type is required.";
+    if (!(els.dscClass?.value || "").trim()) return "DSC class is required.";
+    if (!(els.dscYear?.value || "").trim()) return "Year is required.";
     if (!(els.location?.value || "").trim()) {
       return "Location is required.";
     }
@@ -950,6 +958,22 @@
     const paid = sourcePaymentReceived() ? "Yes" : "No";
     const no = record.invoice_no ? record.invoice_no + " — " : "";
     return "Sale invoice " + no + approved + " · Payment Received: " + paid;
+  }
+
+  function paintInvoiceStatus(record) {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    box.classList.remove("fu-pay-no", "fu-pay-yes");
+    if (!record) {
+      box.textContent = "";
+      box.classList.add("d-none");
+      return;
+    }
+    box.textContent = saleStatusText(record);
+    box.classList.remove("d-none");
+    if (!isDscModule) return;
+    if (sourcePaymentReceived()) box.classList.add("fu-pay-yes");
+    else box.classList.add("fu-pay-no");
   }
 
   function saleIsApproved() {
@@ -1013,6 +1037,10 @@
     const approved = saleIsApproved();
     if (els.generateBillYes) els.generateBillYes.disabled = approved || entryFieldsLocked;
     if (els.generateBillNo) els.generateBillNo.disabled = approved || entryFieldsLocked;
+    if (isDscModule) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = approved;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = !approved;
+    }
     const creditOpen = approved && hasCreditPayment() && !entryFieldsLocked;
     const lockPayments = entryFieldsLocked || (approved && !creditOpen);
     els.paymentWrap?.querySelectorAll("input, select, button, textarea").forEach(function (input) {
@@ -1039,9 +1067,8 @@
     if (!box) return;
     const billNo = (els.billNo?.value || "").trim();
     if (!isStageChecked("tally_bill_generated") || !billNo || !window.FU_INVOICE_STATUS_URL) {
-      box.textContent = "";
-      box.classList.add("d-none");
       lastSaleRecord = null;
+      paintInvoiceStatus(null);
       syncGenerateBillPrompt();
       return;
     }
@@ -1051,19 +1078,16 @@
       const res = await fetch(url.toString(), { credentials: "same-origin" });
       const data = await res.json();
       if (!data.ok || !data.found || !data.record) {
-        box.textContent = "";
-        box.classList.add("d-none");
         lastSaleRecord = null;
+        paintInvoiceStatus(null);
         syncGenerateBillPrompt();
         return;
       }
       lastSaleRecord = data.record;
-      box.textContent = saleStatusText(data.record);
-      box.classList.remove("d-none");
+      paintInvoiceStatus(data.record);
       syncGenerateBillPrompt();
     } catch (_err) {
-      box.textContent = "";
-      box.classList.add("d-none");
+      paintInvoiceStatus(null);
       syncGenerateBillPrompt();
     }
   }
@@ -1146,10 +1170,7 @@
       return;
     }
     resetGenerateBillChoice();
-    if (els.invoiceStatus) {
-      els.invoiceStatus.textContent = "";
-      els.invoiceStatus.classList.add("d-none");
-    }
+    paintInvoiceStatus(null);
     if (window.JTCSDialog?.alert) {
       window.JTCSDialog.alert(data.message || "Related invoices deleted.", "success");
     }
@@ -1199,14 +1220,24 @@
       rate: (els.billAmount?.value || "").trim(),
       state_code: "05",
     };
+    if (isDscModule) {
+      seed.source = "DSC";
+    }
     try {
       sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
     } catch (_err) {
       /* ignore quota errors */
     }
     const url = window.FU_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
-    const width = Math.round(9.4 * 96);
-    const height = Math.round(7.2 * 96);
+    if (isDscModule) {
+      const host = window.top || window;
+      if (typeof host.jtcsOpenPageWindow === "function") {
+        host.jtcsOpenPageWindow(url, "Generate Bill");
+        return;
+      }
+    }
+    const width = Math.round((isDscModule ? 14.4 : 9.4) * 96);
+    const height = Math.round((isDscModule ? 9.1 : 7.2) * 96);
     const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
     const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
     const features = [
@@ -1352,6 +1383,9 @@
     }
     if (els.location) els.location.value = "";
     if (els.introducedBy) els.introducedBy.value = "";
+    if (els.dscType) els.dscType.value = "";
+    if (els.dscClass) els.dscClass.value = "";
+    if (els.dscYear) els.dscYear.value = "";
     clearCustomerSelection();
     els.workflowChecks?.querySelectorAll(".fu-stage-check").forEach(function (cb) {
       cb.checked = false;
@@ -1712,6 +1746,23 @@
       const appNoValue = isDscModule
         ? (row.application_number || row.bill_no || "")
         : (row.bill_no || "");
+      const dscMix = [row.dsc_type, row.dsc_class, row.dsc_year]
+        .map(function (part) { return String(part || "").trim(); })
+        .filter(Boolean)
+        .join(" / ");
+      const actionsCell =
+        '<td class="text-nowrap fu-grid-actions">' +
+        '<button type="button" class="btn btn-outline-primary btn-sm fu-edit-btn" data-id="' +
+        row.entry_id +
+        '" title="' +
+        editTitle +
+        '"><i class="bi bi-pencil"></i></button> ' +
+        '<button type="button" class="btn btn-outline-danger btn-sm fu-delete-btn" data-id="' +
+        row.entry_id +
+        '"' +
+        deleteDisabledAttrs +
+        '><i class="bi bi-trash"></i></button>' +
+        "</td>";
       const mobileCell = isDscModule
         ? copyableCell(row.mobile_number)
         : "<td>" + escapeHtml(row.mobile_number || "—") + "</td>";
@@ -1724,7 +1775,9 @@
         : "<td>" + escapeHtml(appNoValue || "—") + "</td>";
       return (
         '<tr' + (paymentLocked ? ' class="fu-payment-received-row"' : "") + ">" +
+        (isDscModule ? actionsCell : "") +
         "<td>" + escapeHtml(formatDate(row.work_date)) + "</td>" +
+        (isDscModule ? "<td>" + escapeHtml(dscMix || "—") + "</td>" : "") +
         periodCol +
         tdsPeriodCols +
         gstFieldCols +
@@ -1760,18 +1813,7 @@
         paymentReminderCell +
         rowSyncCell +
         "<td>" + thankYouCell + "</td>" +
-        '<td class="text-end fu-grid-actions">' +
-        '<button type="button" class="btn btn-outline-primary btn-sm fu-edit-btn" data-id="' +
-        row.entry_id +
-        '" title="' +
-        editTitle +
-        '"><i class="bi bi-pencil"></i></button> ' +
-        '<button type="button" class="btn btn-outline-danger btn-sm fu-delete-btn" data-id="' +
-        row.entry_id +
-        '"' +
-        deleteDisabledAttrs +
-        '><i class="bi bi-trash"></i></button>' +
-        "</td>" +
+        (isDscModule ? "" : actionsCell) +
         "</tr>"
       );
     }).join("");
@@ -1851,6 +1893,9 @@
     }
     if (els.location) els.location.value = record.location || "";
     if (els.introducedBy) els.introducedBy.value = record.introduced_by || "";
+    if (els.dscType) els.dscType.value = record.dsc_type || "";
+    if (els.dscClass) els.dscClass.value = record.dsc_class || "";
+    if (els.dscYear) els.dscYear.value = record.dsc_year || "";
     if (els.itrFiledDate) els.itrFiledDate.value = (record.itr_filed_date || "").slice(0, 10);
     if (!isDscModule && els.billNo) els.billNo.value = record.bill_no || "";
     if (els.billDate) els.billDate.value = (record.bill_date || "").slice(0, 10);
@@ -2023,6 +2068,9 @@
       }
       payload.location = (els.location?.value || "").trim();
       payload.introduced_by = (els.introducedBy?.value || "").trim();
+      payload.dsc_type = (els.dscType?.value || "").trim();
+      payload.dsc_class = (els.dscClass?.value || "").trim();
+      payload.dsc_year = (els.dscYear?.value || "").trim();
       payload.email_id = (els.customerEmail?.value || "").trim();
     }
     appendBillingPayload(payload);
@@ -2560,7 +2608,59 @@
 
   els.paymentLines?.addEventListener("input", function () {
     if (!lastSaleRecord || !els.invoiceStatus) return;
-    els.invoiceStatus.textContent = saleStatusText(lastSaleRecord);
+    paintInvoiceStatus(lastSaleRecord);
+  });
+
+  async function approveInvoiceHere() {
+    if (!isDscModule || !els.approveInvoiceYes?.checked) return;
+    if (saleIsApproved()) return;
+    const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
+    if (!invoiceId || !window.FU_INVOICE_WORKFLOW_URL) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+      const message = "Pehle invoice generate karein, phir approve karein.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+      else alert(message);
+      return;
+    }
+    const url = String(window.FU_INVOICE_WORKFLOW_URL).replace("/0/", "/" + invoiceId + "/");
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRFToken": window.FU_CSRF || csrfToken(),
+        },
+        body: JSON.stringify({ bill_approved: true }),
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Unable to approve this invoice.");
+      }
+      await refreshInvoiceStatus();
+    } catch (err) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+      const message = err.message || "Unable to approve this invoice.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "error");
+      else alert(message);
+    }
+  }
+
+  els.approveInvoiceYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      approveInvoiceHere();
+    }, 0);
+  });
+
+  els.approveInvoiceNo?.addEventListener("click", function () {
+    if (!saleIsApproved()) return;
+    if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+    if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
   });
 
   els.generateBillYes?.addEventListener("click", function () {

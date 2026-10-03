@@ -20,6 +20,30 @@
   font-weight: 600;
 }
 
+.fu-bill-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+}
+
+#fuInvoiceStatus.fu-pay-no {
+  color: #dc2626;
+  font-weight: 700;
+  animation: fuStatusBlink 1s ease-in-out infinite;
+}
+
+#fuInvoiceStatus.fu-pay-yes {
+  color: #15803d;
+  font-weight: 700;
+  animation: none;
+}
+
+@keyframes fuStatusBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
 .fu-required::after {
   content: " *";
   color: #dc3545;

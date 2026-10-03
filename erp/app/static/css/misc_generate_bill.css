@@ -110,6 +110,268 @@ body.mgb-body {
   white-space: nowrap;
 }
 
+.mgb-customer {
+  position: relative;
+}
+
+.mgb-cust-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  margin-bottom: 0.2rem;
+}
+
+.mgb-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mgb-suggest {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  top: 100%;
+  max-height: 160px;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+.mgb-suggest button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #fff;
+  padding: 0.28rem 0.45rem;
+  font-size: 11px;
+}
+
+.mgb-suggest button:hover,
+.mgb-suggest button:focus {
+  background: #eff6ff;
+}
+
+body.mgb-dsc {
+  overflow: auto;
+  height: auto;
+}
+
+body.mgb-dsc .mgb-shell {
+  width: 11in;
+}
+
+.mgb-lines-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mgb-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.04in;
+}
+
+.mgb-lines-table th,
+.mgb-lines-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.12rem 0.2rem;
+  vertical-align: middle;
+  font-size: 11px;
+}
+
+.mgb-lines-table th {
+  font-size: 10px;
+  color: #475569;
+  font-weight: 600;
+  text-align: left;
+}
+
+.mgb-lines-table .mgb-line-item,
+.mgb-lines-table .mgb-line-desc {
+  min-width: 9rem;
+}
+
+.mgb-lines-table .mgb-line-qty,
+.mgb-lines-table .mgb-line-gst {
+  width: 4.2rem;
+}
+
+.mgb-lines-table .mgb-line-rate {
+  width: 5.2rem;
+}
+
+.mgb-line-amt {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+body.mgb-dsc {
+  background: #f4f7fb;
+}
+
+body.mgb-dsc .mgb-shell {
+  width: 14.2in;
+  max-width: 100vw;
+  background: #fff;
+}
+
+html.jtcs-embed,
+html.jtcs-embed body.mgb-body {
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+
+html.jtcs-embed body.mgb-dsc .mgb-shell {
+  width: min(14.2in, 100%);
+  max-width: 100%;
+  min-height: 100%;
+}
+
+body.mgb-dsc .mgb-header {
+  border-bottom: 2px solid #ff6a00;
+  align-items: center;
+}
+
+.mgb-inv-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.mgb-inv-head img {
+  height: 36px;
+  width: auto;
+}
+
+.mgb-co-name {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0b2545;
+}
+
+.mgb-co-meta {
+  font-size: 11px;
+  color: #5a6b7d;
+}
+
+.mgb-inv-title {
+  display: inline-flex;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.18rem 0.5rem;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0b2545;
+  background: #fff4eb;
+  border-left: 3px solid #ff6a00;
+}
+
+body.mgb-dsc .mgb-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 0.55rem 0.7rem;
+  align-items: start;
+}
+
+.mgb-party {
+  position: sticky;
+  top: 0;
+  background: linear-gradient(180deg, #fff4eb, #fff);
+  border: 1px solid #ffd2b0;
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem 0.7rem;
+}
+
+.mgb-party-title {
+  margin: 0 0 0.4rem;
+  padding: 0.16rem 0.4rem;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0b2545;
+  background: #fff4eb;
+  border-left: 3px solid #ff6a00;
+}
+
+.mgb-party .form-label {
+  margin: 0.28rem 0 0.08rem;
+}
+
+.mgb-party .form-control,
+.mgb-party .form-select {
+  background: #fff;
+}
+
+.mgb-party .form-control[readonly] {
+  background: #f3f6f9;
+}
+
+.mgb-party-split {
+  display: grid;
+  grid-template-columns: 1.4fr 0.7fr;
+  gap: 0.4rem;
+}
+
+.mgb-party textarea {
+  min-height: 4.2rem;
+  background: #fff;
+}
+
+body.mgb-dsc .mgb-lines-table thead th {
+  background: #0b2545;
+  color: #fff;
+  border-bottom: 0;
+}
+
+body.mgb-dsc .mgb-lines-head span {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #0b2545;
+}
+
+.mgb-totals {
+  max-width: 280px;
+  margin-left: auto;
+  border: 1px solid #d7e0ea;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mgb-totals table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.mgb-totals td {
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid #d7e0ea;
+}
+
+.mgb-totals tr:last-child td {
+  background: #ff6a00;
+  color: #fff;
+  font-weight: 700;
+  border-bottom: 0;
+}
+
 @media (max-width: 860px) {
   .mgb-shell {
     width: 100vw;

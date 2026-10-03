@@ -650,9 +650,11 @@ def conversation_detail(conversation_id: int):
 @crm_api_bp.route("/conversations/<int:conversation_id>/messages", methods=["GET"])
 @login_required
 def conversation_messages(conversation_id: int):
-    if not CommunicationService().get_conversation(conversation_id):
+    comm = CommunicationService()
+    rows = comm.list_messages(conversation_id)
+    if not rows and not comm.get_conversation(conversation_id):
         return jsonify({"ok": False, "error": "Yeh chat nahi mili."}), 404
-    return jsonify({"ok": True, "rows": CommunicationService().list_messages(conversation_id)})
+    return jsonify({"ok": True, "rows": rows})
 
 
 def _stored_upload_file(stored: str | None):

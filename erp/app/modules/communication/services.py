@@ -576,7 +576,7 @@ class CommunicationService:
                 LEFT JOIN dbo.CustomerMaster cm ON cm.CustomerID = c.CustomerID
                 LEFT JOIN dbo.CrmLead l ON l.LeadID = c.LeadID
                 LEFT JOIN dbo.Users u ON u.UserID = c.AssignedUserID
-                WHERE c.ConversationID = :id AND c.IsActive = 1
+                WHERE c.ConversationID = :id
                 """
             ),
             {"id": conversation_id},

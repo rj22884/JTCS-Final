@@ -4,7 +4,6 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
-from flask import current_app
 from sqlalchemy import func, or_, select, text
 
 from app.extensions import db
@@ -394,23 +393,9 @@ class GstInvoiceService:
 
     @staticmethod
     def company_profile() -> dict[str, str]:
-        cfg = current_app.config
-        return {
-            "name": cfg.get("COMPANY_DISPLAY_NAME", "Joshi Tax Consultancy & Services"),
-            "gstin": cfg.get("COMPANY_GSTIN", "05AEBPJ1665H2ZR"),
-            "pan": cfg.get("COMPANY_PAN", "AEBPJ1665H"),
-            "cin": cfg.get("COMPANY_CIN", ""),
-            "address": cfg.get(
-                "COMPANY_ADDRESS",
-                "Sanjay Colony, Nainital Road, Haldwani, Uttarakhand 263139",
-            ),
-            "state": cfg.get("COMPANY_STATE", "Uttarakhand"),
-            "state_code": cfg.get("COMPANY_STATE_CODE", "05"),
-            "phone": cfg.get("COMPANY_PHONE", "9412040614"),
-            "email": cfg.get("COMPANY_EMAIL", "admin@jtcsxpert.com"),
-            "website": cfg.get("COMPANY_WEBSITE", "www.jtcsxpert.com"),
-            "logo_filename": "img/jtcs_invoice_logo.png",
-        }
+        from app.services.company_profile_service import invoice_company
+
+        return invoice_company()
 
     @staticmethod
     def state_code_from_name(state: str | None) -> str:
@@ -1368,9 +1353,24 @@ class GstInvoiceService:
         )
         # Miscellaneous Generate Bill types the category amount as GST-inclusive.
         # 400 including 18% stays 400; taxable and CGST/SGST are extracted from it.
-        rate_includes_gst = (
-            bill_source == self.BILL_SOURCE_MISCELLANEOUS
-            and voucher_type == self.VOUCHER_SALE
+        # DSC followup sends gst_inclusive false: Qty × Item Master rate, then GST on top.
+        explicit_inclusive = payload.get("gst_inclusive", payload.get("GstInclusive"))
+        if explicit_inclusive is None or str(explicit_inclusive).strip() == "":
+            rate_includes_gst = (
+                bill_source == self.BILL_SOURCE_MISCELLANEOUS
+                and voucher_type == self.VOUCHER_SALE
+            )
+        else:
+            rate_includes_gst = str(explicit_inclusive).strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        split_gst_per_line = (
+            explicit_inclusive is not None
+            and str(explicit_inclusive).strip() != ""
+            and not rate_includes_gst
         )
         intra_state = bool(place_code) and place_code == seller_code
 
@@ -1380,6 +1380,9 @@ class GstInvoiceService:
         taxable_total = Decimal("0.00")
         gross_total = Decimal("0.00")
         gst_rate_used = Decimal("0.00")
+        line_cgst = Decimal("0.00")
+        line_sgst = Decimal("0.00")
+        line_igst = Decimal("0.00")
 
         for i, raw in enumerate(raw_lines, start=1):
             item_id = raw.get("item_id")
@@ -1423,6 +1426,13 @@ class GstInvoiceService:
                 if taxable < 0:
                     raise ValueError(f"Line {i}: Discount cannot exceed amount.")
                 gross_total += taxable
+                if split_gst_per_line and gst_rate > 0 and taxable > 0:
+                    if intra_state:
+                        half = _q(gst_rate / Decimal("2"))
+                        line_cgst += _q(taxable * half / Decimal("100"))
+                        line_sgst += _q(taxable * half / Decimal("100"))
+                    else:
+                        line_igst += _q(taxable * gst_rate / Decimal("100"))
 
             list_price += line_list
             discount_total += discount
@@ -1454,7 +1464,17 @@ class GstInvoiceService:
         # GST applies for both GST and Non-GST series; kind only controls invoice number format.
         cgst_rate = sgst_rate = igst_rate = Decimal("0.00")
         cgst_amt = sgst_amt = igst_amt = Decimal("0.00")
-        if intra_state:
+        if split_gst_per_line:
+            if intra_state:
+                tax_type = "CGST_SGST"
+                cgst_rate = sgst_rate = _q(gst_rate_used / 2) if gst_rate_used else Decimal("0.00")
+                cgst_amt = line_cgst
+                sgst_amt = line_sgst
+            else:
+                tax_type = "IGST"
+                igst_rate = gst_rate_used
+                igst_amt = line_igst
+        elif intra_state:
             tax_type = "CGST_SGST"
             cgst_rate = sgst_rate = _q(gst_rate_used / 2)
             cgst_amt = _q(taxable_total * cgst_rate / Decimal("100"))

@@ -129,6 +129,12 @@ class FollowupRepository:
             columns.append("e.Quarter")
         if "ApplicationNumber" in available:
             columns.insert(columns.index("e.BillNo"), "e.ApplicationNumber")
+        if "DscType" in available:
+            columns.append("e.DscType")
+        if "DscClass" in available:
+            columns.append("e.DscClass")
+        if "DscYear" in available:
+            columns.append("e.DscYear")
         if "Location" in available:
             columns.append("e.Location")
         if "IntroducedBy" in available:
@@ -199,6 +205,9 @@ class FollowupRepository:
             "FormType",
             "Quarter",
             "ApplicationNumber",
+            "DscType",
+            "DscClass",
+            "DscYear",
             "Location",
             "IntroducedBy",
             "BillNo",
@@ -337,12 +346,27 @@ class FollowupRepository:
                 text("ALTER TABLE dbo.FollowupEntryMaster ADD IntroducedBy NVARCHAR(200) NULL")
             )
             changed = True
+        if "DscType" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscType NVARCHAR(20) NULL")
+            )
+            changed = True
+        if "DscClass" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscClass NVARCHAR(20) NULL")
+            )
+            changed = True
+        if "DscYear" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscYear NVARCHAR(20) NULL")
+            )
+            changed = True
         if changed:
             self.session.flush()
             self._entry_master_columns = None
 
     def ensure_dsc_extra_columns(self) -> None:
-        """Ensure Location / IntroducedBy exist for DSC entry form."""
+        """Ensure Location, Introduced by, and DSC type/class/year exist."""
         self.ensure_application_number_column()
 
     def ensure_gst_return_filed_stage(self) -> None:

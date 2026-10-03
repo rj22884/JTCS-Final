@@ -39,6 +39,7 @@
   let activeBucket = "";
   let staffRows = [];
   let allLabels = [];
+  const convById = {};
 
   const convList = document.getElementById("crmConvList");
   const convEmpty = document.getElementById("crmConvEmpty");
@@ -65,8 +66,9 @@
   }
 
   function messageFileUrl(messageId) {
-    if (!api.messageFile || !messageId) return "";
-    return CrmCommon.urlTemplate(api.messageFile, messageId);
+    const id = parseInt(messageId, 10);
+    if (!Number.isFinite(id) || id <= 0) return "";
+    return "/api/crm/messages/" + id + "/file";
   }
 
   function fileHref(message) {
@@ -103,6 +105,9 @@
       return;
     }
     convEmpty.classList.add("d-none");
+    rows.forEach(function (c) {
+      convById[c.ConversationID] = c;
+    });
     convList.innerHTML = rows
       .map(function (c) {
         const id = c.ConversationID;
@@ -172,7 +177,9 @@
             const safeUrl = CrmCommon.escapeHtml(url);
             if (url && isBrowserImage(m)) {
               mediaHtml =
-                '<a class="wa-file-link" href="' +
+                '<a class="wa-file-link" data-message-id="' +
+                parseInt(m.MessageID, 10) +
+                '" href="' +
                 safeUrl +
                 '" target="_blank" rel="noopener"><img class="wa-attach" src="' +
                 safeUrl +
@@ -183,10 +190,12 @@
               mediaHtml = '<video class="wa-attach" controls src="' + safeUrl + '"></video>';
             } else if (url) {
               mediaHtml =
-                '<a class="small wa-file-link" href="' +
+                '<a class="small wa-file-link" data-message-id="' +
+                parseInt(m.MessageID, 10) +
+                '" href="' +
                 safeUrl +
                 '" target="_blank" rel="noopener"><i class="bi bi-file-earmark"></i> ' +
-                CrmCommon.escapeHtml(m.AttachmentName || "Attachment") +
+                CrmCommon.escapeHtml(m.AttachmentName || m.Body || "Attachment") +
                 "</a>";
             }
           }
@@ -340,23 +349,36 @@
     maybeNotify(unreadSum);
   }
 
+  function showConversation(conv, id) {
+    const row = conv || {};
+    subjectEl.textContent =
+      row.CustomerName || row.LeadName || row.Subject || "Conversation #" + id;
+    channelEl.textContent = row.Channel || "WhatsApp";
+    replyWrap.classList.remove("d-none");
+    setContactActions(row);
+  }
+
   async function selectConversation(id) {
     const numericId = parseInt(id, 10);
     if (!Number.isFinite(numericId) || numericId <= 0) {
       throw new Error("Yeh chat nahi khul rahi.");
     }
     activeConvId = numericId;
-    const detailUrl = CrmCommon.urlTemplate(api.detail, numericId);
-    const data = await CrmCommon.apiFetch(detailUrl);
-    const conv = data.conversation || {};
-    subjectEl.textContent =
-      conv.CustomerName || conv.LeadName || conv.Subject || "Conversation #" + id;
-    channelEl.textContent = conv.Channel || "";
-    replyWrap.classList.remove("d-none");
-    setContactActions(conv);
-    renderTimeline(data.timeline || []);
-    const msgData = await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.messages, numericId));
+    let conv = convById[numericId] || convById[String(numericId)] || null;
+    try {
+      const data = await CrmCommon.apiFetch("/api/crm/conversations/" + numericId);
+      conv = data.conversation || conv;
+      renderTimeline(data.timeline || []);
+    } catch (_err) {
+      renderTimeline([]);
+    }
+    if (conv) showConversation(conv, numericId);
+    const msgData = await CrmCommon.apiFetch("/api/crm/conversations/" + numericId + "/messages");
     renderMessages(msgData.rows || []);
+    if (!conv && !(msgData.rows || []).length) {
+      throw new Error("Yeh chat nahi mili.");
+    }
+    if (!conv) showConversation({ Subject: "WhatsApp", Channel: "WhatsApp", IsUnknown: 1 }, numericId);
     loadConversations();
   }
 
@@ -364,7 +386,7 @@
     if (!activeConvId) return;
     try {
       const msgData = await CrmCommon.apiFetch(
-        CrmCommon.urlTemplate(api.messages, activeConvId)
+        "/api/crm/conversations/" + activeConvId + "/messages"
       );
       renderMessages(msgData.rows || []);
     } catch (_e) {}
@@ -458,9 +480,13 @@
     const link = e.target.closest("a.wa-file-link");
     if (!link) return;
     e.preventDefault();
+    const messageId = parseInt(link.getAttribute("data-message-id"), 10);
+    const fileUrl = Number.isFinite(messageId) && messageId > 0
+      ? "/api/crm/messages/" + messageId + "/file"
+      : link.getAttribute("href");
     const popup = window.open("about:blank", "_blank");
     try {
-      const resp = await fetch(link.getAttribute("href"), { credentials: "same-origin" });
+      const resp = await fetch(fileUrl, { credentials: "same-origin" });
       const ct = resp.headers.get("content-type") || "";
       if (!resp.ok) {
         if (popup) popup.close();

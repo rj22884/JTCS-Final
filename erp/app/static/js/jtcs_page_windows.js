@@ -479,6 +479,8 @@
     true
   );
 
+  window.jtcsClosePageWindow = closeWindow;
+
   if (document.readyState === "loading") {
   window.jtcsEscCloseAll = escCloseAll;
 

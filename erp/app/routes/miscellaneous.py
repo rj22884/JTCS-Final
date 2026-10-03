@@ -7,10 +7,12 @@ from werkzeug.datastructures import MultiDict
 
 from app.customer_master.constants import CUSTOMER_TYPES
 from app.decorators import login_required, require_delete_reauth
+from app.utils.delete_auth import current_login_id, verify_delete_credentials
 from app.repositories.transaction_repository import MasterRepository
 from app.services.followup_service import default_tax_period, tax_period_options
 from app.services.bank_master_service import BankMasterService
 from app.services.gst_invoice_service import STATE_CODES, GstInvoiceService
+from app.services.item_master_service import ItemMasterService
 from app.services.menu_service import MenuService
 from app.services.others_income_expense_service import OthersIncomeExpenseService
 
@@ -160,6 +162,35 @@ def upi_bank_choices() -> list[dict]:
     return choices
 
 
+def _generate_bill_items() -> list[dict]:
+    """Active Item Master rows for the DSC generate-bill line picker."""
+    svc = ItemMasterService()
+    svc.repo.ensure_schema()
+    try:
+        sub_map = svc._sub_work_map_by_item_id()
+    except Exception:
+        sub_map = {}
+    items = []
+    for row in svc.repo.list_all(active_only=True):
+        linked = sub_map.get(int(row.ItemID)) or {}
+        description = (getattr(row, "Description", None) or "").strip()
+        sub_work = (linked.get("sub_work_type") or "").strip()
+        gst_applicable = bool(getattr(row, "GstApplicable", True))
+        gst_rate = float(row.GstRatePercent or 0) if gst_applicable else 0.0
+        items.append(
+            {
+                "item_id": int(row.ItemID),
+                "item_name": row.ItemName or "",
+                "description": description or sub_work,
+                "hsn_sac": row.HsnSac or "",
+                "unit": row.Unit or "NOS",
+                "default_rate": float(row.DefaultRate or 0),
+                "gst_rate_percent": gst_rate,
+            }
+        )
+    return items
+
+
 @bp.route("/generate-bill/invoice", methods=["GET"], strict_slashes=False)
 @bp_alias.route("/generate-bill/invoice", methods=["GET"], strict_slashes=False)
 @login_required
@@ -220,6 +251,32 @@ def delete_generated_bill_invoices():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@bp.route("/generate-bill/customers", methods=["GET"], strict_slashes=False)
+@bp_alias.route("/generate-bill/customers", methods=["GET"], strict_slashes=False)
+@login_required
+def generate_bill_customers():
+    """Customer Master list for DSC 'bill another customer'. Does not change other modules."""
+    query = (request.args.get("q") or "").strip() or None
+    rows = GstInvoiceService().search_customers(query, limit=100)
+    return jsonify({"ok": True, "rows": rows})
+
+
+@bp.route("/generate-bill/confirm-user", methods=["POST"], strict_slashes=False)
+@bp_alias.route("/generate-bill/confirm-user", methods=["POST"], strict_slashes=False)
+@login_required
+def generate_bill_confirm_user():
+    """User ID + password check before DSC convert-to-invoice."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        verify_delete_credentials(
+            str(payload.get("user_id") or ""),
+            str(payload.get("password") or ""),
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
 @bp.route("/generate-bill", methods=["GET"], strict_slashes=False)
 @bp_alias.route("/generate-bill", methods=["GET"], strict_slashes=False)
 @login_required
@@ -246,6 +303,11 @@ def generate_bill_page():
         customer_url=url_for("accounting_invoice.api_customer_detail", customer_id=0),
         lookup_url=url_for("miscellaneous.generate_bill_invoice"),
         delete_url=url_for("accounting_invoice.api_delete_invoice", invoice_id=0),
+        customer_search_url=url_for("accounting_invoice.api_customers"),
+        customer_list_url=url_for("miscellaneous.generate_bill_customers"),
+        confirm_user_url=url_for("miscellaneous.generate_bill_confirm_user"),
+        current_login_id=current_login_id(),
+        bill_items=_generate_bill_items(),
         upi_banks=upi_bank_choices(),
     )
 

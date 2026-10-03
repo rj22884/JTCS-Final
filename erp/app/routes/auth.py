@@ -484,6 +484,27 @@ def deactivate_user(user_id: int):
     return redirect(url_for("auth.users_index"))
 
 
+@bp.route("/profile", methods=["GET", "POST"])
+@login_required
+def company_profile_page():
+    from app.services.company_profile_service import STATES, form_values, save_profile
+
+    can_edit_name = has_admin_role(session.get("role"))
+    values = form_values()
+    if request.method == "POST":
+        ok, message, values = save_profile(request.form, session.get("role"))
+        flash(message, "success" if ok else "danger")
+        if ok:
+            return redirect(url_for("auth.company_profile_page"))
+    return render_template(
+        "auth/company_profile.html",
+        page_title="Company Profile",
+        can_edit_name=can_edit_name,
+        values=values,
+        states=STATES,
+    )
+
+
 @bp.route("/admin/users/<int:user_id>/delete", methods=["POST"])
 @login_required
 @admin_required
