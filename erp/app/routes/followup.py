@@ -27,17 +27,25 @@ from app.services.payment_reminder_service import PaymentReminderService
 from app.services.thank_you_letter_service import ThankYouLetterService
 
 
+def _record_has_payment_received(record: dict) -> bool:
+    stage_codes = {
+        (s.get("StageCode") or "").lower()
+        for s in record.get("completed_stages", [])
+    }
+    return (
+        "payment_received" in stage_codes
+        or record.get("workflow_status") == "Payment Received"
+        or bool(record.get("payment_received"))
+    )
+
+
 def _thank_you_block_reason(module_code: str, record: dict) -> str | None:
     stage_codes = {
         (s.get("StageCode") or "").lower()
         for s in record.get("completed_stages", [])
     }
-    if module_code == "ITR":
-        has_payment = (
-            "payment_received" in stage_codes
-            or record.get("workflow_status") == "Payment Received"
-        )
-        if not has_payment:
+    if module_code in {"ITR", "DSC"}:
+        if not _record_has_payment_received(record):
             return "Thank You letter is available only after Payment Received."
         return None
     has_tally = (
@@ -62,23 +70,38 @@ def _thank_you_letter_file(module_code: str, record: dict, fmt: str) -> tuple[by
         "bill_date": None,
         "invoice_no": record.get("bill_no") or "",
     }
+    pay_svc = FollowupPaymentService(module_code)
+    account = pay_svc.payment_account_for_letter(record.get("bill_no") or "")
+    if not (account or "").strip():
+        labels = []
+        for payment in record.get("payments") or []:
+            label = (
+                payment.get("label")
+                or payment.get("masked_account_number")
+                or payment.get("account_number")
+                or payment.get("bank_name")
+                or ""
+            ).strip()
+            if label and label != "Udhaar" and label not in labels:
+                labels.append(label)
+        account = ", ".join(labels)
+    payments = [row for row in (record.get("payments") or []) if not row.get("is_udhaar")]
+    cash_paid = bool(payments) and all(
+        str(
+            row.get("label")
+            or row.get("bank_name")
+            or row.get("account_number")
+            or row.get("masked_account_number")
+            or ""
+        ).strip().lower()
+        == "cash"
+        for row in payments
+    )
+    formatted_account = ThankYouLetterService.format_payment_account(account)
+    if cash_paid and formatted_account in {"—", "-", "–", ""}:
+        formatted_account = "Cash"
+    kwargs["payment_account"] = formatted_account
     if module_code == "ITR":
-        pay_svc = FollowupPaymentService(module_code)
-        account = pay_svc.payment_account_for_letter(record.get("bill_no") or "")
-        if not (account or "").strip():
-            labels = []
-            for payment in record.get("payments") or []:
-                label = (
-                    payment.get("label")
-                    or payment.get("masked_account_number")
-                    or payment.get("account_number")
-                    or payment.get("bank_name")
-                    or ""
-                ).strip()
-                if label and label != "Udhaar" and label not in labels:
-                    labels.append(label)
-            account = ", ".join(labels)
-        kwargs["payment_account"] = ThankYouLetterService.format_payment_account(account)
         udhaar_amt = FollowupService.udhaar_amount_for_record(record)
         if udhaar_amt > 0.001:
             try:

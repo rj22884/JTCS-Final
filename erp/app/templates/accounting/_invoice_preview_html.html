@@ -47,7 +47,7 @@
       <div><strong>Place of Supply:</strong> {{ pos }}</div>
     </div>
     <div>
-      <div><strong>Contact Person:</strong> {{ invoice.contact_person or dash }}</div>
+      <div><strong>Contact Person:</strong> {{ invoice.contact_person or invoice.customer_name or dash }}</div>
       <div><strong>Contact Email:</strong> {{ invoice.contact_email or dash }}</div>
       <div><strong>Customer ID:</strong> {{ invoice.customer_id or dash }}</div>
       <div><strong>Reverse Charge:</strong> {{ 'Yes' if invoice.reverse_charge else 'No' }}</div>

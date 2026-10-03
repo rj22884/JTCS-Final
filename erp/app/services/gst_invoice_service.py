@@ -438,10 +438,11 @@ class GstInvoiceService:
         gstin = (row["GSTNumber"] or "").strip()
         state = (row["State"] or "").strip()
         code = gstin[:2] if len(gstin) >= 2 and gstin[:2].isdigit() else self.state_code_from_name(state)
+        customer_name = (row["CustomerName"] or "").strip()
         return {
             "customer_id": int(row["CustomerID"]),
-            "customer_name": (row["CustomerName"] or "").strip(),
-            "contact_person": "",
+            "customer_name": customer_name,
+            "contact_person": customer_name,
             "billing_address": address,
             "customer_gstin": gstin,
             "contact_mobile": (row["MobileNumber"] or "").strip(),
@@ -828,7 +829,7 @@ class GstInvoiceService:
             "invoice_date": inv.InvoiceDate.isoformat() if inv.InvoiceDate else "",
             "customer_id": inv.CustomerID,
             "customer_name": inv.CustomerName or "",
-            "contact_person": inv.ContactPerson or "",
+            "contact_person": (inv.ContactPerson or "").strip() or (inv.CustomerName or ""),
             "billing_address": inv.BillingAddress or "",
             "customer_gstin": inv.CustomerGSTIN or "",
             "contact_mobile": inv.ContactMobile or "",
@@ -1587,7 +1588,8 @@ class GstInvoiceService:
             "CustomerName": customer_name[:200],
             "ContactPerson": (
                 (payload.get("contact_person") or "").strip()
-                or cust.get("contact_person")
+                or (cust.get("contact_person") or "").strip()
+                or (customer_name or "").strip()
                 or None
             ),
             "BillingAddress": (

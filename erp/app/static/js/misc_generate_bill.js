@@ -326,7 +326,7 @@
       if (node) node.value = value || "";
     };
     set("mgbPartyName", name);
-    set("mgbPartyContact", record.contact_person || "");
+    set("mgbPartyContact", record.contact_person || name);
     set("mgbPartyGstin", record.customer_gstin || "");
     set("mgbPartyMobile", mobile);
     set("mgbPartyEmail", record.contact_email || "");
@@ -425,6 +425,8 @@
     if (els.mobile && row.mobile) els.mobile.value = row.mobile;
     const partyName = document.getElementById("mgbPartyName");
     if (partyName) partyName.value = row.customer_name || "";
+    const partyContact = document.getElementById("mgbPartyContact");
+    if (partyContact) partyContact.value = row.customer_name || "";
     const partyMobile = document.getElementById("mgbPartyMobile");
     if (partyMobile && row.mobile) partyMobile.value = row.mobile;
     hideCustomerList();

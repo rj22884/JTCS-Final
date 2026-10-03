@@ -418,6 +418,12 @@ button.fu-stat-card {
   padding: 0.15rem 0.4rem;
 }
 
+.fu-thank-btn.disabled,
+.fu-thank-wa:disabled {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .fu-pay-remind-btn {
   font-size: 14px;
   padding: 0.2rem 0.45rem;

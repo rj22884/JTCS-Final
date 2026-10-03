@@ -775,7 +775,7 @@
     if (els.customerId) els.customerId.value = record.customer_id || "";
     if (els.customerSearch) els.customerSearch.value = record.customer_name || "";
     if (els.customerName) els.customerName.value = record.customer_name || "";
-    if (els.contactPerson) els.contactPerson.value = record.contact_person || "";
+    if (els.contactPerson) els.contactPerson.value = record.contact_person || record.customer_name || "";
     if (els.gstin) els.gstin.value = record.customer_gstin || "";
     if (els.address) els.address.value = record.billing_address || "";
     if (els.mobile) els.mobile.value = record.contact_mobile || "";
@@ -1573,7 +1573,7 @@
     els.customerId.value = r.customer_id || "";
     els.customerName.value = r.customer_name || "";
     els.customerSearch.value = r.customer_name || "";
-    els.contactPerson.value = r.contact_person || "";
+    els.contactPerson.value = r.contact_person || r.customer_name || "";
     els.gstin.value = r.customer_gstin || "";
     els.address.value = r.billing_address || "";
     els.mobile.value = r.contact_mobile || "";

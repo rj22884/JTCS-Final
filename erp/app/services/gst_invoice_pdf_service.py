@@ -121,7 +121,7 @@ class GstInvoicePdfService:
             "invoice_date": header["InvoiceDate"].isoformat(),
             "customer_id": header.get("CustomerID"),
             "customer_name": header.get("CustomerName") or "",
-            "contact_person": header.get("ContactPerson") or "",
+            "contact_person": header.get("ContactPerson") or header.get("CustomerName") or "",
             "billing_address": header.get("BillingAddress") or "",
             "customer_gstin": header.get("CustomerGSTIN") or "",
             "contact_mobile": header.get("ContactMobile") or "",

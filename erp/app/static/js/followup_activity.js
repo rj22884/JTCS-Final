@@ -205,9 +205,44 @@
   }
 
   function canDownloadThankYou(row) {
-    // ITR: thank-you letter only after Payment Received is ticked.
-    if (isItrModule) return rowHasPaymentReceived(row);
+    // ITR and DSC: thank-you letter only after Payment Received is ticked.
+    if (isItrModule || isDscModule) return rowHasPaymentReceived(row);
     return rowHasTallyBill(row);
+  }
+
+  function thankYouCellHtml(row) {
+    const ready = canDownloadThankYou(row);
+    const pngTitle = ready
+      ? "Download Thank You Letter (PNG)"
+      : "Available after Payment Received";
+    const waTitle = ready
+      ? "Send Thank You letter image on WhatsApp"
+      : "Available after Payment Received";
+    if (isDscModule || ready) {
+      const pngHref = ready
+        ? escapeHtml(apiUrl(window.FU_API.thank_you_letter, row.entry_id) + "?format=png")
+        : "#";
+      return (
+        '<span class="fu-thank-actions">' +
+        '<a class="btn btn-outline-success btn-sm fu-thank-btn' +
+        (ready ? "" : " disabled") +
+        '" href="' + pngHref + '" title="' + pngTitle + '"' +
+        (ready ? "" : ' aria-disabled="true" tabindex="-1"') +
+        '><i class="bi bi-download"></i> PNG</a>' +
+        '<button type="button" class="btn btn-success btn-sm fu-thank-wa" data-id="' +
+        row.entry_id +
+        '" data-name="' + escapeHtml(row.customer_name || "") +
+        '" title="' + waTitle + '"' +
+        (ready ? "" : " disabled") +
+        '><i class="bi bi-whatsapp"></i></button>' +
+        "</span>"
+      );
+    }
+    return (
+      '<span class="text-muted" title="' +
+      (isItrModule ? "Available after Payment Received" : "Available after Tally Bill Generated") +
+      '">—</span>'
+    );
   }
 
   function isItrPaymentReceivedLocked(row) {
@@ -1718,19 +1753,7 @@
            "<td>" + escapeHtml(row.return_type || "—") + "</td>")
         : "";
       const paymentLocked = isItrPaymentReceivedLocked(row);
-      const thankYouCell = canDownloadThankYou(row)
-        ? '<span class="fu-thank-actions">' +
-          '<a class="btn btn-outline-success btn-sm fu-thank-btn" href="' +
-          escapeHtml(apiUrl(window.FU_API.thank_you_letter, row.entry_id) + "?format=png") +
-          '" title="Download Thank You Letter (PNG)"><i class="bi bi-download"></i> PNG</a>' +
-          '<button type="button" class="btn btn-success btn-sm fu-thank-wa" data-id="' +
-          row.entry_id +
-          '" data-name="' + escapeHtml(row.customer_name || "") +
-          '" title="Send Thank You letter image on WhatsApp"><i class="bi bi-whatsapp"></i></button>' +
-          "</span>"
-        : '<span class="text-muted" title="' +
-          (isItrModule ? "Available after Payment Received" : "Available after Tally Bill Generated") +
-          '">—</span>';
+      const thankYouCell = thankYouCellHtml(row);
       const paymentReminderCell = isItrModule
         ? (canDownloadPaymentReminder(row)
           ? '<td class="text-center">' +

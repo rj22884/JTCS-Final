@@ -96,6 +96,9 @@ class ThankYouLetterService:
         text = (payment_account or "").strip()
         if text.lower() == "cash":
             return "Cash"
+        # Cash book is sometimes stored with a blank or dash account number.
+        if text.lower() in {"cash-", "-cash", "cash account", "cash a/c", "cash book"}:
+            return "Cash"
         if text in {"—", "-", "–", ""}:
             return "—"
         return text

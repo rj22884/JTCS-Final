@@ -278,6 +278,14 @@ class MenuService:
             from app.extensions import db
 
             db.session.rollback()
+        try:
+            from app.routes.customer_merge import ensure_merge_customer_menu
+
+            ensure_merge_customer_menu()
+        except Exception:
+            from app.extensions import db
+
+            db.session.rollback()
         menus = [m for m in self.repository.get_all() if self.can_access_menu(m, role, user_id)]
         # Hidden from app nav (CRM / Exceptional / Settings / non-core modules).
         menus = [m for m in menus if not self._is_hidden_nav_menu(m)]
