@@ -992,7 +992,16 @@
     const approved = record.bill_approved ? "Approved" : "Approve pending";
     const paid = sourcePaymentReceived() ? "Yes" : "No";
     const no = record.invoice_no ? record.invoice_no + " — " : "";
-    return "Sale invoice " + no + approved + " · Payment Received: " + paid;
+    let text = "Sale invoice " + no + approved + " · Payment Received: " + paid;
+    if (isDscModule) {
+      const amount = Number(record.invoice_value);
+      if (Number.isFinite(amount)) {
+        text +=
+          " · Total Invoice Amount: ₹" +
+          amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+    }
+    return text;
   }
 
   function paintInvoiceStatus(record) {
