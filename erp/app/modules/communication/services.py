@@ -695,6 +695,18 @@ class CommunicationService:
         ).mappings().first()
         return dict(row) if row else None
 
+    def delete_message(self, message_id: int) -> bool:
+        ensure_crm_schema()
+        msg = self.get_message(message_id)
+        if not msg:
+            return False
+        db.session.execute(
+            text("DELETE FROM dbo.CrmMessage WHERE MessageID = :id"),
+            {"id": int(message_id)},
+        )
+        db.session.commit()
+        return True
+
     def update_message_attachment(
         self,
         message_id: int,
@@ -737,6 +749,28 @@ class CommunicationService:
                 """
             ),
             {"id": conversation_id, "now": datetime.utcnow()},
+        )
+        db.session.commit()
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.Notification
+                SET IsRead = 1, ReadDate = :now
+                WHERE IsRead = 0
+                  AND ISNULL(IsArchived, 0) = 0
+                  AND (
+                        (EntityType = N'CrmConversation' AND EntityID = :id)
+                     OR LinkURL LIKE :link_end
+                     OR LinkURL LIKE :link_amp
+                  )
+                """
+            ),
+            {
+                "id": conversation_id,
+                "now": datetime.utcnow(),
+                "link_end": f"%c={int(conversation_id)}",
+                "link_amp": f"%c={int(conversation_id)}&%",
+            },
         )
         db.session.commit()
 

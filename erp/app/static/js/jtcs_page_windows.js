@@ -1,6 +1,63 @@
 (function () {
   "use strict";
 
+  function shouldRefreshAfterMutation(url, method) {
+    method = String(method || "GET").toUpperCase();
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+    var path = String(url || "").split("?")[0].toLowerCase();
+    if (!path) return false;
+    if (path.indexOf("/api/notifications") !== -1 || path.indexOf("/api/whats-new") !== -1) return false;
+    if (path.indexOf("/api/crm/") !== -1) return false;
+    if (/\/(read|unread|search|analytics|simulate|draft|sync|reply|attachments|labels|whatsapp|preview|export)(\/|$)/.test(path)) return false;
+    if (method === "DELETE" || path.indexOf("/delete") !== -1) return true;
+    if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (/\/(save|records|manual-entries)$/.test(path)) return true;
+      if (/\/manual-entries\/\d+$/.test(path)) return true;
+      if (/\/records\/\d+$/.test(path)) return true;
+    }
+    return false;
+  }
+
+  if (!window.__jtcsMutationRefresh && typeof window.fetch === "function") {
+    window.__jtcsMutationRefresh = true;
+    var origFetch = window.fetch;
+    var refreshTimer = null;
+    window.fetch = function (input, init) {
+      var method = (init && init.method) || (input && input.method) || "GET";
+      var url = typeof input === "string" ? input : (input && input.url) || "";
+      return origFetch.apply(this, arguments).then(function (resp) {
+        if (resp && resp.ok && shouldRefreshAfterMutation(url, method)) {
+          var copy = resp.clone();
+          copy.json().then(function (data) {
+            if (data && data.ok === false) return;
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(function () {
+              try {
+                if (window.parent && window.parent !== window) {
+                  window.parent.postMessage({ type: "jtcs-page-refresh" }, window.location.origin);
+                }
+              } catch (err) {}
+              window.location.reload();
+            }, 200);
+          }).catch(function () {
+            clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(function () {
+              window.location.reload();
+            }, 200);
+          });
+        }
+        return resp;
+      });
+    };
+  }
+
+  window.addEventListener("pageshow", function (ev) {
+    if (ev.persisted) window.location.reload();
+  });
+  window.addEventListener("popstate", function () {
+    window.location.reload();
+  });
+
   if (window.self !== window.top) {
     document.documentElement.classList.add("jtcs-embed");
     if (document.body) document.body.classList.add("jtcs-embed");
@@ -306,18 +363,34 @@
       window.location.href = "/dashboard";
       return;
     }
+    if (hadWindows && isMainDashboard()) {
+      window.location.reload();
+      return;
+    }
     if (!hadWindows && !hadModals) showEscWarning();
   }
 
   function goBack(win) {
     var frame = win.querySelector("iframe");
     try {
-      if (frame && frame.contentWindow && frame.contentWindow.history) {
+      if (frame && frame.contentWindow && frame.contentWindow.history && frame.contentWindow.history.length > 1) {
+        frame.contentWindow.addEventListener(
+          "popstate",
+          function refreshAfterBack() {
+            frame.contentWindow.location.reload();
+          },
+          { once: true }
+        );
         frame.contentWindow.history.back();
+        return;
+      }
+      if (frame && frame.contentWindow) {
+        frame.contentWindow.location.reload();
         return;
       }
     } catch (err) {}
     closeWindow(win);
+    if (isMainDashboard()) window.location.reload();
   }
 
   function bindChrome(win, selector, handler) {
@@ -479,7 +552,8 @@
         } catch (err) {
           there = "";
         }
-        if (here !== there) window.location.href = dest;
+        if (here === there) window.location.reload();
+        else window.location.href = dest;
         return;
       }
 
@@ -517,6 +591,32 @@
     if (!taskbarEl) ensureHosts();
     refreshTaskbar();
   };
+
+  function alertMatchesConversation(row, conversationId) {
+    var href = String((row && row.href) || "");
+    var token = "c=" + String(conversationId);
+    return href.indexOf(token + "&") !== -1 || href.endsWith(token) || href.indexOf(token + "#") !== -1;
+  }
+
+  window.jtcsClearTaskAlertsForConversation = function (conversationId) {
+    taskAlerts = taskAlerts.filter(function (row) {
+      return !alertMatchesConversation(row, conversationId);
+    });
+    refreshTaskbar();
+  };
+
+  window.jtcsClearTaskAlert = function (notificationId) {
+    taskAlerts = taskAlerts.filter(function (row) {
+      return String(row.id) !== String(notificationId);
+    });
+    refreshTaskbar();
+  };
+
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== window.location.origin) return;
+    if (!ev.data || ev.data.type !== "jtcs-page-refresh") return;
+    if (typeof window.jtcsRefreshDashboard === "function") window.jtcsRefreshDashboard();
+  });
 
   window.jtcsClosePageWindow = closeWindow;
 

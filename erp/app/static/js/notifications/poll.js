@@ -33,7 +33,7 @@
     crmListEl.innerHTML = rows
       .map(function (item) {
         const href = item.LinkURL || "/crm/notifications";
-        const unread = !item.IsRead ? " jtcs-notify-unread" : "";
+        const unread = isUnreadNotice(item) ? " jtcs-notify-unread" : "";
         const msg = item.Message ? String(item.Message).slice(0, 120) : "";
         return (
           '<a class="dropdown-item jtcs-notify-item' +
@@ -107,12 +107,17 @@
     return type === "WhatsApp" || /whatsapp/i.test(title) || /channel=WhatsApp/i.test(link);
   }
 
+  function isUnreadNotice(item) {
+    const value = item && item.IsRead;
+    return !(value === true || value === 1 || value === "1" || value === "true");
+  }
+
   function syncWhatsAppTaskbar(rows) {
     const host = window.top || window;
     if (typeof host.jtcsSetTaskAlerts !== "function") return;
     const alerts = (rows || [])
       .filter(function (item) {
-        return item && !item.IsRead && isWhatsAppNotice(item);
+        return item && isUnreadNotice(item) && isWhatsAppNotice(item);
       })
       .map(function (item) {
         return {

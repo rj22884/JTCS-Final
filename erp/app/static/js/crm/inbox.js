@@ -209,6 +209,14 @@
           return (
             '<div class="' +
             cls +
+            '" data-message-id="' +
+            parseInt(m.MessageID, 10) +
+            '" data-body="' +
+            CrmCommon.escapeHtml(m.Body || "") +
+            '" data-file="' +
+            CrmCommon.escapeHtml(fileHref(m)) +
+            '" data-file-name="' +
+            CrmCommon.escapeHtml(m.AttachmentName || "attachment") +
             '"><div class="wa-bubble">' +
             testBadge +
             (formatted
@@ -383,6 +391,10 @@
     if (conv) showConversation(conv, numericId);
     const msgData = await CrmCommon.apiFetch("/api/crm/conversations/" + numericId + "/messages");
     renderMessages(msgData.rows || []);
+    const host = window.top || window;
+    if (host && typeof host.jtcsClearTaskAlertsForConversation === "function") {
+      host.jtcsClearTaskAlertsForConversation(numericId);
+    }
     if (!conv && !(msgData.rows || []).length) {
       throw new Error("Yeh chat nahi mili.");
     }
@@ -1176,4 +1188,141 @@
     loadConversations().catch(function () {});
     pollMessages();
   }, pollSeconds * 1000);
+
+  const ctxMenu = document.createElement("div");
+  ctxMenu.className = "wa-ctx";
+  ctxMenu.hidden = true;
+  ctxMenu.innerHTML =
+    '<button type="button" data-act="cut">Cut</button>' +
+    '<button type="button" data-act="copy">Copy</button>' +
+    '<button type="button" data-act="paste">Paste</button>' +
+    '<button type="button" data-act="delete">Delete</button>' +
+    '<hr>' +
+    '<button type="button" data-act="save">Save</button>' +
+    '<button type="button" data-act="select">Select all</button>';
+  document.body.appendChild(ctxMenu);
+
+  let ctxMessage = null;
+  const replyBox = document.getElementById("crmReplyBody");
+
+  function hideCtx() {
+    ctxMenu.hidden = true;
+    ctxMessage = null;
+  }
+
+  function selectedText() {
+    const sel = window.getSelection();
+    return sel ? String(sel.toString() || "") : "";
+  }
+
+  function messageText(node) {
+    if (!node) return "";
+    return node.getAttribute("data-body") || "";
+  }
+
+  function isWhatsAppContext() {
+    const channel = (
+      (activeConvMeta && activeConvMeta.Channel) ||
+      activeChannel ||
+      ""
+    ).toLowerCase();
+    return !channel || channel === "whatsapp";
+  }
+
+  function setCtxEnabled(act, on) {
+    const btn = ctxMenu.querySelector('[data-act="' + act + '"]');
+    if (btn) btn.disabled = !on;
+  }
+
+  document.addEventListener("contextmenu", function (event) {
+    const threadHit = event.target.closest("#crmMsgThread, #crmInboxReplyWrap");
+    if (!threadHit || !isWhatsAppContext()) return;
+    event.preventDefault();
+    ctxMessage = event.target.closest(".wa-msg");
+    const inReply = !!event.target.closest("#crmReplyBody");
+    const hasText = !!(selectedText() || (ctxMessage && messageText(ctxMessage)));
+    const hasFile = !!(ctxMessage && ctxMessage.getAttribute("data-file"));
+    setCtxEnabled("cut", hasText || inReply);
+    setCtxEnabled("copy", hasText || hasFile || inReply);
+    setCtxEnabled("paste", !!replyBox);
+    setCtxEnabled("delete", !!ctxMessage);
+    setCtxEnabled("save", hasFile);
+    setCtxEnabled("select", !!(ctxMessage || replyBox));
+    ctxMenu.hidden = false;
+    const left = Math.min(event.clientX, window.innerWidth - 220);
+    const top = Math.min(event.clientY, window.innerHeight - 240);
+    ctxMenu.style.left = left + "px";
+    ctxMenu.style.top = top + "px";
+  });
+
+  document.addEventListener("click", hideCtx);
+  window.addEventListener("blur", hideCtx);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") hideCtx();
+  });
+
+  ctxMenu.addEventListener("click", async function (event) {
+    const btn = event.target.closest("[data-act]");
+    if (!btn || btn.disabled) return;
+    event.stopPropagation();
+    const act = btn.getAttribute("data-act");
+    const text = selectedText() || messageText(ctxMessage);
+    const file = ctxMessage ? ctxMessage.getAttribute("data-file") || "" : "";
+    const fileName = ctxMessage ? ctxMessage.getAttribute("data-file-name") || "attachment" : "attachment";
+    if (act === "copy" || act === "cut") {
+      try {
+        await navigator.clipboard.writeText(text || file);
+      } catch (_err) {}
+      if (act === "cut" && replyBox && document.activeElement === replyBox) {
+        const start = replyBox.selectionStart || 0;
+        const end = replyBox.selectionEnd || 0;
+        replyBox.value = replyBox.value.slice(0, start) + replyBox.value.slice(end);
+      } else if (act === "cut" && ctxMessage) {
+        const id = parseInt(ctxMessage.getAttribute("data-message-id"), 10);
+        if (id) {
+          try {
+            await CrmCommon.apiFetch("/api/crm/messages/" + id + "/delete", { method: "POST", body: {} });
+            if (activeConvId) await selectConversation(activeConvId);
+          } catch (err) {
+            CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+          }
+        }
+      }
+    } else if (act === "paste" && replyBox) {
+      try {
+        const clip = await navigator.clipboard.readText();
+        const start = replyBox.selectionStart || replyBox.value.length;
+        const end = replyBox.selectionEnd || start;
+        replyBox.value = replyBox.value.slice(0, start) + clip + replyBox.value.slice(end);
+        replyBox.focus();
+      } catch (_err) {}
+    } else if (act === "save" && file) {
+      const link = document.createElement("a");
+      link.href = file;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } else if (act === "select") {
+      if (document.activeElement === replyBox && replyBox) replyBox.select();
+      else if (ctxMessage) {
+        const range = document.createRange();
+        range.selectNodeContents(ctxMessage);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } else if (act === "delete" && ctxMessage) {
+      const id = parseInt(ctxMessage.getAttribute("data-message-id"), 10);
+      if (id) {
+        try {
+          await CrmCommon.apiFetch("/api/crm/messages/" + id + "/delete", { method: "POST", body: {} });
+          if (activeConvId) await selectConversation(activeConvId);
+        } catch (err) {
+          CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+        }
+      }
+    }
+    hideCtx();
+  });
 })();

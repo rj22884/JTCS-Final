@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004align1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004custom1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -149,6 +149,13 @@
     </div>
 
     <div class="dash-period-bar-wrap dash-tools">
+      <div class="dash-custom-slot" id="dashCustomSlot" data-user-id="{{ session.get('user_id') or '' }}">
+        <div class="dash-custom-tools">
+          <button type="button" class="dash-custom-tool" id="dashCustomAdd" title="Add card">+</button>
+          <button type="button" class="dash-custom-tool" id="dashCustomRemove" title="Remove selected card">−</button>
+        </div>
+        <div class="dash-custom-cards" id="dashCustomCards"></div>
+      </div>
       <div class="dash-search-stack">
       <div class="dash-ledger-search" id="dashLedgerSearchBox">
         <label class="dash-ledger-search-title" for="dashLedgerSearch">Search Ledger Here</label>
@@ -805,5 +812,46 @@
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20261001dash1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>
+<div class="modal fade" id="dashCustomModal" tabindex="-1" aria-labelledby="dashCustomModalTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h2 class="modal-title h6" id="dashCustomModalTitle">Add card</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="dashCustomSource">Source</label>
+        <select class="form-select form-select-sm mb-2" id="dashCustomSource">
+          <option value="ledger">Ledger</option>
+          <option value="work">Work</option>
+          <option value="custom">Custom field</option>
+        </select>
+        <div id="dashCustomPickWrap">
+          <label class="form-label" for="dashCustomSearch">Select</label>
+          <input type="search" class="form-control form-control-sm mb-1" id="dashCustomSearch" placeholder="Type ledger or work" autocomplete="off">
+          <div class="list-group small" id="dashCustomPickList"></div>
+        </div>
+        <div id="dashCustomFieldWrap" class="d-none">
+          <label class="form-label" for="dashCustomName">Field name</label>
+          <input type="text" class="form-control form-control-sm mb-2" id="dashCustomName" placeholder="Card name">
+          <label class="form-label" for="dashCustomCalc">Calculation</label>
+          <select class="form-select form-select-sm" id="dashCustomCalc">
+            <option value="total_income">Total Income</option>
+            <option value="total_expenses">Total Expenses</option>
+            <option value="total_sales">Total Sales</option>
+            <option value="cash_received">Cash Received</option>
+            <option value="bank_received">Bank Received</option>
+            <option value="income_minus_expense">Income − Expenses</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="dashCustomSave">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard_custom_cards.js') }}?v=20261004custom1"></script>
 <script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20261001dash1"></script>
 {% endblock %}

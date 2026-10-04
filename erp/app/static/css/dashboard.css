@@ -124,10 +124,10 @@
 
 .dash-home {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) 17.5rem;
+  grid-template-columns: max-content minmax(10rem, 1fr) minmax(0, 36.2rem) 17.5rem;
   grid-template-areas:
-    "today metrics side"
-    "rest rest rest";
+    "today custom metrics side"
+    "rest rest rest rest";
   column-gap: 0.75rem;
   row-gap: 0.65rem;
   align-items: start;
@@ -367,6 +367,75 @@ a.dash-watch-link:hover {
 .dash-top-row,
 .dash-period-bar-wrap.dash-tools {
   display: contents;
+}
+
+.dash-custom-slot {
+  grid-area: custom;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+  min-height: 4rem;
+}
+
+.dash-custom-tools {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.dash-custom-tool {
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #1e3a5f;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dash-custom-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+.dash-custom-card {
+  width: max-content;
+  max-width: 100%;
+  min-width: 8.5rem;
+  padding: 0.55rem 0.7rem 0.5rem;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(24, 39, 75, 0.06);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dash-custom-card.is-selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+.dash-custom-card .dash-custom-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.dash-custom-card .dash-custom-value {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #1e3a5f;
+  white-space: nowrap;
 }
 
 .dash-search-stack {
@@ -1592,6 +1661,7 @@ body.modal-open .modal-backdrop.dash-source-backdrop {
     grid-area: tools;
     grid-template-columns: 1fr;
     grid-template-areas:
+      "custom"
       "metrics"
       "side";
     width: 100%;

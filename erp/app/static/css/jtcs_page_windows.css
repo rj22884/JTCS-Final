@@ -59,10 +59,11 @@ html.jtcs-embed .stamp-erp-page {
 }
 
 .jtcs-app-header {
-  z-index: 2;
+  z-index: 6;
+  overflow: visible;
 }
 .jtcs-menu-bar {
-  z-index: 3;
+  z-index: 4;
 }
 .jtcs-sticky-chrome .jtcs-app-header {
   z-index: 6;
@@ -70,6 +71,20 @@ html.jtcs-embed .stamp-erp-page {
 }
 .jtcs-sticky-chrome .jtcs-menu-bar {
   z-index: 4;
+}
+.jtcs-sticky-chrome:has(.jtcs-notify-menu.show) .jtcs-app-header {
+  z-index: 8;
+  overflow: visible;
+}
+.jtcs-sticky-chrome:has(.jtcs-notify-menu.show) .jtcs-menu-bar {
+  z-index: 1;
+}
+.jtcs-header-notify {
+  position: relative;
+  z-index: 2;
+}
+.jtcs-notify-menu.show {
+  z-index: 8;
 }
 
 a.jtcs-menu-link.jtcs-menu-held,

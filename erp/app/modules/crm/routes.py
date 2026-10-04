@@ -686,6 +686,17 @@ def _media_id_from_name(name: str | None) -> str | None:
     return None
 
 
+@crm_api_bp.route("/messages/<int:message_id>/delete", methods=["POST"])
+@login_required
+def message_delete(message_id: int):
+    comm = CommunicationService()
+    msg = comm.get_message(message_id)
+    if not msg or not comm.get_conversation(int(msg["ConversationID"])):
+        return jsonify({"ok": False, "error": "Yeh message nahi mili."}), 404
+    comm.delete_message(message_id)
+    return jsonify({"ok": True})
+
+
 @crm_api_bp.route("/messages/<int:message_id>/file", methods=["GET"])
 @login_required
 def message_file(message_id: int):
