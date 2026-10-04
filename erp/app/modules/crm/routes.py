@@ -1778,6 +1778,16 @@ def notifications_unread():
     uid = _uid()
     notif_count = svc.unread_count(uid)
     msg_count = CommunicationService().unread_message_count()
+    whats_new_unread = 0
+    whats_new_rows = []
+    try:
+        from app.services.whats_new_service import WhatsNewService
+
+        feed = WhatsNewService().header_feed(uid)
+        whats_new_unread = int(feed.get("unread_count") or 0)
+        whats_new_rows = feed.get("items") or []
+    except Exception:
+        current_app.logger.exception("What's New unread feed failed")
     return jsonify(
         {
             "ok": True,
@@ -1785,6 +1795,8 @@ def notifications_unread():
             "unread_notifications": int(notif_count),
             "rows": svc.list_for_user(uid, unread_only=False, page=1, page_size=8).get("rows", []),
             "unread_messages": int(msg_count),
+            "whats_new_unread": whats_new_unread,
+            "whats_new_rows": whats_new_rows,
         }
     )
 

@@ -8,6 +8,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
+from app.utils.timezone import entry_created_at
 from app.models.transactions import (
     CustomerMaster,
     JTCSDailyTransaction,
@@ -31,7 +32,9 @@ class DailyTransactionRepository:
         self.session = session or db.session
 
     def create(self, data: dict) -> JTCSDailyTransaction:
-        row = JTCSDailyTransaction(**data)
+        payload = dict(data)
+        payload["CreatedDate"] = entry_created_at(payload.get("TransactionDate"))
+        row = JTCSDailyTransaction(**payload)
         self.session.add(row)
         self.session.flush()
         return row

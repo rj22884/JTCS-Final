@@ -902,7 +902,10 @@
       });
       if (match) els.state.value = match.value;
     }
-    if (String(seed.source || "") === "DSC") {
+    if (String(seed.source || "") === "DSC" ||
+        String(seed.source || "") === "ITR" ||
+        String(seed.source || "") === "GST" ||
+        String(seed.source || "") === "TDS") {
       enableDscMode();
       rememberEntryCustomer();
       computeTaxes();

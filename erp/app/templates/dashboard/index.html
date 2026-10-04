@@ -3,12 +3,68 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260925pendsale1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004align1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
 {% block content %}
 <div class="dash-page">
+  <div class="dash-kpi-row">
+    {% for item in watch_cards.followups %}
+    <a class="dash-kpi dash-kpi--{{ item.tone }}" href="{{ item.url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi {{ item.icon }}"></i></span>
+      <i class="bi {{ item.icon }} dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">{{ item.label }}</div>
+      <div class="dash-kpi-value">{{ item.count }}</div>
+      <div class="dash-kpi-source">{{ item.source }}</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">{{ item.paid }} paid</span>
+        <span>{{ item.billed }} tally</span>
+      </div>
+      <div class="dash-kpi-bar-row">
+        <span>{{ item.bar_label }}</span>
+        <strong>{{ item.percent }} %</strong>
+      </div>
+      <div class="dash-kpi-track"><span style="width: {{ item.percent }}%"></span></div>
+    </a>
+    {% endfor %}
+
+    <a class="dash-kpi dash-kpi--teal" href="{{ watch_cards.messages.url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi bi-chat-dots"></i></span>
+      <i class="bi bi-chat-dots dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">Messages</div>
+      <div class="dash-kpi-value">{{ watch_cards.messages.unread }}</div>
+      <div class="dash-kpi-source">Communication Center</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">WA {{ watch_cards.messages.whatsapp_unread }}/{{ watch_cards.messages.whatsapp_total }}</span>
+        <span>Email {{ watch_cards.messages.email_unread }}/{{ watch_cards.messages.email_total }}</span>
+      </div>
+      <div class="dash-kpi-bar-row">
+        <span>Read</span>
+        <strong>{{ watch_cards.messages.percent }} %</strong>
+      </div>
+      <div class="dash-kpi-track"><span style="width: {{ watch_cards.messages.percent }}%"></span></div>
+    </a>
+
+    <a class="dash-kpi dash-kpi--amber" href="{{ watch_cards.court_fee_url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi bi-bank"></i></span>
+      <i class="bi bi-bank dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">Court Fee</div>
+      <div class="dash-kpi-value">{{ watch_cards.court_fee_unsold }}</div>
+      <div class="dash-kpi-source">e-Court receipts</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">{{ watch_cards.court_fee_sold }} sold</span>
+        <span>{{ watch_cards.court_fee_total }} imported</span>
+      </div>
+      <div class="dash-kpi-bar-row">
+        <span>Sold</span>
+        <strong>{{ watch_cards.court_fee_percent }} %</strong>
+      </div>
+      <div class="dash-kpi-track"><span style="width: {{ watch_cards.court_fee_percent }}%"></span></div>
+    </a>
+  </div>
+
+  <div class="dash-home">
   <div class="dash-top-row">
     <div class="dash-today-wrap">
       <div class="jtcs-metric-card dash-today-card">
@@ -48,45 +104,6 @@
             </div>
           </button>
           </div>
-          {% if today_activity.bank_lines %}
-            {% for bank in today_activity.bank_lines %}
-            <button type="button" class="dash-today-metric dash-today-metric-btn"
-                    data-today-metric="bank"
-                    data-account-id="{{ bank.account_id or '' }}"
-                    data-label="{{ bank.label }}"
-                    title="View {{ bank.label }} details">
-              <div class="small text-muted">{{ bank.label }}</div>
-              <strong class="{% if bank.amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(bank.amount) }}</strong>
-            </button>
-            {% endfor %}
-          {% else %}
-            <button type="button" class="dash-today-metric dash-today-metric-btn"
-                    data-today-metric="bank" data-label="Bank" title="View Bank details">
-              <div class="small text-muted">Bank</div>
-              <strong class="{% if today_activity.bank_total < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.bank_total) }}</strong>
-            </button>
-          {% endif %}
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="income" data-label="Income" title="View Income details">
-            <div class="small text-muted">Income</div>
-            <strong class="{% if today_activity.income_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.income_amount) }}</strong>
-          </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="expense" data-label="Expense" title="View Expense details">
-            <div class="small text-muted">Expense</div>
-            <strong class="{% if today_activity.expense_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.expense_amount) }}</strong>
-          </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="sales" data-label="Sales" title="View Sales details">
-            <div class="small text-muted">Sales</div>
-            <strong class="{% if today_activity.sale_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.sale_amount) }}</strong>
-          </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="total" data-label="Total Amount" title="View Total Amount details">
-            <div class="small text-muted">Total Amount</div>
-            <strong class="{% if today_activity.total_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
-          </button>
-          {% if today_activity.pending_amount_cumulative > 0 %}
           <div class="dash-today-metric dash-pending-sale-card" title="Generated bills waiting for receiving">
             <div class="small text-muted">Sale / Pending</div>
             <table class="dash-pending-sale-table">
@@ -127,12 +144,12 @@
               </tbody>
             </table>
           </div>
-          {% endif %}
         </div>
       </div>
     </div>
 
-    <div class="dash-period-bar-wrap">
+    <div class="dash-period-bar-wrap dash-tools">
+      <div class="dash-search-stack">
       <div class="dash-ledger-search" id="dashLedgerSearchBox">
         <label class="dash-ledger-search-title" for="dashLedgerSearch">Search Ledger Here</label>
         <div class="dash-ledger-search-field">
@@ -174,14 +191,9 @@
           <button type="button" class="btn btn-sm btn-outline-primary {% if period_preset == 'custom' %}active{% endif %}"
                   id="dashCustomDatesBtn">Custom Dates</button>
         </div>
-        <div class="dash-period-showing small text-muted">
-          Showing {{ date_from | display_date }} — {{ date_to | display_date }}
-        </div>
       </form>
-    </div>
-  </div>
-
-  <div class="row g-2 mb-3" id="dashMetricCards">
+      </div>
+  <div class="dash-metric-group" id="dashMetricCards">
     <div class="col-6 col-md-4 col-xl">
       <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-income w-100 text-start"
               data-metric="total_income" data-label="Total Income">
@@ -335,9 +347,11 @@
       </button>
     </div>
   </div>
+    </div>
+  </div>
 
-  <div class="row g-3">
-    <div class="col-lg-8">
+  <div class="row g-3 dash-home-rest">
+    <div class="col-12">
       <div class="jtcs-card dash-recent-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h2 class="h6 mb-0">Recent Daily Transactions</h2>
@@ -385,44 +399,7 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-4">
-      <div class="jtcs-card mb-0 dash-arch-card">
-        <h2 class="h6 text-muted text-uppercase mb-2">Architecture</h2>
-        <ul class="small mb-0">
-          <li><code>JTCSDailyTransaction</code> — business work</li>
-          <li><code>JtcsBankTransaction</code> — money movement</li>
-          <li class="mt-2 text-muted"><i class="bi bi-database-check"></i> Database connected to: <code>{{ db_connection_display }}</code></li>
-        </ul>
-
-        <div class="dash-whats-new">
-          <h3 class="dash-whats-new-title">
-            <i class="bi bi-stars"></i> What’s New
-          </h3>
-          {% if whats_new %}
-          <ul class="dash-whats-new-list">
-            {% for item in whats_new %}
-            <li class="dash-whats-new-item">
-              <div class="dash-whats-new-meta">
-                <span class="dash-whats-new-date">{{ item.date_display }}</span>
-                {% if item.badge %}
-                <span class="dash-whats-new-badge dash-whats-new-badge--{{ item.badge|lower }}">{{ item.badge }}</span>
-                {% endif %}
-              </div>
-              {% if item.href %}
-              <a class="dash-whats-new-link" href="{{ item.href }}">{{ item.title }}</a>
-              {% else %}
-              <span class="dash-whats-new-heading">{{ item.title }}</span>
-              {% endif %}
-              <p class="dash-whats-new-detail">{{ item.detail }}</p>
-            </li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <p class="dash-whats-new-empty text-muted small mb-0">No recent updates.</p>
-          {% endif %}
-        </div>
-      </div>
-    </div>
+  </div>
   </div>
 
   <section class="dash-analytics" aria-label="Business analytics">

@@ -167,13 +167,17 @@
         .map(function (m) {
           const isNote = !!m.IsInternalNote;
           const outbound = m.Direction === "Outbound" || m.Direction === "Internal";
+          const isEmail = (m.Channel || "").toLowerCase() === "email";
+          const formatted = isEmail && m.BodyHtml;
           const cls =
             "wa-msg" +
-            (isNote ? " wa-msg--note" : outbound ? " wa-msg--out" : "");
+            (isNote ? " wa-msg--note" : outbound ? " wa-msg--out" : "") +
+            (formatted ? " wa-msg--email" : "");
           let mediaHtml = "";
-          if (m.AttachmentPath || m.AttachmentName) {
+          const mime = (m.AttachmentMimeType || "").toLowerCase();
+          const hideInlineImage = formatted && /<img\b/i.test(m.BodyHtml || "") && mime.indexOf("image/") === 0;
+          if (!hideInlineImage && (m.AttachmentPath || m.AttachmentName)) {
             const url = fileHref(m);
-            const mime = (m.AttachmentMimeType || "").toLowerCase();
             const safeUrl = CrmCommon.escapeHtml(url);
             if (url && isBrowserImage(m)) {
               mediaHtml =
@@ -207,7 +211,11 @@
             cls +
             '"><div class="wa-bubble">' +
             testBadge +
-            CrmCommon.escapeHtml(m.Body || "") +
+            (formatted
+              ? '<div class="wa-email-html">' + m.BodyHtml + "</div>"
+              : '<div class="wa-email-text">' +
+                CrmCommon.escapeHtml(m.Body || "").replace(/\n/g, "<br>") +
+                "</div>") +
             mediaHtml +
             '<div class="wa-msg-time">' +
             CrmCommon.formatDate(m.CreatedDate || m.SentAt) +

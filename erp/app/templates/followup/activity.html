@@ -519,7 +519,6 @@
                     </div>
                   </div>
                 </div>
-                {% if module_code == 'DSC' %}
                 <div>
                   <div class="fu-generate-bill-label mb-1">Do you want approve this invoice here?</div>
                   <div class="fu-generate-bill-radios" role="radiogroup" aria-label="Approve this invoice here">
@@ -535,7 +534,6 @@
                     </div>
                   </div>
                 </div>
-                {% endif %}
               </div>
               <div class="small mt-2 d-none" id="fuInvoiceStatus"></div>
             </div>
@@ -671,9 +669,7 @@
   window.FU_DEFAULT_DATE = {{ default_date|tojson }};
   window.FU_GENERATE_BILL_URL = {{ url_for('miscellaneous.generate_bill_page')|tojson }};
   window.FU_INVOICE_STATUS_URL = {{ url_for('miscellaneous.generate_bill_invoice')|tojson }};
-  {% if module_code == 'DSC' %}
   window.FU_INVOICE_WORKFLOW_URL = {{ url_for('accounting_invoice.api_invoice_workflow', invoice_id=0)|tojson }};
-  {% endif %}
   window.FU_INVOICE_DELETE_URL = {{ url_for('miscellaneous.delete_generated_bill_invoices')|tojson }};
   window.FU_BANK_ACCOUNTS = {{ payment_modes|tojson }};
   window.FU_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
@@ -702,5 +698,5 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261003dscyes1"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261004bill1"></script>
 {% endblock %}

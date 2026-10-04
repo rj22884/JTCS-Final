@@ -20,6 +20,9 @@ class RationCardFollowupRepository:
         self._schema_ready = False
 
     def ensure_schema(self) -> None:
+        """Ration Card Followup is removed. The table is not recreated."""
+        self._schema_ready = True
+        return
         if self._schema_ready:
             return
         self.session.execute(

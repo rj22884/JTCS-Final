@@ -9,7 +9,6 @@ from app.utils.timezone import today_app
 from app.decorators import login_required, require_delete_reauth
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
-from app.whats_new import list_whats_new
 
 bp = Blueprint("dashboard", __name__)
 
@@ -113,6 +112,35 @@ def index():
         (row.closing_balance for row in bank_liability_closings), Decimal("0")
     )
     today_activity = dashboard_service.get_today_activity_summary(today)
+    try:
+        watch_cards = dashboard_service.get_watch_cards()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+        current_app.logger.exception("Dashboard watch cards failed")
+        watch_cards = {
+            "followups": [],
+            "followup_total": 0,
+            "whatsapp": {"unread": 0, "total": 0, "url": ""},
+            "email": {"unread": 0, "total": 0, "url": ""},
+            "messages": {
+                "unread": 0,
+                "total": 0,
+                "read": 0,
+                "percent": "0.00",
+                "url": "",
+                "whatsapp_unread": 0,
+                "whatsapp_total": 0,
+                "email_unread": 0,
+                "email_total": 0,
+            },
+            "court_fee_unsold": 0,
+            "court_fee_total": 0,
+            "court_fee_sold": 0,
+            "court_fee_percent": "0.00",
+            "court_fee_url": "",
+        }
     currency_notes = {
         "total_amount": 0.0,
         "total_notes": 0,
@@ -150,6 +178,7 @@ def index():
         bank_liability_closing_total=bank_liability_closing_total,
         bank_closing_manual=bank_closing_manual,
         today_activity=today_activity,
+        watch_cards=watch_cards,
         currency_notes=currency_notes,
         recent=recent,
         date_from=date_from,
@@ -166,8 +195,18 @@ def index():
         fy_end=fy_to,
         prev_fy_from=prev_fy_from,
         prev_fy_to=prev_fy_to,
-        whats_new=list_whats_new(limit=6),
     )
+
+
+@bp.route("/api/whats-new/<int:entry_id>/read", methods=["POST"])
+@login_required
+def whats_new_read(entry_id: int):
+    from app.services.whats_new_service import WhatsNewService
+
+    uid = int(session.get("user_id") or 0)
+    service = WhatsNewService()
+    service.mark_read(uid, entry_id)
+    return jsonify({"ok": True, "unread_count": service.unread_count(uid)})
 
 
 @bp.route("/dashboard/api/analytics")

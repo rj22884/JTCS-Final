@@ -94,6 +94,7 @@
       const rows = data.rows || [];
       renderCrmNotifications(rows);
       syncWhatsAppTaskbar(rows);
+      if (window.jtcsApplyWhatsNew) window.jtcsApplyWhatsNew(data);
     } catch (_err) {
       /* silent */
     }

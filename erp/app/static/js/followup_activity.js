@@ -205,9 +205,7 @@
   }
 
   function canDownloadThankYou(row) {
-    // ITR and DSC: thank-you letter only after Payment Received is ticked.
-    if (isItrModule || isDscModule) return rowHasPaymentReceived(row);
-    return rowHasTallyBill(row);
+    return rowHasPaymentReceived(row);
   }
 
   function thankYouCellHtml(row) {
@@ -983,6 +981,24 @@
     }
   }
 
+  function validateTallyPayment() {
+    if (isStageChecked("tally_bill_generated")) {
+      if (!(els.billNo?.value || "").trim()) {
+        return "Tally bill number is required when Tally Bill Generated is checked.";
+      }
+    }
+    if (isStageChecked("payment_received")) {
+      if (!(els.billNo?.value || "").trim()) {
+        return "Tally bill number is required before marking Payment Received.";
+      }
+      const payTotal = getPaymentTotal();
+      if (!payTotal || payTotal <= 0) {
+        return "Add at least one payment amount for Payment Received.";
+      }
+    }
+    return null;
+  }
+
   function validateDscEntry() {
     if (!isDscModule) return null;
     const locked = els.applicationNumber?.dataset.locked === "1";
@@ -1030,13 +1046,11 @@
     const paid = sourcePaymentReceived() ? "Yes" : "No";
     const no = record.invoice_no ? record.invoice_no + " — " : "";
     let text = "Sale invoice " + no + approved + " · Payment Received: " + paid;
-    if (isDscModule) {
-      const amount = Number(record.invoice_value);
-      if (Number.isFinite(amount)) {
-        text +=
-          " · Total Invoice Amount: ₹" +
-          amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
+    const amount = Number(record.invoice_value);
+    if (Number.isFinite(amount)) {
+      text +=
+        " · Total Invoice Amount: ₹" +
+        amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     return text;
   }
@@ -1052,7 +1066,6 @@
     }
     box.textContent = saleStatusText(record);
     box.classList.remove("d-none");
-    if (!isDscModule) return;
     if (sourcePaymentReceived()) box.classList.add("fu-pay-yes");
     else box.classList.add("fu-pay-no");
   }
@@ -1118,33 +1131,31 @@
     const approved = saleIsApproved();
     if (els.generateBillYes) els.generateBillYes.disabled = approved || entryFieldsLocked;
     if (els.generateBillNo) els.generateBillNo.disabled = approved || entryFieldsLocked;
-    if (isDscModule) {
-      const paymentOn = isStageChecked("payment_received");
-      const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
-      const lockApprove = paymentOn || entryFieldsLocked;
-      if (els.approveInvoiceYes) els.approveInvoiceYes.disabled = lockApprove;
-      if (els.approveInvoiceNo) els.approveInvoiceNo.disabled = lockApprove;
-      if (approved) {
-        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
-        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
-      } else if (!paymentOn) {
-        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
-        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
-      } else if (autoApproveFor === 0) {
-        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
-        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
-      }
-      if (lookupDone && paymentOn && !approved && !approveInFlight) {
-        const token = invoiceId || -1;
-        if (autoApproveFor !== token) {
-          autoApproveFor = token;
-          if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
-          if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
-          approveInvoiceHere();
-        }
-      }
-      if (!paymentOn) autoApproveFor = 0;
+    const paymentOn = isStageChecked("payment_received");
+    const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
+    const lockApprove = paymentOn || entryFieldsLocked;
+    if (els.approveInvoiceYes) els.approveInvoiceYes.disabled = lockApprove;
+    if (els.approveInvoiceNo) els.approveInvoiceNo.disabled = lockApprove;
+    if (approved) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+    } else if (!paymentOn) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = false;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = true;
+    } else if (autoApproveFor === 0) {
+      if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+      if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
     }
+    if (lookupDone && paymentOn && !approved && !approveInFlight) {
+      const token = invoiceId || -1;
+      if (autoApproveFor !== token) {
+        autoApproveFor = token;
+        if (els.approveInvoiceYes) els.approveInvoiceYes.checked = true;
+        if (els.approveInvoiceNo) els.approveInvoiceNo.checked = false;
+        approveInvoiceHere();
+      }
+    }
+    if (!paymentOn) autoApproveFor = 0;
     const creditOpen = approved && hasCreditPayment() && !entryFieldsLocked;
     const lockPayments = entryFieldsLocked || (approved && !creditOpen);
     els.paymentWrap?.querySelectorAll("input, select, button, textarea").forEach(function (input) {
@@ -1324,12 +1335,10 @@
       rate: (els.billAmount?.value || "").trim(),
       state_code: "05",
     };
-    if (isDscModule) {
-      seed.source = "DSC";
-      if (lastSaleRecord && lastSaleRecord.invoice_id) {
-        seed.open_edit = true;
-        seed.invoice_id = lastSaleRecord.invoice_id;
-      }
+    seed.source = workTypeLabel;
+    if (lastSaleRecord && lastSaleRecord.invoice_id) {
+      seed.open_edit = true;
+      seed.invoice_id = lastSaleRecord.invoice_id;
     }
     try {
       sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
@@ -1337,29 +1346,27 @@
       /* ignore quota errors */
     }
     const url = window.FU_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
-    if (isDscModule) {
-      const host = window.top || window;
-      if (typeof host.jtcsOpenPageWindow === "function") {
-        let existing = null;
-        try {
-          const path = new URL(url, window.location.origin);
-          const key = path.pathname.replace(/\/+$/, "") + path.search;
-          existing = host.document.querySelector(
-            '.jtcs-page-win[data-key="' + key.replace(/"/g, "") + '"]'
-          );
-        } catch (_err) {
-          existing = null;
-        }
-        host.jtcsOpenPageWindow(url, "Generate Bill");
-        if (existing && seed.open_edit) {
-          const frame = existing.querySelector("iframe");
-          if (frame) frame.src = url;
-        }
-        return;
+    const host = window.top || window;
+    if (typeof host.jtcsOpenPageWindow === "function") {
+      let existing = null;
+      try {
+        const path = new URL(url, window.location.origin);
+        const key = path.pathname.replace(/\/+$/, "") + path.search;
+        existing = host.document.querySelector(
+          '.jtcs-page-win[data-key="' + key.replace(/"/g, "") + '"]'
+        );
+      } catch (_err) {
+        existing = null;
       }
+      host.jtcsOpenPageWindow(url, "Generate Bill");
+      if (existing && seed.open_edit) {
+        const frame = existing.querySelector("iframe");
+        if (frame) frame.src = url;
+      }
+      return;
     }
-    const width = Math.round((isDscModule ? 14.4 : 9.4) * 96);
-    const height = Math.round((isDscModule ? 9.1 : 7.2) * 96);
+    const width = Math.round(14.4 * 96);
+    const height = Math.round(9.1 * 96);
     const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
     const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
     const features = [
@@ -2215,7 +2222,7 @@
       }
       payload.return_type = gstReturnType;
     }
-    const dscError = validateDscEntry();
+    const dscError = validateDscEntry() || validateTallyPayment();
     if (dscError) {
       alert(dscError);
       return;
@@ -2728,7 +2735,7 @@
   });
 
   async function approveInvoiceHere() {
-    if (!isDscModule || !els.approveInvoiceYes?.checked) return;
+    if (!els.approveInvoiceYes?.checked) return;
     if (saleIsApproved() || approveInFlight) return;
     const invoiceId = lastSaleRecord && lastSaleRecord.invoice_id;
     if (!invoiceId || !window.FU_INVOICE_WORKFLOW_URL) {
@@ -2785,10 +2792,6 @@
   els.generateBillYes?.addEventListener("click", function () {
     setTimeout(function () {
       if (!els.generateBillYes || !els.generateBillYes.checked) return;
-      if (!isDscModule) {
-        openGenerateBillPopup();
-        return;
-      }
       const billNo = (els.billNo?.value || "").trim();
       lookupGeneratedInvoice(billNo)
         .then(function (record) {

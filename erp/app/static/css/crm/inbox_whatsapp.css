@@ -192,6 +192,39 @@ html.jtcs-embed .jtcs-content:has(.wa-inbox) {
   background: var(--wa-bubble-out);
 }
 
+.wa-msg--email .wa-bubble {
+  max-width: min(94%, 46rem);
+}
+
+.wa-email-text {
+  white-space: normal;
+}
+
+.wa-email-html {
+  white-space: normal;
+  line-height: 1.4;
+  font-size: 0.92rem;
+}
+
+.wa-email-html table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.45rem 0;
+}
+
+.wa-email-html td,
+.wa-email-html th {
+  border: 1px solid #d0d7de;
+  padding: 0.2rem 0.45rem;
+  vertical-align: top;
+  text-align: left;
+}
+
+.wa-email-html img {
+  max-width: 180px;
+  height: auto;
+}
+
 .wa-msg--note .wa-bubble {
   background: #fff5c4;
   color: #5c4b00;

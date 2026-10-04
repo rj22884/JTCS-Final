@@ -253,6 +253,81 @@ class CommunicationService:
             ).scalar()
         )
 
+    def email_needs_html(self, external_message_id: str) -> bool:
+        """Stored email whose HTML body has not been saved yet."""
+        ensure_crm_schema()
+        if not external_message_id:
+            return False
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 BodyHtml
+                FROM dbo.CrmMessage
+                WHERE ExternalMessageID = :eid AND Channel = N'Email'
+                """
+            ),
+            {"eid": external_message_id[:128]},
+        ).first()
+        if row is None:
+            return False
+        return not (row[0] or "").strip()
+
+    def save_email_html(
+        self,
+        external_message_id: str,
+        *,
+        body: str,
+        body_html: str,
+        drop_inline_image: bool,
+    ) -> None:
+        """Replace a flattened email body with the formatted HTML copy."""
+        ensure_crm_schema()
+        preview = " ".join((body or "").split())[:100]
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.CrmMessage
+                SET Body = :body,
+                    BodyHtml = :body_html,
+                    AttachmentPath = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentPath END,
+                    AttachmentName = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentName END,
+                    AttachmentMimeType = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentMimeType END
+                WHERE ExternalMessageID = :eid AND Channel = N'Email'
+                """
+            ),
+            {
+                "body": body or "(no body)",
+                "body_html": body_html,
+                "drop_image": 1 if drop_inline_image else 0,
+                "eid": external_message_id[:128],
+            },
+        )
+        db.session.commit()
+        db.session.execute(
+            text(
+                """
+                UPDATE c
+                SET LastMessagePreview = :preview
+                FROM dbo.CrmConversation c
+                INNER JOIN dbo.CrmMessage m ON m.ConversationID = c.ConversationID
+                WHERE m.ExternalMessageID = :eid
+                  AND m.Channel = N'Email'
+                  AND m.CreatedDate = (
+                      SELECT MAX(x.CreatedDate) FROM dbo.CrmMessage x
+                      WHERE x.ConversationID = c.ConversationID
+                  )
+                """
+            ),
+            {"preview": preview, "eid": external_message_id[:128]},
+        )
+        db.session.commit()
+
     def add_message(
         self,
         conversation_id: int,
@@ -266,6 +341,7 @@ class CommunicationService:
         attachment_mime_type: str | None = None,
         attachment_size_bytes: int | None = None,
         media_type: str | None = None,
+        body_html: str | None = None,
         external_message_id: str | None = None,
         delivery_status: str | None = None,
         error_detail: str | None = None,
@@ -289,13 +365,13 @@ class CommunicationService:
             text(
                 """
                 INSERT INTO dbo.CrmMessage
-                    (ConversationID, Direction, Channel, Body, AttachmentPath, AttachmentName,
+                    (ConversationID, Direction, Channel, Body, BodyHtml, AttachmentPath, AttachmentName,
                      AttachmentMimeType, AttachmentSizeBytes, MediaType, ExternalMessageID,
                      DeliveryStatus, StatusUpdatedAt, ErrorDetail, IsTest,
                      CreatedByUserID, CreatedByName, IsInternalNote)
                 OUTPUT INSERTED.MessageID
                 VALUES
-                    (:cid, :direction, :channel, :body, :apath, :aname,
+                    (:cid, :direction, :channel, :body, :body_html, :apath, :aname,
                      :amime, :asize, :mtype, :eid,
                      :dstatus, :now, :err, :is_test,
                      :uid, :uname, :internal)
@@ -306,6 +382,7 @@ class CommunicationService:
                 "direction": direction[:20],
                 "channel": channel[:50],
                 "body": body,
+                "body_html": (body_html or "") or None,
                 "apath": attachment_path,
                 "aname": attachment_name,
                 "amime": (attachment_mime_type or "")[:100] or None,
@@ -324,7 +401,7 @@ class CommunicationService:
         unread_sql = "UnreadCount = UnreadCount + 1," if bump_unread and direction == "Inbound" else ""
         inbound_sql = "LastInboundAt = :now," if direction == "Inbound" else ""
         outbound_sql = "LastOutboundAt = :now," if direction == "Outbound" else ""
-        preview = (body or "")[:240]
+        preview = " ".join((body or "").split())[:100]
         if direction == "Inbound":
             status_sql = """
                 Status = CASE
@@ -588,7 +665,7 @@ class CommunicationService:
         rows = db.session.execute(
             text(
                 """
-                SELECT MessageID, ConversationID, Direction, Channel, Body, AttachmentPath,
+                SELECT MessageID, ConversationID, Direction, Channel, Body, BodyHtml, AttachmentPath,
                        AttachmentName, AttachmentMimeType, AttachmentSizeBytes, MediaType,
                        ExternalMessageID, DeliveryStatus, StatusUpdatedAt, ErrorDetail,
                        ISNULL(IsStarred, 0) AS IsStarred,

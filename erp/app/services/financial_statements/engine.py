@@ -1261,9 +1261,7 @@ class FinancialReportEngine:
                      AND ISNULL(f.IsActive, 1) = 1
                      AND LTRIM(RTRIM(ISNULL(inv.TallyBillNo, N''))) <> N''
                     INNER JOIN dbo.FollowupEntryStage es ON es.EntryID = f.EntryID
-                    INNER JOIN dbo.FollowupWorkflowStage s
-                      ON s.StageID = es.StageID
-                     AND s.StageCode = N'tally_bill_generated'
+                     AND es.StageCode = N'tally_bill_generated'
                     LEFT JOIN dbo.ItemMaster im
                       ON l.ItemID IS NULL
                      AND im.ItemCode = f.ModuleCode

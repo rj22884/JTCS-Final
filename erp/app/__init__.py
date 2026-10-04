@@ -48,7 +48,6 @@ from app.routes.followup import (
     itr_followup_bp,
     tds_followup_bp,
 )
-from app.routes.masters_followup import bp as masters_followup_bp
 from app.routes.masters_customer import bp as masters_customer_bp
 from app.routes.customer_portal import bp as customer_portal_bp
 from app.routes.masters_group import bp as masters_group_bp
@@ -180,7 +179,6 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(dsc_followup_bp)
     app.register_blueprint(tds_followup_bp)
     app.register_blueprint(gst_followup_bp)
-    app.register_blueprint(masters_followup_bp)
     app.register_blueprint(masters_customer_bp)
     app.register_blueprint(customer_portal_bp)
     app.register_blueprint(masters_group_bp)
@@ -296,6 +294,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("API Master menu ensure skipped: %s", exc)
+
+        try:
+            from app.repositories.followup_repository import FollowupRepository
+
+            FollowupRepository().retire_followup_master()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("Followup Master retire skipped: %s", exc)
 
         try:
             from app.services.login_activity_service import LoginActivityService
@@ -642,6 +648,8 @@ def create_app(config_class: type = Config) -> Flask:
         pending_user_count = 0
         crm_notifications = []
         crm_unread_count = 0
+        whats_new_items = []
+        whats_new_unread = 0
         is_admin_user = False
         is_fps_user = False
         if has_request_context() and session.get("user_id"):
@@ -686,6 +694,16 @@ def create_app(config_class: type = Config) -> Flask:
                 except Exception:
                     crm_unread_count = 0
                     crm_notifications = []
+                try:
+                    from app.services.whats_new_service import WhatsNewService
+
+                    feed = WhatsNewService().header_feed(int(session.get("user_id")))
+                    whats_new_unread = int(feed.get("unread_count") or 0)
+                    whats_new_items = feed.get("items") or []
+                except Exception:
+                    app.logger.exception("What's New header failed")
+                    whats_new_unread = 0
+                    whats_new_items = []
 
         db_server = app.config.get("DB_SERVER_DISPLAY", r"JTCS\JTCS")
         db_name = app.config.get("DB_NAME_DISPLAY", "JTCSS")
@@ -748,6 +766,8 @@ def create_app(config_class: type = Config) -> Flask:
             "pending_user_notifications": pending_user_notifications,
             "crm_unread_count": crm_unread_count,
             "crm_notifications": crm_notifications,
+            "whats_new_items": whats_new_items,
+            "whats_new_unread": whats_new_unread,
             "notification_poll_seconds": app.config.get("NOTIFICATION_POLL_SECONDS", 15),
             "is_admin_user": is_admin_user,
             "is_fps_user": is_fps_user,

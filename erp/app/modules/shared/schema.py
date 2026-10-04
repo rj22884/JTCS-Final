@@ -624,6 +624,10 @@ _COMM_CENTER_ALTERS: tuple[str, ...] = (
         CREATE UNIQUE INDEX UX_CrmConversationLabel ON dbo.CrmConversationLabel (ConversationID, LabelID);
     END;
     """,
+    """
+    IF COL_LENGTH(N'dbo.CrmMessage', N'BodyHtml') IS NULL
+        ALTER TABLE dbo.CrmMessage ADD BodyHtml NVARCHAR(MAX) NULL;
+    """,
 )
 
 

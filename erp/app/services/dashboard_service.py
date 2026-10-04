@@ -625,6 +625,271 @@ class DashboardService:
             labels.append(label)
         return " · ".join(labels) if labels else "—"
 
+    def _table_exists(self, table_name: str) -> bool:
+        try:
+            found = db.session.execute(
+                text("SELECT OBJECT_ID(:name, N'U')"),
+                {"name": f"dbo.{table_name}"},
+            ).scalar()
+            return bool(found)
+        except Exception:
+            db.session.rollback()
+            return False
+
+    def _count(self, sql: str, params: dict | None = None) -> int:
+        try:
+            return int(db.session.execute(text(sql), params or {}).scalar() or 0)
+        except Exception:
+            db.session.rollback()
+            return 0
+
+    def get_watch_cards(self) -> dict:
+        """Cards above Today's Activity Summary.
+
+        Follow-up rows are cases with Tally Bill Generated ticked and Payment
+        Received still open. Message cards are unread / inbound total.
+        Court fee is imported e-Court receipts that have not been sold.
+        """
+        from flask import url_for
+
+        followup_order = ("ITR", "GST", "TDS", "DSC")
+        followup_links = {
+            "ITR": "itr_followup.index",
+            "GST": "gst_followup.index",
+            "TDS": "tds_followup.index",
+            "DSC": "dsc_followup.index",
+        }
+        billed: dict[str, int] = {code: 0 for code in followup_order}
+        paid: dict[str, int] = {code: 0 for code in followup_order}
+        if self._table_exists("FollowupEntryMaster") and self._table_exists("FollowupEntryStage"):
+            try:
+                rows = db.session.execute(
+                    text(
+                        """
+                        SELECT f.ModuleCode,
+                               SUM(CASE WHEN t.EntryID IS NOT NULL THEN 1 ELSE 0 END) AS Billed,
+                               SUM(CASE WHEN t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL THEN 1 ELSE 0 END) AS Paid
+                        FROM dbo.FollowupEntryMaster f
+                        LEFT JOIN (
+                            SELECT DISTINCT EntryID
+                            FROM dbo.FollowupEntryStage
+                            WHERE StageCode = N'tally_bill_generated'
+                        ) t ON t.EntryID = f.EntryID
+                        LEFT JOIN (
+                            SELECT DISTINCT EntryID
+                            FROM dbo.FollowupEntryStage
+                            WHERE StageCode = N'payment_received'
+                        ) p ON p.EntryID = f.EntryID
+                        WHERE ISNULL(f.IsActive, 1) = 1
+                        GROUP BY f.ModuleCode
+                        """
+                    )
+                ).all()
+                for module_code, bill_cnt, paid_cnt in rows:
+                    code = (module_code or "").strip().upper()
+                    if code in billed:
+                        billed[code] = int(bill_cnt or 0)
+                        paid[code] = int(paid_cnt or 0)
+                self._apply_itr_screen_payment(billed, paid)
+            except Exception:
+                db.session.rollback()
+
+        misc_billed = 0
+        misc_paid = 0
+        if self._table_exists("OthersIncomeExpenseMaster") and self._table_exists("WorkMaster"):
+            try:
+                misc_row = db.session.execute(
+                    text(
+                        """
+                        SELECT
+                          SUM(CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1 THEN 1 ELSE 0 END) AS Billed,
+                          SUM(CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1
+                                    AND ISNULL(e.PaymentReceived, 0) = 1 THEN 1 ELSE 0 END) AS Paid
+                        FROM dbo.OthersIncomeExpenseMaster e
+                        INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+                        WHERE ISNULL(e.IsActive, 1) = 1
+                          AND w.LedgerKind = N'Misc.'
+                        """
+                    )
+                ).one()
+                misc_billed = int(misc_row[0] or 0)
+                misc_paid = int(misc_row[1] or 0)
+            except Exception:
+                db.session.rollback()
+
+        def _follow_url(endpoint: str) -> str:
+            try:
+                return url_for(endpoint)
+            except Exception:
+                return ""
+
+        follow_meta = {
+            "ITR": ("ITR", "bi-file-earmark-text", "blue", "ITR Followup"),
+            "GST": ("GST", "bi-receipt", "green", "GST Followup"),
+            "TDS": ("TDS", "bi-percent", "orange", "TDS Followup"),
+            "DSC": ("DSC", "bi-patch-check", "pink", "DSC Followup"),
+        }
+        followups = []
+        for code in followup_order:
+            bill_cnt = billed[code]
+            paid_cnt = paid[code]
+            open_cnt = max(bill_cnt - paid_cnt, 0)
+            followups.append(
+                {
+                    "code": code,
+                    "label": follow_meta[code][0],
+                    "icon": follow_meta[code][1],
+                    "tone": follow_meta[code][2],
+                    "source": follow_meta[code][3],
+                    "count": open_cnt,
+                    "billed": bill_cnt,
+                    "paid": paid_cnt,
+                    "percent": self._share_percent(paid_cnt, bill_cnt),
+                    "bar_label": "Payment received",
+                    "url": _follow_url(followup_links[code]),
+                }
+            )
+        misc_open = max(misc_billed - misc_paid, 0)
+        followups.append(
+            {
+                "code": "MISC",
+                "label": "Misc",
+                "icon": "bi-grid",
+                "tone": "violet",
+                "source": "Miscellaneous activity",
+                "count": misc_open,
+                "billed": misc_billed,
+                "paid": misc_paid,
+                "percent": self._share_percent(misc_paid, misc_billed),
+                "bar_label": "Payment received",
+                "url": _follow_url("miscellaneous.index"),
+            }
+        )
+
+        def _channel_counts(channel: str) -> dict:
+            unread = 0
+            total = 0
+            if self._table_exists("CrmConversation"):
+                unread = self._count(
+                    """
+                    SELECT COALESCE(SUM(UnreadCount), 0)
+                    FROM dbo.CrmConversation
+                    WHERE Channel = :channel AND ISNULL(IsActive, 1) = 1
+                    """,
+                    {"channel": channel},
+                )
+            if self._table_exists("CrmMessage") and self._table_exists("CrmConversation"):
+                total = self._count(
+                    """
+                    SELECT COUNT(*)
+                    FROM dbo.CrmMessage m
+                    INNER JOIN dbo.CrmConversation c ON c.ConversationID = m.ConversationID
+                    WHERE c.Channel = :channel
+                      AND m.Direction = N'Inbound'
+                      AND ISNULL(m.IsInternalNote, 0) = 0
+                    """,
+                    {"channel": channel},
+                )
+            return {"unread": unread, "total": total}
+
+        whatsapp = _channel_counts("WhatsApp")
+        email = _channel_counts("Email")
+        inbox_url = _follow_url("crm.inbox_page")
+        whatsapp["url"] = f"{inbox_url}?channel=WhatsApp" if inbox_url else ""
+        email["url"] = f"{inbox_url}?channel=Email" if inbox_url else ""
+
+        unsold = 0
+        receipt_total = 0
+        if self._table_exists("ECourtReceiptLine"):
+            receipt_total = self._count("SELECT COUNT(*) FROM dbo.ECourtReceiptLine")
+            if self._table_exists("ECourtSale"):
+                unsold = self._count(
+                    """
+                    SELECT COUNT(*)
+                    FROM dbo.ECourtReceiptLine l
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.ECourtSale s
+                        WHERE UPPER(LTRIM(RTRIM(s.ReceiptNo))) = UPPER(LTRIM(RTRIM(l.ReceiptNo)))
+                    )
+                    """
+                )
+            else:
+                unsold = receipt_total
+        sold = max(receipt_total - unsold, 0)
+        message_unread = int(whatsapp["unread"] or 0) + int(email["unread"] or 0)
+        message_total = int(whatsapp["total"] or 0) + int(email["total"] or 0)
+        message_read = max(message_total - message_unread, 0)
+
+        return {
+            "followups": followups,
+            "followup_total": sum(item["count"] for item in followups),
+            "whatsapp": whatsapp,
+            "email": email,
+            "messages": {
+                "unread": message_unread,
+                "total": message_total,
+                "read": message_read,
+                "percent": self._share_percent(message_read, message_total),
+                "url": inbox_url or "",
+                "whatsapp_unread": whatsapp["unread"],
+                "whatsapp_total": whatsapp["total"],
+                "email_unread": email["unread"],
+                "email_total": email["total"],
+            },
+            "court_fee_unsold": unsold,
+            "court_fee_total": receipt_total,
+            "court_fee_sold": sold,
+            "court_fee_percent": self._share_percent(sold, receipt_total),
+            "court_fee_url": _follow_url("ecourt.ecourt_activity"),
+        }
+
+    def _apply_itr_screen_payment(self, billed: dict[str, int], paid: dict[str, int]) -> None:
+        """Match the ITR screen: a posted receipt counts as Payment Received.
+
+        The ITR list heals a missing payment tick when cash/bank is already
+        posted. The dashboard uses that same rule so the card equals the
+        ITR Payment Pending total.
+        """
+        open_bills = db.session.execute(
+            text(
+                """
+                SELECT DISTINCT LTRIM(RTRIM(f.BillNo))
+                FROM dbo.FollowupEntryMaster f
+                INNER JOIN (
+                    SELECT DISTINCT EntryID
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode = N'tally_bill_generated'
+                ) t ON t.EntryID = f.EntryID
+                LEFT JOIN (
+                    SELECT DISTINCT EntryID
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode = N'payment_received'
+                ) p ON p.EntryID = f.EntryID
+                WHERE f.ModuleCode = N'ITR'
+                  AND ISNULL(f.IsActive, 1) = 1
+                  AND p.EntryID IS NULL
+                  AND LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
+                """
+            )
+        ).all()
+        bill_nos = {(row[0] or "").strip() for row in open_bills if (row[0] or "").strip()}
+        if not bill_nos:
+            return
+        from app.services.followup_payment_service import FollowupPaymentService
+
+        posted = FollowupPaymentService("ITR").bills_with_posted_payment(bill_nos)
+        extra_paid = len(posted)
+        if extra_paid <= 0:
+            return
+        paid["ITR"] = min(billed.get("ITR", 0), paid.get("ITR", 0) + extra_paid)
+
+    @staticmethod
+    def _share_percent(part: int, whole: int) -> str:
+        if not whole:
+            return "0.00"
+        return f"{(100.0 * part / whole):.2f}"
+
     def get_today_activity_summary(self, system_date: date | None = None) -> TodayActivitySummary:
         system_date = system_date or date.today()
         self._ensure_gst_sales_posted()

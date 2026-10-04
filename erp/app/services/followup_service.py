@@ -229,64 +229,12 @@ def _lookup_tally_bill_income_expense(key: str) -> dict | None:
     }
 
 
-def _lookup_tally_bill_ration_card_followup(key: str) -> dict | None:
-    """Resolve from Ration Card Followup (BillNo or TallyBillNo)."""
-    from app.repositories.ration_card_followup_repository import RationCardFollowupRepository
-    from app.utils.tally_bill import normalize_tally_bill_key
-
-    repo = RationCardFollowupRepository()
-    try:
-        repo.ensure_schema()
-    except Exception:
-        repo.session.rollback()
-    row = repo.find_by_tally_bill_no(key)
-    if row is None or not row.IsActive:
-        return None
-
-    display = (
-        (row.DealerName or "").strip()
-        or (row.FpsName or "").strip()
-        or (row.FpsCode or "").strip()
-        or "Ration Card FPS"
-    )
-    bill_date = getattr(row, "TallyBillDate", None) or row.WorkDate
-    amount = getattr(row, "TallyBillAmount", None)
-    if amount is None:
-        amount = row.Amount
-    tally_no = normalize_tally_bill_key(
-        (getattr(row, "TallyBillNo", None) or "").strip() or (row.BillNo or "").strip()
-    )
-    return {
-        "entry_id": row.EntryID,
-        "module_code": "RCF",
-        "module_title": "Ration Card Followup",
-        "source": "ration_card_followup",
-        "customer_id": None,
-        "customer_name": display,
-        "mobile_number": "",
-        "bill_no": tally_no,
-        "invoice_date": _iso_date(bill_date),
-        "bill_amount": float(amount) if amount is not None else None,
-        "tax_period": "",
-        "quarter": "",
-        "return_type": "",
-        "particulars": f"Ration Card Followup — {display}"[:300],
-        "invoice_kind": "NON_GST",
-        "fps_code": (row.FpsCode or "").strip(),
-        "fps_row_id": row.FpsRowID,
-    }
-
-
 def lookup_tally_bill(bill_no: str) -> dict | None:
-    """Resolve Tally Bill from Followup, OIE Misc, or Ration Card Followup."""
+    """Resolve Tally Bill from Followup or Income / Expense (Misc.)."""
     key = (bill_no or "").strip()
     if not key:
         return None
-    return (
-        _lookup_tally_bill_followup(key)
-        or _lookup_tally_bill_income_expense(key)
-        or _lookup_tally_bill_ration_card_followup(key)
-    )
+    return _lookup_tally_bill_followup(key) or _lookup_tally_bill_income_expense(key)
 
 
 class FollowupService:
@@ -377,7 +325,7 @@ class FollowupService:
             "pan_number": row.PANNumber,
             "remarks": row.Remarks,
             "reason_for_unverified": row.ReasonForUnverified,
-            "stage_ids": [s.StageID for s in (row.stages or [])],
+            "stage_ids": [s.StageCode for s in (row.stages or []) if s.StageCode],
             "completed_stages": completed,
             "workflow_status": FollowupRepository._workflow_status(
                 completed,
@@ -386,43 +334,18 @@ class FollowupService:
         }
 
     def list_stages(self, *, active_only: bool = True) -> list[dict]:
-        if self.module_code == "GST":
-            try:
-                self.followup_repo.ensure_gst_return_filed_stage()
-            except Exception:
-                self.followup_repo.session.rollback()
+        """Fixed stage list. Names are not read from Followup Master."""
         fixed = FIXED_WORKFLOW_STAGES.get(self.module_code) or ()
-        rows = []
-        for code, name, order in fixed:
-            row = self.followup_repo.get_stage_by_code(self.module_code, code)
-            if row is None:
-                row = self.followup_repo.create_stage(
-                    {
-                        "ModuleCode": self.module_code,
-                        "StageCode": code,
-                        "StageName": name,
-                        "DisplayOrder": order,
-                        "ActiveStatus": True,
-                        "CreatedDate": datetime.utcnow(),
-                    }
-                )
-                self.followup_repo.session.commit()
-            else:
-                changed = False
-                if row.StageName != name or row.DisplayOrder != order or not row.ActiveStatus:
-                    row.StageName = name
-                    row.DisplayOrder = order
-                    row.ActiveStatus = True
-                    changed = True
-                if changed:
-                    self.followup_repo.session.commit()
-            item = self._stage_dict(row)
-            item["stage_name"] = name
-            item["display_order"] = order
-            item["active_status"] = True
-            if active_only or item["active_status"]:
-                rows.append(item)
-        return rows
+        return [
+            {
+                "stage_id": code,
+                "stage_code": code,
+                "stage_name": name,
+                "display_order": order,
+                "active_status": True,
+            }
+            for code, name, order in fixed
+        ]
 
     def list_entries(
         self,
@@ -506,7 +429,9 @@ class FollowupService:
             row["form_type"] = row.get("FormType")
             row["quarter"] = row.get("Quarter")
             row["filing_frequency"] = row.get("FilingFrequency") or row.get("filing_frequency") or ""
-            row["stage_ids"] = [s["StageID"] for s in row.get("completed_stages", [])]
+            row["stage_ids"] = [
+                s.get("StageCode") or s.get("StageID") for s in row.get("completed_stages", [])
+            ]
             row["has_tally_bill"] = bool(
                 row.get("has_tally_bill")
                 or row.get("bill_no")
@@ -684,9 +609,6 @@ class FollowupService:
         """ITR-only: if payment was posted but payment_received stage was dropped, fix status."""
         if not rows:
             return
-        payment_stage = self.followup_repo.get_stage_by_code("ITR", "payment_received")
-        if payment_stage is None:
-            return
         candidates: list[tuple[dict, str]] = []
         for row in rows:
             if row.get("payment_received"):
@@ -711,16 +633,16 @@ class FollowupService:
             completed = list(row.get("completed_stages") or [])
             completed.append(
                 {
-                    "StageID": payment_stage.StageID,
-                    "StageCode": payment_stage.StageCode,
-                    "StageName": payment_stage.StageName,
-                    "DisplayOrder": payment_stage.DisplayOrder,
+                    "StageID": "payment_received",
+                    "StageCode": "payment_received",
+                    "StageName": "Payment Received",
+                    "DisplayOrder": 4,
                 }
             )
             row["completed_stages"] = completed
-            row["stage_ids"] = [s["StageID"] for s in completed]
+            row["stage_ids"] = [s.get("StageCode") or s.get("StageID") for s in completed]
             row["payment_received"] = True
-            row["workflow_status"] = payment_stage.StageName or "Payment Received"
+            row["workflow_status"] = "Payment Received"
 
     @staticmethod
     def received_amount_for_letter(record: dict) -> float:
@@ -813,6 +735,11 @@ class FollowupService:
 
         pending = sum(1 for r in rows if (r.get("workflow_status") or "Pending") == "Pending")
         payment_received = sum(1 for r in rows if r.get("payment_received"))
+        payment_pending = sum(
+            1
+            for r in rows
+            if self._progress_bucket(r, self.module_code) == "tally_bill_generated"
+        )
         by_status = {}
         for stage in self.list_stages():
             code = (stage.get("stage_code") or "").strip().lower()
@@ -831,7 +758,7 @@ class FollowupService:
             "total": total,
             "pending": pending,
             "payment_received": payment_received,
-            "payment_pending": total - payment_received,
+            "payment_pending": payment_pending,
             "by_status": by_status,
         }
 
@@ -844,16 +771,26 @@ class FollowupService:
         if row is None or not row.IsActive or row.ModuleCode != self.module_code:
             raise ValueError("Followup entry not found.")
         customer = self.customer_repo.get_detail(row.CustomerID)
-        completed = [
-            {
-                "StageID": es.StageID,
-                "StageCode": es.stage.StageCode if es.stage else "",
-                "StageName": es.stage.StageName if es.stage else "",
-                "DisplayOrder": es.stage.DisplayOrder if es.stage else 0,
-            }
-            for es in sorted(row.stages or [], key=lambda x: (x.stage.DisplayOrder if x.stage else 0))
-        ]
-        all_stages = self.followup_repo.list_stages(self.module_code)
+        stage_meta = {
+            code: (name, order)
+            for code, name, order in FIXED_WORKFLOW_STAGES.get(self.module_code, ())
+        }
+        completed = []
+        for es in row.stages or []:
+            code = (es.StageCode or "").strip()
+            if not code:
+                continue
+            name, order = stage_meta.get(code, (code.replace("_", " ").title(), 0))
+            completed.append(
+                {
+                    "StageID": code,
+                    "StageCode": code,
+                    "StageName": name,
+                    "DisplayOrder": order,
+                }
+            )
+        completed.sort(key=lambda item: item["DisplayOrder"])
+        all_stages = []
         available_cols = self.followup_repo.entry_master_columns()
         data = self._entry_dict(row, stages=completed, available_cols=available_cols)
         data["workflow_status"] = FollowupRepository._workflow_status(completed, all_stages)
@@ -910,20 +847,18 @@ class FollowupService:
                         (s.get("StageCode") or "").lower() for s in (data.get("completed_stages") or [])
                     }
                     if received > 0 and "payment_received" not in completed_codes:
-                        payment_stage = self.followup_repo.get_stage_by_code("ITR", "payment_received")
-                        if payment_stage is not None:
-                            completed = list(data.get("completed_stages") or [])
-                            completed.append(
-                                {
-                                    "StageID": payment_stage.StageID,
-                                    "StageCode": payment_stage.StageCode,
-                                    "StageName": payment_stage.StageName,
-                                    "DisplayOrder": payment_stage.DisplayOrder,
-                                }
-                            )
-                            data["completed_stages"] = completed
-                            data["stage_ids"] = [s["StageID"] for s in completed]
-                            data["workflow_status"] = payment_stage.StageName or "Payment Received"
+                        completed = list(data.get("completed_stages") or [])
+                        completed.append(
+                            {
+                                "StageID": "payment_received",
+                                "StageCode": "payment_received",
+                                "StageName": "Payment Received",
+                                "DisplayOrder": 4,
+                            }
+                        )
+                        data["completed_stages"] = completed
+                        data["stage_ids"] = [s.get("StageCode") or s.get("StageID") for s in completed]
+                        data["workflow_status"] = "Payment Received"
         return data
 
     @classmethod
@@ -1113,20 +1048,21 @@ class FollowupService:
         except ValueError as exc:
             raise ValueError("Valid work date is required.") from exc
 
-    def _parse_stage_ids(self, payload: dict) -> list[int]:
+    def _parse_stage_ids(self, payload: dict) -> list[str]:
         raw = payload.get("stage_ids") or payload.get("StageIDs")
         if raw is None:
             raw = payload.getlist("stage_ids") if hasattr(payload, "getlist") else []
         if isinstance(raw, str):
             raw = [part.strip() for part in raw.split(",") if part.strip()]
-        ids: list[int] = []
+        allowed = {code for code, _name, _order in FIXED_WORKFLOW_STAGES.get(self.module_code, ())}
+        codes: list[str] = []
+        seen: set[str] = set()
         for item in raw or []:
-            try:
-                ids.append(int(item))
-            except (TypeError, ValueError):
-                continue
-        valid = {s.StageID for s in self.followup_repo.list_stages(self.module_code)}
-        return [sid for sid in ids if sid in valid]
+            code = str(item).strip().lower()
+            if code in allowed and code not in seen:
+                seen.add(code)
+                codes.append(code)
+        return codes
 
     def _parse_optional_date(self, payload: dict, *keys: str) -> date | None:
         for key in keys:
@@ -1148,10 +1084,8 @@ class FollowupService:
         except (TypeError, ValueError):
             raise ValueError("Valid bill amount is required.") from None
 
-    def _stage_codes_from_ids(self, stage_ids: list[int]) -> set[str]:
-        stages = self.followup_repo.list_stages(self.module_code)
-        id_to_code = {s.StageID: s.StageCode for s in stages}
-        return {id_to_code[sid] for sid in stage_ids if sid in id_to_code}
+    def _stage_codes_from_ids(self, stage_ids: list[str]) -> set[str]:
+        return {str(code).strip().lower() for code in stage_ids if code}
 
     @staticmethod
     def _normalize_itr_return_type(return_type: str | None) -> str:
@@ -1210,9 +1144,9 @@ class FollowupService:
                 return str(value).strip()
         if row.BillNo:
             stage_codes = {
-                es.stage.StageCode
+                (es.StageCode or "").strip().lower()
                 for es in (row.stages or [])
-                if es.stage and es.stage.StageCode
+                if es.StageCode
             }
             if "tally_bill_generated" not in stage_codes and "payment_received" not in stage_codes:
                 return str(row.BillNo).strip()
@@ -1313,10 +1247,8 @@ class FollowupService:
             payment_lines_raw = payload.get("payment_lines")
             has_payment_lines = isinstance(payment_lines_raw, list) and len(payment_lines_raw) > 0
             if has_payment_lines and "payment_received" not in stage_codes:
-                payment_stage = self.followup_repo.get_stage_by_code("ITR", "payment_received")
-                if payment_stage is not None and payment_stage.ActiveStatus:
-                    stage_ids = list(stage_ids) + [payment_stage.StageID]
-                    stage_codes = self._stage_codes_from_ids(stage_ids)
+                stage_ids = list(stage_ids) + ["payment_received"]
+                stage_codes = self._stage_codes_from_ids(stage_ids)
 
         entry_id_raw = payload.get("entry_id") or payload.get("EntryID")
         entry_id = None
@@ -1397,7 +1329,7 @@ class FollowupService:
         else:
             bill_amount = None
 
-        if self.module_code == "DSC" and "tally_bill_generated" in stage_codes:
+        if self.module_code in {"ITR", "GST", "TDS", "DSC"} and "tally_bill_generated" in stage_codes:
             if not bill_no:
                 raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
 

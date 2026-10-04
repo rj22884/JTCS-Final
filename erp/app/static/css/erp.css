@@ -349,6 +349,51 @@ body.jtcs-body .navbar {
   color: #64748b;
 }
 
+button.dropdown-item.jtcs-wn-open {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #fff;
+}
+
+button.dropdown-item.jtcs-wn-open.is-unread {
+  background: #fff7ed;
+}
+
+.jtcs-wn-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.jtcs-wn-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.jtcs-wn-steps li + li {
+  margin-top: 0.35rem;
+}
+
+.jtcs-wn-stage {
+  background: #0f172a;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.jtcs-wn-video {
+  display: block;
+  width: 100%;
+  max-height: 22rem;
+  background: #0f172a;
+}
+
 .jtcs-header-btn {
   display: inline-flex;
   align-items: center;

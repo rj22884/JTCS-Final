@@ -671,7 +671,7 @@ class GstInvoiceService:
         )
 
     def _linked_followup_paid(self, inv: GstInvoice) -> bool | None:
-        from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
+        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
 
         keys = {
             (inv.TallyBillNo or "").strip().upper(),
@@ -695,10 +695,9 @@ class GstInvoiceService:
         entry_ids = [entry.EntryID for entry in entries]
         paid = db.session.scalar(
             select(FollowupEntryStage.EntryStageID)
-            .join(FollowupWorkflowStage, FollowupWorkflowStage.StageID == FollowupEntryStage.StageID)
             .where(
                 FollowupEntryStage.EntryID.in_(entry_ids),
-                FollowupWorkflowStage.StageCode == "payment_received",
+                FollowupEntryStage.StageCode == "payment_received",
             )
             .limit(1)
         )

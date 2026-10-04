@@ -6,16 +6,141 @@ from sqlalchemy import and_, delete, or_, select, text
 from sqlalchemy.orm import Session, joinedload, load_only
 
 from app.extensions import db
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
+from app.models.followup import FollowupEntryMaster, FollowupEntryStage
 
 
 _DSC_SETTING_SCHEMA_READY = False
+_FOLLOWUP_MASTER_RETIRED = False
 
 
 class FollowupRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
         self._entry_master_columns: set[str] | None = None
+
+    def retire_followup_master(self) -> None:
+        """Copy stage codes onto entry ticks, then drop FollowupWorkflowStage.
+
+        Stage names live in FIXED_WORKFLOW_STAGES. The master table is not recreated.
+        """
+        global _FOLLOWUP_MASTER_RETIRED
+        if _FOLLOWUP_MASTER_RETIRED:
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NULL
+                    ALTER TABLE dbo.FollowupEntryStage ADD StageCode NVARCHAR(50) NULL;
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NOT NULL
+                BEGIN
+                    UPDATE es
+                    SET es.StageCode = s.StageCode
+                    FROM dbo.FollowupEntryStage es
+                    INNER JOIN dbo.FollowupWorkflowStage s ON s.StageID = es.StageID
+                    WHERE es.StageCode IS NULL OR LTRIM(RTRIM(es.StageCode)) = N'';
+
+                    UPDATE dbo.FollowupEntryStage
+                    SET StageCode = N'return_filed'
+                    WHERE StageCode IN (N'gstr1_filed', N'gstr3b_filed');
+                END
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropFk NVARCHAR(MAX) = N'';
+                    SELECT @dropFk = @dropFk
+                        + N'ALTER TABLE dbo.FollowupEntryStage DROP CONSTRAINT '
+                        + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                      AND fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
+                    IF @dropFk <> N''
+                        EXEC sp_executesql @dropFk;
+                END
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropRef NVARCHAR(MAX) = N'';
+                    SELECT @dropRef = @dropRef
+                        + N'ALTER TABLE '
+                        + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
+                        + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
+                        + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
+                    IF @dropRef <> N''
+                        EXEC sp_executesql @dropRef;
+                    IF COL_LENGTH(N'dbo.FollowupEntryStage', N'StageID') IS NOT NULL
+                        ALTER TABLE dbo.FollowupEntryStage ALTER COLUMN StageID INT NULL;
+                    DROP TABLE dbo.FollowupWorkflowStage;
+                END;
+
+                IF OBJECT_ID(N'dbo.MenuUserAllow', N'U') IS NOT NULL
+                    DELETE a
+                    FROM dbo.MenuUserAllow AS a
+                    INNER JOIN dbo.MenuMaster AS m ON m.MenuID = a.MenuID
+                    WHERE ISNULL(m.MenuURL, N'') LIKE N'/masters/followup%'
+                       OR m.MenuName IN (
+                            N'Followup Master', N'ITR Followup Master', N'DSC Followup Master',
+                            N'TDS Followup Master', N'GST Followup Master'
+                       );
+
+                DELETE FROM dbo.MenuMaster
+                WHERE ISNULL(MenuURL, N'') LIKE N'/masters/followup%'
+                   OR MenuName IN (
+                        N'Followup Master', N'ITR Followup Master', N'DSC Followup Master',
+                        N'TDS Followup Master', N'GST Followup Master'
+                   );
+
+                IF OBJECT_ID(N'dbo.RationCardFollowupMaster', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropRcf NVARCHAR(MAX) = N'';
+                    SELECT @dropRcf = @dropRcf
+                        + N'ALTER TABLE '
+                        + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
+                        + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
+                        + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.referenced_object_id = OBJECT_ID(N'dbo.RationCardFollowupMaster')
+                       OR fk.parent_object_id = OBJECT_ID(N'dbo.RationCardFollowupMaster');
+                    IF @dropRcf <> N''
+                        EXEC sp_executesql @dropRcf;
+                    DROP TABLE dbo.RationCardFollowupMaster;
+                END;
+
+                DELETE FROM dbo.MenuMaster
+                WHERE MenuURL = N'/public-report/ration-card/followup'
+                   OR (
+                        MenuName = N'Followup'
+                        AND ParentMenuID IN (
+                            SELECT MenuID FROM dbo.MenuMaster WHERE MenuName = N'Ration Card Report'
+                        )
+                   );
+                """
+            )
+        )
+        self.session.commit()
+        _FOLLOWUP_MASTER_RETIRED = True
 
     def ensure_dsc_setting_schema(self) -> None:
         global _DSC_SETTING_SCHEMA_READY
@@ -509,7 +634,7 @@ class FollowupRepository:
             select(FollowupEntryMaster)
             .options(
                 load_only(*load_cols),
-                joinedload(FollowupEntryMaster.stages).joinedload(FollowupEntryStage.stage),
+                joinedload(FollowupEntryMaster.stages),
             )
             .where(FollowupEntryMaster.EntryID == entry_id)
         )
@@ -613,7 +738,7 @@ class FollowupRepository:
         self.session.flush()
         return row
 
-    def replace_entry_stages(self, entry_id: int, stage_ids: list[int]) -> None:
+    def replace_entry_stages(self, entry_id: int, stage_codes: list[str]) -> None:
         """Replace completed stages for an entry.
 
         Must go through the ORM relationship when the entry is already loaded.
@@ -621,27 +746,24 @@ class FollowupRepository:
         and can drop newly added stages (e.g. payment_received) on the final flush.
         """
         now = datetime.utcnow()
-        unique_ids: list[int] = []
-        seen: set[int] = set()
-        for stage_id in stage_ids:
-            try:
-                sid = int(stage_id)
-            except (TypeError, ValueError):
+        unique_codes: list[str] = []
+        seen: set[str] = set()
+        for raw in stage_codes:
+            code = (str(raw) if raw is not None else "").strip().lower()
+            if not code or code in seen:
                 continue
-            if sid in seen:
-                continue
-            seen.add(sid)
-            unique_ids.append(sid)
+            seen.add(code)
+            unique_codes.append(code)
 
         entry = self.session.get(FollowupEntryMaster, entry_id)
         if entry is not None:
             entry.stages.clear()
             self.session.flush()
-            for sid in unique_ids:
+            for code in unique_codes:
                 entry.stages.append(
                     FollowupEntryStage(
                         EntryID=entry_id,
-                        StageID=sid,
+                        StageCode=code,
                         CompletedDate=now,
                     )
                 )
@@ -649,11 +771,11 @@ class FollowupRepository:
             return
 
         self.session.execute(delete(FollowupEntryStage).where(FollowupEntryStage.EntryID == entry_id))
-        for sid in unique_ids:
+        for code in unique_codes:
             self.session.add(
                 FollowupEntryStage(
                     EntryID=entry_id,
-                    StageID=sid,
+                    StageCode=code,
                     CompletedDate=now,
                 )
             )
@@ -710,38 +832,50 @@ class FollowupRepository:
             params["date_to"] = dt
 
         sql += " ORDER BY e.WorkDate DESC, e.EntryID DESC"
+        self.retire_followup_master()
         rows = list(self.session.execute(text(sql), params).mappings().all())
         results = [dict(row) for row in rows[:limit]]
 
-        stage_rows = self.list_stages(module_code)
-        stage_map = {s.StageID: s for s in stage_rows}
+        from app.services.followup_service import FIXED_WORKFLOW_STAGES
+
+        stage_meta = {
+            code: (name, order)
+            for code, name, order in FIXED_WORKFLOW_STAGES.get(module_code, ())
+        }
         completed = self.session.execute(
             text(
                 """
-                SELECT es.EntryID, es.StageID, s.StageCode, s.StageName, s.DisplayOrder
+                SELECT es.EntryID, es.StageCode
                 FROM FollowupEntryStage es
-                INNER JOIN FollowupWorkflowStage s ON s.StageID = es.StageID
                 INNER JOIN FollowupEntryMaster e ON e.EntryID = es.EntryID
                 WHERE e.ModuleCode = :module AND e.IsActive = 1
+                  AND es.StageCode IS NOT NULL
                 """
             ),
             {"module": module_code},
         ).mappings().all()
         by_entry: dict[int, list] = {}
         for row in completed:
-            by_entry.setdefault(row["EntryID"], []).append(dict(row))
+            code = (row["StageCode"] or "").strip()
+            name, order = stage_meta.get(code, (code.replace("_", " ").title(), 0))
+            by_entry.setdefault(row["EntryID"], []).append(
+                {
+                    "StageID": code,
+                    "StageCode": code,
+                    "StageName": name,
+                    "DisplayOrder": order,
+                }
+            )
 
-        payment_stage = next((s for s in stage_rows if s.StageCode == "payment_received"), None)
         for item in results:
             entry_stages = sorted(
                 by_entry.get(item["EntryID"], []),
                 key=lambda x: x.get("DisplayOrder") or 0,
             )
             item["completed_stages"] = entry_stages
-            item["workflow_status"] = self._workflow_status(entry_stages, stage_rows)
-            item["payment_received"] = bool(
-                payment_stage
-                and any(es["StageID"] == payment_stage.StageID for es in entry_stages)
+            item["workflow_status"] = self._workflow_status(entry_stages, [])
+            item["payment_received"] = any(
+                (es.get("StageCode") or "") == "payment_received" for es in entry_stages
             )
             item["has_tally_bill"] = any(es.get("StageCode") == "tally_bill_generated" for es in entry_stages)
             if item.get("BillAmount") is not None:

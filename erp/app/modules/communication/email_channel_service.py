@@ -5,16 +5,16 @@ from __future__ import annotations
 import email
 import imaplib
 import logging
-import re
 from datetime import datetime
 from email.header import decode_header
-from email.utils import parseaddr, parsedate_to_datetime
+from email.utils import parseaddr
 from pathlib import Path
 
 from flask import current_app
 from flask_mail import Message
 
 from app.modules.communication.customer_link_service import CustomerLinkService
+from app.modules.communication.email_html import html_to_plain, sanitize_email_html
 from app.modules.communication.services import CommunicationService
 from app.modules.notification.services import NotificationService
 from app.modules.shared.timeline_service import TimelineService
@@ -80,10 +80,17 @@ class EmailChannelService:
                 }
             cfg = svc._mail_config()
             sender = cfg.get("MAIL_DEFAULT_SENDER") or cfg.get("MAIL_USERNAME")
+            from html import escape as html_escape
+
+            text_body = body.replace("\r\n", "\n").replace("\r", "\n")
+            html_body = "<div style=\"font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.4;\">"
+            html_body += "<br>".join(html_escape(line) if line else "<br>" for line in text_body.split("\n"))
+            html_body += "</div>"
             msg = Message(
                 subject=subject or f"Re: Conversation #{conversation_id or ''}",
                 recipients=[to_email],
-                body=body,
+                body=text_body,
+                html=html_body,
                 sender=sender,
             )
             svc._send_message_direct(msg)
@@ -122,10 +129,9 @@ class EmailChannelService:
             ids = ids[-limit:]
             for mid in ids:
                 try:
-                    typ, msg_data = client.fetch(mid, "(RFC822)")
-                    if typ != "OK" or not msg_data or not msg_data[0]:
+                    raw = self._fetch_raw(client, mid)
+                    if not raw:
                         continue
-                    raw = msg_data[0][1]
                     if self._import_raw_email(raw):
                         imported += 1
                         client.store(mid, "+FLAGS", "\\Seen")
@@ -133,23 +139,103 @@ class EmailChannelService:
                         skipped += 1
                 except Exception as exc:
                     errors.append(str(exc))
+            refreshed = self._refresh_stored_html(client, limit=limit)
             client.logout()
         except Exception as exc:
             logger.exception("IMAP sync failed")
             return {"ok": False, "error": str(exc), "imported": imported, "skipped": skipped}
 
-        return {"ok": True, "imported": imported, "skipped": skipped, "errors": errors}
+        return {
+            "ok": True,
+            "imported": imported,
+            "skipped": skipped,
+            "refreshed": refreshed,
+            "errors": errors,
+        }
+
+    @staticmethod
+    def _fetch_raw(client, mid, *, header_only: bool = False) -> bytes | None:
+        spec = "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])" if header_only else "(BODY.PEEK[])"
+        typ, msg_data = client.fetch(mid, spec)
+        if typ != "OK" or not msg_data:
+            return None
+        for item in msg_data:
+            if isinstance(item, tuple) and len(item) >= 2 and isinstance(item[1], (bytes, bytearray)):
+                return bytes(item[1])
+        return None
+
+    def _refresh_stored_html(self, client, *, limit: int) -> int:
+        """Fill HTML for emails already saved from the plain-text part."""
+        from app.extensions import db
+        from sqlalchemy import text
+
+        pending = {
+            (row[0] or "").strip()
+            for row in db.session.execute(
+                text(
+                    """
+                    SELECT ExternalMessageID
+                    FROM dbo.CrmMessage
+                    WHERE Channel = N'Email'
+                      AND ExternalMessageID IS NOT NULL
+                      AND (BodyHtml IS NULL OR LTRIM(RTRIM(BodyHtml)) = N'')
+                    """
+                )
+            ).all()
+            if row[0]
+        }
+        if not pending:
+            return 0
+        typ, data = client.search(None, "ALL")
+        if typ != "OK":
+            return 0
+        ids = (data[0] or b"").split()[-limit:]
+        refreshed = 0
+        for mid in ids:
+            try:
+                header = self._fetch_raw(client, mid, header_only=True)
+                if not header:
+                    continue
+                message_id = (email.message_from_bytes(header).get("Message-ID") or "").strip()
+                if message_id[:128] not in pending:
+                    continue
+                raw = self._fetch_raw(client, mid)
+                if raw and self._refresh_email_html(raw):
+                    refreshed += 1
+                    pending.discard(message_id[:128])
+            except Exception:
+                db.session.rollback()
+                logger.exception("Email HTML refresh skipped")
+        return refreshed
+
+    def _refresh_email_html(self, raw: bytes) -> bool:
+        msg = email.message_from_bytes(raw)
+        message_id = (msg.get("Message-ID") or "").strip()
+        if not message_id or not CommunicationService().email_needs_html(message_id[:128]):
+            return False
+        parsed = self._parse_email(msg)
+        if not parsed["html"]:
+            return False
+        CommunicationService().save_email_html(
+            message_id[:128],
+            body=parsed["plain"] or "(no body)",
+            body_html=parsed["html"],
+            drop_inline_image="<img" in parsed["html"].lower(),
+        )
+        return True
 
     def _import_raw_email(self, raw: bytes) -> bool:
         msg = email.message_from_bytes(raw)
         message_id = (msg.get("Message-ID") or "").strip() or None
         if message_id and CommunicationService().message_exists_by_external_id(message_id[:128]):
+            self._refresh_email_html(raw)
             return False
 
         from_name, from_addr = parseaddr(msg.get("From") or "")
         subject = _decode_mime_header(msg.get("Subject"))
-        body = self._extract_body(msg)
-        attachments = self._save_attachments(msg)
+        parsed = self._parse_email(msg)
+        body = parsed["plain"]
+        attachments = parsed["attachments"]
 
         linked = CustomerLinkService().resolve_email(
             from_addr,
@@ -170,6 +256,7 @@ class EmailChannelService:
         msg_id = CommunicationService().add_message(
             conversation_id,
             body=body or "(no body)",
+            body_html=parsed["html"] or None,
             channel="Email",
             direction="Inbound",
             attachment_path=(first_att or {}).get("path"),
@@ -201,70 +288,73 @@ class EmailChannelService:
         )
         return True
 
-    def _extract_body(self, msg) -> str:
-        if msg.is_multipart():
-            plain = None
-            html = None
-            for part in msg.walk():
-                ctype = part.get_content_type()
-                disp = str(part.get("Content-Disposition") or "")
-                if "attachment" in disp:
+    def _parse_email(self, msg) -> dict:
+        """Keep the HTML part Outlook renders, and real file attachments."""
+        plain = None
+        html = None
+        cid_map: dict[str, str] = {}
+        attachments: list[dict] = []
+        parts = msg.walk() if msg.is_multipart() else [msg]
+        for part in parts:
+            ctype = part.get_content_type()
+            disp = str(part.get("Content-Disposition") or "").lower()
+            if ctype == "text/plain" and plain is None and "attachment" not in disp:
+                plain = self._decode_part(part)
+            elif ctype == "text/html" and html is None and "attachment" not in disp:
+                html = self._decode_part(part)
+            elif ctype.startswith("image/") or "attachment" in disp or part.get_filename():
+                if ctype in {"text/plain", "text/html", "multipart/alternative", "multipart/mixed", "multipart/related"}:
                     continue
-                try:
-                    payload = part.get_payload(decode=True) or b""
-                    text = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-                except Exception:
+                saved = self._store_part(part)
+                if not saved:
                     continue
-                if ctype == "text/plain" and plain is None:
-                    plain = text
-                elif ctype == "text/html" and html is None:
-                    html = text
-            if plain:
-                return plain.strip()
-            if html:
-                return re.sub(r"<[^>]+>", " ", html).strip()
-            return ""
-        try:
-            payload = msg.get_payload(decode=True) or b""
-            return payload.decode(msg.get_content_charset() or "utf-8", errors="replace").strip()
-        except Exception:
-            return str(msg.get_payload() or "")
+                cid = (part.get("Content-ID") or "").strip().strip("<>").lower()
+                if cid:
+                    cid_map[cid] = saved["url"]
+                if "attachment" in disp and not cid:
+                    attachments.append(saved)
+        safe_html = sanitize_email_html(html, cid_map=cid_map) if html else ""
+        if safe_html:
+            plain_text = html_to_plain(safe_html)
+        else:
+            plain_text = (plain or "").strip()
+            if not plain_text and html:
+                plain_text = html_to_plain(html)
+        return {"plain": plain_text, "html": safe_html, "attachments": attachments}
 
-    def _save_attachments(self, msg) -> list[dict]:
-        saved: list[dict] = []
-        if not msg.is_multipart():
-            return saved
+    @staticmethod
+    def _decode_part(part) -> str:
+        try:
+            payload = part.get_payload(decode=True) or b""
+            return payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+        except Exception:
+            return ""
+
+    def _store_part(self, part) -> dict | None:
+        filename = _decode_mime_header(part.get_filename()) or "inline.bin"
+        try:
+            data = part.get_payload(decode=True) or b""
+        except Exception:
+            return None
+        if not data:
+            return None
         folder = Path(
             current_app.config.get("CRM_EMAIL_ATTACHMENTS_FOLDER")
             or (Path(current_app.config["UPLOAD_FOLDER"]) / "email_attachments")
         )
         folder.mkdir(parents=True, exist_ok=True)
-        for part in msg.walk():
-            disp = str(part.get("Content-Disposition") or "")
-            filename = part.get_filename()
-            if not filename and "attachment" not in disp:
-                continue
-            filename = _decode_mime_header(filename) or "attachment.bin"
-            try:
-                data = part.get_payload(decode=True) or b""
-            except Exception:
-                continue
-            if not data:
-                continue
-            safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)[:180]
-            stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-            dest = folder / f"{stamp}_{safe}"
-            dest.write_bytes(data)
-            try:
-                rel = dest.relative_to(Path(current_app.config["UPLOAD_FOLDER"]))
-                store_path = f"uploads/{rel.as_posix()}"
-            except ValueError:
-                store_path = str(dest)
-            saved.append(
-                {
-                    "path": store_path,
-                    "name": safe,
-                    "mime": part.get_content_type(),
-                }
-            )
-        return saved
+        safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)[:180]
+        stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+        dest = folder / f"{stamp}_{safe}"
+        dest.write_bytes(data)
+        try:
+            rel = dest.relative_to(Path(current_app.config["UPLOAD_FOLDER"]))
+            store_path = f"uploads/{rel.as_posix()}"
+        except ValueError:
+            store_path = str(dest)
+        return {
+            "path": store_path,
+            "url": "/static/" + store_path if store_path.startswith("uploads/") else store_path,
+            "name": safe,
+            "mime": part.get_content_type(),
+        }

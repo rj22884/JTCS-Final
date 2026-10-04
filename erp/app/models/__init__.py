@@ -4,7 +4,7 @@ from app.models.auth import AuthToken, CompanyProfile, User
 from app.models.menu_master import MenuMaster
 from app.models.menu_user_allow import MenuUserAllow
 from app.models.ecourt import ECourtReceiptBatch, ECourtReceiptLine, ECourtSale
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
+from app.models.followup import FollowupEntryMaster, FollowupEntryStage
 from app.models.stamp import StampMaster, StampOcrImage
 from app.models.exceptional_stamp_upload import (
     ExceptionalStampImport,
@@ -44,7 +44,7 @@ from app.models.ration_card import (
     RationCardUploadBatch,
     RationDealerMaster,
 )
-from app.models.whats_new import WhatsNewEntry
+from app.models.whats_new import WhatsNewEntry, WhatsNewRead
 from app.models.app_version import AppVersionHistory
 from app.models.transactions import (
     CustomerMaster,
@@ -105,7 +105,6 @@ __all__ = [
     "WhatsNewEntry",
     "AppVersionHistory",
     "RdAccountMaster",
-    "FollowupWorkflowStage",
     "FollowupEntryMaster",
     "FollowupEntryStage",
 ]
