@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import imaplib
 import logging
 import secrets
 from typing import Any
@@ -97,6 +98,9 @@ class IntegrationSettingsService:
         elif provider == "smtp":
             missing = self.smtp_missing_fields(self.get_provider_config_decrypted(provider))
             extras["missing_labels"] = self._smtp_missing_labels(missing)
+        elif provider == "imap":
+            missing = self.imap_missing_fields(self.get_provider_config_decrypted(provider))
+            extras["missing_labels"] = missing
         return {
             "provider": provider,
             "fields": fields,
@@ -145,6 +149,17 @@ class IntegrationSettingsService:
                 raise ValueError("; ".join(errors))
         elif provider == "smtp":
             errors = self.validate_smtp_payload(payload)
+            if errors:
+                raise ValueError("; ".join(errors))
+        elif provider == "imap":
+            payload = dict(payload or {})
+            if not str(payload.get("port") or "").strip():
+                payload["port"] = "993"
+            if not str(payload.get("folder") or "").strip():
+                payload["folder"] = "INBOX"
+            if "use_ssl" not in payload:
+                payload["use_ssl"] = True
+            errors = self.validate_imap_payload(payload)
             if errors:
                 raise ValueError("; ".join(errors))
 
@@ -213,6 +228,8 @@ class IntegrationSettingsService:
                     "username": mask_email((payload or {}).get("username")),
                 },
             )
+        elif provider == "imap":
+            self.refresh_imap_status_from_fields()
 
         logger.info(
             "Integration settings saved for provider=%s password_updated=%s",
@@ -233,6 +250,9 @@ class IntegrationSettingsService:
                 )
             result["clear_secrets"] = True
             result["password_updated"] = password_updated
+        elif provider == "imap":
+            result["message"] = "Incoming mail settings saved. The Email tab uses this mailbox."
+            result["clear_secrets"] = True
 
         if provider == "whatsapp_meta":
             missing = result.get("missing_labels") or []
@@ -388,6 +408,49 @@ class IntegrationSettingsService:
             errors.append("Password is required (enter a new password — none is stored yet)")
         return errors
 
+    def validate_imap_payload(self, payload: dict[str, Any]) -> list[str]:
+        """Validate IMAP fields. A blank password keeps the stored secret."""
+        cfg = self.get_provider_config_decrypted("imap")
+        merged = dict(cfg)
+        for key in ("server", "port", "username", "folder", "use_ssl", "imap_password"):
+            raw = (payload or {}).get(key)
+            if key == "imap_password":
+                if raw is None:
+                    continue
+                text = str(raw).strip()
+                if text and text not in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL} and not (
+                    set(text) <= {"*"}
+                ):
+                    merged[key] = text
+                continue
+            if raw is None:
+                continue
+            if key == "use_ssl":
+                merged[key] = "true" if self._as_bool(raw) else "false"
+            else:
+                text = str(raw).strip()
+                if text:
+                    merged[key] = text
+
+        errors: list[str] = []
+        if not (merged.get("server") or "").strip():
+            errors.append("IMAP Server is required")
+        port_raw = (merged.get("port") or "993").strip()
+        try:
+            port = int(port_raw)
+            if port < 1 or port > 65535:
+                errors.append("Port must be between 1 and 65535")
+        except ValueError:
+            errors.append("Port must be a valid number")
+        username = (merged.get("username") or "").strip()
+        if not username:
+            errors.append("Username is required")
+        elif "@" not in username:
+            errors.append("Username must be the full mailbox email")
+        if not (merged.get("imap_password") or "").strip():
+            errors.append("Password is required (enter a new password — none is stored yet)")
+        return errors
+
     @staticmethod
     def smtp_missing_fields(cfg: dict[str, str]) -> list[str]:
         required = ["host", "port", "username", "from_email", "smtp_password"]
@@ -424,6 +487,140 @@ class IntegrationSettingsService:
             status = STATUS_PARTIAL
         self._set_smtp_connection_status(status)
         return status
+
+    @staticmethod
+    def imap_missing_fields(cfg: dict[str, str]) -> list[str]:
+        required = ["server", "username", "imap_password"]
+        return [k for k in required if not (cfg.get(k) or "").strip()]
+
+    def _set_imap_connection_status(self, status: str) -> None:
+        self.repository.upsert(
+            provider="imap",
+            setting_key="connection_status",
+            value_encrypted=encrypt_value(status),
+            description="imap.connection_status",
+        )
+
+    def refresh_imap_status_from_fields(self) -> str:
+        cfg = self.get_provider_config_decrypted("imap")
+        missing = self.imap_missing_fields(cfg)
+        current = (cfg.get("connection_status") or "").strip()
+        if missing:
+            status = STATUS_NOT_CONFIGURED
+        elif current == STATUS_CONNECTED:
+            status = STATUS_CONNECTED
+        else:
+            status = STATUS_PARTIAL
+        self._set_imap_connection_status(status)
+        return status
+
+    def imap_runtime_config(self) -> dict[str, Any] | None:
+        """Decrypted IMAP settings for the Email inbox. None when incomplete."""
+        cfg = self.get_provider_config_decrypted("imap")
+        if self.imap_missing_fields(cfg):
+            return None
+        try:
+            port = int((cfg.get("port") or "993").strip())
+        except ValueError:
+            port = 993
+        raw_ssl = (cfg.get("use_ssl") or "").strip()
+        use_ssl = True if not raw_ssl else self._as_bool(raw_ssl)
+        folder = (cfg.get("folder") or "INBOX").strip() or "INBOX"
+        return {
+            "server": (cfg.get("server") or "").strip(),
+            "port": port,
+            "username": (cfg.get("username") or "").strip(),
+            "password": (cfg.get("imap_password") or "").strip(),
+            "use_ssl": use_ssl,
+            "folder": folder,
+        }
+
+    def test_imap_connection(self, overrides: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Login to the mailbox and open the folder. Does not download mail."""
+        payload = overrides or {}
+        try:
+            cfg = self.get_provider_config_decrypted("imap")
+        except Exception:
+            logger.exception("IMAP settings could not be loaded")
+            return {"ok": False, "message": "Unable to load saved IMAP settings."}
+
+        server = str(
+            payload.get("server") if payload.get("server") is not None else cfg.get("server") or ""
+        ).strip()
+        port_raw = str(payload.get("port") if payload.get("port") is not None else cfg.get("port") or "993").strip() or "993"
+        username = str(
+            payload.get("username") if payload.get("username") is not None else cfg.get("username") or ""
+        ).strip()
+        folder = str(
+            payload.get("folder") if payload.get("folder") is not None else cfg.get("folder") or "INBOX"
+        ).strip() or "INBOX"
+        if "use_ssl" in payload:
+            use_ssl = self._as_bool(payload.get("use_ssl"))
+        else:
+            raw_ssl = (cfg.get("use_ssl") or "").strip()
+            use_ssl = True if not raw_ssl else self._as_bool(raw_ssl)
+
+        posted_password = payload.get("imap_password")
+        posted_text = "" if posted_password is None else str(posted_password).strip()
+        if posted_text and posted_text not in {MASK_PLACEHOLDER, UNCHANGED_SENTINEL} and not (
+            set(posted_text) <= {"*"}
+        ):
+            password = posted_text
+        else:
+            password = (cfg.get("imap_password") or "").strip()
+
+        errors: list[str] = []
+        if not server:
+            errors.append("IMAP Server is required")
+        if not username:
+            errors.append("Username is required")
+        if not password:
+            errors.append("Password is required to test — type it, or Save it first")
+        port = 993
+        try:
+            port = int(float(port_raw))
+            if port < 1 or port > 65535:
+                errors.append("Port must be between 1 and 65535")
+        except ValueError:
+            errors.append("Port must be a valid number")
+        if errors:
+            return {"ok": False, "message": "; ".join(errors), "clear_secrets": True}
+
+        ok = False
+        try:
+            if use_ssl:
+                client = imaplib.IMAP4_SSL(server, port, timeout=20)
+            else:
+                client = imaplib.IMAP4(server, port, timeout=20)
+            client.login(username, password)
+            typ, _data = client.select(folder, readonly=True)
+            try:
+                client.logout()
+            except Exception:
+                logger.debug("IMAP logout after test failed", exc_info=True)
+            if typ != "OK":
+                message = f"Login worked, but folder {folder} could not be opened."
+            else:
+                ok = True
+                message = "IMAP connection successful. The Email tab can read this mailbox."
+        except Exception as exc:
+            logger.warning("IMAP test failed: %s", exc.__class__.__name__)
+            detail = str(exc)
+            if password and password in detail:
+                detail = "Login failed"
+            message = detail[:240] or "IMAP connection failed"
+
+        try:
+            self._set_imap_connection_status(STATUS_CONNECTED if ok else STATUS_FAILED)
+        except Exception:
+            logger.exception("Failed to persist IMAP connection status")
+
+        try:
+            result = self.get_provider_settings_masked("imap")
+        except Exception:
+            result = {"provider": "imap", "field_values": {}}
+        result.update({"ok": ok, "message": message, "clear_secrets": True})
+        return result
 
     def smtp_runtime_config(self) -> dict[str, Any] | None:
         """Return Flask-style MAIL_* mapping from Integration Settings when complete.

@@ -14,7 +14,6 @@ from pathlib import Path
 from flask import current_app
 from flask_mail import Message
 
-from app.extensions import mail
 from app.modules.communication.customer_link_service import CustomerLinkService
 from app.modules.communication.services import CommunicationService
 from app.modules.notification.services import NotificationService
@@ -36,6 +35,26 @@ def _decode_mime_header(value: str | None) -> str:
     return "".join(out)
 
 
+def _imap_runtime() -> dict:
+    """API Master IMAP first, then environment variables."""
+    try:
+        from app.modules.settings.services import IntegrationSettingsService
+
+        saved = IntegrationSettingsService().imap_runtime_config()
+        if saved:
+            return saved
+    except Exception:
+        logger.debug("API Master IMAP settings unavailable; using environment", exc_info=True)
+    return {
+        "server": current_app.config.get("IMAP_SERVER") or "",
+        "username": current_app.config.get("IMAP_USERNAME") or "",
+        "password": current_app.config.get("IMAP_PASSWORD") or "",
+        "port": int(current_app.config.get("IMAP_PORT") or 993),
+        "use_ssl": bool(current_app.config.get("IMAP_USE_SSL", True)),
+        "folder": current_app.config.get("IMAP_FOLDER") or "INBOX",
+    }
+
+
 class EmailChannelService:
     def send_reply(
         self,
@@ -51,14 +70,23 @@ class EmailChannelService:
         if not (body or "").strip():
             return {"ok": False, "error": "Message body required"}
         try:
-            sender = current_app.config.get("MAIL_DEFAULT_SENDER") or current_app.config.get("MAIL_USERNAME")
+            from app.services.email_service import EmailService
+
+            svc = EmailService()
+            if not svc.is_configured():
+                return {
+                    "ok": False,
+                    "error": "SMTP is not configured. Set outgoing mail in Masters → API Master.",
+                }
+            cfg = svc._mail_config()
+            sender = cfg.get("MAIL_DEFAULT_SENDER") or cfg.get("MAIL_USERNAME")
             msg = Message(
                 subject=subject or f"Re: Conversation #{conversation_id or ''}",
                 recipients=[to_email],
                 body=body,
                 sender=sender,
             )
-            mail.send(msg)
+            svc._send_message_direct(msg)
             return {"ok": True, "external_message_id": f"smtp:{conversation_id}:{datetime.utcnow().timestamp()}"}
         except Exception as exc:
             logger.exception("SMTP send failed")
@@ -66,15 +94,19 @@ class EmailChannelService:
 
     def sync_inbox(self, *, limit: int = 30) -> dict:
         """Pull recent unseen (or recent) IMAP messages into CRM."""
-        server = current_app.config.get("IMAP_SERVER") or ""
-        user = current_app.config.get("IMAP_USERNAME") or ""
-        password = current_app.config.get("IMAP_PASSWORD") or ""
-        port = int(current_app.config.get("IMAP_PORT") or 993)
-        use_ssl = bool(current_app.config.get("IMAP_USE_SSL", True))
-        folder = current_app.config.get("IMAP_FOLDER") or "INBOX"
+        imap_cfg = _imap_runtime()
+        server = imap_cfg.get("server") or ""
+        user = imap_cfg.get("username") or ""
+        password = imap_cfg.get("password") or ""
+        port = int(imap_cfg.get("port") or 993)
+        use_ssl = bool(imap_cfg.get("use_ssl", True))
+        folder = imap_cfg.get("folder") or "INBOX"
 
         if not server or not user or not password:
-            return {"ok": False, "error": "IMAP not configured (IMAP_SERVER / IMAP_USERNAME / IMAP_PASSWORD)"}
+            return {
+                "ok": False,
+                "error": "IMAP not configured. Open Masters → API Master → Cloud Email and save Incoming mail (server, username, password).",
+            }
 
         imported = 0
         skipped = 0

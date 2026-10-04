@@ -88,6 +88,7 @@ from app.modules.crm.routes import (
     search_api_bp,
 )
 from app.modules.settings.routes import bp as integration_settings_bp
+from app.routes.api_master import bp as api_master_bp
 from app.routes.whatsapp_cloud import bp as whatsapp_cloud_bp
 from app.routes.whatsapp_webhook import bp as whatsapp_webhook_bp
 from app.modules.system_health.routes import bp as system_health_bp
@@ -218,6 +219,7 @@ def create_app(config_class: type = Config) -> Flask:
     app.register_blueprint(search_api_bp)
     app.register_blueprint(public_intake_bp)
     app.register_blueprint(integration_settings_bp)
+    app.register_blueprint(api_master_bp)
     app.register_blueprint(whatsapp_cloud_bp)
     app.register_blueprint(whatsapp_webhook_bp)
     app.register_blueprint(system_health_bp)
@@ -286,6 +288,14 @@ def create_app(config_class: type = Config) -> Flask:
         except Exception as exc:
             db.session.rollback()
             app.logger.warning("Integration Settings bootstrap skipped: %s", exc)
+
+        try:
+            from app.routes.api_master import ensure_api_master_menu
+
+            ensure_api_master_menu()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("API Master menu ensure skipped: %s", exc)
 
         try:
             from app.services.login_activity_service import LoginActivityService
