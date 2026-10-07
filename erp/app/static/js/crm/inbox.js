@@ -19,6 +19,7 @@
     labels: page.dataset.apiLabels,
     simulate: page.dataset.apiSimulate,
     link: page.dataset.apiLink,
+    matches: page.dataset.apiMatches,
     convLabels: page.dataset.apiConvLabels,
     tasks: page.dataset.apiTasks,
     followups: page.dataset.apiFollowups,
@@ -102,6 +103,11 @@
 
   const promptedThisPage = {};
   let linkDialogConvId = null;
+  let linkDialogMatches = [];
+  let linkDialogPhase = "choose";
+  let linkDialogMainId = null;
+  let linkDialogMergeIds = [];
+  let mergeLinkBusy = false;
 
   function conversationTitle(c) {
     if (!c) return "Unknown WhatsApp Contact";
@@ -180,6 +186,119 @@
     if (modal) modal.hide();
     if (activeConvId === convId) await selectConversation(convId);
     else await loadConversations();
+  }
+
+  function mergeHelpers() {
+    return window.JtcsWaMergeLink || null;
+  }
+
+  function showMergeError(err) {
+    CrmCommon.showAlert((err && err.data && err.data.error) || (err && err.message) || "Merge & Link failed.", "danger");
+  }
+
+  async function submitMergeLink(convId, mainId, mergeIds) {
+    if (mergeLinkBusy) return null;
+    mergeLinkBusy = true;
+    const helpers = mergeHelpers();
+    try {
+      const data = await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, convId), {
+        method: "POST",
+        body: {
+          action: "merge_and_link",
+          customer_id: mainId,
+          merge_customer_ids: mergeIds || [],
+        },
+      });
+      promptedThisPage[convId] = true;
+      linkDialogConvId = null;
+      const modal = linkModal();
+      if (modal) modal.hide();
+      const message = (data && data.message) || (helpers && helpers.resultMessage(data)) || "WhatsApp contact linked.";
+      CrmCommon.showAlert(message, "success");
+      if (activeConvId === convId) await selectConversation(convId);
+      else await loadConversations();
+      return data;
+    } finally {
+      mergeLinkBusy = false;
+    }
+  }
+
+  function bindMainMergeToggles() {
+    const choices = document.getElementById("crmWaLinkChoices");
+    if (!choices) return;
+    choices.querySelectorAll("input[name='crmWaMain']").forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        choices.querySelectorAll("input[name='crmWaMerge']").forEach(function (box) {
+          const isMain = box.value === radio.value;
+          if (isMain) box.checked = false;
+          box.disabled = isMain;
+        });
+      });
+    });
+  }
+
+  function renderMergeDialog() {
+    const helpers = mergeHelpers();
+    const modal = linkModal();
+    if (!helpers || !modal) return;
+    const ui = helpers.renderDialog({
+      phase: linkDialogPhase,
+      matches: linkDialogMatches,
+      mainId: linkDialogMainId,
+      mergeIds: linkDialogMergeIds,
+    });
+    const title = document.getElementById("crmWaLinkTitle");
+    const message = document.getElementById("crmWaLinkMessage");
+    const choices = document.getElementById("crmWaLinkChoices");
+    const review = document.getElementById("crmWaLinkReview");
+    const actions = document.getElementById("crmWaLinkActions");
+    const customerBlock = document.getElementById("crmWaLinkCustomerBlock");
+    const phoneEl = document.getElementById("crmWaLinkPhone");
+    const conv = convById[linkDialogConvId] || activeConvMeta || {};
+    if (phoneEl) phoneEl.textContent = contactMobileOf(conv) || "—";
+    if (title) title.textContent = ui.title;
+    if (message) message.textContent = ui.message;
+    if (customerBlock) customerBlock.classList.add("d-none");
+    if (choices) {
+      choices.innerHTML = ui.choicesHtml || "";
+      choices.classList.toggle("d-none", !ui.showChoices);
+    }
+    if (review) {
+      review.innerHTML = ui.reviewHtml || "";
+      review.classList.toggle("d-none", !ui.showReview);
+    }
+    if (actions) actions.innerHTML = ui.actionsHtml || "";
+    bindMainMergeToggles();
+    modal.show();
+  }
+
+  async function startMergeAndLink(convId) {
+    if (mergeLinkBusy) return;
+    const helpers = mergeHelpers();
+    if (!helpers || !api.matches || !convId) {
+      CrmCommon.showAlert("Merge & Link is not available.", "danger");
+      return;
+    }
+    const data = await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.matches, convId));
+    const matches = data.matches || [];
+    const decision = helpers.decideMergeLink(matches);
+    if (decision.kind === "none") {
+      CrmCommon.showAlert(
+        "No Customer Master record matches this WhatsApp contact. Use Create Customer, Create Lead, or Ignore.",
+        "warning"
+      );
+      return;
+    }
+    if (decision.kind === "auto") {
+      await submitMergeLink(convId, decision.mainId, []);
+      return;
+    }
+    linkDialogConvId = convId;
+    linkDialogMatches = matches;
+    linkDialogPhase = "choose";
+    linkDialogMainId = null;
+    linkDialogMergeIds = [];
+    renderMergeDialog();
   }
 
   function openLinkDialog(conv, mode) {
@@ -272,20 +391,6 @@
       actions.innerHTML = buttons.join("");
     }
     modal.show();
-  }
-
-  function maybePromptLinks(rows) {
-    const modalEl = document.getElementById("crmWaLinkModal");
-    if (modalEl && modalEl.classList.contains("show")) return;
-    const row = (rows || []).find(function (item) {
-      if (item.CustomerID) return false;
-      if ((item.Channel || "") !== "WhatsApp") return false;
-      if (!item.link_prompt) return false;
-      if (!candidateList(item).length) return false;
-      if (promptedThisPage[item.ConversationID]) return false;
-      return true;
-    });
-    if (row) openLinkDialog(row, "merge");
   }
 
   function renderConversations(rows) {
@@ -548,7 +653,6 @@
     if (labelF && labelF.value) params.set("label_id", labelF.value);
     const data = await CrmCommon.apiFetch(api.list + "?" + params.toString());
     renderConversations(data.rows || []);
-    maybePromptLinks(data.rows || []);
     const unreadSum = (data.rows || []).reduce(function (n, r) {
       return n + (parseInt(r.UnreadCount, 10) || 0);
     }, 0);
@@ -1199,7 +1303,11 @@
       const action = btn.getAttribute("data-link-action");
       const conv = activeConvMeta || convById[activeConvId] || {};
       if (action === "review_match") {
-        openLinkDialog(conv, "merge");
+        try {
+          await startMergeAndLink(activeConvId);
+        } catch (err) {
+          showMergeError(err);
+        }
         return;
       }
       if (action === "create_customer" && candidateList(conv).length) {
@@ -1262,7 +1370,62 @@
         openCustomerRecord(customerId);
         return;
       }
-      if (kind === "merge" || kind === "link") {
+      if (kind === "merge") {
+        const convId = linkDialogConvId;
+        const modal = linkModal();
+        if (modal) modal.hide();
+        linkDialogConvId = null;
+        try {
+          await startMergeAndLink(convId);
+        } catch (err) {
+          showMergeError(err);
+        }
+        return;
+      }
+      if (kind === "review-merge") {
+        const helpers = mergeHelpers();
+        const mainPicked = document.querySelector("#crmWaLinkChoices input[name='crmWaMain']:checked");
+        const mergePicked = Array.from(
+          document.querySelectorAll("#crmWaLinkChoices input[name='crmWaMerge']:checked")
+        ).map(function (box) {
+          return parseInt(box.value, 10);
+        });
+        const mainId = mainPicked ? parseInt(mainPicked.value, 10) : null;
+        const plan = helpers
+          ? helpers.payloadForSelection(linkDialogMatches, mainId, mergePicked)
+          : { ok: false, error: "Select one main customer." };
+        if (!plan.ok) {
+          CrmCommon.showAlert(plan.error, "warning");
+          return;
+        }
+        linkDialogMainId = plan.body.customer_id;
+        linkDialogMergeIds = plan.body.merge_customer_ids;
+        linkDialogPhase = "review";
+        renderMergeDialog();
+        return;
+      }
+      if (kind === "back-merge") {
+        linkDialogPhase = "choose";
+        renderMergeDialog();
+        return;
+      }
+      if (kind === "confirm-merge") {
+        const helpers = mergeHelpers();
+        const plan = helpers
+          ? helpers.payloadForSelection(linkDialogMatches, linkDialogMainId, linkDialogMergeIds)
+          : { ok: false, error: "Select one main customer." };
+        if (!plan.ok) {
+          CrmCommon.showAlert(plan.error, "warning");
+          return;
+        }
+        try {
+          await submitMergeLink(linkDialogConvId, plan.body.customer_id, plan.body.merge_customer_ids);
+        } catch (err) {
+          showMergeError(err);
+        }
+        return;
+      }
+      if (kind === "link") {
         try {
           await confirmCustomerLink();
         } catch (err) {

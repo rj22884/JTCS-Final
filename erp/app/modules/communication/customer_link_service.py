@@ -281,9 +281,11 @@ class CustomerLinkService:
         confirmed: bool = False,
         user_id: int | None = None,
         overwrite: bool = False,
+        commit: bool = True,
     ) -> None:
         """Store a conversation-level mapping. Never silently overwrite another conversation."""
-        ensure_crm_schema()
+        if commit:
+            ensure_crm_schema()
         digits = normalize_phone(mobile)
         last10 = last10_digits(mobile)
         if not last10:
@@ -377,7 +379,10 @@ class CustomerLinkService:
                     "now": now,
                 },
             )
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
 
     def resolve_mobile(
         self,

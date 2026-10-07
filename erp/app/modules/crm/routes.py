@@ -30,6 +30,10 @@ from app.modules.communication.services import CommunicationService
 from app.modules.communication.sms_provider import SmsGatewayProvider
 from app.modules.communication.template_service import TemplateService
 from app.modules.communication.webhook_service import WhatsAppWebhookService
+from app.modules.communication.whatsapp_merge_link import (
+    commit_whatsapp_merge_link,
+    load_matches,
+)
 from app.modules.communication.whatsapp_provider import (
     get_whatsapp_provider,
     is_cloud_api_configured,
@@ -246,6 +250,7 @@ def inbox_page():
             "labels": url_for("crm_api.labels_list"),
             "simulate": url_for("crm_api.whatsapp_simulate_inbound"),
             "link": url_for("crm_api.conversation_link", conversation_id=0),
+            "matches": url_for("crm_api.conversation_customer_matches", conversation_id=0),
             "conv_labels": url_for("crm_api.conversation_labels", conversation_id=0),
             "tasks": url_for("crm_api.tasks_create"),
             "followups": url_for("crm_api.followups_create"),
@@ -1052,6 +1057,17 @@ def conversation_labels(conversation_id: int):
     return jsonify({"ok": True, "rows": rows})
 
 
+@crm_api_bp.route("/conversations/<int:conversation_id>/customer-matches", methods=["GET"])
+@login_required
+def conversation_customer_matches(conversation_id: int):
+    """Read Customer Master rows that match this WhatsApp contact. No link or merge."""
+    conv = CommunicationService().get_conversation(conversation_id)
+    if not conv:
+        return jsonify({"ok": False, "error": "Conversation not found"}), 404
+    matches = load_matches(conv)
+    return jsonify({"ok": True, "matches": matches, "count": len(matches)})
+
+
 @crm_api_bp.route("/conversations/<int:conversation_id>/link", methods=["POST"])
 @login_required
 def conversation_link(conversation_id: int):
@@ -1123,6 +1139,27 @@ def conversation_link(conversation_id: int):
             user_name=_uname(),
         )
         return jsonify({"ok": True, "action": "keep_unlinked"})
+
+    if action == "merge_and_link":
+        try:
+            result = commit_whatsapp_merge_link(
+                conversation=conv,
+                main_customer_id=payload.get("customer_id"),
+                merge_customer_ids=payload.get("merge_customer_ids") or [],
+                user_id=_uid(),
+                user_name=_uname(),
+            )
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except Exception:
+            current_app.logger.exception("WhatsApp merge and link failed")
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Merge & Link could not be completed. No customer records were changed.",
+                }
+            ), 500
+        return jsonify({"ok": True, "action": "merge_and_link", **result})
 
     if action == "create_lead":
         result = CrmLeadService().create_lead(
@@ -1273,7 +1310,7 @@ def conversation_link(conversation_id: int):
     return jsonify(
         {
             "ok": False,
-            "error": "Unknown action. Use create_lead, create_customer, link_customer, dismiss_link, keep_unlinked, or ignore.",
+            "error": "Unknown action. Use create_lead, create_customer, link_customer, merge_and_link, dismiss_link, keep_unlinked, or ignore.",
         }
     ), 400
 

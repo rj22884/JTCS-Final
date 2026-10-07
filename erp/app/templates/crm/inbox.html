@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260818">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007watpl">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007merge1">
 {% endblock %}
 
 {% block content %}
@@ -23,6 +23,7 @@
      data-api-labels="{{ api.labels|default('') }}"
      data-api-simulate="{{ api.simulate|default('') }}"
      data-api-link="{{ api.link|default('') }}"
+     data-api-matches="{{ api.matches|default('') }}"
      data-api-conv-labels="{{ api.conv_labels|default('') }}"
      data-api-tasks="{{ api.tasks|default('') }}"
      data-api-followups="{{ api.followups|default('') }}"
@@ -376,6 +377,7 @@
           <div id="crmWaLinkCustomer" class="fw-semibold"></div>
         </div>
         <div id="crmWaLinkChoices" class="list-group mb-2 d-none"></div>
+        <div id="crmWaLinkReview" class="d-none"></div>
       </div>
       <div class="modal-footer py-2 flex-wrap" id="crmWaLinkActions"></div>
     </div>
@@ -386,5 +388,6 @@
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260823dmy1"></script>
 <script src="{{ url_for('static', filename='js/crm/inbox_templates.js') }}?v=20261007watpl"></script>
-<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261007watpl"></script>
+<script src="{{ url_for('static', filename='js/crm/inbox_merge_link.js') }}?v=20261007merge1"></script>
+<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261007merge1"></script>
 {% endblock %}

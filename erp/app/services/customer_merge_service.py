@@ -100,7 +100,7 @@ class CustomerMergeService:
         groups.sort(key=lambda group: (-group["count"], group["label"].lower()))
         return groups
 
-    def merge(self, main_customer_id: int, merge_ids: list[int], mode: str) -> dict:
+    def merge(self, main_customer_id: int, merge_ids: list[int], mode: str, *, commit: bool = True) -> dict:
         mode = (mode or "").strip().lower()
         if mode not in _MODES:
             raise ValueError("Choose by name, by phone number, or by name + phone number.")
@@ -143,7 +143,9 @@ class CustomerMergeService:
                 "merged_count": len(others),
             }
 
-        return persist(_write)
+        if commit:
+            return persist(_write)
+        return _write()
 
     def _same_group(self, main, others: list, mode: str) -> bool:
         name = _name_key(getattr(main, "CustomerName", None))

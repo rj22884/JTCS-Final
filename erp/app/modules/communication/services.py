@@ -827,9 +827,12 @@ class CommunicationService:
         match_status: str | None = None,
         customer_set: bool = False,
         lead_set: bool = False,
+        commit: bool = True,
     ) -> None:
-        ensure_crm_schema()
-        existing = self.get_conversation(conversation_id)
+        existing = None
+        if commit:
+            ensure_crm_schema()
+            existing = self.get_conversation(conversation_id)
         sets = ["ModifiedDate = :now"]
         params: dict = {"id": conversation_id, "now": datetime.utcnow()}
         if status:
@@ -875,6 +878,9 @@ class CommunicationService:
             text(f"UPDATE dbo.CrmConversation SET {', '.join(sets)} WHERE ConversationID = :id"),
             params,
         )
+        if not commit:
+            db.session.flush()
+            return
         db.session.commit()
 
         from app.modules.shared.audit_service import AuditService

@@ -538,3 +538,11 @@ html.jtcs-embed .jtcs-content:has(.wa-inbox) {
   border: 0;
   border-top: 1px solid #e2e8f0;
 }
+.wa-merge-choice {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+.wa-merge-picks {
+  min-width: 5.5rem;
+}
