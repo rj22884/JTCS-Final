@@ -17,7 +17,6 @@
     </div>
     <div class="ledger-html-right">
       <div class="ledger-html-badge">{{ ledger.title }}</div>
-      <div>Closing Balance{% if to_iso %} as of {{ to_iso | display_date }}{% endif %}: <strong>Rs. {{ money(ledger.closing) }}</strong></div>
     </div>
   </div>
 
@@ -25,7 +24,9 @@
 
   <div class="ledger-html-meta-box">
     {% for label, value in ledger.meta %}
-    <div{% if label == 'Total Credit' %} class="ledger-html-meta-total is-credit"{% elif label == 'Total Debit' %} class="ledger-html-meta-total is-debit"{% elif label.startswith('Closing Balance') %} class="ledger-html-meta-total is-closing"{% endif %}><strong>{{ label }}:</strong> {{ value or dash }}</div>
+    {% if not (label or '').startswith('Closing Balance') %}
+    <div{% if label == 'Total Credit' %} class="ledger-html-meta-total is-credit"{% elif label == 'Total Debit' %} class="ledger-html-meta-total is-debit"{% endif %}><strong>{{ label }}:</strong> {{ value or dash }}</div>
+    {% endif %}
     {% endfor %}
   </div>
 
@@ -73,7 +74,7 @@
           <th class="ledger-sort" data-sort="description" role="button">Description <i class="bi bi-arrow-down-up"></i></th>
           <th class="ledger-sort text-end" data-sort="debit" data-sort-type="num" role="button">Debit <i class="bi bi-arrow-down-up"></i></th>
           <th class="ledger-sort text-end" data-sort="credit" data-sort-type="num" role="button">Credit <i class="bi bi-arrow-down-up"></i></th>
-          <th class="ledger-sort text-end" data-sort="balance" data-sort-type="num" role="button">Closing Balance <i class="bi bi-arrow-down-up"></i></th>
+          <th class="ledger-sort text-end" data-sort="balance" data-sort-type="num" role="button">Balance <i class="bi bi-arrow-down-up"></i></th>
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -86,7 +87,8 @@
             data-source-module-id="{{ line.source_module_id or '' }}"
             data-work-type="{{ line.work_type or '' }}"
             data-can-edit="{{ '1' if line.can_edit else '0' }}"
-            data-can-delete="{{ '1' if line.can_delete else '0' }}">
+            data-can-delete="{{ '1' if line.can_delete else '0' }}"
+            data-source-lock="{{ line.source_lock_message or '' }}">
           <td data-col="date" data-sort-value="{{ line.sort_date or '' }}">{{ line.date | display_value if line.date else dash }}</td>
           <td data-col="description">{{ line.description or dash }}</td>
           <td class="text-end" data-col="debit" data-sort-value="{{ line.debit if line.debit is not none else '' }}">{{ money(line.debit) }}</td>
@@ -95,13 +97,13 @@
           <td class="text-end text-nowrap">
             {% if line.kind == 'txn' %}
             <button type="button" class="btn btn-outline-primary btn-sm ledger-row-edit"
-                    {% if not line.can_edit %}disabled{% endif %}
-                    title="Edit">
+                    {% if line.source_lock_message %}{% elif not line.can_edit %}disabled{% endif %}
+                    title="{{ line.source_lock_message or 'Edit' }}">
               <i class="bi bi-pencil"></i>
             </button>
             <button type="button" class="btn btn-outline-danger btn-sm ledger-row-delete"
-                    {% if not line.can_delete %}disabled{% endif %}
-                    title="Delete">
+                    {% if line.source_lock_message %}{% elif not line.can_delete %}disabled{% endif %}
+                    title="{{ line.source_lock_message or 'Delete' }}">
               <i class="bi bi-trash"></i>
             </button>
             {% else %}

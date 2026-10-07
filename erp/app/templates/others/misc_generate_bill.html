@@ -35,6 +35,7 @@
       <input type="hidden" id="mgbTallyBillNo" value="">
       <input type="hidden" id="mgbMobile" value="">
       <input type="hidden" id="mgbInvoiceId" value="">
+      <input type="hidden" id="mgbMiscEntryId" value="">
 
       <div class="mgb-inv-title d-none" id="mgbInvTitle">Sale / Service Invoice</div>
 
@@ -213,7 +214,7 @@
 
       <aside class="mgb-party d-none" id="mgbParty" aria-label="Party Details">
         <div class="mgb-party-title">Party Details</div>
-        <label class="form-label" for="mgbPartyName">Customer Name</label>
+        <label class="form-label" for="mgbPartyName">Customer / Bill To</label>
         <input type="text" class="form-control form-control-sm" id="mgbPartyName" readonly>
         <label class="form-label" for="mgbPartyContact">Contact Person</label>
         <input type="text" class="form-control form-control-sm" id="mgbPartyContact" readonly>
@@ -303,6 +304,6 @@
   <script src="{{ url_for('static', filename='js/jtcs_ledger_notify.js') }}?v=20261001dash1"></script>
   <script src="{{ url_for('static', filename='js/jtcs_dialog.js') }}?v=20260925convertpop"></script>
   <script src="{{ url_for('static', filename='js/delete_confirm.js') }}?v=20260819confirm1"></script>
-  <script src="{{ url_for('static', filename='js/misc_generate_bill.js') }}?v=20261004bill1"></script>
+  <script src="{{ url_for('static', filename='js/misc_generate_bill.js') }}?v=20261006party"></script>
 </body>
 </html>

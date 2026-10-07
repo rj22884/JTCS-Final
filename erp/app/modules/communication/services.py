@@ -153,7 +153,7 @@ class CommunicationService:
                 """
                 SELECT TOP 1 c.ConversationID, c.CustomerID, c.LeadID, c.Subject, c.Channel,
                        c.Status, c.Priority, c.AssignedUserID, c.UnreadCount, c.ContactMobile,
-                       c.ContactEmail, c.ExternalThreadKey, c.MatchStatus
+                       c.ContactEmail, c.ExternalThreadKey, c.MatchStatus, c.CreatedDate
                 FROM dbo.CrmConversation c
                 WHERE c.IsActive = 1
                   AND c.Status <> N'Closed'
@@ -621,7 +621,9 @@ class CommunicationService:
             ),
             params,
         ).mappings().all()
-        return {"total": int(total), "page": page, "page_size": page_size, "rows": [dict(r) for r in rows]}
+        rows_out = [dict(r) for r in rows]
+        self._attach_link_suggestions(rows_out)
+        return {"total": int(total), "page": page, "page_size": page_size, "rows": rows_out}
 
     def get_conversation(self, conversation_id: int) -> dict | None:
         ensure_crm_schema()
@@ -658,7 +660,39 @@ class CommunicationService:
             ),
             {"id": conversation_id},
         ).mappings().first()
-        return dict(row) if row else None
+        if not row:
+            return None
+        record = dict(row)
+        self._attach_link_suggestions([record])
+        return record
+
+    def _attach_link_suggestions(self, rows: list[dict]) -> None:
+        """Suggest Customer Master matches. Does not write a link."""
+        from app.modules.communication.customer_link_service import CustomerLinkService
+
+        pending = [
+            row
+            for row in rows
+            if not row.get("CustomerID") and (row.get("Channel") or "") == "WhatsApp"
+        ]
+        if not pending:
+            for row in rows:
+                row.setdefault("link_candidates", [])
+                row.setdefault("link_prompt", False)
+            return
+        link = CustomerLinkService()
+        for row in rows:
+            if row.get("CustomerID") or (row.get("Channel") or "") != "WhatsApp":
+                row["link_candidates"] = []
+                row["link_prompt"] = False
+                continue
+            candidates = link.link_suggestions(
+                mobile=row.get("ContactMobile") or row.get("ExternalThreadKey"),
+                email=row.get("ContactEmail"),
+            )
+            row["link_candidates"] = candidates
+            status = (row.get("MatchStatus") or "").strip()
+            row["link_prompt"] = bool(candidates) and status != "PromptDismissed"
 
     def list_messages(self, conversation_id: int) -> list[dict]:
         ensure_crm_schema()

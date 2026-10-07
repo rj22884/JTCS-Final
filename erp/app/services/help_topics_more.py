@@ -213,7 +213,7 @@ MORE_TOPICS: tuple[HelpTopic, ...] = (
         url="/itr/followup/",
         steps=(
             _s("Open the activity", "ITR, GST, TDS, and DSC each show their own stage ticks."),
-            _s("Tick the stage", "Tally Bill Generated and Payment Received drive the dashboard Followup Activity card."),
+            _s("Tick the stage", "ITR, GST and TDS use Documents Received, Return Filed, Invoice and Payment Received. Invoice opens the Invoice module for a manual bill."),
         ),
         related=("itr-followup", "dsc-followup", "gst-followup", "tds-followup"),
         keywords="followup master workflow stages",

@@ -12,6 +12,14 @@ from flask import current_app
 
 from app.config import BASE_DIR
 from app.services.backup_service import BackupService
+from app.services.deploy_selection import (
+    added_python_symbols,
+    build_manifest,
+    classify_changes,
+    parse_porcelain_z,
+    selective_commit_args,
+    text_calls_symbol,
+)
 from app.utils.runtime_env import is_vps_runtime
 
 def discover_git_root(start: Path | None = None) -> Path:
@@ -25,6 +33,14 @@ def discover_git_root(start: Path | None = None) -> Path:
 
 REPO_ROOT = discover_git_root()
 DEPLOY_TARGETS = ("app", "web", "both")
+
+
+def _redact_secret(line: str, secret: str) -> str:
+    text = (line or "").rstrip("\r\n")
+    token = (secret or "").strip()
+    if token and token in text:
+        text = text.replace(token, "***")
+    return text
 
 _WINDOWS_GIT_CANDIDATES = (
     Path(r"C:\Program Files\Git\cmd\git.exe"),
@@ -221,6 +237,76 @@ class UtilityService:
     def resolve_download_package(self, file_name: str) -> Path:
         return BackupService().resolve_download("full", file_name)
 
+    def detect_changes(self, *, target: str = "app") -> dict:
+        """Read-only git status for App and/or Web. Does not commit, push, or deploy."""
+        mode = (target or "app").strip().lower()
+        if mode not in DEPLOY_TARGETS:
+            raise ValueError("Invalid upload target. Use app, web, or both.")
+        rows: list[dict] = []
+        errors: list[str] = []
+        repos: list[tuple[str, Path]] = []
+        if mode in {"app", "both"}:
+            repos.append(("app", self.repo_root))
+        if mode in {"web", "both"}:
+            repos.append(("web", Path(self.web.get("WEB_PATH") or "")))
+        for repo_key, root in repos:
+            if not root.is_dir() or not (root / ".git").exists():
+                errors.append(f"{repo_key} git repository was not found.")
+                continue
+            status = self._run_git("status", "--porcelain=v1", "-z", repo=root)
+            if status.returncode != 0:
+                detail = (status.stderr or status.stdout or "git status failed").strip()
+                errors.append(f"{repo_key}: {detail[:240]}")
+                continue
+            rows.extend(parse_porcelain_z(status.stdout or "", repo=repo_key))
+        report = classify_changes(rows, target=mode)
+        if not errors:
+            self._annotate_module_requirements(report, repos)
+        report["ok"] = not errors
+        report["error"] = " ".join(errors)
+        report["repos"] = [key for key, _root in repos]
+        return report
+
+    def preview_selection(
+        self,
+        *,
+        target: str,
+        selected_modules: list[str] | None = None,
+        decisions: dict | None = None,
+    ) -> dict:
+        """Re-read git status and return the exact files a selective upload would commit."""
+        report = self.detect_changes(target=target)
+        manifest = build_manifest(report, selected_modules, decisions or {})
+        return {
+            "ok": bool(report.get("ok")),
+            "error": report.get("error") or "",
+            "target": target,
+            "ready": bool(manifest["ready"]) and bool(report.get("ok")),
+            "files": [
+                {
+                    "key": item["key"],
+                    "repo": item["repo"],
+                    "path": item["path"],
+                    "status": item["status"],
+                    "module_id": item.get("module_id") or "",
+                    "group": item.get("group") or "",
+                }
+                for item in manifest["files"]
+            ],
+            "blocked": [
+                {
+                    "key": item["key"],
+                    "path": item["path"],
+                    "status": item["status"],
+                    "group": item.get("group") or "",
+                }
+                for item in manifest["blocked"]
+            ],
+            "selected_modules": manifest["selected_modules"],
+            "file_keys": manifest["file_keys"],
+            "commit_paths": manifest["commit_paths"],
+        }
+
     def iter_deploy_to_vps(
         self,
         *,
@@ -228,10 +314,13 @@ class UtilityService:
         commit_message: str = "",
         created_by: str = "System",
         target: str = "app",
+        selected_modules: list[str] | None = None,
+        decisions: dict | None = None,
+        files: list[str] | None = None,
     ):
         """Yield NDJSON-friendly events while deploying (log / done / error)."""
         def emit(line: str, *, level: str = "info"):
-            text = (line or "").rstrip("\r\n")
+            text = _redact_secret(line, password)
             if text:
                 return {"type": "log", "level": level, "line": text}
             return None
@@ -262,6 +351,32 @@ class UtilityService:
                 "line": f"=== JTCS Utility Upload ({labels[mode]}) ===",
             }
             commit_message = commit_message or f"deploy {created_by}"
+            change_report = self.detect_changes(target=mode)
+            if change_report.get("error"):
+                raise RuntimeError(change_report["error"])
+            manifest = build_manifest(
+                change_report,
+                selected_modules,
+                decisions or {},
+            )
+            if not manifest["ready"]:
+                raise ValueError(
+                    "Shared, unmapped, deleted, renamed, or uncertain files need an "
+                    "include or skip choice before upload."
+                )
+            requested = sorted(str(item) for item in (files or []))
+            if requested != sorted(manifest["file_keys"]):
+                raise ValueError("File list is stale. Run Detect Changes again.")
+            app_paths = list(manifest["commit_paths"]["app"])
+            web_paths = list(manifest["commit_paths"]["web"])
+            yield {
+                "type": "log",
+                "level": "info",
+                "line": (
+                    f"Selective upload: {len(manifest['files'])} file(s), "
+                    f"modules={', '.join(manifest['selected_modules']) or 'none'}."
+                ),
+            }
             push_info = None
             health_ok = None
             web_ok = None
@@ -277,7 +392,10 @@ class UtilityService:
                 branch = self._git_current_branch()
                 yield {"type": "log", "level": "info", "line": f"App branch: {branch}"}
                 yield {"type": "log", "level": "info", "line": "--- App: Git commit / push ---"}
-                for event in self._iter_git_commit_push(commit_message=commit_message):
+                for event in self._iter_git_commit_push(
+                    commit_message=commit_message,
+                    paths=app_paths,
+                ):
                     if event.get("type") == "push_done":
                         push_info = event.get("push") or {}
                     else:
@@ -372,6 +490,7 @@ class UtilityService:
                 for event in self._iter_deploy_website(
                     password=password,
                     commit_message=commit_message,
+                    paths=web_paths,
                 ):
                     if event.get("type") == "web_done":
                         web_ok = bool(event.get("ok"))
@@ -408,7 +527,7 @@ class UtilityService:
         except Exception as exc:
             yield {"type": "error", "ok": False, "error": str(exc)}
 
-    def _iter_deploy_website(self, *, password: str, commit_message: str):
+    def _iter_deploy_website(self, *, password: str, commit_message: str, paths: list[str] | None = None):
         """Commit local website repo, upload git bundle, checkout on VPS (same SSH password)."""
         import tempfile
 
@@ -445,7 +564,9 @@ class UtilityService:
 
         yield {"type": "log", "level": "info", "line": "Web: Git commit (if needed)…"}
         for event in self._iter_git_commit_only(
-            repo=web_root, commit_message=commit_message or "Update website"
+            repo=web_root,
+            commit_message=commit_message or "Update website",
+            paths=paths or [],
         ):
             yield event
 
@@ -535,24 +656,13 @@ class UtilityService:
         }
         yield {"type": "web_done", "ok": True}
 
-    def _iter_git_commit_only(self, *, repo: Path, commit_message: str):
-        status = self._run_git("status", "--porcelain", repo=repo)
-        if status.returncode != 0:
-            raise RuntimeError(status.stderr or f"git status failed in {repo}")
-        porcelain = (status.stdout or "").strip()
-        if porcelain:
-            yield {"type": "log", "level": "info", "line": f"Web changes detected — staging ({repo.name})…"}
-            for event in self._iter_git("add", "-A", repo=repo):
-                if event.get("type") == "git_rc" and event.get("returncode"):
-                    raise RuntimeError("git add failed (website)")
-                if event.get("type") == "log":
-                    yield event
-            for event in self._iter_git("commit", "-m", commit_message, repo=repo):
-                if event.get("type") == "git_rc":
-                    continue
-                yield event
-        else:
-            yield {"type": "log", "level": "info", "line": "Web: nothing new to commit."}
+    def _iter_git_commit_only(self, *, repo: Path, commit_message: str, paths: list[str] | None = None):
+        yield from self._iter_selective_commit(
+            repo=repo,
+            commit_message=commit_message,
+            paths=paths or [],
+            empty_line="Web: no selected files to commit.",
+        )
 
     def deploy_to_vps(
         self,
@@ -561,6 +671,9 @@ class UtilityService:
         commit_message: str = "",
         created_by: str = "System",
         target: str = "app",
+        selected_modules: list[str] | None = None,
+        decisions: dict | None = None,
+        files: list[str] | None = None,
     ) -> dict:
         """Non-streaming wrapper (collects iter_deploy_to_vps)."""
         final: dict = {"ok": False, "error": "Deploy produced no result."}
@@ -569,6 +682,9 @@ class UtilityService:
             commit_message=commit_message,
             created_by=created_by,
             target=target,
+            selected_modules=selected_modules,
+            decisions=decisions,
+            files=files,
         ):
             if event.get("type") in {"done", "error"}:
                 final = event
@@ -588,6 +704,77 @@ class UtilityService:
                 return resp.status == 200
         except Exception:
             return False
+
+    def _annotate_module_requirements(self, report: dict, repos: list[tuple[str, Path]]) -> None:
+        """Lock modules the published tree already calls, and modules a selection needs."""
+        roots = {key: root for key, root in repos}
+        symbols: dict[str, dict[str, str]] = {}
+        work_text: dict[str, list[str]] = {}
+        for item in report.get("files") or []:
+            if item.get("review") or not str(item.get("path") or "").endswith(".py"):
+                continue
+            module_id = str(item.get("module_id") or "")
+            repo = roots.get(item.get("repo") or "")
+            if not module_id or repo is None:
+                continue
+            current = self._read_text(repo / str(item["path"]))
+            published = self._published_text(repo, str(item["path"]))
+            work_text.setdefault(module_id, []).append(current)
+            for name in added_python_symbols(published, current):
+                symbols.setdefault(module_id, {}).setdefault(name, str(item["path"]))
+        mandatory: set[str] = set()
+        for module_id, names in symbols.items():
+            for name, path in names.items():
+                repo_key = path and next(
+                    (
+                        item.get("repo")
+                        for item in report.get("files") or []
+                        if item.get("path") == path
+                    ),
+                    "app",
+                )
+                repo = roots.get(repo_key or "")
+                if repo is not None and self._published_calls(repo, name, ignore_path=path):
+                    mandatory.add(module_id)
+                    break
+        requires: dict[str, set[str]] = {str(module.get("id") or ""): set() for module in report.get("modules") or []}
+        for owner_id, names in symbols.items():
+            for other_id, blobs in work_text.items():
+                if other_id == owner_id:
+                    continue
+                blob = "\n".join(blobs)
+                if any(text_calls_symbol(blob, name) for name in names):
+                    requires.setdefault(other_id, set()).add(owner_id)
+        for module in report.get("modules") or []:
+            module_id = str(module.get("id") or "")
+            module["mandatory"] = module_id in mandatory
+            module["requires"] = sorted(requires.get(module_id) or [])
+
+    def _read_text(self, path: Path) -> str:
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    def _published_text(self, repo: Path, path: str) -> str:
+        shown = self._run_git("show", f"HEAD:{path}", repo=repo)
+        if shown.returncode != 0:
+            return ""
+        return shown.stdout or ""
+
+    def _published_calls(self, repo: Path, name: str, *, ignore_path: str) -> bool:
+        found = self._run_git("grep", "-I", "-n", "-w", "-e", name, "HEAD", "--", "erp", repo=repo)
+        if found.returncode not in {0, 1}:
+            return False
+        ignore = ignore_path.replace("\\", "/")
+        for line in (found.stdout or "").splitlines():
+            body = line[5:] if line.startswith("HEAD:") else line
+            hit, _, snippet = body.partition(":")
+            hit = hit.replace("\\", "/")
+            if not hit or hit == ignore:
+                continue
+            if text_calls_symbol(snippet, name):
+                return True
+        return False
 
     def _run_git(self, *args: str, repo: Path | None = None) -> subprocess.CompletedProcess[str]:
         git = getattr(self, "_git_bin", None) or resolve_git_executable()
@@ -699,25 +886,51 @@ class UtilityService:
             + ". Checkout a branch first, e.g. git checkout main."
         )
 
-    def _iter_git_commit_push(self, *, commit_message: str):
-        status = self._run_git("status", "--porcelain")
-        if status.returncode != 0:
-            raise RuntimeError(status.stderr or "git status failed")
-        porcelain = (status.stdout or "").strip()
-        if porcelain:
-            yield {"type": "log", "level": "info", "line": "Changes detected — staging…"}
-            for event in self._iter_git("add", "-A"):
-                if event.get("type") == "git_rc" and event.get("returncode"):
-                    raise RuntimeError("git add failed")
-                if event.get("type") == "log":
-                    yield event
-            for event in self._iter_git("commit", "-m", commit_message):
-                if event.get("type") == "git_rc":
-                    # allow "nothing to commit" race
-                    continue
+    def _iter_selective_commit(
+        self,
+        *,
+        repo: Path,
+        commit_message: str,
+        paths: list[str],
+        empty_line: str,
+    ):
+        plan = selective_commit_args(paths, commit_message)
+        if not plan:
+            yield {"type": "log", "level": "info", "line": empty_line}
+            return
+        add_args, commit_args = plan
+        if "-A" in add_args or "--all" in add_args:
+            raise RuntimeError("Selective upload cannot stage every file.")
+        yield {
+            "type": "log",
+            "level": "info",
+            "line": f"Staging {len(paths)} selected file(s) only.",
+        }
+        for event in self._iter_git(*add_args, repo=repo):
+            if event.get("type") == "git_rc" and event.get("returncode"):
+                raise RuntimeError("git add failed for the selected files")
+            if event.get("type") == "log":
                 yield event
-        else:
-            yield {"type": "log", "level": "info", "line": "Nothing new to commit."}
+        commit_lines: list[str] = []
+        commit_rc = 0
+        for event in self._iter_git(*commit_args, repo=repo):
+            if event.get("type") == "git_rc":
+                commit_rc = int(event.get("returncode") or 0)
+            elif event.get("type") == "log":
+                commit_lines.append(event.get("line") or "")
+                yield event
+        blob = "\n".join(commit_lines).lower()
+        nothing = "nothing to commit" in blob or "no changes added to commit" in blob
+        if commit_rc and not nothing:
+            raise RuntimeError("git commit failed for the selected files")
+
+    def _iter_git_commit_push(self, *, commit_message: str, paths: list[str] | None = None):
+        yield from self._iter_selective_commit(
+            repo=self.repo_root,
+            commit_message=commit_message,
+            paths=paths or [],
+            empty_line="No selected App files to commit. Existing branch will be pushed.",
+        )
 
         for event in self._iter_git("push", "-u", "origin", "HEAD"):
             if event.get("type") == "git_rc" and event.get("returncode"):

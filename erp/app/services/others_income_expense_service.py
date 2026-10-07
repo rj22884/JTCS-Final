@@ -595,10 +595,14 @@ class OthersIncomeExpenseService:
             if item_id:
                 item = self.master_repo.session.get(ItemMaster, item_id)
                 if item is not None:
-                    try:
-                        gst_rate = float(item.GstRatePercent or 0)
-                    except (TypeError, ValueError):
-                        gst_rate = 18.0
+                    gst_applicable = bool(getattr(item, "GstApplicable", True))
+                    if not gst_applicable:
+                        gst_rate = 0.0
+                    else:
+                        try:
+                            gst_rate = float(item.GstRatePercent or 0)
+                        except (TypeError, ValueError):
+                            gst_rate = 18.0
                     hsn_sac = (item.HsnSac or "").strip()
                     unit = (item.Unit or "NOS").strip() or "NOS"
             out.append(
@@ -718,14 +722,31 @@ class OthersIncomeExpenseService:
             if not item.get("payment_received") and item.get("account_label") not in (None, "", "—"):
                 item["payment_received"] = True
         from app.services.gst_invoice_service import GstInvoiceService
+        from app.repositories.gst_invoice_repository import GstInvoiceRepository
 
-        status_map = GstInvoiceService().sale_status_by_bill_nos(
+        invoice_svc = GstInvoiceService()
+        status_map = invoice_svc.sale_status_by_bill_nos(
             [item.get("tally_bill_no") or item.get("bill_no") or "" for item in entries]
             + [item.get("bill_no") or "" for item in entries]
+        )
+        by_misc = GstInvoiceRepository().find_by_misc_entries(
+            [item.get("entry_id") for item in entries]
         )
         for item in entries:
             key = (item.get("tally_bill_no") or item.get("bill_no") or "").strip().upper()
             item["sale_invoice"] = status_map.get(key)
+            try:
+                entry_id = int(item.get("entry_id") or 0)
+            except (TypeError, ValueError):
+                entry_id = 0
+            linked = by_misc.get(entry_id) if entry_id else None
+            if linked is None:
+                continue
+            item["sale_invoice"] = {
+                **invoice_svc.invoice_action_snapshot(linked),
+                "bill_status": "Approved" if bool(getattr(linked, "BillApproved", False)) else "Approve pending",
+                "payment_received": "Yes" if invoice_svc._saved_payment_received(linked) else "No",
+            }
         return entries
 
     def get_entry(self, entry_id: int) -> dict:
@@ -757,7 +778,65 @@ class OthersIncomeExpenseService:
             data["payments"] = []
         if not data.get("payment_received") and data.get("payments"):
             data["payment_received"] = True
+        data["linked_invoice"] = None
+        if data.get("ledger_kind") == self.LEDGER_MISC:
+            from app.repositories.gst_invoice_repository import GstInvoiceRepository
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            linked = GstInvoiceRepository().find_by_misc_entries([row.EntryID]).get(int(row.EntryID))
+            if linked is not None:
+                data["linked_invoice"] = GstInvoiceService().invoice_action_snapshot(linked)
         return data
+
+    def reassign_misc_invoice_customer(self, entry_id: int, billing_customer_id: int) -> dict:
+        """Point this Miscellaneous invoice at Same Customer or the chosen billing customer.
+
+        Contact person stays the entry customer. Follow-up invoices are not touched.
+        """
+        self.entry_repo.ensure_schema()
+        row = self.entry_repo.get_by_id(int(entry_id))
+        if row is None or not row.IsActive:
+            raise ValueError("Income / expense record not found.")
+        work = row.work_type
+        ledger = (getattr(work, "LedgerKind", None) or "").strip() if work is not None else ""
+        if ledger not in {"Misc.", "Misc"}:
+            raise ValueError("Record is not a Miscellaneous entry.")
+        try:
+            billing_id = int(billing_customer_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Please select the Billing Customer.") from exc
+
+        from app.repositories.gst_invoice_repository import GstInvoiceRepository
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        invoice_svc = GstInvoiceService()
+        linked = GstInvoiceRepository().find_by_misc_entries([int(row.EntryID)]).get(int(row.EntryID))
+        if linked is None:
+            raise ValueError("Create the invoice before changing the billing customer.")
+        cust = invoice_svc._load_customer(billing_id)
+        if not cust.get("customer_id"):
+            raise ValueError("Please select the Billing Customer.")
+
+        def _write() -> dict:
+            contact_name = invoice_svc._customer_name(getattr(row, "CustomerID", None))
+            if contact_name:
+                linked.ContactPerson = contact_name[:150]
+            if int(getattr(linked, "CustomerID", 0) or 0) != billing_id:
+                linked.CustomerID = billing_id
+                linked.CustomerName = (cust.get("customer_name") or "")[:200]
+                linked.BillingAddress = ((cust.get("billing_address") or "")[:500] or None)
+                linked.CustomerGSTIN = ((cust.get("customer_gstin") or "")[:20] or None)
+                linked.ContactMobile = ((cust.get("contact_mobile") or "")[:20] or None)
+                linked.ContactEmail = ((cust.get("contact_email") or "")[:150] or None)
+                linked.PlaceOfSupply = ((cust.get("place_of_supply") or "")[:100] or None)
+                linked.PlaceOfSupplyCode = ((cust.get("place_of_supply_code") or "")[:5] or None)
+                linked.UpdatedAt = datetime.utcnow()
+                if invoice_svc.normalize_voucher_type(getattr(linked, "VoucherType", None)) == invoice_svc.VOUCHER_SALE:
+                    invoice_svc._sync_sale_daily(linked)
+            db.session.flush()
+            return invoice_svc.invoice_action_snapshot(linked)
+
+        return persist(_write)
 
     def _category_lines_from_row(self, row) -> list[dict]:
         details = list(getattr(row, "detail_lines", None) or [])
@@ -953,14 +1032,18 @@ class OthersIncomeExpenseService:
         work_done = self._bool_from_form(form, "WorkDone", "work_done")
         tally_bill = self._bool_from_form(form, "TallyBillGenerated", "tally_bill_generated")
         payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received")
+        misc_invoice_workflow = ledger_kind == self.LEDGER_MISC and str(
+            form.get("MiscInvoiceWorkflow") or ""
+        ).strip() in {"1", "true", "True", "on"}
         if ledger_kind != self.LEDGER_MISC:
             work_done = False
             tally_bill = False
             payment_received = False
-        if tally_bill and not work_done:
-            raise ValueError("Work Done must be checked before Tally Bill Generated.")
-        if payment_received and not tally_bill:
-            raise ValueError("Tally Bill Generated must be checked before Payment received.")
+        if not misc_invoice_workflow:
+            if tally_bill and not work_done:
+                raise ValueError("Work Done must be checked before Tally Bill Generated.")
+            if payment_received and not tally_bill:
+                raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
         tally_bill_no = (form.get("TallyBillNo") or form.get("tally_bill_no") or "").strip() or None
         tally_bill_date = self._date(form.get("TallyBillDate") or form.get("tally_bill_date"))
@@ -1000,7 +1083,7 @@ class OthersIncomeExpenseService:
             )
             if require_payments and not payment_lines:
                 raise ValueError("At least one payment mode is required.")
-        if ledger_kind == self.LEDGER_MISC:
+        if ledger_kind == self.LEDGER_MISC and not misc_invoice_workflow:
             payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received") or bool(
                 payment_lines
             )
@@ -1008,7 +1091,7 @@ class OthersIncomeExpenseService:
                 raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
         received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
-        if require_payments and received_total <= 0:
+        if require_payments and received_total <= 0 and not misc_invoice_workflow:
             raise ValueError("Payment amount must be greater than zero.")
         amount = category_total
         customer_name = (form.get("CustomerName") or form.get("customer_name") or "").strip() or None
@@ -1023,6 +1106,28 @@ class OthersIncomeExpenseService:
             existing_row = self.entry_repo.get_by_id(entry_id)
             if existing_row is None or not existing_row.IsActive:
                 raise ValueError("Income / expense record not found.")
+
+        preserve_misc_payments = False
+        post_misc_receipt_only = False
+        if misc_invoice_workflow:
+            # Receipt is Money In/Out, as on DSC follow-up. This save does not
+            # post a receipt and does not delete payment rows already stored.
+            payment_lines = []
+            received_total = Decimal("0")
+            post_misc_receipt_only = False
+            if is_update and existing_row is not None:
+                tally_bill = bool(getattr(existing_row, "TallyBillGenerated", False))
+                payment_received = bool(getattr(existing_row, "PaymentReceived", False))
+                tally_bill_no = getattr(existing_row, "TallyBillNo", None) or None
+                tally_bill_date = getattr(existing_row, "TallyBillDate", None)
+                tally_bill_amount = getattr(existing_row, "TallyBillAmount", None)
+                preserve_misc_payments = True
+            else:
+                tally_bill = False
+                payment_received = False
+                tally_bill_no = None
+                tally_bill_date = None
+                tally_bill_amount = None
 
         bill_raw = (form.get("BillNo") or form.get("bill_no") or "").strip()
         if is_update and existing_row:
@@ -1081,7 +1186,9 @@ class OthersIncomeExpenseService:
             daily = None
             bank_ids: list[int] = []
             # Sales Invoice module is separate — do not create Automatic GST invoices from OIE.
-            if payment_lines:
+            if preserve_misc_payments:
+                daily = existing_daily
+            elif payment_lines:
                 daily, bank_ids = self._repost_transactions(
                     bill_no=row.BillNo,
                     work_date=work_date,
@@ -1093,7 +1200,7 @@ class OthersIncomeExpenseService:
                     created_by=created_by,
                     existing_daily=existing_daily,
                     ledger_kind=ledger_kind,
-                    post_sale_on_daily=True,
+                    post_sale_on_daily=not post_misc_receipt_only,
                 )
                 if daily is not None:
                     daily.WorkType = self.WORK_TYPE
@@ -1120,12 +1227,13 @@ class OthersIncomeExpenseService:
             else:
                 message = f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount})."
 
-            from app.services.gst_invoice_service import GstInvoiceService
+            if not misc_invoice_workflow:
+                from app.services.gst_invoice_service import GstInvoiceService
 
-            GstInvoiceService().sync_payment_received_for_bill(row.BillNo, payment_received)
-            tally_key = (row.TallyBillNo or "").strip()
-            if tally_key and tally_key != (row.BillNo or "").strip():
-                GstInvoiceService().sync_payment_received_for_bill(tally_key, payment_received)
+                GstInvoiceService().sync_payment_received_for_bill(row.BillNo, payment_received)
+                tally_key = (row.TallyBillNo or "").strip()
+                if tally_key and tally_key != (row.BillNo or "").strip():
+                    GstInvoiceService().sync_payment_received_for_bill(tally_key, payment_received)
 
             return OthersIncomeExpenseSaveResult(
                 entry_id=row.EntryID,

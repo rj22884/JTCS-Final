@@ -10,8 +10,7 @@
     <h3 class="h5 mb-1">Ledger Report</h3>
     <p class="text-muted small mb-0">
       Search a ledger from Bank Master, Customer Master, Work / Category Master, or Item Master.
-      The grid closing balance is always as of today. Enter From and To dates to preview period
-      transactions and load the summaries.
+      Enter From and To dates to preview period transactions and load the summaries.
     </p>
   </div>
 
@@ -71,16 +70,12 @@
                 role="button" tabindex="0">
               Txns <i class="bi bi-arrow-down-up lr-sort-icon"></i>
             </th>
-            <th class="lr-col-fit text-end lr-sortable" data-sort-key="closing" data-sort-type="num"
-                role="button" tabindex="0">
-              Closing Balance <i class="bi bi-arrow-down-up lr-sort-icon"></i>
-            </th>
             <th class="lr-col-fit text-end">Action</th>
           </tr>
         </thead>
         <tbody id="ledgerGridBody">
           <tr>
-            <td colspan="6" class="text-center text-muted py-4">
+            <td colspan="5" class="text-center text-muted py-4">
               Loading ledgers…
             </td>
           </tr>
@@ -208,6 +203,6 @@
     }
   };
 </script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260915led2"></script>
-<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20260915led2"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261006owner"></script>
+<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20261006search"></script>
 {% endblock %}

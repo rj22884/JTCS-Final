@@ -142,35 +142,51 @@ def sql_unpaid_followup_exclusion() -> str:
     """
 
 
-def sql_customer_ledger_exclude_sale_invoice(alias: str = "d") -> str:
-    """Customer ledger: never surface Accounting Sale / Service Invoice dailies."""
+def sql_customer_ledger_exclude_obc(alias: str = "d") -> str:
+    """Money In/Out is one voucher on OthersBankCashTransaction.
+
+    The customer ledger reads that voucher once, for the full amount.
+    The matching daily must not also appear as Payment Received, or invoice
+    allocation would look like extra accounting entries.
+    """
     return f"""
         AND NOT (
-            UPPER(LTRIM(RTRIM(ISNULL({alias}.WorkType, N'')))) = N'ACCOUNTING'
-            AND LTRIM(RTRIM(ISNULL({alias}.SubWorkType, N''))) = N'Sale / Service Invoice'
+            {alias}.WorkType = N'Others'
+            AND {alias}.SubWorkType LIKE N'Other Bank/Cash Transactions%'
         )
     """
 
 
 def sql_unpaid_followup_exclusion_for_customer_ledger() -> str:
-    """Followup virtual debits for customer ledger (Sales Invoice module detached).
+    """Hide a follow-up bill when that same bill already has a sale invoice.
 
-    Do not hide FollowupEntryMaster bills just because a GstInvoice / Accounting
-    Sale daily exists — those invoice rows are no longer shown on this ledger.
-    Still hide the virtual bill when a non-invoice module sale daily exists.
+    The customer ledger shows the Accounting Sale / Service Invoice for the
+    invoice amount. The follow-up row would be a second receivable. A follow-up
+    bill that never became an invoice stays on the ledger.
     """
     return """
         AND NOT EXISTS (
             SELECT 1
+            FROM dbo.GstInvoice i
+            WHERE i.FollowupEntryID = f.EntryID
+               OR (
+                    LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(i.InvoiceNo, N''))))
+                            = UPPER(LTRIM(RTRIM(f.BillNo)))
+                        OR UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                            = UPPER(LTRIM(RTRIM(f.BillNo)))
+                    )
+               )
+        )
+        AND NOT EXISTS (
+            SELECT 1
             FROM dbo.JTCSDailyTransaction d
             WHERE d.Status = N'Posted'
+              AND LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
               AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
                   = UPPER(LTRIM(RTRIM(f.BillNo)))
               AND ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) <> 0
-              AND NOT (
-                    UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
-                AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
-              )
         )
     """
 

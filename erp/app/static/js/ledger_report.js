@@ -32,16 +32,17 @@
       : null;
 
   let searchTimer = null;
+  let searchRequestId = 0;
+  let catalogRows = null;
   let currentKind = "";
   let currentId = "";
   let isMaximized = false;
   let currentRows = [];
   let lastKind = "all";
   let lastSearch = "";
-  let sortState = { key: "closing", dir: "desc" };
+  let sortState = { key: "label", dir: "asc" };
   let openingOnly = false;
-  let closingAsOf = "";
-  const GRID_COLSPAN = 6;
+  const GRID_COLSPAN = 5;
 
   const KIND_LABELS = {
     bank: "Bank",
@@ -137,46 +138,6 @@
       maximumFractionDigits: 2,
     });
     return (num < 0 ? "-₹ " : "₹ ") + abs;
-  }
-
-  function formatClosing(row) {
-    const value = row && typeof row === "object" ? row.closing : row;
-    if (value == null || value === "") {
-      return '<span class="text-muted">—</span>';
-    }
-    const num = parseFloat(value);
-    if (Number.isNaN(num)) {
-      return '<span class="text-muted">—</span>';
-    }
-    const kind = String((row && row.kind) || "").toLowerCase();
-    const side = String((row && row.closing_dr_cr) || "").trim().toUpperCase();
-    if (kind === "customer") {
-      if (Math.abs(num) < 0.005) {
-        return '<span class="lr-no-overdue">No overdue</span>';
-      }
-      const isCr = side === "CR" || (!side && num < 0);
-      const cls = isCr ? "lr-cr-balance" : "lr-dr-balance";
-      const suffix = isCr ? " Cr" : " Dr";
-      return (
-        '<span class="' +
-        cls +
-        '">' +
-        escapeHtml(formatMoney(Math.abs(num)) + suffix) +
-        "</span>"
-      );
-    }
-    if (Math.abs(num) < 0.005) {
-      return '<span class="text-muted">' + escapeHtml(formatMoney(0)) + "</span>";
-    }
-    const cls = side === "DR" ? "lr-dr-balance" : side === "CR" ? "lr-cr-balance" : "";
-    const suffix = side === "DR" ? " Dr" : side === "CR" ? " Cr" : "";
-    return (
-      '<span class="' +
-      cls +
-      '">' +
-      escapeHtml(formatMoney(Math.abs(num)) + suffix) +
-      "</span>"
-    );
   }
 
   function formatDisplayDate(value) {
@@ -295,7 +256,7 @@
     if (!sortState.key) return rows.slice();
     const key = sortState.key;
     const dir = sortState.dir === "asc" ? 1 : -1;
-    const numeric = key === "txn_count" || key === "closing";
+    const numeric = key === "txn_count";
     return rows.slice().sort(function (a, b) {
       let av = a[key];
       let bv = b[key];
@@ -341,9 +302,6 @@
     if (els.count) {
       let label =
         currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
-      if (closingAsOf) {
-        label += " · Closing as of " + formatDisplayDate(closingAsOf);
-      }
       if (openingOnly) {
         label += " · Enter From and To dates to load period transactions in Preview";
       }
@@ -371,9 +329,6 @@
           escapeHtml(row.txn_count == null ? "—" : row.txn_count) +
           "</td>" +
           '<td class="lr-col-fit text-end">' +
-          formatClosing(row) +
-          "</td>" +
-          '<td class="lr-col-fit text-end">' +
           '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
           escapeHtml(row.kind) +
           '" data-id="' +
@@ -390,6 +345,7 @@
   function loadLedgers() {
     const kind = (els.kind?.value || "all").trim().toLowerCase();
     const search = (els.search?.value || "").trim();
+    const requestId = ++searchRequestId;
 
     const params = new URLSearchParams();
     params.set("kind", kind);
@@ -406,13 +362,15 @@
     })
       .then(function (res) {
         return res.json().then(function (data) {
+          if (requestId !== searchRequestId) return;
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to search ledgers.");
           openingOnly = !!data.preview_needs_dates;
-          closingAsOf = data.closing_as_of || cfg.today || "";
+          if (!search) catalogRows = data.rows || [];
           renderRows(data.rows || [], kind, search);
         });
       })
       .catch(function (err) {
+        if (requestId !== searchRequestId) return;
         currentRows = [];
         if (els.body) {
           els.body.innerHTML = emptyRow(
@@ -502,7 +460,7 @@
       sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
     } else {
       sortState.key = key;
-      sortState.dir = key === "txn_count" || key === "closing" ? "desc" : "asc";
+      sortState.dir = key === "txn_count" ? "desc" : "asc";
     }
     renderRows(currentRows, lastKind, lastSearch);
   }
@@ -526,9 +484,30 @@
     downloadExport(fmt);
   }
 
+  function rowMatchesSearch(row, needle) {
+    const haystack = [row.label, row.subtitle, row.kind, KIND_LABELS[row.kind]]
+      .join(" ")
+      .toLowerCase();
+    return haystack.indexOf(needle) >= 0;
+  }
+
+  function showCachedSearch() {
+    if (!catalogRows) return false;
+    const kind = (els.kind?.value || "all").trim().toLowerCase();
+    const search = (els.search?.value || "").trim().toLowerCase();
+    const rows = catalogRows.filter(function (row) {
+      if (kind !== "all" && String(row.kind || "").toLowerCase() !== kind) return false;
+      if (!search) return true;
+      return rowMatchesSearch(row, search);
+    });
+    renderRows(rows, kind, search);
+    return true;
+  }
+
   function scheduleSearch() {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadLedgers, 280);
+    showCachedSearch();
+    searchTimer = setTimeout(loadLedgers, 180);
   }
 
   els.search?.addEventListener("input", scheduleSearch);

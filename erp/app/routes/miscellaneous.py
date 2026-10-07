@@ -363,6 +363,24 @@ def record(entry_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@bp.route("/records/<int:entry_id>/billing-customer", methods=["POST"], strict_slashes=False)
+@bp_alias.route("/records/<int:entry_id>/billing-customer", methods=["POST"], strict_slashes=False)
+@login_required
+def reassign_billing_customer(entry_id: int):
+    """Move this Miscellaneous invoice to Same Customer or the selected billing customer."""
+    payload = request.get_json(silent=True) or {}
+    raw = payload.get("billing_customer_id")
+    if raw in (None, ""):
+        raw = payload.get("BillingCustomerID")
+    try:
+        invoice = OthersIncomeExpenseService().reassign_misc_invoice_customer(entry_id, raw)
+        return jsonify({"ok": True, "invoice": invoice})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @bp.route("/records/<int:entry_id>/delete", methods=["POST"], strict_slashes=False)
 @bp_alias.route("/records/<int:entry_id>/delete", methods=["POST"], strict_slashes=False)
 @login_required

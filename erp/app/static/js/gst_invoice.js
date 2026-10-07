@@ -35,9 +35,12 @@
     place: document.getElementById("invPlace"),
     placeCode: document.getElementById("invPlaceCode"),
     date: document.getElementById("invDate"),
-    tallyBillNo: document.getElementById("invTallyBillNo"),
     no: document.getElementById("invNo"),
     id: document.getElementById("invId"),
+    followupEntryId: document.getElementById("invFollowupEntryId"),
+    formCard: document.getElementById("invFormCard"),
+    cancelBtn: document.getElementById("invCancelBtn"),
+    deleteBtn: document.getElementById("invDeleteBtn"),
     rcm: document.getElementById("invRcm"),
     notes: document.getElementById("invNotes"),
     billStatusWrap: document.getElementById("invBillStatusWrap"),
@@ -48,7 +51,7 @@
     payReceivedYes: document.getElementById("invPayReceivedYes"),
     payReceivedNo: document.getElementById("invPayReceivedNo"),
     payRemoveReason: document.getElementById("invPayRemoveReason"),
-    payBank: document.getElementById("invPayBank"),
+    payBanks: document.getElementById("invPayBanks"),
     payDate: document.getElementById("invPayDate"),
     amountPaid: document.getElementById("invAmountPaid"),
     roundOffAmt: document.getElementById("invRoundOffAmt"),
@@ -78,7 +81,13 @@
   let searchTimer = null;
   let editingId = null;
   let currentBillSource = "Manual";
-  let lastTallyLookup = "";
+  let editingSourceType = "MANUAL";
+  let editingSourceModule = "ACCOUNTING";
+  let editingLockMessage = "";
+  const launchParams = new URLSearchParams(window.location.search || "");
+  let followupNotified = false;
+  let invoiceFormDirty = false;
+  let suppressInvoiceDirty = false;
   let savedBillApproved = false;
   let savedPaymentReceived = false;
   let statusAuth = null;
@@ -338,6 +347,97 @@
     schedulePreview();
   }
 
+  function roundMoney(value) {
+    const n = Number(value);
+    if (!isFinite(n)) return 0;
+    return Math.round((n + Number.EPSILON) * 100) / 100;
+  }
+
+  function preGstRate(amount, gstRate) {
+    const gross = roundMoney(amount);
+    const gst = Number(gstRate) || 0;
+    if (gross <= 0) return 0;
+    if (gst <= 0) return gross;
+    return roundMoney(gross / (1 + gst / 100));
+  }
+
+  function itemMasterGstPercent(it) {
+    if (!it || it.gst_applicable === false) return 0;
+    const gst = Number(it.gst_rate_percent);
+    return isNaN(gst) || gst < 0 ? 0 : gst;
+  }
+
+  function applyMiscInclusiveLine(tr, seed) {
+    if (!tr || !seed) return;
+    const gross = roundMoney(seed.amount);
+    if (!(gross > 0)) return;
+    tr.dataset.miscInclusiveGross = gross.toFixed(2);
+    const it = seed.item_id
+      ? items.find(function (x) {
+          return String(x.item_id) === String(seed.item_id);
+        })
+      : null;
+    const gst = it
+      ? itemMasterGstPercent(it)
+      : seed.item_id
+        ? Number(seed.gst_rate_percent) || 0
+        : 0;
+    const itemSel = tr.querySelector(".inv-item");
+    if (it && itemSel) itemSel.value = String(it.item_id);
+    if (it) {
+      const hsn = tr.querySelector(".inv-hsn");
+      const unit = tr.querySelector(".inv-unit");
+      const part = tr.querySelector(".inv-particulars");
+      if (hsn) hsn.value = it.hsn_sac || seed.hsn_sac || "";
+      if (unit) unit.value = it.unit || seed.unit || "NOS";
+      if (part && !(part.value || "").trim()) part.value = it.item_name || seed.particulars || "";
+    }
+    const gstEl = tr.querySelector(".inv-gst");
+    const rateEl = tr.querySelector(".inv-rate");
+    const qtyEl = tr.querySelector(".inv-qty");
+    const discEl = tr.querySelector(".inv-disc");
+    if (gstEl) gstEl.value = String(gst);
+    if (rateEl) rateEl.value = preGstRate(gross, gst).toFixed(2);
+    if (qtyEl) qtyEl.value = "1";
+    if (discEl) discEl.value = "0";
+    syncServicePeriodFields(tr);
+    recalcLocal(tr);
+  }
+
+  function miscInclusiveSeeds(params) {
+    if (!params || params.get("misc_inclusive") !== "1") return [];
+    if (!(params.get("misc_entry_id") || "").trim()) return [];
+    try {
+      const rows = JSON.parse(params.get("misc_lines") || "[]");
+      if (!Array.isArray(rows)) return [];
+      return rows.filter(function (row) {
+        return row && Number(row.amount) > 0;
+      });
+    } catch (_err) {
+      return [];
+    }
+  }
+
+  function applyMiscInclusiveSeeds(params) {
+    const seeds = miscInclusiveSeeds(params);
+    if (!seeds.length || !els.body) return;
+    clearLines();
+    seeds.forEach(function (seed) {
+      addLine({
+        item_id: seed.item_id || "",
+        particulars: seed.particulars || "",
+        hsn_sac: seed.hsn_sac || "",
+        unit: seed.unit || "NOS",
+        qty: "1",
+        rate: "0",
+        discount_amount: "0",
+        gst_rate_percent: "0",
+      });
+      applyMiscInclusiveLine(els.body.lastElementChild, seed);
+    });
+    schedulePreview();
+  }
+
   function bindLine(tr) {
     const itemSel = tr.querySelector(".inv-item");
     itemSel?.addEventListener("change", function () {
@@ -351,8 +451,14 @@
       }
       tr.querySelector(".inv-hsn").value = it.hsn_sac || "";
       tr.querySelector(".inv-unit").value = it.unit || "NOS";
-      tr.querySelector(".inv-rate").value = it.default_rate != null ? it.default_rate : 0;
-      tr.querySelector(".inv-gst").value = it.gst_rate_percent != null ? it.gst_rate_percent : 18;
+      if (tr.dataset.miscInclusiveGross) {
+        const gst = itemMasterGstPercent(it);
+        tr.querySelector(".inv-gst").value = String(gst);
+        tr.querySelector(".inv-rate").value = preGstRate(tr.dataset.miscInclusiveGross, gst).toFixed(2);
+      } else {
+        tr.querySelector(".inv-rate").value = it.default_rate != null ? it.default_rate : 0;
+        tr.querySelector(".inv-gst").value = it.gst_rate_percent != null ? it.gst_rate_percent : 18;
+      }
       syncServicePeriodFields(tr);
       recalcLocal(tr);
       schedulePreview();
@@ -362,6 +468,18 @@
     });
     tr.querySelectorAll("input").forEach(function (inp) {
       inp.addEventListener("input", function () {
+        if (
+          tr.dataset.miscInclusiveGross &&
+          (inp.classList.contains("inv-rate") ||
+            inp.classList.contains("inv-qty") ||
+            inp.classList.contains("inv-disc"))
+        ) {
+          delete tr.dataset.miscInclusiveGross;
+        } else if (tr.dataset.miscInclusiveGross && inp.classList.contains("inv-gst")) {
+          const gst = parseFloat(inp.value || "0") || 0;
+          const rateEl = tr.querySelector(".inv-rate");
+          if (rateEl) rateEl.value = preGstRate(tr.dataset.miscInclusiveGross, gst).toFixed(2);
+        }
         recalcLocal(tr);
         schedulePreview();
       });
@@ -386,7 +504,33 @@
     let disc = 0;
     let taxable = 0;
     let gstUsed = 0;
+    let inclusiveGross = 0;
+    let inclusiveTaxable = 0;
+    let inclusiveCgst = 0;
+    let inclusiveSgst = 0;
+    let inclusiveIgst = 0;
+    const placeNow = (els.placeCode?.value || "").trim();
+    const sellerNow = String(api.companyStateCode || "05").trim();
+    const intraNow = !!placeNow && placeNow === sellerNow;
     els.body?.querySelectorAll(".inv-line").forEach(function (tr) {
+      const grossRaw = tr.dataset.miscInclusiveGross;
+      if (grossRaw) {
+        const gross = roundMoney(grossRaw);
+        const gst = parseFloat(tr.querySelector(".inv-gst")?.value || "0") || 0;
+        const lineTaxable = preGstRate(gross, gst);
+        const lineGst = roundMoney(gross - lineTaxable);
+        inclusiveGross += gross;
+        inclusiveTaxable += lineTaxable;
+        if (gst > gstUsed) gstUsed = gst;
+        if (gst > 0 && intraNow) {
+          const cgstPart = roundMoney(lineGst / 2);
+          inclusiveCgst += cgstPart;
+          inclusiveSgst += roundMoney(lineGst - cgstPart);
+        } else {
+          inclusiveIgst += lineGst;
+        }
+        return;
+      }
       const qty = parseFloat(tr.querySelector(".inv-qty")?.value || "0") || 0;
       const rate = parseFloat(tr.querySelector(".inv-rate")?.value || "0") || 0;
       const d = parseFloat(tr.querySelector(".inv-disc")?.value || "0") || 0;
@@ -408,18 +552,19 @@
     if (intra) {
       cgstRate = gstUsed / 2;
       sgstRate = gstUsed / 2;
-      cgst = (taxable * cgstRate) / 100;
-      sgst = (taxable * sgstRate) / 100;
+      cgst = inclusiveCgst + (taxable * cgstRate) / 100;
+      sgst = inclusiveSgst + (taxable * sgstRate) / 100;
     } else {
       igstRate = gstUsed;
-      igst = (taxable * igstRate) / 100;
+      igst = inclusiveIgst + (taxable * igstRate) / 100;
     }
-    const baseValue = taxable + cgst + sgst + igst;
+    const standardTax = intra ? cgst + sgst - inclusiveCgst - inclusiveSgst : igst - inclusiveIgst;
+    const baseValue = taxable + standardTax;
     const roundOff = roundOffSigned();
     return {
-      list_price: listPrice,
+      list_price: listPrice + inclusiveTaxable,
       discount_amount: disc,
-      taxable_value: taxable,
+      taxable_value: taxable + inclusiveTaxable,
       cgst_rate: cgstRate,
       cgst_amount: cgst,
       sgst_rate: sgstRate,
@@ -427,7 +572,7 @@
       igst_rate: igstRate,
       igst_amount: igst,
       round_off: roundOff,
-      invoice_value: Math.max(0, baseValue + roundOff),
+      invoice_value: Math.max(0, baseValue + inclusiveGross + roundOff),
       amount_in_words: (els.words && els.words.textContent) || "",
       tax_type: intra ? "CGST_SGST" : "IGST",
     };
@@ -661,6 +806,183 @@
     if (!removingApproval && !removingPayment) statusAuth = null;
   }
 
+  function openInvoiceForm() {
+    els.formCard?.classList.remove("d-none");
+    els.formCard?.classList.add("is-open");
+  }
+
+  function closeInvoiceForm() {
+    els.formCard?.classList.add("d-none");
+    els.formCard?.classList.remove("is-open");
+  }
+
+  function markInvoiceClean() {
+    invoiceFormDirty = false;
+    suppressInvoiceDirty = true;
+    setTimeout(function () {
+      suppressInvoiceDirty = false;
+      invoiceFormDirty = false;
+    }, 0);
+  }
+
+  function invoiceHostWindow() {
+    try {
+      if (window.parent && window.parent !== window) return window.parent;
+    } catch (_err) {
+      /* embedded page may be cross-origin; it is not */
+    }
+    if (window.opener && !window.opener.closed) return window.opener;
+    return null;
+  }
+
+  function closeEmbeddedInvoice() {
+    try {
+      if (window.frameElement && window.top && typeof window.top.jtcsClosePageWindow === "function") {
+        const host = window.frameElement.closest(".jtcs-page-win");
+        if (host) {
+          window.top.jtcsClosePageWindow(host, true);
+          return true;
+        }
+      }
+    } catch (_err) {
+      /* stay on the invoice page */
+    }
+    return false;
+  }
+
+  function confirmDiscardInvoice() {
+    if (!invoiceFormDirty) return Promise.resolve(true);
+    const message = "Unsaved changes will be lost. Do you want to close?";
+    if (window.JTCSDialog && JTCSDialog.confirm) {
+      return JTCSDialog.confirm(message, {
+        title: "Close invoice",
+        okLabel: "Yes / Close",
+        cancelLabel: "No / Stay",
+        type: "warning",
+      });
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+
+  window.jtcsRequestClose = function () {
+    return confirmDiscardInvoice().then(function (allow) {
+      if (!allow) return false;
+      const entryId = (els.followupEntryId?.value || "").trim();
+      if (!editingId && entryId && !followupNotified) {
+        notifyInvoiceOpener("jtcs-invoice-cancelled", null);
+      }
+      return true;
+    });
+  };
+
+  els.form?.addEventListener("input", function () {
+    if (!suppressInvoiceDirty) invoiceFormDirty = true;
+  });
+  els.form?.addEventListener("change", function () {
+    if (!suppressInvoiceDirty) invoiceFormDirty = true;
+  });
+
+  function selectedBankIds() {
+    return Array.from(document.querySelectorAll(".inv-pay-bank:checked"))
+      .map(function (box) { return String(box.value || ""); })
+      .filter(Boolean);
+  }
+
+  function clearSelectedBanks() {
+    document.querySelectorAll(".inv-pay-bank").forEach(function (box) {
+      box.checked = false;
+    });
+  }
+
+  function ensureBankCheckbox(accountId, label) {
+    const id = String(accountId || "");
+    if (!id || document.getElementById("invPayBank" + id) || !els.payBanks) return;
+    const row = document.createElement("div");
+    row.className = "form-check mb-0 inv-pay-bank-row";
+    const input = document.createElement("input");
+    input.className = "form-check-input inv-pay-bank";
+    input.type = "checkbox";
+    input.id = "invPayBank" + id;
+    input.value = id;
+    const text = document.createElement("label");
+    text.className = "form-check-label";
+    text.htmlFor = input.id;
+    text.textContent = label || ("Account " + id);
+    row.appendChild(input);
+    row.appendChild(text);
+    els.payBanks.appendChild(row);
+  }
+
+  function setSelectedBanks(ids) {
+    const wanted = (ids || []).map(String).filter(Boolean).slice(0, 2);
+    clearSelectedBanks();
+    wanted.forEach(function (id) {
+      ensureBankCheckbox(id, "Saved account " + id);
+      const box = document.getElementById("invPayBank" + id);
+      if (box) box.checked = true;
+    });
+  }
+
+  function bankAlert(message) {
+    showStatus(message, "danger");
+    if (window.JTCSDialog && JTCSDialog.alert) {
+      JTCSDialog.alert(message, "warning");
+      return;
+    }
+    window.alert(message);
+  }
+
+  function notifyInvoiceOpener(type, record, extra) {
+    const host = invoiceHostWindow();
+    if (!host) return;
+    const entryId = (els.followupEntryId?.value || "").trim();
+    const miscId = (launchParams.get("misc_entry_id") || "").trim();
+    if (!entryId && !miscId && type !== "jtcs-invoice-deleted") return;
+    host.postMessage(
+      {
+        type: type,
+        followup_entry_id: entryId || (record && record.followup_entry_id) || "",
+        misc_entry_id: miscId,
+        record: record || null,
+        created: !!(extra && extra.created),
+      },
+      window.location.origin
+    );
+    followupNotified = true;
+  }
+
+  function askReceivePayment() {
+    const message = "Do you want to receive payment?";
+    if (window.JTCSDialog && JTCSDialog.confirm) {
+      return JTCSDialog.confirm(message, {
+        title: "Receive payment",
+        okLabel: "Yes",
+        cancelLabel: "No",
+        type: "info",
+      });
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+
+  function receiptFormUrl(record) {
+    const params = new URLSearchParams();
+    params.set("receipt", "1");
+    params.set("customer_id", String(record.customer_id || ""));
+    params.set("customer_name", record.customer_name || "");
+    params.set("invoice_id", String(record.invoice_id || ""));
+    if (record.invoice_value != null && record.invoice_value !== "") {
+      params.set("amount", String(record.invoice_value));
+    }
+    if (window.JtcsInvoiceReceiptReturn) {
+      window.JtcsInvoiceReceiptReturn.appendModuleReturn(
+        params,
+        launchParams.get("receipt_origin") || (record && record.source_module) || "",
+        launchParams.get("return_to") || ""
+      );
+    }
+    return "/others/bank-cash-transactions?" + params.toString();
+  }
+
   function collectPayload() {
     const lines = [];
     els.body.querySelectorAll(".inv-line").forEach(function (tr) {
@@ -677,6 +999,8 @@
         discount_amount: tr.querySelector(".inv-disc")?.value || "0",
         gst_rate_percent: tr.querySelector(".inv-gst")?.value || "18",
       });
+      const gross = tr.dataset.miscInclusiveGross;
+      if (gross) lines[lines.length - 1].inclusive_gross = gross;
     });
     const payload = {
       invoice_no: els.no?.value || "",
@@ -694,10 +1018,9 @@
       place_of_supply_code: els.placeCode?.value || "",
       reverse_charge: els.rcm?.value || "0",
       notes: els.notes?.value || "",
-      tally_bill_no: els.tallyBillNo?.value || "",
       round_off_amount: els.roundOffAmt?.value || "",
       round_off_sign: els.roundOffSign?.value || "",
-      payment_bank_account_id: els.payBank?.value || "",
+      payment_bank_account_ids: selectedBankIds(),
       payment_date: els.payDate?.value || "",
       amount_paid: els.amountPaid?.value === "" || els.amountPaid?.value == null
         ? ""
@@ -705,6 +1028,17 @@
       bill_source: currentBillSource || "Manual",
       lines: lines,
     };
+    const launchedFollowup = (launchParams.get("followup_entry_id") || "").trim();
+    const launchedMisc = (launchParams.get("misc_entry_id") || "").trim();
+    payload.from_source = !!(launchedFollowup || launchedMisc);
+    payload.accounting_edit = !payload.from_source;
+    if (launchedFollowup) payload.followup_entry_id = Number(launchedFollowup);
+    if (launchedMisc) payload.misc_entry_id = Number(launchedMisc);
+    // Miscellaneous sale form: the typed rate is the rate. GST is added on top.
+    // Do not back the rate out into a list price (₹200 must stay ₹200, not ₹169.49).
+    if (launchedMisc || currentBillSource === "Miscellaneous") {
+      payload.gst_inclusive = false;
+    }
     if (tallyStatusVisible()) {
       payload.bill_approved = !!(els.billApproved && els.billApproved.checked);
       payload.payment_received = paymentReceivedYes();
@@ -766,6 +1100,7 @@
   function fillRecord(record) {
     editingId = record.invoice_id || null;
     currentBillSource = record.bill_source || "Manual";
+    editingSourceType = invoiceSourceType(record);
     applyTallyStatus(record);
     if (els.id) els.id.value = String(record.invoice_id || "");
     if (els.no) els.no.value = record.invoice_no || "";
@@ -783,32 +1118,34 @@
     if (els.placeCode) els.placeCode.value = record.place_of_supply_code || "";
     if (els.rcm) els.rcm.value = record.reverse_charge ? "1" : "0";
     if (els.notes) els.notes.value = record.notes || "";
-    if (els.tallyBillNo) els.tallyBillNo.value = record.tally_bill_no || "";
-    lastTallyLookup = (record.tally_bill_no || "").trim();
-    setRoundOffFromRecord(record);
-    if (els.payBank) {
-      const payId = record.payment_bank_account_id
-        ? String(record.payment_bank_account_id)
-        : "";
-      if (payId) {
-        const exists = Array.from(els.payBank.options).some(function (opt) {
-          return opt.value === payId;
-        });
-        if (!exists && record.pay_account_number) {
-          const opt = document.createElement("option");
-          opt.value = payId;
-          opt.textContent =
-            (record.pay_bank_name || "Bank") +
-            " · " +
-            record.pay_account_number +
-            (record.pay_upi_id ? " · UPI: " + record.pay_upi_id : "");
-          els.payBank.appendChild(opt);
-        }
-        els.payBank.value = payId;
-      } else {
-        els.payBank.value = "";
-      }
+    if (els.followupEntryId) {
+      els.followupEntryId.value = record.followup_entry_id ? String(record.followup_entry_id) : "";
     }
+    setRoundOffFromRecord(record);
+    const bankIds = (record.payment_bank_account_ids || []).map(String).filter(Boolean);
+    if (!bankIds.length && record.payment_bank_account_id) {
+      bankIds.push(String(record.payment_bank_account_id));
+    }
+    const savedBanks = record.pay_banks || [];
+    bankIds.forEach(function (id) {
+      const saved = savedBanks.find(function (bank) {
+        return String(bank.account_id || "") === String(id);
+      });
+      let label = "Saved account " + id;
+      if (saved) {
+        label = (saved.bank_name || "Bank");
+        if (saved.account_number) label += " - " + saved.account_number;
+        if (saved.account_type) label += " [" + saved.account_type + "]";
+        if (saved.upi_id) label += " - UPI: " + saved.upi_id;
+      } else if (String(id) === String(bankIds[0]) && record.pay_bank_name) {
+        label = record.pay_bank_name;
+        if (record.pay_account_number) label += " - " + record.pay_account_number;
+        if (record.pay_account_type) label += " [" + record.pay_account_type + "]";
+        if (record.pay_upi_id) label += " - UPI: " + record.pay_upi_id;
+      }
+      ensureBankCheckbox(id, label);
+    });
+    setSelectedBanks(bankIds);
     if (els.payDate) {
       els.payDate.value = (record.payment_date || api.today || "").slice(0, 10);
     }
@@ -848,12 +1185,19 @@
     if (els.saveBtn) {
       els.saveBtn.innerHTML = '<i class="bi bi-save"></i> Update Invoice';
     }
+    applySourceOwnership(record);
+    if (ownerLaunchMatches(record)) els.deleteBtn?.classList.remove("d-none");
+    openInvoiceForm();
+    markInvoiceClean();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function startNew() {
+  async function startNew(options) {
+    options = options || {};
     editingId = null;
     currentBillSource = "Manual";
+    editingSourceType = "MANUAL";
+    els.deleteBtn?.classList.add("d-none");
     resetTallyStatus();
     if (els.id) els.id.value = "";
     setInvoiceKind("NON_GST", false);
@@ -869,11 +1213,10 @@
     if (els.placeCode) els.placeCode.value = "";
     if (els.rcm) els.rcm.value = "0";
     if (els.notes) els.notes.value = "";
-    if (els.payBank) els.payBank.value = "";
+    clearSelectedBanks();
+    if (!options.keepFollowup && els.followupEntryId) els.followupEntryId.value = "";
     if (els.payDate) els.payDate.value = api.today || new Date().toISOString().slice(0, 10);
     if (els.amountPaid) els.amountPaid.value = "";
-    if (els.tallyBillNo) els.tallyBillNo.value = "";
-    lastTallyLookup = "";
     resetRoundOff();
     if (els.date) {
       // Purchase: user enters supplier invoice date; Sale defaults to today.
@@ -905,8 +1248,11 @@
     setModeBadge(false);
     if (els.saveBtn) {
       els.saveBtn.innerHTML = '<i class="bi bi-save"></i> Save Invoice';
+      els.saveBtn.disabled = false;
     }
     showStatus("New invoice form ready.", "info");
+    openInvoiceForm();
+    markInvoiceClean();
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -944,6 +1290,15 @@
     }
     if (!payload.lines.length) {
       showStatus("Add at least one line item.", "danger");
+      return;
+    }
+    const bankIds = payload.payment_bank_account_ids || [];
+    if (!bankIds.length) {
+      bankAlert("Please select at least one bank account.");
+      return;
+    }
+    if (bankIds.length > 2) {
+      bankAlert("Maximum 2 bank accounts can be selected for an invoice.");
       return;
     }
     if (!(await servicePeriodReviewWarning())) {
@@ -986,8 +1341,30 @@
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Save failed");
     showStatus(data.message || "Saved.", "success");
+    invoiceFormDirty = false;
+    const linkedFollowup = (els.followupEntryId?.value || "").trim();
+    const linkedMisc = (launchParams.get("misc_entry_id") || "").trim();
+    const justCreated = !editingId;
+    if (linkedFollowup || linkedMisc) {
+      notifyInvoiceOpener("jtcs-invoice-saved", data.record, { created: justCreated });
+      if (justCreated && data.record && data.record.customer_id) {
+        const receive = await askReceivePayment();
+        if (receive) {
+          window.location.assign(receiptFormUrl(data.record));
+          return true;
+        }
+      }
+    }
+    if (isFollowupModalEmbed()) return true;
+    if ((linkedFollowup || linkedMisc) && closeEmbeddedInvoice()) return true;
+    closeInvoiceForm();
     await loadGrid();
-    await startNew();
+    return true;
+  }
+
+  function isFollowupModalEmbed() {
+    const params = new URLSearchParams(window.location.search || "");
+    return params.get("fu_embed") === "1";
   }
 
   function showOriginPopup(path) {
@@ -1011,21 +1388,95 @@
     const res = await fetch(apiUrl(api.get, id), { credentials: "same-origin" });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Load failed");
-    if (data.record && data.record.converted_invoice) {
-      showOriginPopup(data.record.origin_path);
-      return;
-    }
     fillRecord(data.record);
     showStatus("Editing " + (data.record.invoice_no || ""), "info");
   }
 
-  async function deleteInvoice(id) {
+  function invoiceSourceType(row) {
+    const explicit = String((row && row.source_type) || "").toUpperCase();
+    if (explicit === "FOLLOWUP" || explicit === "MISC" || explicit === "MANUAL") return explicit;
+    if (row && row.followup_entry_id) return "FOLLOWUP";
+    const bill = String((row && row.bill_source) || "");
+    if (bill === "Follow-up") return "FOLLOWUP";
+    if (bill === "Miscellaneous") return "MISC";
+    return "MANUAL";
+  }
+
+  function ownerLaunchMatches(record) {
+    const moduleName = String((record && record.source_module) || "ACCOUNTING").toUpperCase();
+    const launchedFollowup = (launchParams.get("followup_entry_id") || "").trim();
+    const launchedMisc = (launchParams.get("misc_entry_id") || "").trim();
+    if (!moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL") {
+      return !launchedFollowup && !launchedMisc;
+    }
+    if (moduleName === "MISC") {
+      if (!launchedMisc) return false;
+      const stored = record && record.misc_entry_id;
+      if (stored && String(stored) !== launchedMisc) return false;
+      return true;
+    }
+    if (!launchedFollowup || !record) return false;
+    return String(record.followup_entry_id || "") === launchedFollowup;
+  }
+
+  function applySourceOwnership(record) {
+    editingSourceModule = String((record && record.source_module) || "ACCOUNTING").toUpperCase();
+    editingLockMessage = (record && record.source_lock_message) || "";
+    const allowed = !record || !record.invoice_id || ownerLaunchMatches(record);
+    if (els.saveBtn) els.saveBtn.disabled = !allowed;
+    if (!allowed) {
+      els.deleteBtn?.classList.add("d-none");
+      if (editingLockMessage) showStatus(editingLockMessage, "warning");
+      return;
+    }
+    if (els.saveBtn) els.saveBtn.disabled = false;
+  }
+
+  function sourceListDeleteMessage(sourceType) {
+    if (sourceType === "FOLLOWUP") {
+      return "This invoice was generated from Follow-up and cannot be deleted from this list.";
+    }
+    return "This invoice was generated from Miscellaneous and cannot be deleted from this list.";
+  }
+
+  async function deleteInvoice(id, options) {
+    options = options || {};
+    const row = (gridRows || []).find(function (item) {
+      return String(item.invoice_id) === String(id);
+    });
+    const record = row || {
+      invoice_id: id,
+      source_module: editingSourceModule,
+      source_lock_message: editingLockMessage,
+      followup_entry_id: (els.followupEntryId && els.followupEntryId.value) || "",
+    };
+    const moduleName = String(record.source_module || "ACCOUNTING").toUpperCase();
+    const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
+    if (!accountingOwned && !ownerLaunchMatches(record)) {
+      const message = record.source_lock_message || editingLockMessage
+        || "Edit and delete are available only from the module that created this invoice.";
+      if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(message, "warning");
+      else alert(message);
+      return;
+    }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm("Delete this invoice?"))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this invoice?" });
       if (!creds) return;
+    }
+    const body = creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {};
+    const launchedFollowup = (launchParams.get("followup_entry_id") || "").trim();
+    const launchedMisc = (launchParams.get("misc_entry_id") || "").trim();
+    if (!accountingOwned && launchedMisc) {
+      body.from_source = true;
+      body.misc_entry_id = Number(launchedMisc);
+    } else if (!accountingOwned && launchedFollowup) {
+      body.from_source = true;
+      body.followup_entry_id = Number(launchedFollowup);
+    } else {
+      body.delete_context = "accounting_invoice";
     }
     const res = await fetch(apiUrl(api.delete, id), {
       method: "POST",
@@ -1034,13 +1485,29 @@
         "Content-Type": "application/json",
         "X-CSRFToken": api.csrf || "",
       },
-      body: JSON.stringify(creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {}),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "Delete failed");
     showStatus(data.message || "Deleted.", "success");
+    const removed = (gridRows || []).find(function (row) {
+      return String(row.invoice_id) === String(id);
+    });
+    if (removed && removed.followup_entry_id && window.opener && !window.opener.closed) {
+      window.opener.postMessage(
+        {
+          type: "jtcs-invoice-deleted",
+          followup_entry_id: removed.followup_entry_id,
+          record: null,
+        },
+        window.location.origin
+      );
+    }
     if (editingId && String(editingId) === String(id)) {
-      await startNew();
+      editingId = null;
+      editingSourceType = "MANUAL";
+      els.deleteBtn?.classList.add("d-none");
+      closeInvoiceForm();
     }
     await loadGrid();
   }
@@ -1080,6 +1547,42 @@
   }
 
   let gridRows = [];
+  let gridLoadPromise = null;
+  const GRID_LOAD_ERROR = "Unable to load invoices. Please try Refresh.";
+
+  function setGridBusy(isRefresh) {
+    if (els.gridCount) {
+      els.gridCount.textContent = isRefresh ? "Refreshing..." : "Loading invoices...";
+    }
+    if (!isRefresh && els.gridEmpty) {
+      els.gridEmpty.classList.remove("d-none");
+      els.gridEmpty.textContent = "Loading invoices...";
+    }
+    if (els.gridRefresh) {
+      els.gridRefresh.disabled = true;
+      if (!els.gridRefresh.dataset.label) {
+        els.gridRefresh.dataset.label = els.gridRefresh.innerHTML;
+      }
+      els.gridRefresh.innerHTML =
+        '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Refreshing...';
+    }
+  }
+
+  function clearGridBusy() {
+    if (!els.gridRefresh) return;
+    els.gridRefresh.disabled = false;
+    if (els.gridRefresh.dataset.label) {
+      els.gridRefresh.innerHTML = els.gridRefresh.dataset.label;
+    }
+  }
+
+  function showGridLoadError() {
+    if (els.gridCount) els.gridCount.textContent = GRID_LOAD_ERROR;
+    if (!gridRows.length && els.gridEmpty) {
+      els.gridEmpty.classList.remove("d-none");
+      els.gridEmpty.textContent = GRID_LOAD_ERROR;
+    }
+  }
 
   function taxLabel(row) {
     return row.tax_type === "CGST_SGST"
@@ -1184,6 +1687,7 @@
   }
 
   function paymentReceivedLabel(row) {
+    if (row.payment_status) return row.payment_status;
     if (String(row.bill_source || "") !== "Miscellaneous") return "—";
     return row.payment_received ? "Yes" : "No";
   }
@@ -1342,7 +1846,7 @@
       if (els.gridEmpty) {
         els.gridEmpty.textContent = total
           ? "No invoices match these filters."
-          : "No saved invoices yet. Save a bill to see it here.";
+          : "No saved invoices.";
       }
       if (els.gridCount) els.gridCount.textContent = total ? "0 of " + total + " invoices" : "0 invoices";
       return;
@@ -1356,6 +1860,9 @@
     }
     rows.forEach(function (row) {
       const billSource = (row.bill_source || "Manual").toString();
+      const moduleName = String(row.source_module || "ACCOUNTING").toUpperCase();
+      const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
+      const lockMessage = row.source_lock_message || sourceListDeleteMessage(invoiceSourceType(row));
       const tr = document.createElement("tr");
       if (billSource.toLowerCase() === "automatic") {
         tr.className = "inv-row-automatic";
@@ -1402,30 +1909,18 @@
             '" title="Review, then update Bill Status"><i class="bi bi-clipboard-check"></i></button>'
           : "") +
         '<button type="button" class="btn btn-outline-primary btn-sm me-1 inv-g-edit' +
-        (isConvertedRow(row) ? " is-locked" : "") +
+        (accountingOwned ? "" : " is-source-locked") +
         '" data-id="' +
         row.invoice_id +
-        '"' +
-        (isConvertedRow(row)
-          ? ' data-origin="' +
-            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
-            '"'
-          : "") +
-        ' title="' +
-        (isConvertedRow(row) ? "Edit from the source screen" : "Edit") +
+        '" title="' +
+        escapeHtml(accountingOwned ? "Edit" : lockMessage) +
         '"><i class="bi bi-pencil"></i></button>' +
         '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del' +
-        (isConvertedRow(row) ? " is-locked" : "") +
+        (accountingOwned ? "" : " is-source-locked") +
         '" data-id="' +
         row.invoice_id +
-        '"' +
-        (isConvertedRow(row)
-          ? ' data-origin="' +
-            escapeHtml(row.origin_path || "Activities → Miscellaneous → Edit Entry") +
-            '"'
-          : "") +
-        ' title="' +
-        (isConvertedRow(row) ? "Delete from the source screen" : "Delete") +
+        '" title="' +
+        escapeHtml(accountingOwned ? "Delete" : lockMessage) +
         '"><i class="bi bi-trash"></i></button>' +
         '<button type="button" class="btn btn-outline-info btn-sm me-1 inv-g-preview" data-id="' +
         row.invoice_id +
@@ -1456,14 +1951,28 @@
   }
 
   async function loadGrid() {
-    const url = new URL(api.list, window.location.origin);
-    if (voucherType) url.searchParams.set("voucher_type", voucherType);
-    const res = await fetch(url.toString(), { credentials: "same-origin" });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || "Grid load failed");
-    gridRows = data.rows || [];
-    fillFilterLists(gridRows);
-    applyGridFilters();
+    if (gridLoadPromise) return gridLoadPromise;
+    const isRefresh = gridRows.length > 0;
+    setGridBusy(isRefresh);
+    gridLoadPromise = (async function () {
+      try {
+        const url = new URL(api.list, window.location.origin);
+        if (voucherType) url.searchParams.set("voucher_type", voucherType);
+        const res = await fetch(url.toString(), { credentials: "same-origin" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "Grid load failed");
+        gridRows = data.rows || [];
+        fillFilterLists(gridRows);
+        applyGridFilters();
+      } catch (err) {
+        showGridLoadError();
+        throw err;
+      } finally {
+        gridLoadPromise = null;
+        clearGridBusy();
+      }
+    })();
+    return gridLoadPromise;
   }
 
   async function searchCustomers(q) {
@@ -1479,194 +1988,6 @@
     if (els.customerSuggest) els.customerSuggest.innerHTML = "";
   }
 
-  function findItemForModule(moduleCode) {
-    const needle = String(moduleCode || "").toUpperCase();
-    if (!needle) return null;
-    return (
-      items.find(function (it) {
-        const hay = (
-          (it.item_code || "") +
-          " " +
-          (it.item_name || "") +
-          " " +
-          (it.label || "")
-        ).toUpperCase();
-        return hay.indexOf(needle) >= 0;
-      }) || null
-    );
-  }
-
-  function mapFollowupQuarter(raw) {
-    const value = String(raw || "").trim();
-    if (!value) return "";
-    if (serviceQuarters.indexOf(value) >= 0) return value;
-    const key = value.toUpperCase().slice(0, 2);
-    const map = {
-      Q1: "Q1-Apr-May-Jun",
-      Q2: "Q2-Jul-Aug-Sep",
-      Q3: "Q3-Oct-Nov-Dec",
-      Q4: "Q4-Jan-Feb-Mar",
-    };
-    return map[key] || "";
-  }
-
-  function applyTallyAmount(rec) {
-    const moduleCode = String(rec.module_code || "").toUpperCase();
-    const isOie =
-      moduleCode === "OIE" ||
-      moduleCode === "RCF" ||
-      (rec.source || "") === "income_expense" ||
-      (rec.source || "") === "ration_card_followup";
-    if (isOie) {
-      const nonGst = document.getElementById("invKindNonGst");
-      if (nonGst) nonGst.checked = true;
-    }
-    const item = isOie ? null : findItemForModule(rec.module_code);
-    const gst =
-      isOie
-        ? 0
-        : item && item.gst_rate_percent != null
-          ? item.gst_rate_percent
-          : 18;
-    const split = splitGstInclusive(rec.bill_amount != null ? rec.bill_amount : 0, gst);
-    clearLines();
-    addLine({
-      item_id: item ? item.item_id : "",
-      tax_period: rec.tax_period || "",
-      quarter: mapFollowupQuarter(rec.quarter),
-      particulars: rec.particulars || "",
-      hsn_sac: item ? item.hsn_sac : "",
-      unit: item ? item.unit || "NOS" : "NOS",
-      qty: 1,
-      rate: split.rate,
-      gst_rate_percent: gst,
-    });
-    if (els.roundOffAmt) {
-      els.roundOffAmt.value = split.roundOff ? Number(split.roundOff).toFixed(2) : "";
-    }
-    setRoundOffSign(split.sign);
-  }
-
-  function q2(n) {
-    return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-  }
-
-  function isIntraState() {
-    const placeCode = (els.placeCode?.value || "").trim();
-    const seller = String(api.companyStateCode || "05").trim();
-    return !!placeCode && placeCode === seller;
-  }
-
-  function splitGstInclusive(gross, gstRate) {
-    gross = q2(gross);
-    gstRate = q2(gstRate);
-    if (gross <= 0) return { rate: 0, roundOff: 0, sign: "" };
-    if (gstRate <= 0) return { rate: gross, roundOff: 0, sign: "" };
-    const taxable = q2((gross * 100) / (100 + gstRate));
-    let gstTotal;
-    if (isIntraState()) {
-      const half = q2(gstRate / 2);
-      gstTotal = q2(q2((taxable * half) / 100) + q2((taxable * half) / 100));
-    } else {
-      gstTotal = q2((taxable * gstRate) / 100);
-    }
-    const roundOff = q2(gross - q2(taxable + gstTotal));
-    let sign = "";
-    if (roundOff > 0) sign = "add";
-    else if (roundOff < 0) sign = "sub";
-    return { rate: taxable, roundOff: Math.abs(roundOff), sign: sign };
-  }
-
-  async function applyTallyBill(rec) {
-    if (!rec) return;
-    if (rec.bill_no && els.tallyBillNo) {
-      els.tallyBillNo.value = rec.bill_no;
-      lastTallyLookup = String(rec.bill_no).trim();
-    }
-    if (rec.existing_invoice_id) {
-      editingId = parseInt(rec.existing_invoice_id, 10) || null;
-      currentBillSource = rec.bill_source || "Automatic";
-      if (editingId) {
-        setModeBadge(true);
-        if (els.saveBtn) {
-          els.saveBtn.innerHTML = '<i class="bi bi-save"></i> Update Invoice';
-        }
-      }
-    }
-    if (rec.invoice_date && els.date) {
-      els.date.value = String(rec.invoice_date).slice(0, 10);
-      await refreshInvoiceNo().catch(function () {});
-    }
-    if (rec.customer_id) {
-      try {
-        await pickCustomer(rec.customer_id);
-      } catch (_err) {
-        if (els.customerId) els.customerId.value = rec.customer_id || "";
-        if (els.customerName) els.customerName.value = rec.customer_name || "";
-        if (els.customerSearch) els.customerSearch.value = rec.customer_name || "";
-      }
-    } else if (rec.customer_name) {
-      if (els.customerName) els.customerName.value = rec.customer_name;
-      if (els.customerSearch) els.customerSearch.value = rec.customer_name;
-      if (els.mobile && rec.mobile_number) els.mobile.value = rec.mobile_number;
-    }
-    if (rec.invoice_kind === "NON_GST") {
-      const nonGst = document.getElementById("invKindNonGst");
-      if (nonGst) {
-        nonGst.checked = true;
-        await refreshInvoiceNo().catch(function () {});
-      }
-    } else if (rec.invoice_kind === "GST") {
-      const gstKind = document.getElementById("invKindGst");
-      if (gstKind) {
-        gstKind.checked = true;
-        await refreshInvoiceNo().catch(function () {});
-      }
-    }
-    applyTallyAmount(rec);
-    const amt =
-      rec.bill_amount != null
-        ? Number(rec.bill_amount).toLocaleString("en-IN", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })
-        : "0.00";
-    showStatus(
-      (rec.module_title || rec.module_code || "Followup") +
-        " se bill mila — " +
-        (rec.customer_name || "Customer") +
-        " · Amount ₹" +
-        amt +
-        ". Invoice isi naam par ready hai, Save Invoice dabayein.",
-      "success"
-    );
-    schedulePreview();
-  }
-
-  async function lookupTallyBill(force) {
-    if (voucherType === "PURCHASE" || !api.tallyBill || !els.tallyBillNo) return;
-    const billNo = (els.tallyBillNo.value || "").trim();
-    if (!billNo) return;
-    if (!force && billNo === lastTallyLookup) return;
-    lastTallyLookup = billNo;
-    showStatus("Tally Bill Number followup / Income-Expense / Ration Card mein dhoondh rahe hain…", "info");
-    try {
-      const url = new URL(api.tallyBill, window.location.origin);
-      url.searchParams.set("bill_no", billNo);
-      const res = await fetch(url.toString(), { credentials: "same-origin" });
-      const data = await res.json();
-      if (!data.ok || !data.record) {
-        throw new Error(
-          data.error ||
-            "Tally Bill Number followup, Income/Expense (Misc.), ya Ration Card Followup mein nahi mila."
-        );
-      }
-      await applyTallyBill(data.record);
-    } catch (err) {
-      lastTallyLookup = "";
-      showStatus(err.message || String(err), "danger");
-    }
-  }
 
   async function pickCustomer(id) {
     const res = await fetch(apiUrl(api.customer, id), { credentials: "same-origin" });
@@ -1763,7 +2084,13 @@
     schedulePreview();
   });
 
-  els.payBank?.addEventListener("change", function () {
+  els.payBanks?.addEventListener("change", function (ev) {
+    const box = ev.target.closest(".inv-pay-bank");
+    if (box && box.checked && selectedBankIds().length > 2) {
+      box.checked = false;
+      bankAlert("Maximum 2 bank accounts can be selected for an invoice.");
+      return;
+    }
     schedulePreview();
   });
 
@@ -1829,26 +2156,66 @@
   els.payReceivedYes?.addEventListener("change", onPaymentReceivedChange);
   els.payReceivedNo?.addEventListener("change", onPaymentReceivedChange);
 
-  els.tallyBillNo?.addEventListener("keydown", function (ev) {
-    if (ev.key === "Enter") {
-      ev.preventDefault();
-      lookupTallyBill(true).catch(function (err) {
-        showStatus(err.message || String(err), "danger");
-      });
-    }
-  });
-  els.tallyBillNo?.addEventListener("blur", function () {
-    lookupTallyBill(false).catch(function (err) {
-      showStatus(err.message || String(err), "danger");
-    });
-  });
-
   els.addLine?.addEventListener("click", function () {
     addLine();
   });
 
+  async function applyContactCustomer(customerId) {
+    const id = parseInt(customerId, 10);
+    if (!id || !api.customer) return;
+    const res = await fetch(apiUrl(api.customer, id), { credentials: "same-origin" });
+    const data = await res.json();
+    const name = data && data.ok && data.record ? (data.record.customer_name || "") : "";
+    if (name && els.contactPerson) els.contactPerson.value = name;
+  }
+
+  async function applyFollowupLaunch(params) {
+    const followupId = (params.get("followup_entry_id") || "").trim();
+    if (followupId && els.followupEntryId) els.followupEntryId.value = followupId;
+    const deepCustomerId = (params.get("customer_id") || "").trim();
+    if (deepCustomerId) {
+      await pickCustomer(deepCustomerId);
+    } else {
+      const deepCustomerName = (params.get("customer_name") || "").trim();
+      if (deepCustomerName) {
+        if (els.customerName) els.customerName.value = deepCustomerName;
+        if (els.customerSearch) els.customerSearch.value = deepCustomerName;
+      }
+    }
+    const contactCustomerId = (params.get("contact_customer_id") || "").trim();
+    if (contactCustomerId) await applyContactCustomer(contactCustomerId);
+  }
+
   els.newBtn?.addEventListener("click", function () {
-    startNew().catch(function (err) {
+    const params = new URLSearchParams(window.location.search || "");
+    const fromFollowup = params.get("open_form") === "1";
+    startNew(fromFollowup ? { keepFollowup: true } : undefined)
+      .then(function () {
+        if (fromFollowup) return applyFollowupLaunch(params);
+      })
+      .catch(function (err) {
+        showStatus(err.message || String(err), "danger");
+      });
+  });
+
+  els.cancelBtn?.addEventListener("click", function () {
+    confirmDiscardInvoice().then(function (allow) {
+      if (!allow) return;
+      const entryId = (els.followupEntryId?.value || "").trim();
+      const wasNew = !editingId;
+      invoiceFormDirty = false;
+      if (wasNew && entryId && !followupNotified) {
+        notifyInvoiceOpener("jtcs-invoice-cancelled", null);
+      }
+      if (entryId && closeEmbeddedInvoice()) return;
+      closeInvoiceForm();
+      showStatus("Invoice form closed.", "info");
+    });
+  });
+
+  els.deleteBtn?.addEventListener("click", function () {
+    if (!editingId) return;
+    deleteInvoice(editingId, { fromAccountingForm: true }).catch(function (err) {
       showStatus(err.message || String(err), "danger");
     });
   });
@@ -2094,8 +2461,10 @@
     if (previewBtn) hideReviewBar();
     const waBtn = ev.target.closest(".inv-g-wa");
     if (editBtn) {
-      if (editBtn.classList.contains("is-locked")) {
-        showOriginPopup(editBtn.getAttribute("data-origin") || "");
+      if (editBtn.classList.contains("is-source-locked")) {
+        const message = editBtn.getAttribute("title") || "Edit is available only from the module that created this invoice.";
+        if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(message, "warning");
+        else alert(message);
       } else {
         loadForEdit(editBtn.getAttribute("data-id")).catch(function (err) {
           showStatus(err.message || String(err), "danger");
@@ -2103,10 +2472,12 @@
       }
     }
     if (delBtn) {
-      if (delBtn.classList.contains("is-locked")) {
-        showOriginPopup(delBtn.getAttribute("data-origin") || "");
+      if (delBtn.classList.contains("is-source-locked") || delBtn.classList.contains("is-locked")) {
+        const message = delBtn.getAttribute("title") || sourceListDeleteMessage("FOLLOWUP");
+        if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(message, "warning");
+        else alert(message);
       } else {
-        deleteInvoice(delBtn.getAttribute("data-id")).catch(function (err) {
+        deleteInvoice(delBtn.getAttribute("data-id"), { fromAccountingList: true }).catch(function (err) {
           showStatus(err.message || String(err), "danger");
         });
       }
@@ -2129,34 +2500,46 @@
     }
   });
 
+  window.jtcsInvoiceIsDirty = function () {
+    return !!invoiceFormDirty;
+  };
+  window.jtcsInvoiceSaveFromHost = function () {
+    return saveInvoice();
+  };
+
   (async function init() {
-    await startNew();
-    await loadGrid();
     const params = new URLSearchParams(window.location.search || "");
+    if (params.get("fu_embed") === "1") {
+      document.documentElement.classList.add("fu-invoice-embed");
+    }
+    await loadGrid();
     const editId = (params.get("edit") || "").trim();
-    const deepCustomerId = (params.get("customer_id") || "").trim();
-    const deepTallyBill = (
-      params.get("tally_bill_no") ||
-      params.get("bill_no") ||
-      ""
-    ).trim();
+    const openForm = params.get("open_form") === "1";
     if (editId) {
       await loadForEdit(editId);
-    } else if (deepCustomerId) {
-      await pickCustomer(deepCustomerId);
-    } else {
-      const deepCustomerName = (params.get("customer_name") || "").trim();
-      if (deepCustomerName) {
-        if (els.customerName) els.customerName.value = deepCustomerName;
-        if (els.customerSearch) els.customerSearch.value = deepCustomerName;
+      applyMiscInclusiveSeeds(params);
+      const followupId = (params.get("followup_entry_id") || "").trim();
+      if (followupId && els.followupEntryId && !els.followupEntryId.value) {
+        els.followupEntryId.value = followupId;
       }
-    }
-    if (!editId && deepTallyBill && els.tallyBillNo) {
-      els.tallyBillNo.value = deepTallyBill;
-      await lookupTallyBill(true);
+      const miscId = (params.get("misc_entry_id") || "").trim();
+      const miscBillCustomerId = (params.get("misc_bill_customer_id") || "").trim();
+      if (
+        miscId &&
+        miscBillCustomerId &&
+        String(els.customerId?.value || "") !== miscBillCustomerId
+      ) {
+        await pickCustomer(miscBillCustomerId);
+      }
+      const contactCustomerId = (params.get("contact_customer_id") || "").trim();
+      if (contactCustomerId) await applyContactCustomer(contactCustomerId);
+      markInvoiceClean();
+    } else if (openForm) {
+      await startNew({ keepFollowup: true });
+      await applyFollowupLaunch(params);
+      applyMiscInclusiveSeeds(params);
     }
   })().catch(function (err) {
     showStatus(err.message || String(err), "danger");
-    addLine();
   });
 })();

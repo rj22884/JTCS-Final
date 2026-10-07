@@ -35,7 +35,7 @@ from app.extensions import db
 from app.utils.opening_balance import apply_account_running, is_credit_normal_nature
 from app.services.payment_accounting_service import (
     FOLLOWUP_MODULES,
-    sql_customer_ledger_exclude_sale_invoice,
+    sql_customer_ledger_exclude_obc,
     sql_customer_receipt_expr,
     sql_not_udhaar_payment,
     sql_unpaid_followup_exclusion_for_customer_ledger,
@@ -1598,9 +1598,10 @@ class LedgerExportService:
         return customer_id in self.individual_client_ids([customer_id])
 
     def _individual_client_movement_sql(self, *, customer_pred: str) -> str:
-        """Misc sale + misc payment, and followup sale + followup payment.
+        """Misc sale + misc payment, follow-up bills, and sale invoices.
 
-        Sales invoices (Accounting Sale / Service Invoice) are not included.
+        A sale invoice is the receivable. The matching follow-up bill amount
+        is omitted when that invoice already exists.
         """
         modules = ", ".join(f"N'{code}'" for code in FOLLOWUP_MODULES)
         not_udhaar = sql_not_udhaar_payment("ba", "pm")
@@ -1679,6 +1680,7 @@ class LedgerExportService:
               AND f.BillNo IS NOT NULL
               AND LTRIM(RTRIM(f.BillNo)) <> N''
               AND ISNULL(f.BillAmount, 0) > 0
+              {sql_unpaid_followup_exclusion_for_customer_ledger()}
 
             UNION ALL
 
@@ -1706,6 +1708,25 @@ class LedgerExportService:
               AND d.WorkType IN ({modules})
               AND ISNULL(p.Amount, 0) > 0
               AND {not_udhaar}
+
+            UNION ALL
+
+            SELECT
+                d.CustomerID,
+                d.TransactionDate,
+                d.TransactionID,
+                d.WorkType,
+                d.SubWorkType,
+                d.ReferenceNo,
+                ISNULL(d.Description, CONCAT(N'Invoice ', ISNULL(d.ReferenceNo, N''))) AS Description,
+                ISNULL(d.SaleAmount, 0) AS SaleAmount,
+                CAST(0 AS DECIMAL(18, 2)) AS ReceiptAmount
+            FROM dbo.JTCSDailyTransaction d
+            WHERE {customer_pred.replace("e.CustomerID", "d.CustomerID")}
+              AND d.Status = N'Posted'
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
+              AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
+              AND ISNULL(d.SaleAmount, 0) <> 0
         """
 
     def _individual_client_activity_parts(
@@ -1869,6 +1890,13 @@ class LedgerExportService:
         if customer is None:
             raise ValueError("Customer not found.")
 
+        try:
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().post_missing_sale_dailies(int(customer_id))
+        except Exception:
+            db.session.rollback()
+
         date_from, date_to = self._resolve_period(date_from, date_to)
         opening = Decimal("0.00")
         ob_date = None
@@ -1903,7 +1931,7 @@ class LedgerExportService:
                     WHERE d.CustomerID = :customer_id
                       AND d.Status = N'Posted'
                       {prior_date_sql}
-                      {sql_customer_ledger_exclude_sale_invoice("d")}
+                      {sql_customer_ledger_exclude_obc("d")}
                 ) x
                 """
             ),
@@ -2040,7 +2068,7 @@ class LedgerExportService:
                       AND d.Status = N'Posted'
                       AND d.TransactionDate >= :date_from
                       AND d.TransactionDate <= :date_to
-                      {sql_customer_ledger_exclude_sale_invoice("d")}
+                      {sql_customer_ledger_exclude_obc("d")}
                     ORDER BY d.TransactionDate ASC, d.TransactionID ASC
                     """
                 ),
@@ -2059,8 +2087,8 @@ class LedgerExportService:
                 )
             )
 
-        # Individual Client: sale and payment come from Misc activity and
-        # Followup only. Accounting sale invoices are not part of this ledger.
+        # Individual Client activity replaces the generic daily list.
+        # Money In/Out is added back as one full-amount voucher, not per invoice.
         if self._is_individual_client(customer_id):
             ic_prior_billed, ic_prior_received, rows = self._individual_client_activity_parts(
                 customer_id,
@@ -2076,7 +2104,21 @@ class LedgerExportService:
                 + prior_received
                 + prior_obc_received
             )
-            opening = self._money(base_opening + ic_prior_billed - ic_prior_received)
+            opening = self._money(
+                base_opening
+                + ic_prior_billed
+                - ic_prior_received
+                + prior_obc_billed
+                - prior_obc_received
+            )
+            if obc_rows:
+                rows.extend(obc_rows)
+                rows.sort(
+                    key=lambda r: (
+                        r.get("TransactionDate") or date.min,
+                        int(r.get("TransactionID") or 0),
+                    )
+                )
 
         name = (customer["CustomerName"] or f"Customer {customer_id}").strip()
         chart_group_name = ""

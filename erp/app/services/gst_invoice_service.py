@@ -8,7 +8,12 @@ from sqlalchemy import func, or_, select, text
 
 from app.extensions import db
 from app.models.gst_billing import GstInvoice
-from app.models.transactions import JTCSDailyTransaction
+from app.models.transactions import (
+    JTCSDailyTransaction,
+    JTCSDailyTransactionPayment,
+    JtcsBankAccountMaster,
+    JtcsBankTransaction,
+)
 from app.repositories.gst_invoice_repository import GstInvoiceRepository
 from app.repositories.item_master_repository import ItemMasterRepository
 from app.repositories.transaction_repository import (
@@ -56,6 +61,17 @@ STATE_CODES = {
 
 def _q(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _pre_gst_rate(gross: Decimal, gst_rate: Decimal) -> Decimal:
+    """GST-inclusive amount → pre-GST rate. GST is the remainder, not rate × percent."""
+    gross = _q(gross)
+    gst_rate = _q(gst_rate)
+    if gross <= 0:
+        return Decimal("0.00")
+    if gst_rate <= 0:
+        return gross
+    return _q(gross / (Decimal("1") + (gst_rate / Decimal("100"))))
 
 
 def amount_in_words_inr(amount: Decimal) -> str:
@@ -217,101 +233,12 @@ class GstInvoiceService:
         return None
 
     def rebifurcate_miscellaneous_inclusive(self) -> int:
-        """Rewrite Miscellaneous sale invoices that added GST on top of an inclusive amount.
+        """Leave saved GST, TDS, ITR, DSC and Miscellaneous invoices as the user saved them.
 
-        A ₹400 category amount was stored as taxable and posted as ₹472. Those
-        invoices are split so Invoice Value stays ₹400 and the daily sale matches.
+        Opening the dashboard used to split GST back out of the invoice total, so a
+        bill saved at one amount came back as another. That rewrite is not used.
         """
-        self.repo.ensure_schema()
-        invoices = list(
-            db.session.scalars(
-                select(GstInvoice).where(
-                    GstInvoice.BillSource == self.BILL_SOURCE_MISCELLANEOUS,
-                    GstInvoice.VoucherType == self.VOUCHER_SALE,
-                )
-            ).all()
-        )
-        changed = 0
-        for inv in invoices:
-            lines = self.repo.list_lines(inv.InvoiceID)
-            if not lines:
-                continue
-            gst_rate = max(
-                (_q(Decimal(str(line.GstRatePercent or 0))) for line in lines),
-                default=Decimal("0.00"),
-            )
-            gross = Decimal("0.00")
-            for line in lines:
-                qty = Decimal(str(line.Qty or 0))
-                rate = Decimal(str(line.Rate or 0))
-                discount = Decimal(str(line.DiscountAmount or 0))
-                gross += _q(qty * rate - discount)
-            gross = _q(gross)
-            current = _q(Decimal(str(inv.InvoiceValue or 0)))
-            source_gross = self._source_bill_gross(inv)
-            if gst_rate <= 0:
-                if source_gross and source_gross > 0 and abs(current - source_gross) > Decimal("0.05"):
-                    inv.InvoiceValue = source_gross
-                    inv.TaxableValue = source_gross
-                    inv.ListPrice = source_gross
-                    inv.AmountInWords = amount_in_words_inr(source_gross)
-                    inv.UpdatedAt = datetime.utcnow()
-                    changed += 1
-                continue
-            if gross <= 0 and not (source_gross and source_gross > 0):
-                continue
-            if source_gross and source_gross > 0:
-                if abs(current - source_gross) <= Decimal("0.05"):
-                    continue
-                gross = source_gross
-            else:
-                added_on_top = _q(gross * (Decimal("100") + gst_rate) / Decimal("100"))
-                if abs(current - added_on_top) > Decimal("0.05") or abs(current - gross) <= Decimal("0.05"):
-                    continue
-            intra = (inv.TaxType or "") == "CGST_SGST" or (
-                _q(Decimal(str(inv.CgstAmount or 0))) > 0
-                or _q(Decimal(str(inv.SgstAmount or 0))) > 0
-            )
-            split = self._split_gst_inclusive(gross, gst_rate, intra)
-            if len(lines) == 1:
-                line = lines[0]
-                qty = Decimal(str(line.Qty or 1)) or Decimal("1")
-                line.Rate = _q(split["taxable"] / qty)
-                line.TaxableValue = split["taxable"]
-            else:
-                # Spread the inclusive gross across lines by their current share.
-                shares = []
-                for line in lines:
-                    qty = Decimal(str(line.Qty or 0))
-                    rate = Decimal(str(line.Rate or 0))
-                    discount = Decimal(str(line.DiscountAmount or 0))
-                    shares.append(_q(qty * rate - discount))
-                share_total = _q(sum(shares, Decimal("0.00"))) or Decimal("1")
-                for line, share in zip(lines, shares):
-                    part = self._split_gst_inclusive(
-                        _q(gross * share / share_total), gst_rate, intra
-                    )
-                    qty = Decimal(str(line.Qty or 1)) or Decimal("1")
-                    line.Rate = _q(part["taxable"] / qty)
-                    line.TaxableValue = part["taxable"]
-            inv.ListPrice = split["taxable"]
-            inv.TaxableValue = split["taxable"]
-            inv.TaxType = split["tax_type"]
-            inv.CgstRate = split["cgst_rate"]
-            inv.CgstAmount = split["cgst"]
-            inv.SgstRate = split["sgst_rate"]
-            inv.SgstAmount = split["sgst"]
-            inv.IgstRate = split["igst_rate"]
-            inv.IgstAmount = split["igst"]
-            inv.RoundOffAmount = split["round_off"]
-            inv.InvoiceValue = split["invoice_value"]
-            inv.AmountInWords = amount_in_words_inr(split["invoice_value"])
-            inv.UpdatedAt = datetime.utcnow()
-            self._sync_sale_daily(inv)
-            changed += 1
-        if changed:
-            db.session.commit()
-        return changed
+        return 0
 
     def _parse_round_off(self, payload: dict) -> Decimal:
         sign = str(
@@ -451,6 +378,45 @@ class GstInvoiceService:
             "place_of_supply_code": code,
         }
 
+    def _customer_name(self, customer_id: int | None) -> str:
+        try:
+            cid = int(customer_id or 0)
+        except (TypeError, ValueError):
+            return ""
+        if cid <= 0:
+            return ""
+        return (self._load_customer(cid).get("customer_name") or "").strip()
+
+    def _apply_followup_contact(self, header: dict) -> None:
+        """Contact person is the original follow-up customer, not the billing customer."""
+        entry_id = self._positive_id(header.get("FollowupEntryID"))
+        if not entry_id:
+            return
+        from app.models.followup import FollowupEntryMaster
+
+        entry = db.session.get(FollowupEntryMaster, entry_id)
+        if entry is None:
+            return
+        name = self._customer_name(getattr(entry, "CustomerID", None))
+        if name:
+            header["ContactPerson"] = name[:150]
+
+    def _apply_misc_contact(self, header: dict) -> None:
+        """MISC contact person stays the original entry customer when another party is billed."""
+        if header.get("FollowupEntryID"):
+            return
+        entry_id = self._positive_id(header.get("MiscEntryID"))
+        if not entry_id:
+            return
+        from app.models.others import OthersIncomeExpenseMaster
+
+        entry = db.session.get(OthersIncomeExpenseMaster, entry_id)
+        if entry is None:
+            return
+        name = self._customer_name(getattr(entry, "CustomerID", None))
+        if name:
+            header["ContactPerson"] = name[:150]
+
     def search_customers(self, q: str | None = None, limit: int = 30) -> list[dict]:
         term = (q or "").strip()
         lim = max(1, min(int(limit or 30), 100))
@@ -500,11 +466,13 @@ class GstInvoiceService:
     BILL_SOURCE_AUTOMATIC = "Automatic"
     BILL_SOURCE_IMPORT = "Import"
     BILL_SOURCE_MISCELLANEOUS = "Miscellaneous"
+    BILL_SOURCE_FOLLOWUP = "Follow-up"
     BILL_SOURCES = (
         BILL_SOURCE_MANUAL,
         BILL_SOURCE_AUTOMATIC,
         BILL_SOURCE_IMPORT,
         BILL_SOURCE_MISCELLANEOUS,
+        BILL_SOURCE_FOLLOWUP,
     )
     # Purchase payment → bank ledger only (never used by Sale / other modules).
     PURCHASE_BANK_SOURCE_TABLE = "GstInvoice"
@@ -520,6 +488,8 @@ class GstInvoiceService:
             return GstInvoiceService.BILL_SOURCE_IMPORT
         if raw in {"miscellaneous", "misc", "oie_misc", "others_misc"}:
             return GstInvoiceService.BILL_SOURCE_MISCELLANEOUS
+        if raw in {"followup", "follow_up", "follow-up"}:
+            return GstInvoiceService.BILL_SOURCE_FOLLOWUP
         return GstInvoiceService.BILL_SOURCE_MANUAL
 
     @staticmethod
@@ -697,7 +667,7 @@ class GstInvoiceService:
             select(FollowupEntryStage.EntryStageID)
             .where(
                 FollowupEntryStage.EntryID.in_(entry_ids),
-                FollowupEntryStage.StageCode == "payment_received",
+                FollowupEntryStage.StageCode.in_(("payment_received", "Payment Received")),
             )
             .limit(1)
         )
@@ -722,6 +692,286 @@ class GstInvoiceService:
             return bool(stored)
         return False
 
+    def money_in_total(self, invoice_id: int, *, exclude_entry_id: int | None = None) -> Decimal:
+        """Active Money In/Out amounts linked to this invoice."""
+        totals = self.money_in_totals([invoice_id], exclude_entry_id=exclude_entry_id)
+        try:
+            key = int(invoice_id)
+        except (TypeError, ValueError):
+            return Decimal("0.00")
+        return totals.get(key, Decimal("0.00"))
+
+    def money_in_totals(
+        self, invoice_ids, *, exclude_entry_id: int | None = None
+    ) -> dict[int, Decimal]:
+        """Allocated Money In amounts per invoice.
+
+        Child allocation rows are the source of truth. A legacy voucher that
+        still stores a single InvoiceID is counted only when it has no
+        allocation rows, so the full voucher is never added once per invoice.
+        """
+        from app.models.bank_cash import (
+            OthersBankCashInvoiceAllocation,
+            OthersBankCashTransaction,
+        )
+        from app.repositories.bank_cash_repository import OthersBankCashRepository
+
+        keys: list[int] = []
+        seen: set[int] = set()
+        for raw in invoice_ids or []:
+            try:
+                key = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if key > 0 and key not in seen:
+                seen.add(key)
+                keys.append(key)
+        totals = {key: Decimal("0.00") for key in keys}
+        if not keys:
+            return totals
+        OthersBankCashRepository().ensure_schema()
+        skip = int(exclude_entry_id) if exclude_entry_id else None
+        allocated_entries: set[int] = set()
+        alloc_rows = []
+        legacy_rows = []
+        for chunk in self._id_chunks(keys):
+            alloc_rows.extend(
+                db.session.execute(
+                    select(
+                        OthersBankCashInvoiceAllocation.InvoiceID,
+                        OthersBankCashInvoiceAllocation.EntryID,
+                        OthersBankCashInvoiceAllocation.AllocatedAmount,
+                    )
+                    .join(
+                        OthersBankCashTransaction,
+                        OthersBankCashTransaction.EntryID
+                        == OthersBankCashInvoiceAllocation.EntryID,
+                    )
+                    .where(
+                        OthersBankCashInvoiceAllocation.InvoiceID.in_(chunk),
+                        OthersBankCashTransaction.IsActive == True,  # noqa: E712
+                    )
+                ).all()
+            )
+            legacy_rows.extend(
+                db.session.scalars(
+                    select(OthersBankCashTransaction).where(
+                        OthersBankCashTransaction.InvoiceID.in_(chunk),
+                        OthersBankCashTransaction.IsActive == True,  # noqa: E712
+                    )
+                ).all()
+            )
+        for invoice_id, entry_id, amount in alloc_rows:
+            allocated_entries.add(int(entry_id))
+            if skip and int(entry_id) == skip:
+                continue
+            invoice_key = int(invoice_id)
+            if invoice_key in totals:
+                totals[invoice_key] += _q(Decimal(str(amount or 0)))
+        for row in legacy_rows:
+            entry_id = int(row.EntryID)
+            if entry_id in allocated_entries:
+                continue
+            if skip and entry_id == skip:
+                continue
+            invoice_key = int(row.InvoiceID or 0)
+            if invoice_key in totals:
+                totals[invoice_key] += _q(Decimal(str(row.Amount or 0)))
+        return {key: _q(value) for key, value in totals.items()}
+
+    def payment_position(self, inv: GstInvoice, *, exclude_entry_id: int | None = None) -> dict:
+        """Paid / Partially Paid / Unpaid from Money In and existing receipt transactions."""
+        value = _q(Decimal(str(getattr(inv, "InvoiceValue", None) or 0)))
+        received = self.money_in_total(inv.InvoiceID, exclude_entry_id=exclude_entry_id)
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        pay = PaymentAccountingService()
+        seen: set[int] = set()
+        refs = {
+            (getattr(inv, "TallyBillNo", None) or "").strip(),
+            (getattr(inv, "InvoiceNo", None) or "").strip(),
+        }
+        refs.discard("")
+        for ref in refs:
+            for daily in pay.find_receipt_dailies(ref):
+                daily_id = int(daily.TransactionID)
+                if daily_id in seen:
+                    continue
+                seen.add(daily_id)
+                received += _q(pay._received_on_daily(daily))
+        received = _q(received)
+        outstanding = _q(value - received)
+        if outstanding < 0:
+            outstanding = Decimal("0.00")
+        if received <= 0:
+            status = "Unpaid"
+        elif outstanding <= 0:
+            status = "Paid"
+        else:
+            status = "Partially Paid"
+        return {
+            "invoice_amount": float(value),
+            "received_amount": float(received),
+            "outstanding_amount": float(outstanding),
+            "payment_status": status,
+        }
+
+    _OWNER_MESSAGES = {
+        "GST": (
+            "This invoice was generated from GST Follow-up. "
+            "Please edit or delete it from GST Follow-up."
+        ),
+        "TDS": (
+            "This invoice was generated from TDS Follow-up. "
+            "Please edit or delete it from TDS Follow-up."
+        ),
+        "ITR": (
+            "This invoice was generated from ITR Follow-up. "
+            "Please edit or delete it from ITR Follow-up."
+        ),
+        "DSC": (
+            "This invoice was generated from DSC Follow-up. "
+            "Please edit or delete it from DSC Follow-up."
+        ),
+        "MISC": (
+            "This invoice was generated from MISC. "
+            "Please edit or delete it from MISC → Generate Bill."
+        ),
+        "ACCOUNTING": (
+            "This invoice was created from Accounting → Invoice. "
+            "Please edit or delete it from the Invoice module."
+        ),
+    }
+
+    def invoice_source_type(self, inv: GstInvoice) -> str:
+        """Stored origin used by delete protection. Follow-up link wins over the label."""
+        if getattr(inv, "FollowupEntryID", None):
+            return "FOLLOWUP"
+        if getattr(inv, "MiscEntryID", None):
+            return "MISC"
+        source = self.normalize_bill_source(getattr(inv, "BillSource", None))
+        if source == self.BILL_SOURCE_FOLLOWUP:
+            return "FOLLOWUP"
+        if source == self.BILL_SOURCE_MISCELLANEOUS:
+            return "MISC"
+        return "MANUAL"
+
+    def source_delete_blocked_message(self, inv: GstInvoice) -> str:
+        return self.source_owner(inv)["message"]
+
+    @staticmethod
+    def _positive_id(raw) -> int:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return 0
+        return value if value > 0 else 0
+
+    def _followup_module_map(self, entry_ids) -> dict[int, str]:
+        keys: list[int] = []
+        for raw in entry_ids or []:
+            key = self._positive_id(raw)
+            if key:
+                keys.append(key)
+        if not keys:
+            return {}
+        from app.models.followup import FollowupEntryMaster
+
+        found: dict[int, str] = {}
+        for chunk in self._id_chunks(set(keys)):
+            rows = db.session.execute(
+                select(FollowupEntryMaster.EntryID, FollowupEntryMaster.ModuleCode).where(
+                    FollowupEntryMaster.EntryID.in_(list(chunk))
+                )
+            ).all()
+            for entry_id, module in rows:
+                found[int(entry_id)] = (module or "").strip().upper()
+        return found
+
+    def source_owner(self, inv: GstInvoice, modules: dict[int, str] | None = None) -> dict:
+        """Permanent source of this invoice. IDs only — never a name or bill number."""
+        followup_id = self._positive_id(getattr(inv, "FollowupEntryID", None))
+        misc_id = self._positive_id(getattr(inv, "MiscEntryID", None))
+        bill_source = self.normalize_bill_source(getattr(inv, "BillSource", None))
+        if followup_id:
+            if modules is None:
+                modules = self._followup_module_map([followup_id])
+            module = (modules.get(followup_id) or "").strip().upper()
+            if module not in {"GST", "TDS", "ITR", "DSC"}:
+                message = (
+                    "This invoice was generated from Follow-up. "
+                    "Please edit or delete it from the follow-up that created it."
+                )
+                module = "FOLLOWUP"
+            else:
+                message = self._OWNER_MESSAGES[module]
+            return {
+                "kind": "FOLLOWUP",
+                "module": module,
+                "followup_entry_id": followup_id,
+                "misc_entry_id": None,
+                "message": message,
+            }
+        if misc_id or bill_source == self.BILL_SOURCE_MISCELLANEOUS:
+            return {
+                "kind": "MISC",
+                "module": "MISC",
+                "followup_entry_id": None,
+                "misc_entry_id": misc_id or None,
+                "message": self._OWNER_MESSAGES["MISC"],
+            }
+        return {
+            "kind": "MANUAL",
+            "module": "ACCOUNTING",
+            "followup_entry_id": None,
+            "misc_entry_id": None,
+            "message": self._OWNER_MESSAGES["ACCOUNTING"],
+        }
+
+    def source_owner_for_id(self, invoice_id: int) -> dict:
+        inv = self.repo.get_by_id(int(invoice_id))
+        if inv is None:
+            return {
+                "kind": "MANUAL",
+                "module": "ACCOUNTING",
+                "followup_entry_id": None,
+                "misc_entry_id": None,
+                "message": self._OWNER_MESSAGES["ACCOUNTING"],
+            }
+        return self.source_owner(inv)
+
+    def assert_source_mutation(self, inv: GstInvoice, payload: dict | None) -> None:
+        """Edit and delete are allowed only from the module that created the invoice."""
+        owner = self.source_owner(inv)
+        body = payload or {}
+        from_source = self._form_flag(body, "from_source")
+        followup_id = self._positive_id(
+            body.get("followup_entry_id") if body.get("followup_entry_id") not in (None, "")
+            else body.get("FollowupEntryID")
+        )
+        misc_id = self._positive_id(
+            body.get("misc_entry_id") if body.get("misc_entry_id") not in (None, "")
+            else body.get("MiscEntryID")
+        )
+        accounting = self._form_flag(body, "accounting_edit") or (
+            str(body.get("delete_context") or "").strip().lower() == "accounting_invoice"
+        )
+        if owner["kind"] == "FOLLOWUP":
+            if from_source and followup_id == int(owner["followup_entry_id"]):
+                return
+            raise ValueError(owner["message"])
+        if owner["kind"] == "MISC":
+            if not from_source:
+                raise ValueError(owner["message"])
+            stored = owner["misc_entry_id"]
+            if stored and misc_id != int(stored):
+                raise ValueError(owner["message"])
+            if not stored and not misc_id:
+                raise ValueError(owner["message"])
+            return
+        if from_source or not accounting:
+            raise ValueError(owner["message"])
+
     def sync_payment_received_for_bill(self, bill_no: str, paid: bool) -> None:
         """Keep converted sale invoices ticked from the source payment variable."""
         ids = self.repo.list_ids_for_bill_no(bill_no)
@@ -734,6 +984,72 @@ class GstInvoiceService:
             inv.InvoicePaymentReceived = bool(paid)
             inv.UpdatedAt = datetime.utcnow()
         db.session.flush()
+
+    def sync_payment_received_for_followup(
+        self, *, entry_id: int | None, bill_no: str | None, paid: bool
+    ) -> None:
+        """Set linked sale invoices to Payment Received or Payment Pending. Does not delete them."""
+        ids: set[int] = set()
+        key = (bill_no or "").strip()
+        if key:
+            ids.update(int(invoice_id) for invoice_id in self.repo.list_ids_for_bill_no(key))
+        if entry_id:
+            linked = self.repo.find_by_followup_entry(int(entry_id))
+            if linked is not None:
+                ids.add(int(linked.InvoiceID))
+        if not ids:
+            return
+        for invoice_id in ids:
+            inv = self.repo.get_by_id(invoice_id)
+            if inv is None:
+                continue
+            inv.InvoicePaymentReceived = bool(paid)
+            inv.UpdatedAt = datetime.utcnow()
+        db.session.flush()
+
+    def customer_sale_totals(self, customer_id: int) -> dict:
+        """Saved sale invoices for one customer: billed, received, and overdue."""
+        try:
+            cid = int(customer_id)
+        except (TypeError, ValueError):
+            cid = 0
+        if cid <= 0:
+            return {
+                "invoice_total": 0.0,
+                "payment_received_total": 0.0,
+                "overdue_amount": 0.0,
+                "bill_count": 0,
+            }
+        rows = list(
+            db.session.scalars(
+                select(GstInvoice).where(
+                    GstInvoice.CustomerID == cid,
+                    GstInvoice.VoucherType == self.VOUCHER_SALE,
+                )
+            ).all()
+        )
+        invoice_total = Decimal("0.00")
+        received_total = Decimal("0.00")
+        for inv in rows:
+            value = _q(Decimal(str(inv.InvoiceValue or 0)))
+            invoice_total += value
+            if bool(getattr(inv, "InvoicePaymentReceived", False)):
+                received_total += value
+                continue
+            paid = _q(Decimal(str(getattr(inv, "AmountPaid", None) or 0)))
+            if paid > 0:
+                received_total += paid if paid <= value else value
+        invoice_total = _q(invoice_total)
+        received_total = _q(received_total)
+        overdue = _q(invoice_total - received_total)
+        if overdue < 0:
+            overdue = Decimal("0.00")
+        return {
+            "invoice_total": float(invoice_total),
+            "payment_received_total": float(received_total),
+            "overdue_amount": float(overdue),
+            "bill_count": len(rows),
+        }
 
     def mark_source_payment_received(self, bill_no: str, paid: bool) -> None:
         """User Yes/No on the source entry. Sale invoice follows this flag."""
@@ -798,7 +1114,7 @@ class GstInvoiceService:
             if account_id not in ordered:
                 ordered.append(account_id)
         if len(ordered) > 2:
-            raise ValueError("Select at most 2 bank accounts.")
+            raise ValueError("Maximum 2 bank accounts can be selected for an invoice.")
         return ordered
 
     def _live_pay_upi_id(self, inv) -> str:
@@ -866,6 +1182,7 @@ class GstInvoiceService:
             "bill_approved": bool(getattr(inv, "BillApproved", False)),
             "bill_unapprove_reason": getattr(inv, "BillUnapproveReason", None) or "",
             "payment_received": self._saved_payment_received(inv),
+            **self.payment_position(inv),
             "payment_remove_reason": getattr(inv, "InvoicePaymentRemoveReason", None) or "",
             "converted_invoice": self.normalize_bill_source(getattr(inv, "BillSource", None))
             == self.BILL_SOURCE_MISCELLANEOUS,
@@ -886,13 +1203,19 @@ class GstInvoiceService:
                 if getattr(inv, "AmountPaid", None) is not None
                 else None
             ),
+            "followup_entry_id": getattr(inv, "FollowupEntryID", None),
+            "misc_entry_id": getattr(inv, "MiscEntryID", None),
             "tally_bill_no": (getattr(inv, "TallyBillNo", None) or "").strip(),
             "bill_source": self.normalize_bill_source(
                 getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
             ),
+            "source_type": self.invoice_source_type(inv),
             "created_at": inv.CreatedAt.isoformat() if inv.CreatedAt else "",
             "lines": self._serialize_lines(lines),
         }
+        owner = self.source_owner(inv)
+        data["source_module"] = owner["module"]
+        data["source_lock_message"] = owner["message"]
         if data["bill_source"] == self.BILL_SOURCE_MISCELLANEOUS:
             for line in data["lines"]:
                 # PDF / HTML preview: Item (description) only — no tax year brackets.
@@ -945,18 +1268,365 @@ class GstInvoiceService:
         date_to: date | None = None,
         voucher_type: str | None = None,
     ) -> list[dict]:
-        # Automatic invoice backfill disabled — Sales Invoice is a separate module;
-        # followup/OIE/ration no longer auto-create Sale / Service Invoice rows.
+        # Grid payload only. Edit, print, and PDF still use get_record / _serialize.
         vt = self.normalize_voucher_type(voucher_type) if voucher_type else None
-        return [
-            self._serialize(inv, lines=[])
-            for inv in self.repo.list_all(
-                search=search,
-                date_from=date_from,
-                date_to=date_to,
-                voucher_type=vt,
+        invoices = self.repo.list_all(
+            search=search,
+            date_from=date_from,
+            date_to=date_to,
+            voucher_type=vt,
+        )
+        return self._grid_rows(invoices)
+
+    @staticmethod
+    def _id_chunks(values, size: int = 400):
+        items = [item for item in values if item not in (None, "")]
+        for index in range(0, len(items), size):
+            yield items[index : index + size]
+
+    def _grid_rows(self, invoices: list[GstInvoice]) -> list[dict]:
+        """Sale/purchase list columns only. One pass, no per-invoice queries."""
+        if not invoices:
+            return []
+        invoice_ids = [int(inv.InvoiceID) for inv in invoices if inv.InvoiceID]
+        allocated = self.money_in_totals(invoice_ids)
+        refs: set[str] = set()
+        for inv in invoices:
+            for raw in (getattr(inv, "TallyBillNo", None), inv.InvoiceNo):
+                ref = (raw or "").strip().upper()
+                if ref:
+                    refs.add(ref)
+        receipts_by_ref = self._batch_receipt_amounts(refs)
+        misc_paid = self._batch_misc_payment_received(invoices)
+        upi_by_bank = self._batch_bank_upi(invoices)
+        modules = self._followup_module_map(
+            [getattr(inv, "FollowupEntryID", None) for inv in invoices]
+        )
+        rows: list[dict] = []
+        for inv in invoices:
+            value = _q(inv.InvoiceValue)
+            received = allocated.get(int(inv.InvoiceID), Decimal("0.00"))
+            seen_dailies: set[int] = set()
+            seen_refs: set[str] = set()
+            for raw in (getattr(inv, "TallyBillNo", None), inv.InvoiceNo):
+                ref = (raw or "").strip().upper()
+                if not ref or ref in seen_refs:
+                    continue
+                seen_refs.add(ref)
+                for daily_id, amount in receipts_by_ref.get(ref, ()):
+                    if daily_id in seen_dailies:
+                        continue
+                    seen_dailies.add(daily_id)
+                    received += amount
+            outstanding = value - received
+            if outstanding < 0:
+                outstanding = Decimal("0.00")
+            if received <= 0:
+                payment_status = "Unpaid"
+            elif outstanding <= 0:
+                payment_status = "Paid"
+            else:
+                payment_status = "Partially Paid"
+            bill_source = self.normalize_bill_source(
+                getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
             )
+            if bill_source == self.BILL_SOURCE_MISCELLANEOUS:
+                payment_received = misc_paid.get(int(inv.InvoiceID), False)
+            else:
+                payment_received = bool(getattr(inv, "InvoicePaymentReceived", None))
+            upi = (getattr(inv, "PayUpiId", None) or "").strip()
+            if not upi and getattr(inv, "PaymentBankAccountID", None):
+                upi = upi_by_bank.get(int(inv.PaymentBankAccountID), "")
+            owner = self.source_owner(inv, modules)
+            rows.append(
+                {
+                    "invoice_id": inv.InvoiceID,
+                    "invoice_no": inv.InvoiceNo,
+                    "invoice_date": inv.InvoiceDate.isoformat() if inv.InvoiceDate else "",
+                    "customer_name": inv.CustomerName,
+                    "contact_mobile": inv.ContactMobile or "",
+                    "invoice_kind": getattr(inv, "InvoiceKind", None) or "NON_GST",
+                    "tax_type": inv.TaxType or "IGST",
+                    "igst_rate": float(inv.IgstRate or 0),
+                    "invoice_value": float(value),
+                    "bill_source": bill_source,
+                    "source_type": self.invoice_source_type(inv),
+                    "source_module": owner["module"],
+                    "source_lock_message": owner["message"],
+                    "followup_entry_id": getattr(inv, "FollowupEntryID", None),
+                    "misc_entry_id": getattr(inv, "MiscEntryID", None),
+                    "bill_approved": bool(getattr(inv, "BillApproved", False)),
+                    "payment_received": payment_received,
+                    "payment_status": payment_status,
+                    "converted_invoice": bill_source == self.BILL_SOURCE_MISCELLANEOUS,
+                    "voucher_type": self.normalize_voucher_type(
+                        getattr(inv, "VoucherType", None)
+                    ),
+                    "pay_upi_id": upi,
+                    "pay_account_holder": (getattr(inv, "PayAccountHolder", None) or "").strip(),
+                    "pay_bank_name": (getattr(inv, "PayBankName", None) or "").strip(),
+                }
+            )
+        return rows
+
+    def _batch_bank_upi(self, invoices: list[GstInvoice]) -> dict[int, str]:
+        needed = {
+            int(inv.PaymentBankAccountID)
+            for inv in invoices
+            if not (getattr(inv, "PayUpiId", None) or "").strip()
+            and getattr(inv, "PaymentBankAccountID", None)
+        }
+        found: dict[int, str] = {}
+        if not needed:
+            return found
+        for chunk in self._id_chunks(needed):
+            banks = db.session.scalars(
+                select(JtcsBankAccountMaster).where(
+                    JtcsBankAccountMaster.JtcsBankAccountID.in_(chunk)
+                )
+            ).all()
+            for bank in banks:
+                found[int(bank.JtcsBankAccountID)] = (getattr(bank, "UpiId", None) or "").strip()
+        return found
+
+    def _batch_receipt_amounts(self, refs: set[str]) -> dict[str, list[tuple[int, Decimal]]]:
+        """Historical receipt totals keyed by bill reference. One query set, not one per invoice."""
+        grouped: dict[str, list[tuple[int, Decimal]]] = {}
+        if not refs:
+            return grouped
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        pay = PaymentAccountingService()
+        dailies: dict[int, JTCSDailyTransaction] = {}
+        for chunk in self._id_chunks(refs):
+            rows = db.session.scalars(
+                select(JTCSDailyTransaction).where(
+                    JTCSDailyTransaction.Status == "Posted",
+                    or_(
+                        JTCSDailyTransaction.ReferenceNo.in_(chunk),
+                        JTCSDailyTransaction.Remarks.in_(chunk),
+                    ),
+                )
+            ).all()
+            for daily in rows:
+                dailies[int(daily.TransactionID)] = daily
+        if not dailies:
+            return grouped
+        daily_ids = list(dailies)
+        payments: dict[int, list] = {}
+        for chunk in self._id_chunks(daily_ids):
+            for row in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.TransactionID.in_(chunk)
+                )
+            ).all():
+                payments.setdefault(int(row.TransactionID), []).append(row)
+        banks: dict[int, list] = {}
+        seen_banks: set[int] = set()
+        id_set = set(daily_ids)
+        for chunk in self._id_chunks(daily_ids):
+            bank_rows = db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.SourceTable == "JTCSDailyTransaction",
+                    or_(
+                        JtcsBankTransaction.SourceRecordID.in_(chunk),
+                        JtcsBankTransaction.SourceID.in_(chunk),
+                    ),
+                )
+            ).all()
+            for bank in bank_rows:
+                bank_id = int(bank.JtcsBankTransactionID)
+                if bank_id in seen_banks:
+                    continue
+                target = bank.SourceRecordID if bank.SourceRecordID in id_set else bank.SourceID
+                if target not in id_set:
+                    continue
+                seen_banks.add(bank_id)
+                banks.setdefault(int(target), []).append(bank)
+        extra_ids: set[int] = set()
+        for daily in dailies.values():
+            if daily.BankTransactionID and int(daily.BankTransactionID) not in seen_banks:
+                extra_ids.add(int(daily.BankTransactionID))
+        for rows in payments.values():
+            for row in rows:
+                if row.BankTransactionID and int(row.BankTransactionID) not in seen_banks:
+                    extra_ids.add(int(row.BankTransactionID))
+        extra_banks: dict[int, JtcsBankTransaction] = {}
+        for chunk in self._id_chunks(extra_ids):
+            for bank in db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.JtcsBankTransactionID.in_(chunk)
+                )
+            ).all():
+                extra_banks[int(bank.JtcsBankTransactionID)] = bank
+        for daily in dailies.values():
+            bucket = banks.setdefault(int(daily.TransactionID), [])
+            present = {int(bank.JtcsBankTransactionID) for bank in bucket}
+            for row in payments.get(int(daily.TransactionID), []):
+                bank_id = int(row.BankTransactionID) if row.BankTransactionID else 0
+                bank = extra_banks.get(bank_id)
+                if bank is not None and bank_id not in present:
+                    bucket.append(bank)
+                    present.add(bank_id)
+            if daily.BankTransactionID:
+                bank_id = int(daily.BankTransactionID)
+                bank = extra_banks.get(bank_id)
+                if bank is not None and bank_id not in present:
+                    bucket.append(bank)
+        account_ids = {
+            int(row.BankAccountID)
+            for rows in payments.values()
+            for row in rows
+            if row.BankAccountID
+        }
+        accounts: dict[int, JtcsBankAccountMaster] = {}
+        for chunk in self._id_chunks(account_ids):
+            for account in db.session.scalars(
+                select(JtcsBankAccountMaster).where(
+                    JtcsBankAccountMaster.JtcsBankAccountID.in_(chunk)
+                )
+            ).all():
+                accounts[int(account.JtcsBankAccountID)] = account
+
+        def received_on(daily: JTCSDailyTransaction) -> Decimal:
+            total = Decimal("0.00")
+            for bank in banks.get(int(daily.TransactionID), []):
+                if pay.is_udhaar_text(bank.BankName) or pay.is_udhaar_text(
+                    bank.MaskedAccountNumber
+                ):
+                    continue
+                total += pay.money(bank.Debit)
+            if total > 0:
+                return total
+            for row in payments.get(int(daily.TransactionID), []):
+                account = accounts.get(int(row.BankAccountID)) if row.BankAccountID else None
+                if pay.is_udhaar_account(account):
+                    continue
+                total += pay.money(row.Amount)
+            return total
+
+        for daily in dailies.values():
+            has_lines = bool(payments.get(int(daily.TransactionID)))
+            received = received_on(daily)
+            if pay._is_gst_sale_daily(daily):
+                continue
+            sub = (daily.SubWorkType or "").strip()
+            sale = pay.money(daily.SaleAmount) + pay.money(daily.IncomeAmount)
+            is_receipt = sub == pay.receipt_sub_work_type or (
+                sale == 0 and (has_lines or received > 0)
+            )
+            is_combined = sale > 0 and (has_lines or received > 0)
+            if not is_receipt and not is_combined:
+                continue
+            matched: set[str] = set()
+            for raw in (daily.ReferenceNo, daily.Remarks):
+                ref = pay.norm_ref(raw)
+                if ref in refs:
+                    matched.add(ref)
+            for ref in matched:
+                grouped.setdefault(ref, []).append((int(daily.TransactionID), received))
+        return grouped
+
+    def _batch_misc_payment_received(self, invoices: list[GstInvoice]) -> dict[int, bool]:
+        """Payment Received ticks for miscellaneous bills, without a query per invoice."""
+        misc = [
+            inv
+            for inv in invoices
+            if self.normalize_bill_source(getattr(inv, "BillSource", None))
+            == self.BILL_SOURCE_MISCELLANEOUS
         ]
+        found: dict[int, bool] = {}
+        if not misc:
+            return found
+        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+        from app.models.others import OthersIncomeExpenseMaster
+
+        exact_keys: set[str] = set()
+        upper_keys: set[str] = set()
+        for inv in misc:
+            for raw in (getattr(inv, "TallyBillNo", None), inv.InvoiceNo):
+                key = (raw or "").strip()
+                if not key:
+                    continue
+                exact_keys.add(key)
+                upper_keys.add(key.upper())
+        misc_by_key: dict[str, list] = {}
+        for chunk in self._id_chunks(exact_keys):
+            entries = db.session.scalars(
+                select(OthersIncomeExpenseMaster).where(
+                    OthersIncomeExpenseMaster.IsActive == True,  # noqa: E712
+                    OthersIncomeExpenseMaster.BillNo.in_(chunk)
+                    | OthersIncomeExpenseMaster.TallyBillNo.in_(chunk),
+                )
+            ).all()
+            for entry in entries:
+                for raw in (entry.BillNo, entry.TallyBillNo):
+                    key = (raw or "").strip()
+                    if key:
+                        misc_by_key.setdefault(key, []).append(entry)
+        followup_by_key: dict[str, list] = {}
+        entry_ids: set[int] = set()
+        bill_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.BillNo)))
+        app_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.ApplicationNumber)))
+        for chunk in self._id_chunks(upper_keys):
+            entries = db.session.scalars(
+                select(FollowupEntryMaster).where(
+                    FollowupEntryMaster.IsActive == True,  # noqa: E712
+                    bill_key.in_(chunk) | app_key.in_(chunk),
+                )
+            ).all()
+            for entry in entries:
+                entry_ids.add(int(entry.EntryID))
+                for raw in (entry.BillNo, entry.ApplicationNumber):
+                    key = (raw or "").strip().upper()
+                    if key:
+                        followup_by_key.setdefault(key, []).append(entry)
+        paid_ids: set[int] = set()
+        for chunk in self._id_chunks(entry_ids):
+            stage_ids = db.session.scalars(
+                select(FollowupEntryStage.EntryID).where(
+                    FollowupEntryStage.EntryID.in_(chunk),
+                    FollowupEntryStage.StageCode.in_(("payment_received", "Payment Received")),
+                )
+            ).all()
+            paid_ids.update(int(entry_id) for entry_id in stage_ids if entry_id)
+        for inv in misc:
+            keys = {
+                (getattr(inv, "TallyBillNo", None) or "").strip(),
+                (inv.InvoiceNo or "").strip(),
+            }
+            keys.discard("")
+            misc_entries = []
+            seen_misc: set[int] = set()
+            followups = []
+            seen_followup: set[int] = set()
+            for key in keys:
+                for entry in misc_by_key.get(key, []):
+                    entry_id = int(entry.EntryID)
+                    if entry_id in seen_misc:
+                        continue
+                    seen_misc.add(entry_id)
+                    misc_entries.append(entry)
+                for entry in followup_by_key.get(key.upper(), []):
+                    entry_id = int(entry.EntryID)
+                    if entry_id in seen_followup:
+                        continue
+                    seen_followup.add(entry_id)
+                    followups.append(entry)
+            followup_paid = None
+            if followups:
+                followup_paid = any(int(entry.EntryID) in paid_ids for entry in followups)
+            if misc_entries and followup_paid is not None:
+                source_paid = any(bool(entry.PaymentReceived) for entry in misc_entries) or followup_paid
+            elif misc_entries:
+                source_paid = any(bool(entry.PaymentReceived) for entry in misc_entries)
+            else:
+                source_paid = followup_paid
+            if source_paid is None:
+                stored = getattr(inv, "InvoicePaymentReceived", None)
+                source_paid = bool(stored) if stored is not None else False
+            found[int(inv.InvoiceID)] = bool(source_paid)
+        return found
 
     def get_record(self, invoice_id: int) -> dict:
         inv = self.repo.get_by_id(invoice_id)
@@ -1070,7 +1740,7 @@ class GstInvoiceService:
                 "detail": "Yes" if entry.get("work_done") else "No",
             },
             {
-                "title": "5. Tally Bill Generated",
+                "title": "5. Source bill",
                 "detail": (
                     "Yes — " + (entry.get("tally_bill_no") or entry.get("bill_no") or "")
                     if entry.get("tally_bill_generated")
@@ -1190,6 +1860,38 @@ class GstInvoiceService:
             payload, persist_no=False, require_payment_bank=False
         )[2]
 
+    def invoice_action_snapshot(self, inv) -> dict:
+        """Identity of one saved invoice. Callers must already hold this invoice id."""
+        invoice_date = inv.InvoiceDate.isoformat() if getattr(inv, "InvoiceDate", None) else ""
+        payload = {
+            "invoice_id": int(inv.InvoiceID),
+            "invoice_no": inv.InvoiceNo or "",
+            "invoice_date": invoice_date,
+            "invoice_value": float(inv.InvoiceValue or 0),
+            "customer_id": int(inv.CustomerID) if getattr(inv, "CustomerID", None) else None,
+            "customer_name": inv.CustomerName or "",
+            "contact_mobile": (getattr(inv, "ContactMobile", None) or ""),
+            "pay_url": "",
+        }
+        upi = (getattr(inv, "PayUpiId", None) or "").strip()
+        if upi:
+            try:
+                from app.services.gst_invoice_pdf_service import GstInvoicePdfService
+
+                payload["pay_url"] = GstInvoicePdfService().public_pay_url(
+                    {
+                        "invoice_id": payload["invoice_id"],
+                        "invoice_no": payload["invoice_no"],
+                        "invoice_value": payload["invoice_value"],
+                        "pay_upi_id": upi,
+                        "pay_account_holder": getattr(inv, "PayAccountHolder", None) or "",
+                        "pay_bank_name": getattr(inv, "PayBankName", None) or "",
+                    }
+                ) or ""
+            except Exception:
+                payload["pay_url"] = ""
+        return payload
+
     def sale_status_by_bill_nos(self, bill_nos) -> dict[str, dict]:
         """Sale-invoice Bill Status and Payment Received keyed by bill number."""
         keys = {(str(item or "")).strip() for item in bill_nos}
@@ -1202,16 +1904,35 @@ class GstInvoiceService:
                 GstInvoice.TallyBillNo.in_(keys) | GstInvoice.InvoiceNo.in_(keys),
             )
         ).all()
-        found: dict[str, dict] = {}
+        by_key: dict[str, dict[int, dict]] = {}
         for inv in rows:
             payload = {
-                "invoice_no": inv.InvoiceNo or "",
+                **self.invoice_action_snapshot(inv),
                 "bill_status": "Approved" if bool(getattr(inv, "BillApproved", False)) else "Approve pending",
                 "payment_received": "Yes" if self._saved_payment_received(inv) else "No",
             }
+            seen = set()
             for key in ((inv.TallyBillNo or "").strip(), (inv.InvoiceNo or "").strip()):
-                if key:
-                    found[key.upper()] = payload
+                if not key:
+                    continue
+                ukey = key.upper()
+                if ukey in seen:
+                    continue
+                seen.add(ukey)
+                by_key.setdefault(ukey, {})[int(inv.InvoiceID)] = payload
+        found: dict[str, dict] = {}
+        for ukey, invoices in by_key.items():
+            if len(invoices) == 1:
+                found[ukey] = next(iter(invoices.values()))
+                continue
+            sample = next(iter(invoices.values()))
+            found[ukey] = {
+                "invoice_id": None,
+                "invoice_no": "",
+                "bill_status": sample.get("bill_status") or "",
+                "payment_received": sample.get("payment_received") or "",
+                "ambiguous": True,
+            }
         return found
 
     def _origin_path(self, inv: GstInvoice) -> str:
@@ -1383,6 +2104,16 @@ class GstInvoiceService:
         line_cgst = Decimal("0.00")
         line_sgst = Decimal("0.00")
         line_igst = Decimal("0.00")
+        # Miscellaneous Activity invoice generation only. Other modules never send this.
+        inclusive_list = Decimal("0.00")
+        inclusive_discount = Decimal("0.00")
+        inclusive_taxable = Decimal("0.00")
+        inclusive_gross_total = Decimal("0.00")
+        inclusive_cgst = Decimal("0.00")
+        inclusive_sgst = Decimal("0.00")
+        inclusive_igst = Decimal("0.00")
+        inclusive_gst_rate = Decimal("0.00")
+        saw_inclusive = False
 
         for i, raw in enumerate(raw_lines, start=1):
             item_id = raw.get("item_id")
@@ -1411,6 +2142,59 @@ class GstInvoiceService:
                 raw.get("gst_rate_percent"),
                 str(item.GstRatePercent if item else "18"),
             )
+            inclusive_gross_raw = raw.get("inclusive_gross", raw.get("InclusiveGross"))
+            misc_linked = str(
+                payload.get("misc_entry_id") or payload.get("MiscEntryID") or ""
+            ).strip() not in ("", "None")
+            if (
+                misc_linked
+                and voucher_type == self.VOUCHER_SALE
+                and inclusive_gross_raw not in (None, "")
+            ):
+                # Amount typed on Miscellaneous Activity is the GST-inclusive total.
+                # Rate = amount / (1 + item GST / 100). GST = amount − rate.
+                if item is not None and not bool(getattr(item, "GstApplicable", True)):
+                    gst_rate = Decimal("0.00")
+                gross_line = self._money(inclusive_gross_raw)
+                if discount:
+                    gross_line = _q(gross_line - discount)
+                if gross_line < 0:
+                    raise ValueError(f"Line {i}: Discount cannot exceed amount.")
+                pre_gst = _pre_gst_rate(gross_line, gst_rate)
+                rate = _q(pre_gst / qty) if qty else pre_gst
+                taxable = _q(rate * qty) if qty else pre_gst
+                gst_amt = _q(gross_line - taxable)
+                if gst_rate > 0 and intra_state:
+                    cgst_part = _q(gst_amt / Decimal("2"))
+                    inclusive_cgst += cgst_part
+                    inclusive_sgst += _q(gst_amt - cgst_part)
+                else:
+                    inclusive_igst += gst_amt
+                inclusive_gross_total += gross_line
+                inclusive_list += taxable
+                inclusive_discount += discount
+                inclusive_taxable += taxable
+                if gst_rate > inclusive_gst_rate:
+                    inclusive_gst_rate = gst_rate
+                saw_inclusive = True
+                lines_out.append(
+                    {
+                        "SrNo": i,
+                        "ItemID": item_id,
+                        "Particulars": particulars[:300],
+                        "TaxPeriod": (tax_period[:20] if tax_period else None),
+                        "Quarter": (quarter[:40] if quarter else None),
+                        "Month": (month[:20] if month else None),
+                        "HsnSac": hsn[:20] if hsn else None,
+                        "Unit": unit[:30],
+                        "Qty": qty,
+                        "Rate": rate,
+                        "DiscountAmount": discount,
+                        "TaxableValue": taxable,
+                        "GstRatePercent": gst_rate,
+                    }
+                )
+                continue
             line_list = _q(qty * rate)
             if rate_includes_gst and gst_rate > 0:
                 gross_line = _q(line_list - discount)
@@ -1491,6 +2275,22 @@ class GstInvoiceService:
         else:
             round_off = self._parse_round_off(payload)
             invoice_value = _q(invoice_value + round_off)
+        if saw_inclusive:
+            list_price += inclusive_list
+            discount_total += inclusive_discount
+            taxable_total += inclusive_taxable
+            cgst_amt += inclusive_cgst
+            sgst_amt += inclusive_sgst
+            igst_amt += inclusive_igst
+            if inclusive_gst_rate > gst_rate_used:
+                gst_rate_used = inclusive_gst_rate
+                if intra_state:
+                    cgst_rate = sgst_rate = (
+                        _q(gst_rate_used / 2) if gst_rate_used else Decimal("0.00")
+                    )
+                else:
+                    igst_rate = gst_rate_used
+            invoice_value = _q(invoice_value + inclusive_gross_total)
         if invoice_value < 0:
             raise ValueError("Invoice Value cannot be negative after round off.")
         words = amount_in_words_inr(invoice_value)
@@ -1553,7 +2353,7 @@ class GstInvoiceService:
             pay_bank_id = None
             pay_banks_json = None
             if require_payment_bank:
-                raise ValueError("Payment Bank Account is required.")
+                raise ValueError("Please select at least one bank account.")
 
         pay_date_raw = (payload.get("payment_date") or payload.get("PaymentDate") or "").strip()
         payment_date = None
@@ -1642,14 +2442,15 @@ class GstInvoiceService:
             "PayBankAccounts": pay_banks_json,
             "PaymentDate": payment_date,
             "AmountPaid": amount_paid,
-            "TallyBillNo": self._normalized_tally_bill_no(
-                payload.get("tally_bill_no") or payload.get("TallyBillNo")
-            ),
             "BillSource": bill_source,
             **self._tally_status_header(payload, bill_source, voucher_type),
             "CreatedBy": (payload.get("created_by") or None),
             "CreatedAt": datetime.utcnow(),
         }
+        if "tally_bill_no" in payload or "TallyBillNo" in payload:
+            header["TallyBillNo"] = self._normalized_tally_bill_no(
+                payload.get("tally_bill_no") or payload.get("TallyBillNo")
+            )
 
         preview = {
             "invoice_kind": invoice_kind,
@@ -1768,6 +2569,16 @@ class GstInvoiceService:
         if daily is None:
             inv.DailyTransactionID = None
             return
+        shared = db.session.scalars(
+            select(GstInvoice).where(
+                GstInvoice.DailyTransactionID == daily.TransactionID,
+                GstInvoice.InvoiceID != inv.InvoiceID,
+            )
+        ).first()
+        if shared is not None:
+            inv.DailyTransactionID = None
+            db.session.flush()
+            return
         DailyTransactionRepository().delete(daily)
         inv.DailyTransactionID = None
         db.session.flush()
@@ -1851,6 +2662,39 @@ class GstInvoiceService:
         db.session.flush()
         self._reconcile_payment_duplicates(inv)
         return True
+
+    def post_missing_sale_dailies(self, customer_id: int) -> int:
+        """Post Sale invoices for this customer that have no receivable daily yet.
+
+        Uses the same Sale / Service Invoice daily as a manual invoice. Does not
+        create a second follow-up receivable.
+        """
+        try:
+            cid = int(customer_id)
+        except (TypeError, ValueError):
+            return 0
+        if cid <= 0:
+            return 0
+        self.repo.ensure_schema()
+        rows = list(
+            db.session.scalars(
+                select(GstInvoice).where(
+                    GstInvoice.CustomerID == cid,
+                    GstInvoice.VoucherType == self.VOUCHER_SALE,
+                )
+            ).all()
+        )
+        posted = 0
+        for inv in rows:
+            if _q(Decimal(str(inv.InvoiceValue or 0))) == 0:
+                continue
+            if self._find_own_sale_daily(inv) is not None:
+                continue
+            if self._sync_sale_daily(inv):
+                posted += 1
+        if posted:
+            db.session.commit()
+        return posted
 
     def _reconcile_payment_duplicates(self, inv: GstInvoice) -> None:
         tally = self._norm_ref(getattr(inv, "TallyBillNo", None))
@@ -2003,6 +2847,157 @@ class GstInvoiceService:
             bank_repo.create(payload)
         return True
 
+    def _bind_followup_link(
+        self, header: dict, payload: dict, *, exclude_invoice_id: int | None = None
+    ) -> None:
+        """Link a sale invoice to one ITR, GST, TDS, or DSC follow-up. One invoice per entry."""
+        if "followup_entry_id" not in payload and "FollowupEntryID" not in payload:
+            return
+        raw = payload.get("followup_entry_id")
+        if raw in (None, "") and "FollowupEntryID" in payload:
+            raw = payload.get("FollowupEntryID")
+        if raw in (None, "", 0, "0"):
+            header["FollowupEntryID"] = None
+            return
+        try:
+            entry_id = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invalid follow-up link.") from exc
+        from app.models.followup import FollowupEntryMaster
+        from app.repositories.followup_repository import FollowupRepository
+
+        FollowupRepository().ensure_billing_customer_columns()
+        entry = db.session.get(FollowupEntryMaster, entry_id)
+        if entry is None or not getattr(entry, "IsActive", True):
+            raise ValueError("Follow-up entry not found.")
+        if (entry.ModuleCode or "").strip().upper() not in {"ITR", "GST", "TDS", "DSC"}:
+            raise ValueError("Invoice can be linked only to an ITR, GST, TDS, or DSC follow-up.")
+        customer_id = header.get("CustomerID")
+        try:
+            billing_id = int(customer_id) if customer_id not in (None, "") else 0
+        except (TypeError, ValueError):
+            billing_id = 0
+        if billing_id <= 0 or not self._load_customer(billing_id).get("customer_id"):
+            raise ValueError("Please select the Billing Customer.")
+        followup_customer_id = int(entry.CustomerID)
+        if billing_id == followup_customer_id:
+            entry.BillingType = "SAME_CUSTOMER"
+            entry.BillingCustomerID = followup_customer_id
+        else:
+            entry.BillingType = "OTHER_CUSTOMER"
+            entry.BillingCustomerID = billing_id
+        existing = self.repo.find_by_followup_entry(entry_id)
+        if existing is not None and existing.InvoiceID != exclude_invoice_id:
+            raise ValueError("An invoice is already linked to this follow-up.")
+        bill_no = (getattr(entry, "BillNo", None) or "").strip()
+        if bill_no:
+            by_bill = self.repo.find_by_tally_bill_no(bill_no)
+            if by_bill is not None and by_bill.InvoiceID != exclude_invoice_id:
+                other_entry = getattr(by_bill, "FollowupEntryID", None)
+                if not other_entry or int(other_entry) == entry_id:
+                    raise ValueError("An invoice is already linked to this follow-up.")
+        header["FollowupEntryID"] = entry_id
+        header["BillSource"] = self.BILL_SOURCE_FOLLOWUP
+        self._apply_followup_contact(header)
+
+    def _bind_misc_link(self, header: dict, payload: dict, *, existing: GstInvoice | None = None) -> None:
+        """Store the Miscellaneous entry id. Does not match bill numbers or names."""
+        if header.get("FollowupEntryID") or (
+            existing is not None and getattr(existing, "FollowupEntryID", None)
+        ):
+            return
+        if existing is not None and getattr(existing, "MiscEntryID", None):
+            header["MiscEntryID"] = int(existing.MiscEntryID)
+            self._apply_misc_contact(header)
+            return
+        raw = payload.get("misc_entry_id")
+        if raw in (None, "") and "MiscEntryID" in payload:
+            raw = payload.get("MiscEntryID")
+        entry_id = self._positive_id(raw)
+        if not entry_id:
+            return
+        from app.models.others import OthersIncomeExpenseMaster
+
+        entry = db.session.get(OthersIncomeExpenseMaster, entry_id)
+        if entry is None or not getattr(entry, "IsActive", True):
+            raise ValueError(self._OWNER_MESSAGES["MISC"])
+        work = getattr(entry, "work_type", None)
+        ledger = (getattr(work, "LedgerKind", None) or "").strip()
+        if work is not None and ledger not in {"Misc.", "Misc"}:
+            raise ValueError(self._OWNER_MESSAGES["MISC"])
+        header["MiscEntryID"] = entry_id
+        if header.get("BillSource") == self.BILL_SOURCE_MANUAL:
+            header["BillSource"] = self.BILL_SOURCE_MISCELLANEOUS
+        self._apply_misc_contact(header)
+
+    def assign_billing_customer(self, entry_id: int, billing_customer_id: int) -> None:
+        """Point the linked sale invoice and its ledger at the billing customer id."""
+        try:
+            billing_id = int(billing_customer_id)
+        except (TypeError, ValueError):
+            raise ValueError("Please select the Billing Customer.") from None
+        cust = self._load_customer(billing_id)
+        if not cust.get("customer_id"):
+            raise ValueError("Please select the Billing Customer.")
+        inv = self.repo.find_by_followup_entry(int(entry_id))
+        if inv is None:
+            return
+        from app.models.followup import FollowupEntryMaster
+
+        entry = db.session.get(FollowupEntryMaster, int(entry_id))
+        contact_name = self._customer_name(getattr(entry, "CustomerID", None) if entry is not None else None)
+        if contact_name:
+            inv.ContactPerson = contact_name[:150]
+        if int(getattr(inv, "CustomerID", 0) or 0) == billing_id:
+            db.session.flush()
+            return
+        inv.CustomerID = billing_id
+        inv.CustomerName = (cust.get("customer_name") or "")[:200]
+        inv.BillingAddress = ((cust.get("billing_address") or "")[:500] or None)
+        inv.CustomerGSTIN = ((cust.get("customer_gstin") or "")[:20] or None)
+        inv.ContactMobile = ((cust.get("contact_mobile") or "")[:20] or None)
+        inv.ContactEmail = ((cust.get("contact_email") or "")[:150] or None)
+        inv.PlaceOfSupply = ((cust.get("place_of_supply") or "")[:100] or None)
+        inv.PlaceOfSupplyCode = ((cust.get("place_of_supply_code") or "")[:5] or None)
+        inv.UpdatedAt = datetime.utcnow()
+        if self.normalize_voucher_type(getattr(inv, "VoucherType", None)) == self.VOUCHER_SALE:
+            self._sync_sale_daily(inv)
+        db.session.flush()
+
+    def _ensure_followup_invoice_stage(self, entry_id: int) -> None:
+        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+        from app.services.followup_service import canonical_stage_code, stage_description
+
+        entry = db.session.get(FollowupEntryMaster, entry_id)
+        if entry is None or not getattr(entry, "IsActive", True):
+            return
+        if (entry.ModuleCode or "").strip().upper() not in {"ITR", "GST", "TDS", "DSC"}:
+            return
+        for stage in entry.stages or []:
+            if canonical_stage_code(stage.StageCode) == "invoice":
+                return
+        entry.stages.append(
+            FollowupEntryStage(
+                EntryID=entry.EntryID,
+                StageID=None,
+                StageCode=stage_description("invoice"),
+                CompletedDate=datetime.utcnow(),
+            )
+        )
+        db.session.flush()
+
+    def _clear_followup_invoice_stage(self, entry_id: int) -> None:
+        from app.models.followup import FollowupEntryMaster
+        from app.services.followup_service import canonical_stage_code
+
+        entry = db.session.get(FollowupEntryMaster, entry_id)
+        if entry is None:
+            return
+        for stage in list(entry.stages or []):
+            if canonical_stage_code(stage.StageCode) == "invoice":
+                entry.stages.remove(stage)
+        db.session.flush()
+
     def create_record(
         self,
         payload: dict,
@@ -2017,13 +3012,17 @@ class GstInvoiceService:
             payload.get("bill_source") or payload.get("BillSource")
         )
         if require_payment_bank is None:
-            # Sale invoices (incl. Misc / Manual) no longer require payment bank.
-            # Purchase still opts in via caller when needed.
+            # Internal callers (import, automatic copies) may omit a bank.
+            # The invoice screen API passes require_payment_bank=True.
             require_payment_bank = False
         header, lines, _ = self._build_header_and_lines(
             payload, persist_no=True, require_payment_bank=require_payment_bank
         )
         header["BillSource"] = bill_source
+        self._bind_followup_link(header, payload)
+        self._bind_misc_link(header, payload)
+        self._apply_followup_contact(header)
+        self._apply_misc_contact(header)
         tally_key = header.get("TallyBillNo")
         existing = self.repo.find_by_tally_bill_no(tally_key) if tally_key else None
         if existing is not None:
@@ -2043,9 +3042,13 @@ class GstInvoiceService:
                         else self.BILL_SOURCE_MANUAL
                     ),
                 }
-                # Keep outer caller transaction (e.g. OIE save) — never nested persist.
+                # Automatic shells have no source owner yet. A saved MISC invoice
+                # can be updated only from MISC.
                 return self.update_record(
-                    existing.InvoiceID, upgrade_payload, commit=commit
+                    existing.InvoiceID,
+                    upgrade_payload,
+                    commit=commit,
+                    enforce_owner=existing_source != self.BILL_SOURCE_AUTOMATIC,
                 )
             self._assert_tally_bill_unique(tally_key)
 
@@ -2053,23 +3056,48 @@ class GstInvoiceService:
             inv = self.repo.create(header, lines)
             self._sync_sale_daily(inv)
             self._sync_purchase_payment_bank(inv)
+            entry_id = getattr(inv, "FollowupEntryID", None)
+            if entry_id:
+                self._ensure_followup_invoice_stage(int(entry_id))
+            if self.normalize_voucher_type(getattr(inv, "VoucherType", None)) == self.VOUCHER_SALE:
+                from app.services.others_bank_cash_service import OthersBankCashService
+
+                OthersBankCashService().apply_unallocated_to_invoice(inv)
             return self._serialize(inv)
 
+        if (
+            self.normalize_voucher_type(header.get("VoucherType")) == self.VOUCHER_SALE
+            and header.get("CustomerID")
+        ):
+            from app.repositories.bank_cash_repository import OthersBankCashRepository
+
+            OthersBankCashRepository().ensure_schema()
         if commit:
             return persist(_write)
         return _write()
 
     def update_record(
-        self, invoice_id: int, payload: dict, *, commit: bool = True
+        self,
+        invoice_id: int,
+        payload: dict,
+        *,
+        commit: bool = True,
+        require_payment_bank: bool = False,
+        enforce_owner: bool = True,
     ) -> dict:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
+        if enforce_owner:
+            self.assert_source_mutation(inv, payload)
         existing_source = self.normalize_bill_source(
             getattr(inv, "BillSource", None) or self.BILL_SOURCE_MANUAL
         )
-        if existing_source == self.BILL_SOURCE_MISCELLANEOUS and not self._form_flag(
-            payload, "from_source"
+        accounting_edit = self._form_flag(payload, "accounting_edit")
+        if (
+            existing_source == self.BILL_SOURCE_MISCELLANEOUS
+            and not self._form_flag(payload, "from_source")
+            and not accounting_edit
         ):
             raise ValueError(self.converted_edit_message(inv))
         if "bill_source" not in payload and "BillSource" not in payload:
@@ -2079,10 +3107,20 @@ class GstInvoiceService:
         )
         payload = {**payload, "invoice_no": inv.InvoiceNo, "bill_source": bill_source}
         self._guard_tally_status_change(inv, payload)
-        # Sale invoices do not require payment bank (legacy Manual bank rule removed).
         header, lines, _ = self._build_header_and_lines(
-            payload, persist_no=False, require_payment_bank=False
+            payload, persist_no=False, require_payment_bank=require_payment_bank
         )
+        self._bind_followup_link(header, payload, exclude_invoice_id=invoice_id)
+        if getattr(inv, "FollowupEntryID", None):
+            header["FollowupEntryID"] = int(inv.FollowupEntryID)
+        self._apply_followup_contact(header)
+        self._bind_misc_link(header, payload, existing=inv)
+        if getattr(inv, "MiscEntryID", None):
+            header["MiscEntryID"] = int(inv.MiscEntryID)
+        self._apply_misc_contact(header)
+        linked_entry = header.get("FollowupEntryID", getattr(inv, "FollowupEntryID", None))
+        if linked_entry and header.get("BillSource") == self.BILL_SOURCE_MANUAL:
+            header["BillSource"] = self.BILL_SOURCE_FOLLOWUP
         self._assert_tally_bill_unique(header.get("TallyBillNo"), exclude_invoice_id=invoice_id)
         header["UpdatedAt"] = datetime.utcnow()
         header.pop("CreatedAt", None)
@@ -2177,7 +3215,7 @@ class GstInvoiceService:
         """Delete linked sale invoices. Returns 0 when this bill has none."""
         ids = self.repo.list_ids_for_bill_no(bill_no)
         for invoice_id in ids:
-            self.delete_record(invoice_id)
+            self.delete_record(invoice_id, enforce_owner=False)
         return len(ids)
 
     def delete_invoices_for_bill(self, bill_no: str) -> int:
@@ -2187,14 +3225,39 @@ class GstInvoiceService:
             raise ValueError("No invoice is linked to this bill.")
         return count
 
-    def delete_record(self, invoice_id: int) -> str:
+    def delete_record(
+        self,
+        invoice_id: int,
+        *,
+        payload: dict | None = None,
+        enforce_owner: bool = True,
+    ) -> str:
+        try:
+            invoice_id = int(invoice_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Unable to delete invoice: Invoice ID is missing or invalid."
+            ) from exc
+        if invoice_id <= 0:
+            raise ValueError("Unable to delete invoice: Invoice ID is missing or invalid.")
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
+        if enforce_owner:
+            self.assert_source_mutation(inv, payload)
+        from app.repositories.bank_cash_repository import OthersBankCashRepository
+
+        OthersBankCashRepository().ensure_schema()
 
         def _write() -> str:
+            entry_id = getattr(inv, "FollowupEntryID", None)
             self._remove_sale_daily(inv)
             self._remove_purchase_payment_bank(inv)
+            if entry_id:
+                self._clear_followup_invoice_stage(int(entry_id))
+            from app.services.others_bank_cash_service import OthersBankCashService
+
+            OthersBankCashService().release_invoice_allocations(inv.InvoiceID)
             self.repo.delete(inv)
             return "Invoice deleted successfully."
 

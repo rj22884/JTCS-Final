@@ -159,9 +159,38 @@ class WhatsAppWebhookService:
             )
 
         thread_key = last10 or linked.get("last10") or linked.get("mobile") or mobile
+        # An existing unlinked WhatsApp chat is not merged just because a customer
+        # was created later. Customer-first chats (customer already existed) still link.
+        defer_link = False
+        if existing and not existing.get("CustomerID") and not existing.get("LeadID"):
+            prior_status = (existing.get("MatchStatus") or "").strip()
+            if prior_status == "PromptDismissed":
+                defer_link = True
+            elif linked.get("customer_id") or ambiguous:
+                customer_first = False
+                if linked.get("customer_id") and not ambiguous:
+                    customer_first = self.link.customer_predates_conversation(
+                        int(linked["customer_id"]),
+                        existing.get("CreatedDate"),
+                    )
+                if not customer_first:
+                    defer_link = True
+                    if linked.get("customer_id"):
+                        match_status = "Suggested"
+                        unknown = True
+                        subject = existing.get("Subject") or "Unknown WhatsApp Contact"
+                        linked = dict(linked)
+                        linked["customer_id"] = None
+                        linked["unknown"] = True
         if existing:
             conversation_id = int(existing["ConversationID"])
-            if not existing.get("CustomerID") and not existing.get("LeadID"):
+            if defer_link:
+                if match_status in {"Suggested", "Ambiguous"} and (existing.get("MatchStatus") or "") != "PromptDismissed":
+                    self.comm.update_conversation(
+                        conversation_id,
+                        match_status=match_status,
+                    )
+            elif not existing.get("CustomerID") and not existing.get("LeadID"):
                 self.comm.update_conversation(
                     conversation_id,
                     customer_id=linked.get("customer_id"),

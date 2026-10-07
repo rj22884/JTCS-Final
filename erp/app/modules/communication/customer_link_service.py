@@ -36,11 +36,6 @@ def phones_match(a: str | None, b: str | None) -> bool:
     return da == db_
 
 
-_PHONE_DIGITS = (
-    "REPLACE(REPLACE(REPLACE(ISNULL({col}, N''), N' ', N''), N'-', N''), N'+', N'')"
-)
-
-
 class CustomerLinkService:
     """Resolve WhatsApp/Email contact → CustomerID or LeadID.
 
@@ -49,37 +44,110 @@ class CustomerLinkService:
     when more than one customer shares the mobile.
     """
 
-    def find_customers_by_mobile(self, mobile: str | None) -> list[dict]:
+    def _active_customers(self) -> list[dict]:
+        if getattr(self, "_customer_cache", None) is not None:
+            return self._customer_cache
         ensure_crm_schema()
-        last10 = last10_digits(mobile)
-        if not last10:
-            return []
-        wa = _PHONE_DIGITS.format(col="WhatsAppNumber")
-        mo = _PHONE_DIGITS.format(col="MobileNumber")
-        alt = _PHONE_DIGITS.format(col="AlternateMobile")
         rows = db.session.execute(
             text(
-                f"""
+                """
                 SELECT CustomerID, CustomerName, MobileNumber, WhatsAppNumber,
-                       AlternateMobile, EmailID, CustomerGroup, CustomerStatus, City
+                       AlternateMobile, EmailID, CustomerGroup, CustomerStatus, City,
+                       CreatedDate
                 FROM dbo.CustomerMaster
                 WHERE ISNULL(CustomerStatus, N'Active') <> N'Inactive'
-                  AND (
-                        {wa} LIKE N'%' + :last10
-                     OR {mo} LIKE N'%' + :last10
-                     OR {alt} LIKE N'%' + :last10
-                  )
                 ORDER BY CustomerID
                 """
-            ),
-            {"last10": last10},
+            )
         ).mappings().all()
-        out = []
-        for row in rows:
-            rec = dict(row)
-            rec["customer_id"] = int(rec["CustomerID"])
-            out.append(rec)
-        return out
+        self._customer_cache = [dict(row) for row in rows]
+        return self._customer_cache
+
+    @staticmethod
+    def _public_customer(row: dict) -> dict:
+        rec = {
+            "CustomerID": int(row["CustomerID"]),
+            "customer_id": int(row["CustomerID"]),
+            "CustomerName": row.get("CustomerName") or "",
+            "MobileNumber": row.get("MobileNumber") or "",
+            "WhatsAppNumber": row.get("WhatsAppNumber") or "",
+            "AlternateMobile": row.get("AlternateMobile") or "",
+            "EmailID": row.get("EmailID") or "",
+            "CustomerGroup": row.get("CustomerGroup") or "",
+            "CustomerStatus": row.get("CustomerStatus") or "",
+            "City": row.get("City") or "",
+        }
+        return rec
+
+    def _rows_matching_phone(self, mobile: str | None) -> list[dict]:
+        """Match on normalized mobile only. Customer name is never a key."""
+        last10 = last10_digits(mobile)
+        if len(last10) < 10:
+            return []
+        matched = []
+        for row in self._active_customers():
+            phones = (
+                row.get("WhatsAppNumber"),
+                row.get("MobileNumber"),
+                row.get("AlternateMobile"),
+            )
+            if any(last10_digits(phone) == last10 for phone in phones):
+                matched.append(row)
+        return matched
+
+    def _rows_matching_email(self, email: str | None) -> list[dict]:
+        addr = (email or "").strip().lower()
+        if not addr or "@" not in addr:
+            return []
+        return [
+            row
+            for row in self._active_customers()
+            if (row.get("EmailID") or "").strip().lower() == addr
+        ]
+
+    def find_customers_by_mobile(self, mobile: str | None) -> list[dict]:
+        return [self._public_customer(row) for row in self._rows_matching_phone(mobile)]
+
+    def match_customers(self, *, mobile: str | None = None, email: str | None = None) -> list[dict]:
+        """Phone first, then exact email. Never match on name alone."""
+        phone_rows = self._rows_matching_phone(mobile)
+        if phone_rows:
+            return [self._public_customer(row) for row in phone_rows]
+        return [self._public_customer(row) for row in self._rows_matching_email(email)]
+
+    def link_suggestions(
+        self, *, mobile: str | None = None, email: str | None = None
+    ) -> list[dict]:
+        suggestions = []
+        for row in self.match_customers(mobile=mobile, email=email):
+            shown_mobile = (
+                row.get("MobileNumber") or row.get("WhatsAppNumber") or row.get("AlternateMobile") or ""
+            )
+            suggestions.append(
+                {
+                    "customer_id": int(row["customer_id"]),
+                    "customer_name": (row.get("CustomerName") or "").strip(),
+                    "mobile": shown_mobile,
+                    "email": (row.get("EmailID") or "").strip(),
+                }
+            )
+        return suggestions
+
+    def customer_predates_conversation(self, customer_id: int, conversation_created) -> bool:
+        """True only when Customer Master existed before this WhatsApp conversation."""
+        if not customer_id or conversation_created is None:
+            return False
+        created = None
+        for row in self._active_customers():
+            if int(row["CustomerID"]) == int(customer_id):
+                created = row.get("CreatedDate")
+                break
+        if created is None:
+            return False
+        try:
+            return created <= conversation_created
+        except TypeError:
+            return False
 
     def find_customer_by_mobile(self, mobile: str | None) -> dict | None:
         """Return the customer only when exactly one active match exists."""

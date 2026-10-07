@@ -190,13 +190,11 @@ def search():
             date_from=date_from,
             date_to=date_to,
         )
-        as_of = date.today()
         return jsonify(
             {
                 "ok": True,
                 "rows": rows,
                 "opening_only": False,
-                "closing_as_of": as_of.isoformat(),
                 "preview_needs_dates": date_from is None or date_to is None,
             }
         )

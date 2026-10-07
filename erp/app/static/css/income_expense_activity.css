@@ -386,6 +386,39 @@
   font-weight: 600;
 }
 
+#oieInvoiceStatus.oie-pay-no {
+  color: #dc2626;
+  font-weight: 700;
+  animation: oieStatusBlink 1s ease-in-out infinite;
+}
+
+#oieInvoiceStatus.oie-pay-yes {
+  color: #15803d;
+  font-weight: 700;
+  animation: none;
+}
+
+.oie-bill-no-copy {
+  display: inline-flex;
+  align-items: center;
+}
+
+#oieCustomerBillSummary {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding-top: 1.35rem;
+}
+
+#oieCustomerBillSummary .is-overdue {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+@keyframes oieStatusBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
 .oie-payment-section-locked {
   opacity: 0.62;
 }
@@ -406,4 +439,116 @@
   font-weight: 650;
   margin-left: 0.25rem;
   vertical-align: middle;
+}
+
+.oie-invoice-summary {
+  flex: 1 0 100%;
+  margin: 0.35rem 0 0.15rem;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.oie-invoice-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.65rem;
+}
+
+.oie-invoice-info,
+.oie-pay-adjust {
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.3rem;
+}
+
+.oie-invoice-info { border-left: 3px solid #0b2545; }
+
+.oie-invoice-card-title {
+  font-weight: 650;
+  margin-bottom: 0.2rem;
+}
+
+.oie-invoice-info span {
+  color: #5a6b7d;
+  margin-right: 0.25rem;
+}
+
+.oie-pay-adjust {
+  border-left: 3px solid #15803d;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.oie-pay-adjust .oie-invoice-card-title,
+.oie-pay-adjust strong,
+.oie-pay-adjust .oie-pay-label,
+.oie-pay-adjust summary { color: #166534; }
+
+.oie-pay-entry {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid #bbf7d0;
+}
+
+.oie-customer-results {
+  position: absolute;
+  z-index: 1060;
+  width: 100%;
+  max-height: 220px;
+  overflow: auto;
+}
+
+#oieEntryModal .modal-dialog:has(.oie-entry-modal.is-invoice-edit) {
+  width: calc(100vw - 0.75rem);
+  max-width: calc(100vw - 0.75rem);
+  height: calc(100vh - 0.75rem);
+  max-height: calc(100vh - 0.75rem);
+  margin: 0.375rem auto;
+}
+
+#oieEntryModal .oie-entry-modal.is-invoice-edit {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.oie-entry-modal.is-invoice-edit .modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.oie-entry-modal.is-invoice-edit #oieEntryForm,
+.oie-entry-modal.is-invoice-edit .modal-header { display: none; }
+
+.oie-invoice-editor {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  background: #fff;
+}
+
+.oie-entry-modal.is-invoice-edit .oie-invoice-editor { display: flex; }
+
+.oie-invoice-editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.28rem 0.65rem;
+  border-bottom: 1px solid #d6e4f5;
+  background: #f8fafc;
+}
+
+#oieInvoiceEditorFrame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
 }

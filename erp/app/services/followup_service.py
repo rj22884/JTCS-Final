@@ -61,41 +61,90 @@ DSC_TYPES = ("Ind.", "Org.")
 DSC_CLASSES = ("Class-II", "Class-III")
 DSC_YEARS = ("1-Year", "2-Years", "3-Years")
 
+# ITR, GST and TDS share one manual flow. DSC keeps its own stages.
+TAX_FOLLOWUP_MODULES = frozenset({"ITR", "GST", "TDS"})
+TAX_WORKFLOW_STAGES = (
+    ("documents_received", "Documents Received", 1),
+    ("return_filed", "Return Filed", 2),
+    ("invoice", "Invoice", 3),
+)
+
 # Pasted from Followup Master. Followup screens use these names, not the master screen.
 FIXED_WORKFLOW_STAGES = {
-    "ITR": (
-        ("documents_received", "Documents Received", 1),
-        ("itr_filed", "ITR Filed", 2),
-        ("tally_bill_generated", "Tally Bill Generated", 3),
-        ("payment_received", "Payment Received", 4),
-        ("unverified", "Unverified", 5),
-    ),
+    "ITR": TAX_WORKFLOW_STAGES,
+    "GST": TAX_WORKFLOW_STAGES,
+    "TDS": TAX_WORKFLOW_STAGES,
     "DSC": (
         ("documents_received", "Documents Received", 1),
         ("application_received", "Application Received", 2),
         ("kyc", "KYC", 3),
         ("download_status", "Download Status", 4),
         ("tally_bill_generated", "Tally Bill Generated", 5),
-        ("payment_received", "Payment Received", 6),
-    ),
-    "TDS": (
-        ("documents_received", "Documents Received", 1),
-        ("kyc", "KYC", 2),
-        ("tally_bill_generated", "Tally Bill Generated", 3),
-        ("payment_received", "Payment Received", 4),
-    ),
-    "GST": (
-        ("documents_received", "Documents Received", 1),
-        ("return_filed", "Return Filed", 2),
-        ("tally_bill_generated", "Tally Bill Generated", 3),
-        ("payment_received", "Payment Received", 4),
+        ("invoice", "Invoice", 6),
     ),
 }
+
+# Saved on the entry itself. These modules do not use a stage-code master.
+MANUAL_STAGE_MODULES = ("ITR", "GST", "TDS", "DSC")
+
+
+def stage_description(code: str | None) -> str:
+    """Manual stage name stored on the entry. The stage master is not used."""
+    key = (code or "").strip().lower().replace(" ", "_")
+    aliases = {
+        "gstr1_filed": "return_filed",
+        "gstr3b_filed": "return_filed",
+        "itr_filed": "return_filed",
+        "application_no": "application_received",
+    }
+    key = aliases.get(key, key)
+    for stages in FIXED_WORKFLOW_STAGES.values():
+        for stage_code, name, _order in stages:
+            if stage_code == key:
+                return name
+    text = (code or "").strip()
+    return text
+
+
+def canonical_stage_code(value: str | None) -> str:
+    """Accept a stored description or an older stage code and return the code."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    compact = lowered.replace(" ", "_")
+    aliases = {
+        "gstr1_filed": "return_filed",
+        "gstr3b_filed": "return_filed",
+        "gstr-1_filed": "return_filed",
+        "itr_filed": "return_filed",
+        "application_no": "application_received",
+    }
+    compact = aliases.get(compact, compact)
+    for stages in FIXED_WORKFLOW_STAGES.values():
+        for stage_code, name, _order in stages:
+            if compact == stage_code or lowered == name.lower():
+                return stage_code
+    return compact
 
 TDS_FORM_TYPES = ("Original", "Revised")
 TDS_QUARTERS = ("Q1", "Q2", "Q3", "Q4")
 GST_RETURN_TYPES = ("GSTR1", "GSTR3B", "GSTR7", "GSTR-Others")
 GST_FILING_FREQUENCIES = ("Monthly", "Quarterly", "Yearly")
+GST_MONTHS = (
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+    "January",
+    "February",
+    "March",
+)
 
 
 def current_fy_start_year(today: date | None = None) -> int:
@@ -117,6 +166,11 @@ def tax_period_options(*, years_back: int = 3, years_forward: int = 1, today: da
 
 def default_tax_period(today: date | None = None) -> str:
     return tax_period_for_year(current_fy_start_year(today))
+
+
+def default_gst_month(today: date | None = None) -> str:
+    today = today or date.today()
+    return GST_MONTHS[(today.month - 4) % 12]
 
 
 def _iso_date(value) -> str | None:
@@ -229,6 +283,26 @@ def _lookup_tally_bill_income_expense(key: str) -> dict | None:
     }
 
 
+def _canonical_stage_ids(completed: list | None, row) -> list[str]:
+    """Checkbox codes. Stored names such as Documents Received map back to the tick."""
+    codes: list[str] = []
+    seen: set[str] = set()
+    for item in completed or []:
+        raw = item.get("StageCode") or item.get("StageID") or item.get("StageName")
+        code = canonical_stage_code(raw)
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    if codes:
+        return codes
+    for stage in getattr(row, "stages", None) or []:
+        code = canonical_stage_code(getattr(stage, "StageCode", None))
+        if code and code not in seen:
+            seen.add(code)
+            codes.append(code)
+    return codes
+
+
 def lookup_tally_bill(bill_no: str) -> dict | None:
     """Resolve Tally Bill from Followup or Income / Expense (Misc.)."""
     key = (bill_no or "").strip()
@@ -301,12 +375,21 @@ class FollowupService:
         quarter = None
         if "Quarter" in available_cols:
             quarter = getattr(row, "Quarter", None)
+        gst_month = getattr(row, "GstMonth", None) if "GstMonth" in available_cols else None
+        billing_type = getattr(row, "BillingType", None) if "BillingType" in available_cols else None
+        billing_customer_id = (
+            getattr(row, "BillingCustomerID", None) if "BillingCustomerID" in available_cols else None
+        )
         return {
             "entry_id": row.EntryID,
             "module_code": row.ModuleCode,
             "work_date": row.WorkDate.isoformat() if row.WorkDate else None,
             "tax_period": row.TaxPeriod,
+            "gst_month": gst_month,
             "customer_id": row.CustomerID,
+            "billing_type": (billing_type or ""),
+            "billing_customer_id": int(billing_customer_id) if billing_customer_id else None,
+            "billing_customer_name": "",
             "return_type": row.ReturnType,
             "form_type": form_type,
             "quarter": quarter,
@@ -325,7 +408,7 @@ class FollowupService:
             "pan_number": row.PANNumber,
             "remarks": row.Remarks,
             "reason_for_unverified": row.ReasonForUnverified,
-            "stage_ids": [s.StageCode for s in (row.stages or []) if s.StageCode],
+            "stage_ids": _canonical_stage_ids(completed, row),
             "completed_stages": completed,
             "workflow_status": FollowupRepository._workflow_status(
                 completed,
@@ -357,6 +440,7 @@ class FollowupService:
         date_from: str | None = None,
         date_to: str | None = None,
     ) -> list[dict]:
+        self.followup_repo.ensure_gst_month_column()
         if self.module_code == "ITR":
             self.followup_repo.ensure_filing_status_columns()
         if self.module_code == "TDS":
@@ -366,9 +450,8 @@ class FollowupService:
 
             CustomerRepository().ensure_schema()
             self.followup_repo.ensure_dsc_extra_columns()
-        # Progressive exclusive-bucket status filter (ITR + DSC).
-        # Other modules keep repository tick-based status filtering.
-        repo_status = None if self.module_code in {"ITR", "DSC"} else status_filter
+        # Progressive exclusive-bucket status filter for every follow-up module.
+        repo_status = None if self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC" else status_filter
         rows = self.followup_repo.list_entries(
             self.module_code,
             search=search,
@@ -386,10 +469,19 @@ class FollowupService:
             if row.get("CreatedDate"):
                 row["created_date"] = row["CreatedDate"].isoformat() if hasattr(row["CreatedDate"], "isoformat") else str(row["CreatedDate"])
             row["entry_id"] = row.get("EntryID")
+            row["customer_id"] = row.get("CustomerID")
+            row["billing_type"] = (row.get("BillingType") or "")
+            raw_billing = row.get("BillingCustomerID")
+            try:
+                row["billing_customer_id"] = int(raw_billing) if raw_billing else None
+            except (TypeError, ValueError):
+                row["billing_customer_id"] = None
+            row["billing_customer_name"] = ""
             row["customer_name"] = row.get("CustomerName") or ""
             row["mobile_number"] = row.get("MobileNumber") or ""
             row["email_id"] = row.get("EmailID") or row.get("email_id") or ""
             row["pan_number"] = row.get("PANNumber") or row.get("pan_number") or ""
+            row["aadhaar_number"] = row.get("AadhaarNumber") or row.get("aadhaar_number") or ""
             row["employee_code"] = row.get("EmployeeCode") or ""
             dob = row.get("DateOfBirth")
             if dob is not None and hasattr(dob, "isoformat"):
@@ -426,6 +518,7 @@ class FollowupService:
             row["remarks"] = row.get("Remarks")
             row["reason_for_unverified"] = row.get("ReasonForUnverified")
             row["tax_period"] = row.get("TaxPeriod")
+            row["gst_month"] = row.get("GstMonth") or ""
             row["form_type"] = row.get("FormType")
             row["quarter"] = row.get("Quarter")
             row["filing_frequency"] = row.get("FilingFrequency") or row.get("filing_frequency") or ""
@@ -444,11 +537,8 @@ class FollowupService:
         if self.module_code == "ITR":
             self._heal_itr_payment_status_rows(rows)
             self._attach_itr_payment_receive_dates(rows)
-            if status_filter:
-                rows = self._filter_entries_by_status(rows, status_filter, module_code="ITR")
-        elif self.module_code == "DSC":
-            if status_filter:
-                rows = self._filter_entries_by_status(rows, status_filter, module_code="DSC")
+        if status_filter and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
+            rows = self._filter_entries_by_status(rows, status_filter, module_code=self.module_code)
         from app.services.gst_invoice_service import GstInvoiceService
 
         status_map = GstInvoiceService().sale_status_by_bill_nos(
@@ -457,7 +547,120 @@ class FollowupService:
         for row in rows:
             key = (row.get("bill_no") or row.get("BillNo") or "").strip().upper()
             row["sale_invoice"] = status_map.get(key)
+        self._attach_linked_invoices(rows)
         return rows
+
+    @staticmethod
+    def _invoice_link_dict(inv) -> dict:
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        return GstInvoiceService().invoice_action_snapshot(inv)
+
+    def _fill_billing_customer_name(self, row: dict) -> None:
+        if row.get("billing_type") != "OTHER_CUSTOMER":
+            return
+        if (row.get("billing_customer_name") or "").strip():
+            return
+        try:
+            billing_id = int(row.get("billing_customer_id") or 0)
+        except (TypeError, ValueError):
+            return
+        if billing_id <= 0:
+            return
+        billing_customer = self.customer_repo.get_by_id(billing_id)
+        row["billing_customer_name"] = (
+            billing_customer.CustomerName if billing_customer is not None else ""
+        )
+
+    def _resolve_billing_customer(
+        self,
+        payload: dict,
+        *,
+        followup_customer_id: int,
+        invoice_checked: bool,
+    ) -> tuple[str, int]:
+        """Billing customer is the invoice customer. Follow-up customer stays unchanged."""
+        if not invoice_checked:
+            return "", int(followup_customer_id)
+        raw_type = (payload.get("billing_type") or payload.get("BillingType") or "")
+        billing_type = str(raw_type).strip().upper()
+        if billing_type not in {"SAME_CUSTOMER", "OTHER_CUSTOMER"}:
+            raise ValueError("Please select Same Customer or Other Customer.")
+        if billing_type == "SAME_CUSTOMER":
+            return "SAME_CUSTOMER", int(followup_customer_id)
+        raw_id = payload.get("billing_customer_id")
+        if raw_id in (None, ""):
+            raw_id = payload.get("BillingCustomerID")
+        try:
+            billing_id = int(raw_id)
+        except (TypeError, ValueError):
+            billing_id = 0
+        if billing_id <= 0 or self.customer_repo.get_by_id(billing_id) is None:
+            raise ValueError("Please select the Billing Customer.")
+        return "OTHER_CUSTOMER", billing_id
+
+    def _strip_unlinked_invoice_stage(self, row: dict) -> None:
+        """Invoice is complete only when a real invoice is linked to this entry."""
+        completed = [
+            stage
+            for stage in (row.get("completed_stages") or [])
+            if canonical_stage_code(stage.get("StageCode") or stage.get("stage_code") or "") != "invoice"
+        ]
+        row["completed_stages"] = completed
+        row["stage_ids"] = [
+            code
+            for code in (row.get("stage_ids") or [])
+            if canonical_stage_code(str(code)) != "invoice"
+        ]
+        row["workflow_status"] = FollowupRepository._workflow_status(completed, [])
+
+    def _attach_linked_invoices(self, rows: list[dict]) -> None:
+        """Invoice No / Date / Amount come from the saved invoice, not the follow-up form."""
+        for row in rows:
+            row["linked_invoice"] = None
+        if self.module_code not in TAX_FOLLOWUP_MODULES and self.module_code != "DSC":
+            return
+        if not rows:
+            return
+        from app.repositories.gst_invoice_repository import GstInvoiceRepository
+
+        repo = GstInvoiceRepository()
+        ids = []
+        for row in rows:
+            try:
+                ids.append(int(row.get("entry_id") or 0))
+            except (TypeError, ValueError):
+                continue
+        by_entry = repo.find_by_followup_entries(ids)
+        for row in rows:
+            try:
+                entry_id = int(row.get("entry_id") or 0)
+            except (TypeError, ValueError):
+                entry_id = 0
+            inv = by_entry.get(entry_id) if entry_id else None
+            if inv is None:
+                bill = (row.get("bill_no") or row.get("BillNo") or "").strip()
+                matches = repo.list_ids_for_bill_no(bill) if bill else []
+                if len(matches) == 1:
+                    inv = repo.get_by_id(matches[0])
+                    other_entry = getattr(inv, "FollowupEntryID", None) if inv is not None else None
+                    if inv is not None and other_entry not in (None, entry_id):
+                        inv = None
+            if inv is None:
+                self._strip_unlinked_invoice_stage(row)
+                self._fill_billing_customer_name(row)
+                continue
+            row["linked_invoice"] = self._invoice_link_dict(inv)
+            followup_customer = int(row.get("customer_id") or 0)
+            invoice_customer = int(getattr(inv, "CustomerID", None) or 0)
+            if invoice_customer and followup_customer and invoice_customer != followup_customer:
+                row["billing_type"] = "OTHER_CUSTOMER"
+                row["billing_customer_id"] = invoice_customer
+                row["billing_customer_name"] = inv.CustomerName or ""
+            elif followup_customer:
+                row["billing_type"] = "SAME_CUSTOMER"
+                row["billing_customer_id"] = followup_customer
+            self._fill_billing_customer_name(row)
 
     def _attach_itr_payment_receive_dates(self, rows: list[dict]) -> None:
         """ITR grid: payment receive date(s) only when Payment Received is ticked."""
@@ -491,24 +694,27 @@ class FollowupService:
 
     @classmethod
     def _itr_progress_bucket(cls, row: dict) -> str:
-        """ITR Excel card bucket: furthest progress tick, exclusive of later stages.
+        """Tax follow-up card bucket: furthest progress tick, exclusive of later stages.
 
-        PENDING → only pending (no later ticks)
-        DOCUMENTS RECEIVED → docs ticked, later not
-        ITR FILED → itr filed ticked, later not
-        TALLY BILL GENERATED / PAYMENT PENDING → bill ticked, payment not
-        PAYMENT RECEIVED → all ticks / payment received
+        Documents Received → Return Filed → Invoice.
+        Older Payment Received ticks stay on the Invoice bucket. They are not a stage.
         """
         codes = cls._completed_stage_codes(row)
         status = (row.get("workflow_status") or "").strip()
-        if status == "Unverified" or "unverified" in codes:
-            return "unverified"
-        if row.get("payment_received") or "payment_received" in codes:
-            return "payment_received"
-        if "tally_bill_generated" in codes or status == "Tally Bill Generated":
-            return "tally_bill_generated"
-        if "itr_filed" in codes or status == "ITR Filed":
-            return "itr_filed"
+        if (
+            "invoice" in codes
+            or "tally_bill_generated" in codes
+            or "payment_received" in codes
+            or row.get("payment_received")
+            or status in {"Invoice", "Tally Bill Generated", "Payment Received"}
+        ):
+            return "invoice"
+        if (
+            "return_filed" in codes
+            or "itr_filed" in codes
+            or status in {"Return Filed", "ITR Filed"}
+        ):
+            return "return_filed"
         if "documents_received" in codes or status == "Documents Received":
             return "documents_received"
         return "pending"
@@ -521,17 +727,21 @@ class FollowupService:
         DOCUMENTS RECEIVED → docs ticked, later not
         APPLICATION → application ticked, later not
         KYC / DOWNLOAD STATUS → same exclusive rule
-        TALLY BILL GENERATED / PAYMENT PENDING → bill ticked, payment not
-        PAYMENT RECEIVED → payment received
+        TALLY BILL GENERATED → bill ticked. Older Payment Received ticks stay on that bucket.
         """
         codes = cls._completed_stage_codes(row)
         status = (row.get("workflow_status") or "").strip()
         status_l = status.lower()
         if status == "Unverified" or "unverified" in codes:
             return "unverified"
-        if row.get("payment_received") or "payment_received" in codes:
-            return "payment_received"
-        if "tally_bill_generated" in codes or status == "Tally Bill Generated":
+        if "invoice" in codes or status == "Invoice":
+            return "invoice"
+        if (
+            "tally_bill_generated" in codes
+            or "payment_received" in codes
+            or row.get("payment_received")
+            or status in {"Tally Bill Generated", "Payment Received"}
+        ):
             return "tally_bill_generated"
         if "download_status" in codes or status == "Download Status":
             return "download_status"
@@ -567,20 +777,24 @@ class FollowupService:
             sf = sf.split(":", 1)[1].strip()
             if not sf:
                 return rows
-        # Excel: PAYMENT PENDING = BILL GENERATED without payment received
+        # Payment pending = Invoice stage without Payment Received.
+        # DSC still uses Tally Bill Generated for that bucket.
         if sf == "payment_pending":
+            pending_code = "tally_bill_generated" if module_code == "DSC" else "invoice"
             return [
                 r
                 for r in rows
-                if cls._progress_bucket(r, module_code) == "tally_bill_generated"
+                if cls._progress_bucket(r, module_code) == pending_code
             ]
+        if module_code != "DSC" and sf == "itr_filed":
+            sf = "return_filed"
+        if module_code != "DSC" and sf == "tally_bill_generated":
+            sf = "invoice"
         itr_codes = {
             "pending",
             "documents_received",
-            "itr_filed",
-            "tally_bill_generated",
-            "payment_received",
-            "unverified",
+            "return_filed",
+            "invoice",
         }
         dsc_codes = {
             "pending",
@@ -590,7 +804,7 @@ class FollowupService:
             "kyc",
             "download_status",
             "tally_bill_generated",
-            "payment_received",
+            "invoice",
             "unverified",
         }
         valid = dsc_codes if module_code == "DSC" else itr_codes
@@ -606,7 +820,8 @@ class FollowupService:
         ]
 
     def _heal_itr_payment_status_rows(self, rows: list[dict]) -> None:
-        """ITR-only: if payment was posted but payment_received stage was dropped, fix status."""
+        """Historical receipts stay in accounting. They no longer create a follow-up stage."""
+        return
         if not rows:
             return
         candidates: list[tuple[dict, str]] = []
@@ -681,6 +896,32 @@ class FollowupService:
                 continue
         return total
 
+    @staticmethod
+    def _unique_gst_cases(rows: list[dict]) -> list[dict]:
+        """One GST case is one customer + month + tax year.
+
+        A blank month is a legacy row and stays its own case.
+        Different months for the same customer are never merged.
+        """
+        unique: list[dict] = []
+        seen: set[tuple] = set()
+        for row in rows:
+            try:
+                customer_id = int(row.get("customer_id") or row.get("CustomerID") or 0)
+            except (TypeError, ValueError):
+                customer_id = 0
+            month = (row.get("gst_month") or row.get("GstMonth") or "").strip().lower()
+            period = (row.get("tax_period") or row.get("TaxPeriod") or "").strip().lower()
+            if month:
+                key = (customer_id, month, period)
+            else:
+                key = ("entry", row.get("entry_id") or row.get("EntryID"), period)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(row)
+        return unique
+
     def stats(
         self,
         *,
@@ -692,8 +933,8 @@ class FollowupService:
     ) -> dict:
         """Card totals.
 
-        ITR + DSC: Excel progressive buckets (current furthest stage only).
-        Other modules: count of cases with each stage tick.
+        Every module: exclusive bucket of the furthest ticked stage.
+        GST counts each customer + month + tax year as its own case.
         """
         rows = self.list_entries(
             search=search,
@@ -702,17 +943,19 @@ class FollowupService:
             date_from=date_from,
             date_to=date_to,
         )
+        if self.module_code == "GST":
+            rows = self._unique_gst_cases(rows)
         total = len(rows)
 
-        if self.module_code in {"ITR", "DSC"}:
+        if self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC":
             buckets: dict[str, int] = {}
             for row in rows:
                 key = self._progress_bucket(row, self.module_code)
                 buckets[key] = buckets.get(key, 0) + 1
             pending = buckets.get("pending", 0)
             payment_received = buckets.get("payment_received", 0)
-            # Excel: PAYMENT PENDING = BILL GENERATED without payment received
-            payment_pending = buckets.get("tally_bill_generated", 0)
+            pending_code = "tally_bill_generated" if self.module_code == "DSC" else "invoice"
+            payment_pending = buckets.get(pending_code, 0)
             by_status: dict[str, int] = {}
             for stage in self.list_stages():
                 code = (stage.get("stage_code") or "").strip().lower()
@@ -735,10 +978,11 @@ class FollowupService:
 
         pending = sum(1 for r in rows if (r.get("workflow_status") or "Pending") == "Pending")
         payment_received = sum(1 for r in rows if r.get("payment_received"))
+        pending_code = "tally_bill_generated" if self.module_code == "DSC" else "invoice"
         payment_pending = sum(
             1
             for r in rows
-            if self._progress_bucket(r, self.module_code) == "tally_bill_generated"
+            if self._progress_bucket(r, self.module_code) == pending_code
         )
         by_status = {}
         for stage in self.list_stages():
@@ -762,7 +1006,132 @@ class FollowupService:
             "by_status": by_status,
         }
 
+    def customer_bill_summary(self, customer_id: int) -> dict:
+        """Saved bills and actual receipts for one customer.
+
+        Overdue is cumulative bill amount minus cumulative payment received.
+        A saved invoice amount is used as-is and is never rewritten here.
+        """
+        from sqlalchemy import select
+
+        from app.extensions import db
+        from app.models.followup import FollowupEntryMaster
+        from app.models.gst_billing import GstInvoice
+        from app.services.gst_invoice_service import GstInvoiceService
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        empty = {
+            "invoice_total": 0.0,
+            "payment_received_total": 0.0,
+            "overdue_amount": 0.0,
+            "bill_count": 0,
+        }
+        try:
+            cid = int(customer_id)
+        except (TypeError, ValueError):
+            return empty
+        if cid <= 0:
+            return empty
+
+        self.followup_repo.ensure_gst_month_column()
+
+        def money(value) -> Decimal:
+            return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+
+        def bill_key(value) -> str:
+            return (value or "").strip().upper()
+
+        bills: dict[str, Decimal] = {}
+        invoice_alias_keys: set[str] = set()
+        invoices = list(
+            db.session.scalars(
+                select(GstInvoice).where(
+                    GstInvoice.CustomerID == cid,
+                    GstInvoice.VoucherType == GstInvoiceService.VOUCHER_SALE,
+                )
+            ).all()
+        )
+        invoice_keys: list[tuple] = []
+        for inv in invoices:
+            aliases = {bill_key(inv.InvoiceNo), bill_key(getattr(inv, "TallyBillNo", None))}
+            aliases.discard("")
+            invoice_alias_keys.update(aliases)
+            primary = (
+                bill_key(getattr(inv, "TallyBillNo", None))
+                or bill_key(inv.InvoiceNo)
+                or f"INV:{inv.InvoiceID}"
+            )
+            if primary not in bills:
+                bills[primary] = money(inv.InvoiceValue)
+            aliases.add(primary)
+            invoice_keys.append((inv, aliases))
+
+        followups = list(
+            db.session.scalars(
+                select(FollowupEntryMaster).where(
+                    FollowupEntryMaster.CustomerID == cid,
+                    FollowupEntryMaster.IsActive == True,  # noqa: E712
+                    FollowupEntryMaster.BillAmount.isnot(None),
+                )
+            ).all()
+        )
+        for row in followups:
+            key = bill_key(row.BillNo) or f"ENTRY:{row.EntryID}"
+            if key in bills or key in invoice_alias_keys:
+                continue
+            bills[key] = money(row.BillAmount)
+
+        pay = PaymentAccountingService()
+        received = Decimal("0.00")
+        seen_receipts: set[int] = set()
+
+        def add_receipts(ref: str) -> bool:
+            nonlocal received
+            if not ref or ref.startswith("ENTRY:") or ref.startswith("INV:"):
+                return False
+            found = False
+            for daily in pay.find_receipt_dailies(ref):
+                other_customer = getattr(daily, "CustomerID", None)
+                if other_customer is not None and int(other_customer) != cid:
+                    continue
+                found = True
+                receipt_id = int(daily.TransactionID)
+                if receipt_id in seen_receipts:
+                    continue
+                seen_receipts.add(receipt_id)
+                received += pay._received_on_daily(daily)
+            return found
+
+        for key in list(bills):
+            add_receipts(key)
+        for inv, aliases in invoice_keys:
+            had_receipt = False
+            for alias in aliases:
+                if add_receipts(alias):
+                    had_receipt = True
+            if had_receipt:
+                continue
+            paid = money(getattr(inv, "AmountPaid", None))
+            if paid > 0:
+                received += paid
+
+        invoice_ids = [int(inv.InvoiceID) for inv, _aliases in invoice_keys]
+        if invoice_ids:
+            for allocated in GstInvoiceService().money_in_totals(invoice_ids).values():
+                received += money(allocated)
+
+        bill_total = money(sum(bills.values(), Decimal("0.00")))
+        received = money(received)
+        overdue = money(bill_total - received)
+        return {
+            "invoice_total": float(bill_total),
+            "payment_received_total": float(received),
+            "overdue_amount": float(overdue),
+            "bill_count": len(bills),
+        }
+
     def get_entry(self, entry_id: int) -> dict:
+        self.followup_repo.ensure_gst_month_column()
         if self.module_code == "TDS":
             self.followup_repo.ensure_tds_period_columns()
         if self.module_code == "DSC":
@@ -777,7 +1146,7 @@ class FollowupService:
         }
         completed = []
         for es in row.stages or []:
-            code = (es.StageCode or "").strip()
+            code = canonical_stage_code(es.StageCode)
             if not code:
                 continue
             name, order = stage_meta.get(code, (code.replace("_", " ").title(), 0))
@@ -835,30 +1204,7 @@ class FollowupService:
                 else:
                     received = 0.0
                 data["received_amount"] = received
-                if self.module_code == "ITR":
-                    bill_val = float(data.get("bill_amount") or 0)
-                    if bill_val <= 0 and sale_daily is not None and sale_daily.SaleAmount:
-                        data["bill_amount"] = float(sale_daily.SaleAmount)
-                    elif bill_val <= 0 and received > 0:
-                        data["bill_amount"] = received
-                    elif bill_val <= 0 and daily.SaleAmount:
-                        data["bill_amount"] = float(daily.SaleAmount)
-                    completed_codes = {
-                        (s.get("StageCode") or "").lower() for s in (data.get("completed_stages") or [])
-                    }
-                    if received > 0 and "payment_received" not in completed_codes:
-                        completed = list(data.get("completed_stages") or [])
-                        completed.append(
-                            {
-                                "StageID": "payment_received",
-                                "StageCode": "payment_received",
-                                "StageName": "Payment Received",
-                                "DisplayOrder": 4,
-                            }
-                        )
-                        data["completed_stages"] = completed
-                        data["stage_ids"] = [s.get("StageCode") or s.get("StageID") for s in completed]
-                        data["workflow_status"] = "Payment Received"
+        self._attach_linked_invoices([data])
         return data
 
     @classmethod
@@ -1058,7 +1404,14 @@ class FollowupService:
         codes: list[str] = []
         seen: set[str] = set()
         for item in raw or []:
-            code = str(item).strip().lower()
+            code = canonical_stage_code(str(item) if item is not None else "")
+            if self.module_code in TAX_FOLLOWUP_MODULES:
+                if code == "tally_bill_generated":
+                    code = "invoice"
+                elif self.module_code == "TDS" and code == "kyc":
+                    code = "return_filed"
+                elif code == "unverified":
+                    continue
             if code in allowed and code not in seen:
                 seen.add(code)
                 codes.append(code)
@@ -1144,7 +1497,7 @@ class FollowupService:
                 return str(value).strip()
         if row.BillNo:
             stage_codes = {
-                (es.StageCode or "").strip().lower()
+                canonical_stage_code(es.StageCode)
                 for es in (row.stages or [])
                 if es.StageCode
             }
@@ -1189,7 +1542,43 @@ class FollowupService:
                 f"and period {tax_period}."
             )
 
+    @staticmethod
+    def _normalize_gst_month(raw) -> str:
+        text = str(raw or "").strip()
+        if not text:
+            raise ValueError("Month is required.")
+        for name in GST_MONTHS:
+            if name.lower() == text.lower():
+                return name
+        raise ValueError("Select a valid month.")
+
+    def _assert_gst_entry_not_duplicate(
+        self,
+        *,
+        tax_period: str,
+        gst_month: str,
+        customer: dict,
+        customer_id: int,
+        entry_id: int | None = None,
+    ) -> None:
+        if self.module_code != "GST":
+            return
+        existing = self.followup_repo.find_active_gst_month_duplicate(
+            customer_id=customer_id,
+            tax_period=tax_period,
+            gst_month=gst_month,
+            exclude_entry_id=entry_id,
+        )
+        if existing:
+            name = (customer.get("CustomerName") or "").strip() or f"customer #{customer_id}"
+            raise ValueError(
+                f"Duplicate entry: {name} already has a GST follow-up for {gst_month} {tax_period}."
+            )
+
     def save_entry(self, payload: dict, *, created_by: str | None = None) -> dict:
+        self.followup_repo.ensure_billing_customer_columns()
+        self.followup_repo.ensure_gst_month_column()
+        self.followup_repo.ensure_stage_code_unique()
         self.followup_repo.ensure_dsc_extra_columns()
         work_date = self._parse_work_date(payload)
         tax_period = (payload.get("tax_period") or payload.get("TaxPeriod") or default_tax_period()).strip()
@@ -1241,18 +1630,11 @@ class FollowupService:
         stage_ids = self._parse_stage_ids(payload)
         stage_codes = self._stage_codes_from_ids(stage_ids)
 
-        # ITR: if payment lines are submitted, always keep payment_received in stages
-        # even when earlier steps (e.g. Documents Received) were skipped.
-        if self.module_code == "ITR":
-            payment_lines_raw = payload.get("payment_lines")
-            has_payment_lines = isinstance(payment_lines_raw, list) and len(payment_lines_raw) > 0
-            if has_payment_lines and "payment_received" not in stage_codes:
-                stage_ids = list(stage_ids) + ["payment_received"]
-                stage_codes = self._stage_codes_from_ids(stage_ids)
-
         entry_id_raw = payload.get("entry_id") or payload.get("EntryID")
         entry_id = None
         existing_bill_no = None
+        existing_bill_amount = None
+        existing_bill_date = None
         existing_row = None
         if entry_id_raw not in (None, "", "0"):
             try:
@@ -1263,6 +1645,20 @@ class FollowupService:
             existing_row = self.followup_repo.get_entry(entry_id)
             if existing_row:
                 existing_bill_no = existing_row.BillNo
+                if getattr(existing_row, "BillAmount", None) is not None:
+                    existing_bill_amount = float(existing_row.BillAmount)
+                existing_bill_date = getattr(existing_row, "BillDate", None)
+
+        gst_month = None
+        if self.module_code == "GST":
+            gst_month = self._normalize_gst_month(payload.get("gst_month") or payload.get("GstMonth"))
+            self._assert_gst_entry_not_duplicate(
+                tax_period=tax_period,
+                gst_month=gst_month,
+                customer=customer,
+                customer_id=customer_id,
+                entry_id=entry_id,
+            )
 
         if self.module_code == "DSC":
             self.followup_repo.ensure_dsc_extra_columns()
@@ -1302,46 +1698,79 @@ class FollowupService:
             dsc_year = None
             email_id = None
 
+        self.followup_repo.ensure_billing_customer_columns()
+        invoice_stage = "invoice" in stage_codes
+        if invoice_stage and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
+            linked_invoice = None
+            if entry_id:
+                from app.repositories.gst_invoice_repository import GstInvoiceRepository
+
+                linked_invoice = GstInvoiceRepository().find_by_followup_entry(entry_id)
+            if linked_invoice is None:
+                raise ValueError(
+                    "Invoice cannot be selected manually. "
+                    "Please click 'Create Invoice' to generate the invoice first."
+                )
+        billing_type, billing_customer_id = self._resolve_billing_customer(
+            payload,
+            followup_customer_id=customer_id,
+            invoice_checked="invoice" in stage_codes,
+        )
+        tax_followup = self.module_code in TAX_FOLLOWUP_MODULES
+        if (
+            tax_followup
+            and entry_id
+            and existing_row is not None
+            and "invoice" in stage_codes
+            and "return_filed" not in stage_codes
+        ):
+            previous_codes = {
+                canonical_stage_code(getattr(stage, "StageCode", None))
+                for stage in (existing_row.stages or [])
+            }
+            if "return_filed" in previous_codes or "itr_filed" in previous_codes:
+                raise ValueError(
+                    "Please uncheck Invoice first before unchecking Return Filed."
+                )
         needs_billing = (
-            "tally_bill_generated" in stage_codes or "payment_received" in stage_codes
-        ) or (
-            self.module_code == "ITR" and "itr_filed" in stage_codes
+            (not tax_followup and "tally_bill_generated" in stage_codes)
+            or "payment_received" in stage_codes
+            or "return_filed" in stage_codes
+            or "itr_filed" in stage_codes
         )
         if needs_billing:
             self.followup_repo.ensure_billing_columns()
 
         bill_no = (payload.get("bill_no") or payload.get("BillNo") or existing_bill_no or "").strip() or None
-        if "tally_bill_generated" in stage_codes and not bill_no:
+        if tax_followup:
+            # Invoice is created manually in the Invoice module. Do not mint a Tally bill here.
+            bill_no = existing_bill_no
+            if "payment_received" in stage_codes and not bill_no:
+                bill_no = FollowupBillingService.next_bill_no(self.module_code, work_date)
+        elif "tally_bill_generated" in stage_codes and not bill_no:
             bill_no = FollowupBillingService.next_bill_no(self.module_code, work_date)
-        if bill_no:
+        if bill_no and self.module_code != "DSC":
             other = self.followup_repo.find_by_tally_bill_no(bill_no)
             other_id = int(other.get("EntryID") or 0) if other else 0
             if other and other_id and other_id != int(entry_id or 0):
                 other_mod = (other.get("ModuleCode") or "").strip().upper() or "Followup"
                 other_name = (other.get("CustomerName") or "").strip()
+                label = "Bill number" if tax_followup else "Tally Bill Number"
                 raise ValueError(
-                    f"Tally Bill Number {bill_no} already used in {other_mod} Followup"
+                    f"{label} {bill_no} already used in {other_mod} Followup"
                     + (f" ({other_name})" if other_name else "")
                     + ". Duplicate allow nahi hai."
                 )
-        if "tally_bill_generated" in stage_codes or "payment_received" in stage_codes:
+        raw_amount = payload.get("bill_amount")
+        if raw_amount in (None, ""):
+            raw_amount = payload.get("BillAmount")
+        if raw_amount not in (None, ""):
             bill_amount = self._parse_bill_amount(payload)
         else:
-            bill_amount = None
+            bill_amount = existing_bill_amount
 
-        if self.module_code in {"ITR", "GST", "TDS", "DSC"} and "tally_bill_generated" in stage_codes:
-            if not bill_no:
-                raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
-
-        if "payment_received" in stage_codes and (bill_amount is None or float(bill_amount) <= 0):
-            payment_service = FollowupPaymentService(self.module_code)
-            try:
-                preview_lines = payment_service.parse_payment_lines(payload, Decimal("0"))
-                derived = sum((line["amount"] for line in preview_lines), Decimal("0"))
-                if derived > 0:
-                    bill_amount = float(derived)
-            except ValueError:
-                pass
+        if "tally_bill_generated" in stage_codes and not bill_no:
+            raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
 
         bill_date = self._parse_optional_date(payload, "bill_date", "BillDate") or work_date
         itr_filed_date = self._parse_optional_date(payload, "itr_filed_date", "ITRFiledDate")
@@ -1369,6 +1798,11 @@ class FollowupService:
         if self.meta.get("has_tds_period_split"):
             data["FormType"] = form_type
             data["Quarter"] = quarter
+        if self.module_code == "GST":
+            data["GstMonth"] = gst_month
+        if "invoice" in stage_codes:
+            data["BillingType"] = billing_type
+            data["BillingCustomerID"] = billing_customer_id
         if self.module_code == "DSC":
             data["ApplicationNumber"] = application_no
             data["DscType"] = dsc_type
@@ -1377,30 +1811,35 @@ class FollowupService:
             data["Location"] = location
             data["IntroducedBy"] = introduced_by
 
-        if "itr_filed" in stage_codes:
+        if "return_filed" in stage_codes or "itr_filed" in stage_codes:
             if not itr_filed_date:
                 itr_filed_date = date.today()
             data["ITRFiledDate"] = itr_filed_date
         else:
             data["ITRFiledDate"] = None
 
-        if "tally_bill_generated" in stage_codes:
-            data["BillNo"] = bill_no
-            data["BillAmount"] = bill_amount
-            data["BillDate"] = bill_date or date.today()
-        elif "payment_received" in stage_codes:
-            data["BillNo"] = bill_no
-            data["BillAmount"] = bill_amount
-            if bill_date:
-                data["BillDate"] = bill_date
-        elif self.module_code == "DSC":
-            data["BillNo"] = None
-            data["BillAmount"] = None
-            data["BillDate"] = None
-        else:
-            data["BillNo"] = None
-            data["BillAmount"] = None
-            data["BillDate"] = None
+        saved_bill_no = bill_no or existing_bill_no
+        saved_bill_date = bill_date or existing_bill_date
+        keeps_bill = (not tax_followup and "tally_bill_generated" in stage_codes) or (
+            "payment_received" in stage_codes
+        )
+        if keeps_bill:
+            if saved_bill_no:
+                data["BillNo"] = saved_bill_no
+            if bill_amount is not None:
+                data["BillAmount"] = bill_amount
+            if saved_bill_date:
+                data["BillDate"] = saved_bill_date
+            elif not tax_followup and "tally_bill_generated" in stage_codes:
+                data["BillDate"] = date.today()
+
+        persist_stage_ids = list(stage_ids)
+        if existing_row is not None:
+            for link in existing_row.stages or []:
+                if canonical_stage_code(link.StageCode) == "payment_received":
+                    if "payment_received" not in persist_stage_ids:
+                        persist_stage_ids.append("payment_received")
+                    break
 
         def _write() -> dict:
             if self.module_code == "DSC":
@@ -1410,31 +1849,36 @@ class FollowupService:
                 if row is None or not row.IsActive or row.ModuleCode != self.module_code:
                     raise ValueError("Followup entry not found.")
                 self.followup_repo.update_entry(row, data)
-                self.followup_repo.replace_entry_stages(entry_id, stage_ids)
+                self.followup_repo.replace_entry_stages(entry_id, persist_stage_ids)
                 saved_id = entry_id
             else:
                 data["CreatedBy"] = created_by
                 data["CreatedDate"] = datetime.utcnow()
                 data["IsActive"] = True
                 row = self.followup_repo.create_entry(data)
-                self.followup_repo.replace_entry_stages(row.EntryID, stage_ids)
+                self.followup_repo.replace_entry_stages(row.EntryID, persist_stage_ids)
                 saved_id = row.EntryID
 
-            final_bill_no = data.get("BillNo")
+            billing_stage = (not tax_followup and "tally_bill_generated" in stage_codes) or (
+                "payment_received" in stage_codes
+            )
+            final_bill_no = data.get("BillNo") if billing_stage else existing_bill_no
             payment_service = FollowupPaymentService(self.module_code)
             old_bill = (existing_bill_no or "").strip()
-            new_bill = (final_bill_no or "").strip()
-            if old_bill and old_bill.upper() != new_bill.upper():
+            new_bill = (final_bill_no or "").strip() if billing_stage else old_bill
+            amount_value = data.get("BillAmount")
+            if amount_value is None:
+                amount_value = existing_bill_amount
+            if billing_stage and old_bill and old_bill.upper() != new_bill.upper():
                 payment_service.remove_followup_accounting(old_bill)
 
-            amount_value = data.get("BillAmount")
-            if new_bill:
+            if billing_stage and new_bill:
                 payment_service.accounting.reconcile_reference(new_bill)
-            if new_bill and "tally_bill_generated" not in stage_codes and "payment_received" not in stage_codes:
-                payment_service.accounting.remove_followup_sale(new_bill)
 
             if "payment_received" in stage_codes:
                 if not new_bill:
+                    if tax_followup:
+                        raise ValueError("Payment reference is missing. Save Payment Received again.")
                     raise ValueError("Tally bill number is required before marking Payment Received.")
                 payment_lines = payment_service.parse_payment_lines(
                     payload, Decimal(str(amount_value or 0))
@@ -1442,13 +1886,10 @@ class FollowupService:
                 if not payment_lines:
                     raise ValueError("Add at least one payment mode with amount.")
                 received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
+                if received_total <= 0:
+                    raise ValueError("Payment amount must be greater than zero.")
                 if amount_value is None or float(amount_value) <= 0:
                     amount_value = float(received_total)
-                    data["BillAmount"] = amount_value
-                    if row is not None:
-                        row.BillAmount = Decimal(str(amount_value))
-                if amount_value is None or float(amount_value) <= 0:
-                    raise ValueError("Payment amount must be greater than zero.")
                 if self.module_code in ("ITR", "DSC", "GST", "TDS"):
                     for line in payment_lines:
                         if not line.get("payment_date"):
@@ -1466,17 +1907,17 @@ class FollowupService:
                     created_by=created_by or "System",
                     existing_daily=existing_daily,
                 )
-            elif new_bill:
+            elif billing_stage and new_bill:
                 payment_service.remove_receipts(new_bill)
-            elif old_bill:
+            elif billing_stage and old_bill:
                 payment_service.remove_followup_accounting(old_bill)
 
             from app.services.gst_invoice_service import GstInvoiceService
 
-            if new_bill:
-                GstInvoiceService().sync_payment_received_for_bill(
-                    new_bill, "payment_received" in stage_codes
-                )
+            if "invoice" in stage_codes and billing_customer_id:
+                GstInvoiceService().assign_billing_customer(saved_id, int(billing_customer_id))
+            if billing_stage and new_bill and "payment_received" in stage_codes:
+                GstInvoiceService().sync_payment_received_for_bill(new_bill, True)
             return self.get_entry(saved_id)
 
         return persist(_write)
@@ -1486,17 +1927,17 @@ class FollowupService:
         if row is None or not row.IsActive or row.ModuleCode != self.module_code:
             raise ValueError("Followup entry not found.")
         for link in list(row.stages or []):
-            code = ((link.stage.StageCode if link.stage else "") or "").strip().lower()
+            code = canonical_stage_code(link.StageCode)
             if code == "payment_received":
                 raise ValueError("Remove Payment Received in Edit before deleting this entry.")
-        bill_no = (row.BillNo or "").strip()
-        application_no = (row.ApplicationNumber or "").strip()
         from app.services.gst_invoice_service import GstInvoiceService
 
         invoices = GstInvoiceService()
-        for key in (bill_no, application_no):
-            if key:
-                invoices.delete_invoices_for_bill_if_any(key)
+        for invoice_id in invoices.repo.list_ids_for_followup_entry(entry_id):
+            invoices.delete_record(
+                invoice_id,
+                payload={"from_source": True, "followup_entry_id": int(entry_id)},
+            )
 
         def _write() -> str:
             current = self.followup_repo.get_entry(entry_id)

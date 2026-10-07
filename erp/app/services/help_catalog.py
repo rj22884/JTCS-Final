@@ -324,12 +324,12 @@ TOPICS: tuple[HelpTopic, ...] = (
         "bi-list-check",
         "activities",
         "Activities → ITR Followup",
-        "Track Income-tax return work by customer and tax period: documents, filing, Tally bill, and payment stages.",
+        "Track Income-tax return work by customer and tax period: documents, return filed, invoice, and payment.",
         url="/itr/followup",
         steps=(
             _s("Select period and customer", "Set work date, tax period (assessment year), and customer (PAN is taken from Customer Master)."),
-            _s("Advance stages", "Mark Documents Received → ITR Filed → Tally Bill Generated → Payment Received. Unverified holds a reason."),
-            _s("Billing", "When Tally bill is generated, bill number and date feed customer outstanding and ledgers."),
+            _s("Advance stages", "Mark Documents Received → Return Filed → Invoice → Payment Received."),
+            _s("Invoice", "Ticking Invoice opens the Invoice module. Create the bill there manually."),
         ),
         shots=(
             _shot(
@@ -338,7 +338,7 @@ TOPICS: tuple[HelpTopic, ...] = (
                 ribbon=("Activities", "ITR Followup"),
                 fields=(("Tax period", "AY 2026-27"), ("Customer", "Sharma Enterprises")),
                 columns=("Customer", "Return", "Stage", "Bill No"),
-                rows=(("Sharma Enterprises", "ITR-3", "ITR Filed", "—"),),
+                rows=(("Sharma Enterprises", "ITR-3", "Return Filed", "—"),),
                 highlights=("Workflow stages are fixed on this screen", "Bill links to customer ledger"),
             ),
         ),
@@ -379,12 +379,12 @@ TOPICS: tuple[HelpTopic, ...] = (
         "bi-receipt",
         "activities",
         "Activities → GST Followup",
-        "GST return work by tax period: documents received, return filed, Tally bill, payment.",
+        "GST return work by tax period: documents received, return filed, invoice, and payment.",
         url="/gst/followup",
         steps=(
             _s("Choose tax period", "Use the GST period (month/quarter) required for that customer."),
             _s("Mark Return Filed", "After the portal filing, mark the stage so the grid reflects completion."),
-            _s("Bill and collect", "Tally Bill Generated and Payment Received update customer outstanding."),
+            _s("Invoice and payment", "Ticking Invoice opens the Invoice module for a manual bill. Payment Received closes the case."),
         ),
         shots=(
             _shot(
@@ -408,7 +408,7 @@ TOPICS: tuple[HelpTopic, ...] = (
         url="/tds/followup",
         steps=(
             _s("Select form and quarter", "Use the TDS form/quarter fields on the entry."),
-            _s("Complete KYC and bill stages", "Documents → KYC → Tally Bill → Payment."),
+            _s("Advance stages", "Documents Received → Return Filed → Invoice → Payment Received."),
         ),
         shots=(
             _shot(

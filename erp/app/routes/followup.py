@@ -14,11 +14,13 @@ from app.services.customer_service import CustomerService
 from app.services.followup_billing_service import FollowupBillingService
 from app.services.followup_payment_service import FollowupPaymentService
 from app.services.followup_service import (
+    GST_MONTHS,
     GST_RETURN_TYPES,
     MODULE_META,
     TDS_FORM_TYPES,
     TDS_QUARTERS,
     FollowupService,
+    default_gst_month,
     default_tax_period,
     tax_period_options,
 )
@@ -44,7 +46,7 @@ def _thank_you_block_reason(module_code: str, record: dict) -> str | None:
         (s.get("StageCode") or "").lower()
         for s in record.get("completed_stages", [])
     }
-    if module_code in {"ITR", "DSC"}:
+    if module_code in {"ITR", "GST", "TDS", "DSC"}:
         if not _record_has_payment_received(record):
             return "Thank You letter is available only after Payment Received."
         return None
@@ -190,6 +192,8 @@ def _make_activity_blueprint(
             default_date=date.today().isoformat(),
             default_tax_period=default_tax_period(),
             tax_periods=tax_period_options(),
+            gst_months=GST_MONTHS,
+            default_gst_month=default_gst_month(),
             tds_form_types=TDS_FORM_TYPES,
             tds_quarters=TDS_QUARTERS,
             gst_return_types=GST_RETURN_TYPES,
@@ -199,8 +203,21 @@ def _make_activity_blueprint(
             payment_modes=master_repo.list_stamp_bank_payment_modes(),
             api_urls=_followup_api_urls(blueprint_name, module_code, allow_customer_create),
             pincode_lookup_url=url_for("masters_customer.lookup_pincode"),
+            customer_bill_summary_url=url_for(f"{blueprint_name}.customer_bill_summary"),
             load_entry_id=request.args.get("load_entry", type=int),
         )
+
+    @bp.route("/api/customer-bill-summary", methods=["GET"], strict_slashes=False)
+    @login_required
+    def customer_bill_summary():
+        customer_id = request.args.get("customer_id", type=int)
+        if not customer_id:
+            return jsonify({"ok": False, "error": "Customer is required."}), 400
+        try:
+            totals = FollowupService(module_code).customer_bill_summary(customer_id)
+            return jsonify({"ok": True, **totals})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
 
     @bp.route("/grid", methods=["GET"], strict_slashes=False)
     @login_required
@@ -516,7 +533,7 @@ def _make_activity_blueprint(
         @bp.route("/records/<int:entry_id>/payment-reminder", methods=["GET"], strict_slashes=False)
         @login_required
         def payment_reminder(entry_id: int):
-            """PNG payment reminder — available after Tally Bill Generated (payment pending)."""
+            """PNG payment reminder — available after Invoice, while payment is pending."""
             service = FollowupService(module_code)
             try:
                 record = service.get_entry(entry_id)
@@ -527,18 +544,18 @@ def _make_activity_blueprint(
                 (s.get("StageCode") or "").lower()
                 for s in record.get("completed_stages", [])
             }
-            has_tally = (
-                "tally_bill_generated" in stage_codes
-                or bool(record.get("bill_no"))
-                or record.get("workflow_status") == "Tally Bill Generated"
+            has_invoice = (
+                "invoice" in stage_codes
+                or "tally_bill_generated" in stage_codes
+                or record.get("workflow_status") in {"Invoice", "Tally Bill Generated"}
             )
             has_payment = (
                 "payment_received" in stage_codes
                 or record.get("workflow_status") == "Payment Received"
             )
-            if not has_tally:
+            if not has_invoice:
                 return jsonify(
-                    {"ok": False, "error": "Payment reminder is available after Tally Bill Generated."}
+                    {"ok": False, "error": "Payment reminder is available after Invoice."}
                 ), 400
             if has_payment:
                 return jsonify(

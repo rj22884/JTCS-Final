@@ -10,6 +10,7 @@
     taxYear: document.getElementById("mgbTaxYear"),
     invoiceNo: document.getElementById("mgbInvoiceNo"),
     invoiceId: document.getElementById("mgbInvoiceId"),
+    miscEntryId: document.getElementById("mgbMiscEntryId"),
     customerId: document.getElementById("mgbCustomerId"),
     customerName: document.getElementById("mgbCustomerName"),
     item: document.getElementById("mgbItem"),
@@ -184,11 +185,9 @@
       recalcDscLine(tr);
       return;
     }
-    const rate = tr.querySelector(".mgb-line-rate");
     const gst = tr.querySelector(".mgb-line-gst");
     const qty = tr.querySelector(".mgb-line-qty");
-    if (rate) rate.value = it.default_rate != null ? String(it.default_rate) : "0";
-    if (gst) gst.value = it.gst_rate_percent != null ? String(it.gst_rate_percent) : "0";
+    if (gst) gst.value = it.gst_rate_percent != null ? String(it.gst_rate_percent) : "";
     if (qty && !(qty.value || "").trim()) qty.value = "1";
     tr.dataset.hsn = it.hsn_sac || "";
     tr.dataset.unit = it.unit || "NOS";
@@ -262,7 +261,10 @@
     });
     if (pref.item_id) {
       applyItemToLine(tr, pref.item_id);
-      if (pref.rate != null && pref.rate !== "") {
+      if (pref.blank_rate) {
+        const rate = tr.querySelector(".mgb-line-rate");
+        if (rate) rate.value = "";
+      } else if (pref.rate != null && pref.rate !== "") {
         const rate = tr.querySelector(".mgb-line-rate");
         if (rate) rate.value = String(pref.rate);
       }
@@ -326,7 +328,10 @@
       if (node) node.value = value || "";
     };
     set("mgbPartyName", name);
-    set("mgbPartyContact", record.contact_person || name);
+    const contact = billAnotherCustomer && (entryCustomer.name || "").trim()
+      ? entryCustomer.name
+      : (record.contact_person || name);
+    set("mgbPartyContact", contact);
     set("mgbPartyGstin", record.customer_gstin || "");
     set("mgbPartyMobile", mobile);
     set("mgbPartyEmail", record.contact_email || "");
@@ -426,7 +431,11 @@
     const partyName = document.getElementById("mgbPartyName");
     if (partyName) partyName.value = row.customer_name || "";
     const partyContact = document.getElementById("mgbPartyContact");
-    if (partyContact) partyContact.value = row.customer_name || "";
+    if (partyContact) {
+      partyContact.value = billAnotherCustomer && (entryCustomer.name || "").trim()
+        ? entryCustomer.name
+        : (row.customer_name || "");
+    }
     const partyMobile = document.getElementById("mgbPartyMobile");
     if (partyMobile && row.mobile) partyMobile.value = row.mobile;
     hideCustomerList();
@@ -628,6 +637,7 @@
       voucher_type: "SALE",
       customer_id: (els.customerId?.value || "").trim(),
       customer_name: (els.customerName?.value || "").trim(),
+      contact_person: (document.getElementById("mgbPartyContact")?.value || entryCustomer.name || "").trim(),
       contact_mobile: (els.mobile?.value || "").trim(),
       billing_address: (els.address?.value || "").trim(),
       place_of_supply: (els.state?.value || "").trim(),
@@ -636,6 +646,7 @@
       notes: "",
       tally_bill_no: (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim(),
       bill_source: "Miscellaneous",
+      misc_entry_id: (els.miscEntryId?.value || "").trim(),
       payment_bank_account_ids: selectedBankIds(),
       lines: [line],
     };
@@ -675,6 +686,7 @@
       voucher_type: "SALE",
       customer_id: (els.customerId?.value || "").trim(),
       customer_name: (els.customerName?.value || "").trim(),
+      contact_person: (document.getElementById("mgbPartyContact")?.value || entryCustomer.name || "").trim(),
       contact_mobile: (els.mobile?.value || "").trim(),
       billing_address: (els.address?.value || "").trim(),
       place_of_supply: (els.state?.value || "").trim(),
@@ -683,6 +695,7 @@
       notes: "",
       tally_bill_no: (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim(),
       bill_source: "Miscellaneous",
+      misc_entry_id: (els.miscEntryId?.value || "").trim(),
       gst_inclusive: false,
       round_off_amount: String(roundOffMagnitude()),
       round_off_sign: (els.roundOffSign?.value || "").trim(),
@@ -773,7 +786,21 @@
     if (els.invoiceId && record.invoice_id) {
       els.invoiceId.value = String(record.invoice_id);
     }
+    notifyMiscInvoiceSaved(record);
     return record;
+  }
+
+  function notifyMiscInvoiceSaved(record) {
+    const host = window.parent && window.parent !== window ? window.parent : null;
+    if (!host) return;
+    host.postMessage(
+      {
+        type: "jtcs-misc-invoice-saved",
+        misc_entry_id: (els.miscEntryId?.value || "").trim(),
+        record: record || null,
+      },
+      window.location.origin
+    );
   }
 
   async function requestPdf(disposition) {
@@ -869,8 +896,28 @@
     }
   }
 
+  function seedInvoiceLines(lines) {
+    if (!els.lineBody || !Array.isArray(lines) || !lines.length) return;
+    els.lineBody.innerHTML = "";
+    lines.forEach(function (line) {
+      const gst =
+        line.gst_rate_percent != null && line.gst_rate_percent !== ""
+          ? line.gst_rate_percent
+          : "";
+      addDscLine({
+        item_id: line.item_id,
+        qty: line.qty || "1",
+        rate: "",
+        gst_rate_percent: gst,
+        blank_rate: true,
+      });
+    });
+  }
+
   function applySeed(seed) {
     if (!seed || typeof seed !== "object") return;
+    if (seed.entry_id && els.miscEntryId) els.miscEntryId.value = String(seed.entry_id);
+    if (seed.invoice_id && els.invoiceId) els.invoiceId.value = String(seed.invoice_id);
     if (els.date) els.date.value = (seed.date || "").slice(0, 10);
     if (els.taxYear) {
       const want = seed.tax_year || cfg.defaultTaxPeriod || "";
@@ -887,7 +934,10 @@
     if (els.itemId) els.itemId.value = seed.item_id ? String(seed.item_id) : "";
     if (els.hsn) els.hsn.value = seed.hsn_sac || "";
     if (els.unit) els.unit.value = seed.unit || "NOS";
-    if (els.rate) els.rate.value = seed.rate != null && seed.rate !== "" ? String(seed.rate) : "";
+    if (els.rate) {
+      els.rate.value =
+        seed.open_edit && seed.rate != null && seed.rate !== "" ? String(seed.rate) : "";
+    }
     if (els.gstRate) {
       els.gstRate.value =
         seed.gst_rate_percent != null && seed.gst_rate_percent !== ""
@@ -905,9 +955,14 @@
     if (String(seed.source || "") === "DSC" ||
         String(seed.source || "") === "ITR" ||
         String(seed.source || "") === "GST" ||
-        String(seed.source || "") === "TDS") {
+        String(seed.source || "") === "TDS" ||
+        String(seed.source || "") === "Miscellaneous") {
       enableDscMode();
       rememberEntryCustomer();
+      if (!seed.open_edit) {
+        if (els.lineBody) els.lineBody.innerHTML = "";
+        addDscLine();
+      }
       computeTaxes();
       ensureCustomerFromMaster()
         .catch(function () {
@@ -1044,32 +1099,22 @@
     if (idx >= 0) bankOrder.splice(idx, 1);
   });
 
-  async function editInvoice() {
-    showError("");
-    const billNo = (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim();
-    if (!billNo || !cfg.lookupUrl) {
-      showError("Invoice number is required before edit.");
+  function applyLoadedInvoice(rec) {
+    if (!rec) return;
+    const moduleName = String(rec.source_module || "").toUpperCase();
+    if (moduleName && moduleName !== "MISC") {
+      if (els.invoiceId) els.invoiceId.value = "";
+      showError(rec.source_lock_message || "This invoice can be edited only from the module that created it.");
       return;
     }
-    const url = new URL(cfg.lookupUrl, window.location.origin);
-    url.searchParams.set("bill_no", billNo);
-    const res = await fetch(url.toString(), {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    const data = await res.json().catch(function () {
-      return {};
-    });
-    if (!res.ok || !data.ok || !data.found || !data.record) {
-      if (dscMode && res.ok && data.ok && !data.found) {
-        showError("");
-        showOk("Abhi saved bill nahi hai. Pehle Save karein, uske baad Edit usi bill ko kholega.");
+    if (rec.misc_entry_id && els.miscEntryId) {
+      if (els.miscEntryId.value && String(rec.misc_entry_id) !== String(els.miscEntryId.value)) {
+        if (els.invoiceId) els.invoiceId.value = "";
+        showError(rec.source_lock_message || "This invoice belongs to a different MISC entry.");
         return;
       }
-      showError(data.error || "No saved bill found to edit.");
-      return;
+      if (!els.miscEntryId.value) els.miscEntryId.value = String(rec.misc_entry_id);
     }
-    const rec = data.record;
     if (els.invoiceId) els.invoiceId.value = rec.invoice_id ? String(rec.invoice_id) : "";
     if (els.invoiceNo && rec.invoice_no) els.invoiceNo.value = rec.invoice_no;
     if (els.date && rec.invoice_date) els.date.value = String(rec.invoice_date).slice(0, 10);
@@ -1127,6 +1172,48 @@
     showOk("Bill loaded for edit. Preview or Download saves the changes.");
   }
 
+  async function editInvoice() {
+    showError("");
+    const invoiceId = (els.invoiceId?.value || "").trim();
+    if (invoiceId) {
+      const res = await fetch("/accounting/api/invoices/" + invoiceId, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok || !data.ok || !data.record) {
+        showError(data.error || "No saved bill found to edit.");
+        return;
+      }
+      applyLoadedInvoice(data.record);
+      return;
+    }
+    const billNo = (els.tallyBillNo?.value || els.invoiceNo?.value || "").trim();
+    if (!billNo || !cfg.lookupUrl) {
+      showError("Invoice number is required before edit.");
+      return;
+    }
+    const url = new URL(cfg.lookupUrl, window.location.origin);
+    url.searchParams.set("bill_no", billNo);
+    const res = await fetch(url.toString(), {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok || !data.found || !data.record) {
+      if (dscMode && res.ok && data.ok && !data.found) {
+        showError("");
+        showOk("Abhi saved bill nahi hai. Pehle Save karein, uske baad Edit usi bill ko kholega.");
+        return;
+      }
+      showError(data.error || "No saved bill found to edit.");
+      return;
+    }
+    applyLoadedInvoice(data.record);
+  }
+
   async function deleteInvoice() {
     showError("");
     const invoiceId = (els.invoiceId?.value || "").trim();
@@ -1147,7 +1234,12 @@
         Accept: "application/json",
         "X-CSRFToken": cfg.csrf || "",
       },
-      body: JSON.stringify({ user_id: userId, password: password, from_source: true }),
+      body: JSON.stringify({
+        user_id: userId,
+        password: password,
+        from_source: true,
+        misc_entry_id: (els.miscEntryId?.value || "").trim(),
+      }),
     });
     const data = await res.json().catch(function () {
       return {};
@@ -1158,6 +1250,7 @@
     }
     if (els.invoiceId) els.invoiceId.value = "";
     setSelectedBanks([]);
+    notifyMiscInvoiceSaved(null);
     showOk(data.message || "Bill deleted.");
   }
 

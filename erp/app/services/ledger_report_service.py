@@ -93,6 +93,7 @@ class LedgerReportService:
         mid = link.get("source_module_id")
         line["can_edit"] = bool(link.get("can_open") and link.get("source_url"))
         line["can_delete"] = bool(module and mid)
+        line["source_lock_message"] = (link.get("source_lock_message") or "").strip()
         line["source_url"] = link.get("source_url") or ""
         line["source_module"] = module
         line["source_module_id"] = mid or ""
@@ -231,11 +232,8 @@ class LedgerReportService:
 
         if not listing_all:
             rows = rows[:lim]
-        # Grid closing is always as of the current system date. Preview / summaries
-        # still use the page From–To dates; those args are ignored here.
+        # Search lists ledgers only. Closing balance is not part of this grid.
         _ = (date_from, date_to)
-        as_of = date.today()
-        self._attach_search_closings(rows, as_of)
         return rows
 
     def _search_banks(self, search: str, limit: int) -> list[dict[str, Any]]:
@@ -2147,6 +2145,9 @@ class LedgerReportService:
                 desc = f"{desc} · Qty {qty}" + (f" {unit}" if unit else "")
             txn_date = row["InvoiceDate"]
             invoice_id = int(row["InvoiceID"])
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            owner = GstInvoiceService().source_owner_for_id(invoice_id)
             lines.append(
                 self._decorate_line(
                     {
@@ -2158,13 +2159,8 @@ class LedgerReportService:
                         "kind": "txn",
                     },
                     link={
-                        "can_open": True,
-                        "source_module": "invoice",
-                        "source_module_id": invoice_id,
-                        "source_url": url_for(
-                            "accounting_invoice.invoice_sale", edit=invoice_id
-                        ),
-                        "work_type": "",
+                        "can_open": False,
+                        "source_lock_message": owner["message"],
                     },
                 )
             )

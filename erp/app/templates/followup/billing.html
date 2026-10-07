@@ -27,7 +27,7 @@
         <input type="text" class="form-control" id="fuBillTaxPeriod" value="{{ default_tax_period }}" readonly>
       </div>
       <div class="col-md-4">
-        <label class="form-label">Tally Bill Number</label>
+        <label class="form-label">Bill Number</label>
         <div class="input-group">
           <input type="text" class="form-control" id="fuBillNo" value="{{ next_bill_no }}">
           <button type="button" class="btn btn-outline-secondary" id="fuBillRefreshNo" title="Refresh bill number">
@@ -47,7 +47,7 @@
       <div class="col-12">
         <div class="alert alert-info py-2 small mb-0">
           After applying, the bill number and amount will fill into the followup entry form.
-          {% if module_code == 'ITR' %}
+          {% if module_code in ['ITR', 'GST', 'TDS'] %}
           Save the entry and mark <strong>Payment Received</strong> to enable Thank You letter download.
           {% else %}
           Save the entry and mark <strong>Tally Bill Generated</strong> to enable Thank You letter download.

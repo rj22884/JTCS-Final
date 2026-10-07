@@ -363,6 +363,7 @@
       work_type: tr.getAttribute("data-work-type") || "",
       can_edit: tr.getAttribute("data-can-edit") === "1",
       can_delete: tr.getAttribute("data-can-delete") === "1",
+      source_lock_message: tr.getAttribute("data-source-lock") || "",
       description: (tr.querySelector('[data-col="description"]')?.textContent || "").trim(),
     };
   }
@@ -409,6 +410,10 @@
   }
 
   function openEdit(row) {
+    if (row && row.source_lock_message) {
+      alert(row.source_lock_message);
+      return;
+    }
     if (!row || !row.can_edit || !row.source_url) {
       alert("Edit is not available for this row. Source entry could not be resolved.");
       return;
@@ -429,6 +434,10 @@
   }
 
   async function deleteRow(row) {
+    if (row && row.source_lock_message) {
+      alert(row.source_lock_message);
+      return;
+    }
     const url = resolveDeleteUrl(row);
     if (!url) {
       alert("Delete is not available for this row.");

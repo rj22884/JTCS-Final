@@ -529,8 +529,13 @@ class GstInvoicePdfService:
         if data.get("place_of_supply_code"):
             pos = f"{pos} ({data['place_of_supply_code']})"
 
+        party_heading = (
+            "Supplier"
+            if str(data.get("voucher_type") or "").upper() == "PURCHASE"
+            else "Customer / Bill To"
+        )
         cust_left = [
-            Paragraph(f"<b>Customer Name:</b> {data['customer_name']}", small),
+            Paragraph(f"<b>{party_heading}:</b> {data['customer_name']}", small),
             Paragraph(
                 f"<b>Billing / Shipping Address:</b> {data.get('billing_address') or '—'}",
                 small,
