@@ -795,6 +795,8 @@ def conversation_reply(conversation_id: int):
         vars_map.update({str(k): str(v or "") for k, v in payload["template_vars"].items()})
     body = TemplateService.interpolate(body, vars_map)
 
+    template_name = (payload.get("template_name") or "").strip()
+    template_language = (payload.get("language") or "en").strip() or "en"
     if not is_note and channel == "WhatsApp":
         mobile = whatsapp_to_number(
             conv.get("ExternalThreadKey"),
@@ -803,8 +805,23 @@ def conversation_reply(conversation_id: int):
             conv.get("MobileNumber"),
             conv.get("LeadMobile"),
         )
-        provider = get_whatsapp_provider()
-        send_result = provider.send_message(mobile or "", body)
+        if template_name:
+            from app.modules.communication.meta_whatsapp_service import MetaWhatsAppService
+            from app.modules.communication.whatsapp_template_catalog import template_message_components
+
+            try:
+                components = template_message_components(payload.get("template_vars"))
+            except ValueError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 400
+            send_result = MetaWhatsAppService().send_template_message(
+                mobile or "",
+                template_name=template_name,
+                language=template_language,
+                components=components,
+            )
+        else:
+            provider = get_whatsapp_provider()
+            send_result = provider.send_message(mobile or "", body)
         if send_result.get("error"):
             send_result["error"] = _whatsapp_send_error(send_result.get("error"))
         if send_result.get("ok"):

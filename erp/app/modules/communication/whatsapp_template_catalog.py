@@ -74,6 +74,29 @@ def variable_specs(components: list[dict[str, Any]] | None) -> list[dict[str, st
     return specs
 
 
+def template_body_parameters(variables: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Meta body parameters in placeholder order. Empty values are rejected."""
+    raw = variables or {}
+    numbers = sorted(int(str(key)) for key in raw if str(key).isdigit())
+    parameters: list[dict[str, str]] = []
+    for number in numbers:
+        value = raw.get(str(number))
+        if value is None:
+            value = raw.get(number)
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError(f"Template variable {{{{{number}}}}} is empty.")
+        parameters.append({"type": "text", "text": text[:1024]})
+    return parameters
+
+
+def template_message_components(variables: dict[str, Any] | None) -> list[dict[str, Any]]:
+    parameters = template_body_parameters(variables)
+    if not parameters:
+        return []
+    return [{"type": "body", "parameters": parameters}]
+
+
 def button_summaries(components: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     buttons: list[dict[str, str]] = []
     for component in components or []:

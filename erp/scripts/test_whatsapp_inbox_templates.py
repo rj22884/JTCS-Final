@@ -13,6 +13,7 @@ from app.modules.communication.whatsapp_template_catalog import (  # noqa: E402
     merge_template_rows,
     public_meta_error,
     select_inbox_templates,
+    template_message_components,
 )
 from app.modules.settings.whatsapp_meta_client import WhatsAppMetaClient  # noqa: E402
 
@@ -140,6 +141,22 @@ def main() -> None:
     check("second page uses cursor not next url", pager.calls[1][1].get("after") == "cursor-2")
     check("paged marketing and utility both usable", [row["Name"] for row in selected] == ["number_change", "payment_reminder"])
     check("pager did not record the next url", all("SECRET" not in str(call) for call in pager.calls))
+    components = template_message_components({"1": "PARTH JOSHI", "2": "+91 84770 05566"})
+    check(
+        "template body parameters stay in order",
+        components == [{
+            "type": "body",
+            "parameters": [
+                {"type": "text", "text": "PARTH JOSHI"},
+                {"type": "text", "text": "+91 84770 05566"},
+            ],
+        }],
+    )
+    try:
+        template_message_components({"1": "PARTH JOSHI", "2": "  "})
+        check("empty template variable is rejected", False)
+    except ValueError:
+        check("empty template variable is rejected", True)
     print("ALL PASS")
 
 

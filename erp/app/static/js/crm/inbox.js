@@ -41,6 +41,7 @@
   let staffRows = [];
   let templateRows = [];
   let templateDefaults = {};
+  let activeTemplate = null;
   let allLabels = [];
   const convById = {};
 
@@ -798,6 +799,7 @@
     const body = document.getElementById("crmReplyBody");
     const box = document.getElementById("crmTemplateVars");
     if (!helpers || !body || !box || !row) return;
+    activeTemplate = row;
     const fields = helpers.variableFields(row, templateDefaults, activeConvMeta);
     if (!fields.length) {
       hideTemplateVars();
@@ -1016,15 +1018,27 @@
       if (sendBtn) sendBtn.disabled = true;
       try {
         if (body) {
+          const note = document.getElementById("crmReplyNote").checked;
+          const channel = document.getElementById("crmReplyChannel").value;
+          const payload = {
+            body: body,
+            channel: channel,
+            is_internal_note: note,
+          };
+          if (activeTemplate && channel === "WhatsApp" && !note) {
+            const vars = {};
+            document.querySelectorAll("#crmTemplateVars [data-template-var]").forEach(function (field) {
+              vars[field.getAttribute("data-template-var")] = field.value;
+            });
+            payload.template_name = activeTemplate.ExternalTemplateName || activeTemplate.Name || "";
+            payload.language = activeTemplate.LanguageCode || "en";
+            payload.template_vars = vars;
+          }
           const data = await CrmCommon.apiFetch(
             CrmCommon.urlTemplate(api.reply, activeConvId),
             {
               method: "POST",
-              body: {
-                body: body,
-                channel: document.getElementById("crmReplyChannel").value,
-                is_internal_note: document.getElementById("crmReplyNote").checked,
-              },
+              body: payload,
             }
           );
           if (data.warning) CrmCommon.showAlert(data.warning, "warning");
@@ -1037,6 +1051,8 @@
         pendingFiles.length = 0;
         renderPendingFiles();
         replyBody.value = "";
+        activeTemplate = null;
+        hideTemplateVars();
         const fileInput = document.getElementById("crmReplyFile");
         const folderInput = document.getElementById("crmReplyFolder");
         if (fileInput) fileInput.value = "";
@@ -1132,7 +1148,10 @@
           applySelectedTemplate(row);
           return;
         }
+        activeTemplate = row || null;
         hideTemplateVars();
+      } else {
+        activeTemplate = null;
       }
       if (!el.value) return;
       document.getElementById("crmReplyBody").value = el.value;
