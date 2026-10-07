@@ -80,6 +80,8 @@ class GstInvoice(db.Model):
     PaymentDate: Mapped[date | None] = mapped_column(Date, nullable=True)
     AmountPaid: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     TallyBillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
+    FollowupEntryID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    MiscEntryID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     BillSource: Mapped[str] = mapped_column(Unicode(40), nullable=False, default="Manual")
     BillApproved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     BillUnapproveReason: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)

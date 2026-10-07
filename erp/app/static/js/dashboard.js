@@ -1043,12 +1043,17 @@
       bank_account: tr.getAttribute("data-bank-account") || "",
       amount: tr.getAttribute("data-amount") || "",
       is_expense: tr.getAttribute("data-is-expense") === "1",
+      source_lock_message: tr.getAttribute("data-source-lock") || "",
     };
   }
 
   function openRecentSource(tr) {
     const row = recentRowFromEl(tr);
     if (!row) return;
+    if (row.source_lock_message) {
+      alert(row.source_lock_message);
+      return;
+    }
     if (!row.can_open || !row.source_url) {
       alert("Source entry form is not available for this transaction.");
       return;

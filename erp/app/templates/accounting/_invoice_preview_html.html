@@ -40,7 +40,7 @@
 
   <div class="inv-html-cust">
     <div>
-      <div><strong>Customer Name:</strong> {{ invoice.customer_name }}</div>
+      <div><strong>{% if (invoice.voucher_type or '')|upper == 'PURCHASE' %}Supplier{% else %}Customer / Bill To{% endif %}:</strong> {{ invoice.customer_name }}</div>
       <div><strong>Billing / Shipping Address:</strong> {{ invoice.billing_address or dash }}</div>
       <div><strong>Contact Mobile No.:</strong> {{ invoice.contact_mobile or dash }}</div>
       <div><strong>Customer GSTIN:</strong> {{ invoice.customer_gstin or dash }}</div>

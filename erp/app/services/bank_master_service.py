@@ -276,11 +276,48 @@ class BankMasterService:
             "modified_date": row.ModifiedDate.isoformat() if isinstance(row.ModifiedDate, datetime) else "",
         }
 
-    def list_payment_accounts(self) -> list[dict]:
-        """Active bank accounts for sale invoice Payment Bank (QR/Bill Received only).
+    def _account_type_line(self, raw: str | None) -> str:
+        """Show the stored Bank Master type on one line, for example CA - Current Account."""
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        if "-" in text and " " not in text.split("-", 1)[0]:
+            code, _, name = text.partition("-")
+            code = code.strip()
+            name = name.strip()
+            if code and name:
+                return f"{code} - {name}"
+        for item in self.list_account_types_for_form():
+            code = (item.get("code") or "").strip()
+            name = (item.get("name") or "").strip()
+            if code.casefold() != text.casefold():
+                continue
+            if name and name.casefold() != code.casefold():
+                return f"{code} - {name}"
+            return code
+        return text
 
-        Cash is excluded (invoice QR). Accounts without QR/Bill Received stay off this list.
-        UPI ID is optional — invoice PDF shows a fallback when it is blank.
+    def _payment_account_line(self, data: dict) -> str:
+        """Bank name, account number, type, and UPI on a single line."""
+        bank_name = (data.get("bank_name") or "").strip() or "Bank"
+        number = (data.get("account_number") or "").strip()
+        line = bank_name
+        if number:
+            line += f" - {number}"
+        type_label = self._account_type_line(data.get("account_type"))
+        if type_label:
+            line += f" [{type_label}]"
+        upi = (data.get("upi_id") or "").strip()
+        if upi:
+            line += f" - UPI: {upi}"
+        return line
+
+    def list_payment_accounts(self, *, qr_bill_received_only: bool = True) -> list[dict]:
+        """Active non-cash bank accounts for sale invoice Payment Bank.
+
+        Account type is not a filter: CA, SB, CC, OD, and every other active
+        Bank Master type are included. Cash stays off this list because a sale
+        invoice cannot use cash for the payment QR.
         """
         self.repo.ensure_schema()
         rows = []
@@ -290,12 +327,10 @@ class BankMasterService:
             if self._is_cash_account(row.BankName, row.AccountNumber):
                 continue
             data = self._serialize(row)
-            if not data.get("qr_bill_received"):
+            if qr_bill_received_only and not data.get("qr_bill_received"):
                 continue
-            data["label"] = (
-                f"{data['bank_name']} · {data['account_number']}"
-                + (f" [{data['account_type']}]" if data["account_type"] else "")
-            )
+            data["label"] = self._payment_account_line(data)
+            data["payment_line"] = data["label"]
             rows.append(data)
         rows.sort(
             key=lambda r: (
@@ -313,10 +348,8 @@ class BankMasterService:
             if not row.ActiveStatus:
                 continue
             data = self._serialize(row)
-            data["label"] = (
-                f"{data['bank_name']} · {data['account_number']}"
-                + (f" [{data['account_type']}]" if data["account_type"] else "")
-            )
+            data["label"] = self._payment_account_line(data)
+            data["payment_line"] = data["label"]
             rows.append(data)
         rows.sort(key=lambda r: (0 if r.get("is_cash") else 1, (r.get("label") or "").lower()))
         return rows

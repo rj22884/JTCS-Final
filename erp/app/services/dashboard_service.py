@@ -532,24 +532,6 @@ class DashboardService:
     def _last4_account(masked: str | None, account_number: str | None) -> str:
         return DashboardService._account_suffix(account_number, masked)
 
-    @staticmethod
-    def _is_cash_account(bank_name: str | None, account_number: str | None) -> bool:
-        return (bank_name or "").strip().lower() == "cash" or (
-            account_number or ""
-        ).strip().lower() == "cash"
-
-    @staticmethod
-    def _mask_account_display(
-        account_number: str | None, bank_name: str | None = None
-    ) -> str:
-        """Cash → 'Cash'; numeric accounts → XXXX396; letter codes → XXXXStamp."""
-        if DashboardService._is_cash_account(bank_name, account_number):
-            return "Cash"
-        suffix = DashboardService._account_suffix(account_number)
-        if not suffix:
-            return "—"
-        return "XXXX" + suffix
-
     def _accounts_for_daily_txns(
         self, txn_ids: list[int]
     ) -> dict[int, list[tuple[str, str]]]:
@@ -588,25 +570,41 @@ class DashboardService:
                 """
                 SELECT
                     d.TransactionID AS transaction_id,
-                    bt.BankName AS bank_name,
-                    COALESCE(NULLIF(a.AccountNumber, N''), bt.MaskedAccountNumber, N'') AS account_number
+                    debit.BankName AS debit_bank_name,
+                    debit.AccountNumber AS debit_account_number,
+                    credit.BankName AS credit_bank_name,
+                    credit.AccountNumber AS credit_account_number,
+                    direct.BankName AS direct_bank_name,
+                    direct.AccountNumber AS direct_account_number
                 FROM JTCSDailyTransaction d
                 INNER JOIN JtcsBankTransaction bt
                     ON bt.JtcsBankTransactionID = d.BankTransactionID
-                LEFT JOIN JtcsBankAccountMaster a
-                    ON a.JtcsBankAccountID = bt.JtcsBankAccountID
+                LEFT JOIN JtcsBankAccountMaster direct
+                    ON direct.JtcsBankAccountID = bt.JtcsBankAccountID
+                   AND bt.JtcsBankAccountID > 0
+                LEFT JOIN OthersBankCashTransaction obc
+                    ON obc.OutBankTransactionID = d.BankTransactionID
+                    OR obc.InBankTransactionID = d.BankTransactionID
+                LEFT JOIN JtcsBankAccountMaster debit
+                    ON debit.JtcsBankAccountID = obc.DebitBankAccountID
+                LEFT JOIN JtcsBankAccountMaster credit
+                    ON credit.JtcsBankAccountID = obc.CreditBankAccountID
                 WHERE d.TransactionID IN :ids
                   AND d.BankTransactionID IS NOT NULL
                 """
             ).bindparams(bindparam("ids", expanding=True))
             for row in db.session.execute(fallback, {"ids": missing}).mappings().all():
                 tid = int(row["transaction_id"])
-                by_txn.setdefault(tid, []).append(
-                    (
-                        (row["bank_name"] or "").strip(),
-                        (row["account_number"] or "").strip(),
-                    )
+                pairs = (
+                    (row["debit_bank_name"], row["debit_account_number"]),
+                    (row["credit_bank_name"], row["credit_account_number"]),
+                    (row["direct_bank_name"], row["direct_account_number"]),
                 )
+                for bank_name, account_number in pairs:
+                    number = (account_number or "").strip()
+                    if not number:
+                        continue
+                    by_txn.setdefault(tid, []).append(((bank_name or "").strip(), number))
         return by_txn
 
     def _format_bank_accounts_label(
@@ -616,8 +614,10 @@ class DashboardService:
             return "—"
         labels: list[str] = []
         seen: set[str] = set()
-        for bank_name, account_number in accounts:
-            label = self._mask_account_display(account_number, bank_name)
+        for _bank_name, account_number in accounts:
+            label = (account_number or "").strip()
+            if not label:
+                continue
             key = label.casefold()
             if key in seen:
                 continue
@@ -646,8 +646,9 @@ class DashboardService:
     def get_watch_cards(self) -> dict:
         """Cards above Today's Activity Summary.
 
-        Follow-up rows are cases with Tally Bill Generated ticked and Payment
-        Received still open. Message cards are unread / inbound total.
+        Follow-up rows for ITR, GST and TDS are cases with Invoice ticked and
+        Payment Received still open. DSC still uses Tally Bill Generated.
+        Message cards are unread / inbound total.
         Court fee is imported e-Court receipts that have not been sold.
         """
         from flask import url_for
@@ -671,14 +672,24 @@ class DashboardService:
                                SUM(CASE WHEN t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL THEN 1 ELSE 0 END) AS Paid
                         FROM dbo.FollowupEntryMaster f
                         LEFT JOIN (
-                            SELECT DISTINCT EntryID
-                            FROM dbo.FollowupEntryStage
-                            WHERE StageCode = N'tally_bill_generated'
+                            SELECT DISTINCT es.EntryID
+                            FROM dbo.FollowupEntryStage es
+                            INNER JOIN dbo.FollowupEntryMaster fe ON fe.EntryID = es.EntryID
+                            WHERE (
+                                fe.ModuleCode IN (N'ITR', N'GST', N'TDS')
+                                AND es.StageCode IN (
+                                    N'invoice', N'Invoice',
+                                    N'tally_bill_generated', N'Tally Bill Generated'
+                                )
+                            ) OR (
+                                fe.ModuleCode = N'DSC'
+                                AND es.StageCode IN (N'tally_bill_generated', N'Tally Bill Generated')
+                            )
                         ) t ON t.EntryID = f.EntryID
                         LEFT JOIN (
                             SELECT DISTINCT EntryID
                             FROM dbo.FollowupEntryStage
-                            WHERE StageCode = N'payment_received'
+                            WHERE StageCode IN (N'payment_received', N'Payment Received')
                         ) p ON p.EntryID = f.EntryID
                         WHERE ISNULL(f.IsActive, 1) = 1
                         GROUP BY f.ModuleCode
@@ -859,12 +870,15 @@ class DashboardService:
                 INNER JOIN (
                     SELECT DISTINCT EntryID
                     FROM dbo.FollowupEntryStage
-                    WHERE StageCode = N'tally_bill_generated'
+                    WHERE StageCode IN (
+                        N'invoice', N'Invoice',
+                        N'tally_bill_generated', N'Tally Bill Generated'
+                    )
                 ) t ON t.EntryID = f.EntryID
                 LEFT JOIN (
                     SELECT DISTINCT EntryID
                     FROM dbo.FollowupEntryStage
-                    WHERE StageCode = N'payment_received'
+                    WHERE StageCode IN (N'payment_received', N'Payment Received')
                 ) p ON p.EntryID = f.EntryID
                 WHERE f.ModuleCode = N'ITR'
                   AND ISNULL(f.IsActive, 1) = 1
@@ -1370,29 +1384,16 @@ class DashboardService:
                 return base
 
             if wt_u == "ACCOUNTING" and "sale" in sw_l and ref:
-                row = db.session.execute(
-                    text(
-                        """
-                        SELECT TOP 1 InvoiceID
-                        FROM dbo.GstInvoice
-                        WHERE InvoiceNo = :invoice_no
-                        ORDER BY InvoiceID DESC
-                        """
-                    ),
-                    {"invoice_no": ref},
-                ).first()
-                if row:
-                    iid = int(row[0])
-                    base.update(
-                        {
-                            "source_module": "gst_invoice",
-                            "source_module_id": iid,
-                            "source_url": url_for(
-                                "accounting_invoice.invoice_sale", edit=iid
-                            ),
-                            "can_open": True,
-                        }
-                    )
+                base.update(
+                    {
+                        "source_module": "gst_invoice",
+                        "source_url": None,
+                        "can_open": False,
+                        "source_lock_message": (
+                            "This invoice can be edited or deleted only from the module that created it."
+                        ),
+                    }
+                )
                 return base
 
             if wt_u in {"ITR", "DSC", "TDS", "GST"} and "followup" in sw_l:
@@ -1667,18 +1668,16 @@ class DashboardService:
             return base
         voucher = (row["VoucherType"] or "SALE").strip().upper()
         iid = int(row["InvoiceID"])
-        if voucher == "PURCHASE":
-            endpoint = "accounting_invoice.invoice_purchase"
-            module = "invoice"
-        else:
-            endpoint = "accounting_invoice.invoice_sale"
-            module = "invoice"
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        owner = GstInvoiceService().source_owner_for_id(iid)
         base.update(
             {
-                "source_module": module,
+                "source_module": "invoice",
                 "source_module_id": iid,
-                "source_url": url_for(endpoint, edit=iid),
-                "can_open": True,
+                "source_url": None,
+                "can_open": False,
+                "source_lock_message": owner["message"],
                 "work_type": "Accounting",
                 "sub_work_type": "Purchase Invoice Payment" if voucher == "PURCHASE" else "Sale / Service Invoice",
             }

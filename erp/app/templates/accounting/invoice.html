@@ -5,7 +5,7 @@
 {% set party_label = 'Supplier' if is_purchase else 'Customer' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20261003invfilter1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/gst_invoice.css') }}?v=20261006invfit">
 {% endblock %}
 
 {# Ribbon left empty so the toolbar row collapses and bill moves up. #}
@@ -26,7 +26,7 @@
 
 {% block content %}
 <div class="inv-page inv-page-full" data-voucher-type="{{ voucher_type }}">
-  <div class="inv-card inv-workspace">
+  <div class="inv-card inv-workspace inv-form-card d-none" id="invFormCard">
     <div class="inv-card-head">
       <img src="{{ url_for('static', filename='img/jtcs_invoice_logo.png') }}" alt="JTCS Logo">
       <div class="flex-grow-1">
@@ -43,6 +43,7 @@
     <form id="invForm" novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" id="invId" value="">
+      <input type="hidden" id="invFollowupEntryId" value="">
       <input type="hidden" id="invVoucherType" value="{{ voucher_type }}">
 
       <div class="inv-workspace-body">
@@ -64,14 +65,25 @@
             </div>
           </div>
 
-          <div class="row g-compact mb-2">
-            {% if not is_purchase %}
-            <div class="col-auto">
-              <label class="form-label" for="invTallyBillNo">Tally Bill Number</label>
-              <input type="text" class="form-control form-control-sm inv-fw-md" id="invTallyBillNo"
-                     maxlength="50" placeholder="GST / TDS / DSC / ITR" autocomplete="off">
+          <div class="inv-pay-banks-line">
+            <div class="inv-pay-banks" id="invPayBanks">
+              {% for b in payment_banks %}
+              <div class="form-check mb-0 inv-pay-bank-row">
+                <input class="form-check-input inv-pay-bank" type="checkbox"
+                       id="invPayBank{{ b.account_id }}" value="{{ b.account_id }}"
+                       data-cash="{{ 1 if b.is_cash else 0 }}"
+                       data-label="{{ b.payment_line or b.label }}">
+                <label class="form-check-label" for="invPayBank{{ b.account_id }}">
+                  {{ b.payment_line or b.label }}
+                </label>
+              </div>
+              {% else %}
+              <div class="small text-muted">No bank accounts are available.</div>
+              {% endfor %}
             </div>
-            {% endif %}
+          </div>
+
+          <div class="row g-compact mb-2">
             <div class="col-auto">
               <label class="form-label" for="invNo">{% if is_purchase %}Supplier Invoice No *{% else %}Invoice No{% endif %}</label>
               {% if is_purchase %}
@@ -113,7 +125,7 @@
                      value="{% if is_purchase %}{% else %}{{ today }}{% endif %}" required>
             </div>
             <div class="col-auto position-relative">
-              <label class="form-label" for="invCustomerSearch">{{ party_label }} *</label>
+              <label class="form-label" for="invCustomerSearch">{% if is_purchase %}Supplier{% else %}Customer / Bill To{% endif %} *</label>
               <input type="search" class="form-control form-control-sm inv-fw-xl" id="invCustomerSearch"
                      placeholder="Select name / mobile / GSTIN" autocomplete="off">
               <input type="hidden" id="invCustomerId" value="">
@@ -125,20 +137,6 @@
               <select class="form-select form-select-sm inv-fw-xs" id="invRcm">
                 <option value="0" selected>No</option>
                 <option value="1">Yes</option>
-              </select>
-            </div>
-            <div class="col-auto">
-              <label class="form-label" for="invPayBank">Payment Bank *</label>
-              <select class="form-select form-select-sm inv-fw-xl" id="invPayBank" required>
-                <option value="">— Select —</option>
-                {% for b in payment_banks %}
-                <option value="{{ b.account_id }}"
-                        data-upi="{{ b.upi_id or '' }}"
-                        data-label="{{ b.label }}"
-                        data-cash="{{ 1 if b.is_cash else 0 }}">
-                  {{ b.label }}{% if b.upi_id %} · UPI: {{ b.upi_id }}{% endif %}
-                </option>
-                {% endfor %}
               </select>
             </div>
             {% if is_purchase %}
@@ -223,6 +221,12 @@
                 <button type="button" class="btn btn-inv-orange btn-sm" id="invSaveBtn">
                   <i class="bi bi-save"></i> Save Invoice
                 </button>
+                <button type="button" class="btn btn-outline-danger btn-sm d-none" id="invDeleteBtn">
+                  <i class="bi bi-trash"></i> Delete
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="invCancelBtn">
+                  Cancel
+                </button>
               </div>
             </div>
           </div>
@@ -232,7 +236,7 @@
           <div class="inv-section-title">Party Details</div>
           <div class="inv-party-fields">
             <div>
-              <label class="form-label" for="invCustomerName">{{ party_label }} Name *</label>
+              <label class="form-label" for="invCustomerName">{% if is_purchase %}Supplier Name{% else %}Customer / Bill To{% endif %} *</label>
               <input type="text" class="form-control form-control-sm" id="invCustomerName" required readonly>
             </div>
             <div>
@@ -278,6 +282,7 @@
   <div class="inv-card inv-grid-card">
     <div class="d-flex flex-wrap align-items-end gap-2 inv-saved-head">
       <h6 class="mb-0 me-auto">Saved {{ 'Purchase' if is_purchase else 'Sale / Service' }} Invoices</h6>
+      <button type="button" class="btn btn-inv-orange btn-sm" id="invNewBtn">+ New Invoice</button>
       <div>
         <input type="search" class="form-control form-control-sm inv-fw-lg" id="invGridSearch"
                placeholder="Search all columns...">
@@ -285,7 +290,7 @@
       <button type="button" class="btn btn-inv-outline btn-sm" id="invGridRefresh">
         <i class="bi bi-arrow-clockwise"></i> Refresh
       </button>
-      <span class="small text-muted" id="invGridCount">0 invoices</span>
+      <span class="small text-muted" id="invGridCount">Loading invoices...</span>
     </div>
     <div class="table-responsive">
       <table class="table table-sm table-hover table-striped align-middle mb-0">
@@ -338,7 +343,7 @@
         <tbody id="invGridBody"></tbody>
       </table>
     </div>
-    <div id="invGridEmpty" class="small text-muted py-3">No saved invoices yet. Save a bill to see it here.</div>
+    <div id="invGridEmpty" class="small text-muted py-3">Loading invoices...</div>
   </div>
 </div>
 
@@ -396,9 +401,9 @@
     nextInvoiceNo: {{ next_invoice_no | tojson }},
     voucherType: {{ voucher_type | tojson }},
     canTickConverted: {{ can_tick_converted | tojson }},
-    tallyBill: {{ url_for('accounting_invoice.api_tally_bill_lookup') | tojson }},
     csrf: {{ csrf_token() | tojson }}
   };
 </script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261003invfilter1"></script>
+<script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261007receiptclose"></script>
 {% endblock %}

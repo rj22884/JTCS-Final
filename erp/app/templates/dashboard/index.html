@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004custom1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004kpisize3">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -11,9 +11,16 @@
 <div class="dash-page">
   <div class="dash-kpi-row">
     {% for item in watch_cards.followups %}
+    {% set kpi_icon = {
+      'ITR': 'bi-currency-rupee',
+      'GST': 'bi-receipt',
+      'TDS': 'bi-percent',
+      'DSC': 'bi-usb-drive',
+      'MISC': 'bi-collection'
+    }.get(item.code, item.icon) %}
     <a class="dash-kpi dash-kpi--{{ item.tone }}" href="{{ item.url or '#' }}">
-      <span class="dash-kpi-icon"><i class="bi {{ item.icon }}"></i></span>
-      <i class="bi {{ item.icon }} dash-kpi-ghost" aria-hidden="true"></i>
+      <span class="dash-kpi-icon"><i class="bi {{ kpi_icon }}"></i></span>
+      <i class="bi {{ kpi_icon }} dash-kpi-ghost" aria-hidden="true"></i>
       <div class="dash-kpi-title">{{ item.label }}</div>
       <div class="dash-kpi-value">{{ item.count }}</div>
       <div class="dash-kpi-source">{{ item.source }}</div>
@@ -389,6 +396,7 @@
                     data-bank-account="{{ row.bank_account or '' }}"
                     data-amount="{{ row.amount or '' }}"
                     data-is-expense="{{ '1' if row.is_expense else '0' }}"
+                    data-source-lock="{{ row.source_lock_message or '' }}"
                     {% if row.can_open %}role="button" tabindex="0" title="Open source entry form"{% endif %}>
                   <td class="text-nowrap">{{ (row.entry_datetime or row.entry_date) | display_datetime }}</td>
                   <td>{{ row.work }}</td>
@@ -808,9 +816,9 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261001dash1"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261006owner"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20261001dash1"></script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260909ob1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261006owner"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>
 <div class="modal fade" id="dashCustomModal" tabindex="-1" aria-labelledby="dashCustomModalTitle" aria-hidden="true">
   <div class="modal-dialog">
