@@ -166,8 +166,16 @@ def invoice_index():
         from app.extensions import db
 
         db.session.rollback()
-    # Preserve followup / deep-link billing: open Sale form with query params.
-    if (request.args.get("customer_id") or request.args.get("customer_name") or "").strip():
+    # Follow-up edit/create links land on /accounting/invoice. The sale form
+    # lives at /invoice/sale. Keep edit, create, and billing query params.
+    deep_link = (
+        request.args.get("edit")
+        or request.args.get("open_form")
+        or request.args.get("fu_embed")
+        or request.args.get("customer_id")
+        or request.args.get("customer_name")
+    )
+    if str(deep_link or "").strip():
         target = url_for("accounting_invoice.invoice_sale")
         qs = request.query_string.decode("utf-8", errors="ignore")
         return redirect(f"{target}?{qs}" if qs else target)
@@ -370,6 +378,20 @@ def api_list_invoices():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@bp.route("/api/invoices/<int:invoice_id>/payment-adjustment", methods=["GET"], strict_slashes=False)
+@login_required
+def api_invoice_payment_adjustment(invoice_id: int):
+    try:
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        adjustment = OthersBankCashService().invoice_payment_adjustment(invoice_id)
+        return jsonify({"ok": True, "adjustment": adjustment})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 404
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
 @bp.route("/api/invoices/<int:invoice_id>", methods=["GET"], strict_slashes=False)
 @login_required
 def api_get_invoice(invoice_id: int):
@@ -399,7 +421,9 @@ def api_create_invoice():
     payload = request.get_json(silent=True) or {}
     try:
         record = GstInvoiceService().create_record(
-            payload, created_by=session.get("username") or session.get("user_name")
+            payload,
+            created_by=session.get("username") or session.get("user_name"),
+            require_payment_bank=True,
         )
         return jsonify(
             {
@@ -422,7 +446,9 @@ def api_create_invoice():
 def api_update_invoice(invoice_id: int):
     payload = request.get_json(silent=True) or {}
     try:
-        record = GstInvoiceService().update_record(invoice_id, payload)
+        record = GstInvoiceService().update_record(
+            invoice_id, payload, require_payment_bank=True
+        )
         return jsonify(
             {
                 "ok": True,
@@ -457,6 +483,20 @@ def api_invoice_workflow(invoice_id: int):
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
+@bp.route("/api/customer-bill-summary", methods=["GET"], strict_slashes=False)
+@login_required
+def api_customer_bill_summary():
+    """Cumulative sale invoice, payment received, and overdue for one customer."""
+    customer_id = request.args.get("customer_id", type=int)
+    if not customer_id:
+        return jsonify({"ok": False, "error": "Customer is required."}), 400
+    try:
+        totals = GstInvoiceService().customer_sale_totals(customer_id)
+        return jsonify({"ok": True, **totals})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @bp.route("/api/invoices/navigate", methods=["GET"], strict_slashes=False)
@@ -553,16 +593,18 @@ def api_next_invoice_no():
 def api_delete_invoice(invoice_id: int):
     payload = request.get_json(silent=True) or {}
     try:
+        if not invoice_id or int(invoice_id) <= 0:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Unable to delete invoice: Invoice ID is missing or invalid.",
+                }
+            ), 400
         svc = GstInvoiceService()
-        inv = svc.repo.get_by_id(invoice_id)
-        if (
-            inv is not None
-            and svc.normalize_bill_source(getattr(inv, "BillSource", None))
-            == svc.BILL_SOURCE_MISCELLANEOUS
-            and not svc._form_flag(payload, "from_source")
-        ):
-            return jsonify({"ok": False, "error": svc.converted_edit_message(inv)}), 400
-        message = svc.delete_record(invoice_id)
+        inv = svc.repo.get_by_id(int(invoice_id))
+        if inv is None:
+            return jsonify({"ok": False, "error": "Invoice not found."}), 404
+        message = svc.delete_record(int(invoice_id), payload=payload)
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
