@@ -38,6 +38,8 @@
   let pollTimer = null;
   let activeBucket = "";
   let staffRows = [];
+  let templateRows = [];
+  let templateDefaults = {};
   let allLabels = [];
   const convById = {};
 
@@ -98,6 +100,194 @@
     return "";
   }
 
+  const promptedThisPage = {};
+  let linkDialogConvId = null;
+
+  function conversationTitle(c) {
+    if (!c) return "Unknown WhatsApp Contact";
+    if (c.CustomerName) return c.CustomerName;
+    if (c.LeadName) return c.LeadName;
+    const subject = String(c.Subject || "").trim();
+    if (
+      !subject ||
+      subject === "Unknown WhatsApp Contact" ||
+      subject === "Multiple Customers Found" ||
+      subject === "Unlinked WhatsApp Contact"
+    ) {
+      return "Unknown WhatsApp Contact";
+    }
+    return subject;
+  }
+
+  function contactMobileOf(c) {
+    if (!c) return "";
+    return c.ContactMobile || c.WhatsAppNumber || c.MobileNumber || c.LeadMobile || "";
+  }
+
+  function candidateList(conv) {
+    const raw = (conv && (conv.link_candidates || conv.match_candidates)) || [];
+    return raw
+      .map(function (row) {
+        return {
+          customer_id: row.customer_id || row.CustomerID,
+          customer_name: row.customer_name || row.CustomerName || "",
+          mobile: row.mobile || row.MobileNumber || row.WhatsAppNumber || row.AlternateMobile || "",
+          email: row.email || row.EmailID || "",
+        };
+      })
+      .filter(function (row) {
+        return row.customer_id;
+      });
+  }
+
+  function linkModal() {
+    const el = document.getElementById("crmWaLinkModal");
+    if (!el || !window.bootstrap) return null;
+    return bootstrap.Modal.getOrCreateInstance(el);
+  }
+
+  function selectedLinkCustomerId() {
+    const picked = document.querySelector("#crmWaLinkChoices input[name='crmWaCustomer']:checked");
+    if (picked) return parseInt(picked.value, 10);
+    const conv = convById[linkDialogConvId] || activeConvMeta;
+    const rows = candidateList(conv);
+    if (rows.length === 1) return parseInt(rows[0].customer_id, 10);
+    return null;
+  }
+
+  function openCustomerRecord(customerId) {
+    const base = api.customer360 || "/crm/customer-360";
+    const url = String(base).replace(/\/?$/, "/") + customerId;
+    const host = window.top || window;
+    if (host.jtcsOpenPageWindow) host.jtcsOpenPageWindow(url, "Customer");
+    else window.location.href = url;
+  }
+
+  async function confirmCustomerLink() {
+    const customerId = selectedLinkCustomerId();
+    if (!customerId || !linkDialogConvId || !api.link) {
+      CrmCommon.showAlert("Select the Customer Master record to link.", "warning");
+      return;
+    }
+    const convId = linkDialogConvId;
+    await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, convId), {
+      method: "POST",
+      body: { action: "link_customer", customer_id: customerId },
+    });
+    promptedThisPage[convId] = true;
+    linkDialogConvId = null;
+    const modal = linkModal();
+    if (modal) modal.hide();
+    if (activeConvId === convId) await selectConversation(convId);
+    else await loadConversations();
+  }
+
+  function openLinkDialog(conv, mode) {
+    const modal = linkModal();
+    if (!modal || !conv) return;
+    linkDialogConvId = conv.ConversationID;
+    const candidates = candidateList(conv);
+    const multiple = candidates.length > 1;
+    const phone = contactMobileOf(conv) || "—";
+    const title = document.getElementById("crmWaLinkTitle");
+    const message = document.getElementById("crmWaLinkMessage");
+    const phoneEl = document.getElementById("crmWaLinkPhone");
+    const customerBlock = document.getElementById("crmWaLinkCustomerBlock");
+    const customerEl = document.getElementById("crmWaLinkCustomer");
+    const choices = document.getElementById("crmWaLinkChoices");
+    const actions = document.getElementById("crmWaLinkActions");
+    if (phoneEl) phoneEl.textContent = phone;
+    if (multiple) {
+      if (title) title.textContent = "Select Customer Master record";
+      if (message) {
+        message.textContent =
+          "Multiple Customer Master records match this WhatsApp contact. Please select the correct customer.";
+      }
+      if (customerBlock) customerBlock.classList.add("d-none");
+      if (choices) {
+        choices.classList.remove("d-none");
+        choices.innerHTML = candidates
+          .map(function (row, index) {
+            return (
+              '<label class="list-group-item">' +
+              '<input class="form-check-input me-2" type="radio" name="crmWaCustomer" value="' +
+              row.customer_id +
+              '"' +
+              (index === 0 ? " checked" : "") +
+              "> " +
+              "<strong>" +
+              CrmCommon.escapeHtml(row.customer_name || "Customer") +
+              "</strong>" +
+              "<div class=\"small text-muted\">" +
+              CrmCommon.escapeHtml(row.mobile || "") +
+              " · Customer ID " +
+              row.customer_id +
+              "</div></label>"
+            );
+          })
+          .join("");
+      }
+    } else {
+      const one = candidates[0] || {};
+      if (title) title.textContent = mode === "exists" ? "Customer already exists" : "Link WhatsApp contact";
+      if (message) {
+        message.textContent =
+          mode === "exists"
+            ? "Customer already exists in Customer Master."
+            : "An existing Customer Master record matches this WhatsApp contact. Do you want to link/merge this WhatsApp contact with the existing Customer Master record?";
+      }
+      if (customerBlock) customerBlock.classList.remove("d-none");
+      if (customerEl) {
+        customerEl.textContent = [one.customer_name || "Customer", one.mobile || ""]
+          .filter(Boolean)
+          .join("\n");
+        customerEl.style.whiteSpace = "pre-line";
+      }
+      if (choices) {
+        choices.classList.add("d-none");
+        choices.innerHTML = "";
+      }
+    }
+    if (actions) {
+      const buttons = [];
+      if (mode === "exists") {
+        buttons.push(
+          '<button type="button" class="btn btn-outline-primary btn-sm" data-wa-link="open">Open Customer</button>'
+        );
+        buttons.push(
+          '<button type="button" class="btn btn-outline-primary btn-sm" data-wa-link="link">Link WhatsApp</button>'
+        );
+      }
+      buttons.push(
+        '<button type="button" class="btn btn-primary btn-sm" data-wa-link="merge">Merge &amp; Link</button>'
+      );
+      if (mode !== "exists") {
+        buttons.push(
+          '<button type="button" class="btn btn-outline-secondary btn-sm" data-wa-link="later">Not Now</button>'
+        );
+      }
+      buttons.push(
+        '<button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>'
+      );
+      actions.innerHTML = buttons.join("");
+    }
+    modal.show();
+  }
+
+  function maybePromptLinks(rows) {
+    const modalEl = document.getElementById("crmWaLinkModal");
+    if (modalEl && modalEl.classList.contains("show")) return;
+    const row = (rows || []).find(function (item) {
+      if (item.CustomerID) return false;
+      if ((item.Channel || "") !== "WhatsApp") return false;
+      if (!item.link_prompt) return false;
+      if (!candidateList(item).length) return false;
+      if (promptedThisPage[item.ConversationID]) return false;
+      return true;
+    });
+    if (row) openLinkDialog(row, "merge");
+  }
+
   function renderConversations(rows) {
     if (!rows.length) {
       convList.innerHTML = "";
@@ -113,18 +303,15 @@
         const id = c.ConversationID;
         const unread = (c.UnreadCount || 0) > 0 ? " is-unread" : "";
         const active = id === activeConvId ? " is-active" : "";
-        const name =
-          c.IsUnknown
-            ? "Unknown WhatsApp Contact"
-            : c.CustomerName || c.LeadName || c.Subject || "Conversation #" + id;
+        const name = conversationTitle(c);
         const pin = c.IsPinned ? '<i class="bi bi-pin-angle-fill wa-pin"></i> ' : "";
         const badge =
           (c.UnreadCount || 0) > 0
             ? '<span class="wa-unread-pill">' + c.UnreadCount + "</span>"
             : "";
-        const mobile =
-          c.ContactMobile || c.WhatsAppNumber || c.MobileNumber || c.LeadMobile || "";
+        const mobile = contactMobileOf(c);
         const preview = c.LastMessagePreview || "";
+        const when = c.LastMessageAt ? CrmCommon.formatDate(c.LastMessageAt) : "";
         const pri = c.Priority && c.Priority !== "Normal" ? " · " + c.Priority : "";
         const unk = c.IsUnknown ? ' <span class="wa-unknown">Unknown</span>' : "";
         return (
@@ -144,9 +331,10 @@
           "</div>" +
           '<div class="crm-conv-meta">' +
           CrmCommon.escapeHtml(mobile) +
-          (c.LastMessageAt ? " · " + CrmCommon.formatDate(c.LastMessageAt) : "") +
-          pri +
           "</div>" +
+          (when
+            ? '<div class="crm-conv-meta">' + CrmCommon.escapeHtml(when) + pri + "</div>"
+            : "") +
           (preview
             ? '<div class="crm-conv-preview">' + CrmCommon.escapeHtml(preview) + "</div>"
             : "") +
@@ -272,13 +460,14 @@
       conv.LeadMobile ||
       "";
     const email = conv.ContactEmail || conv.EmailID || conv.LeadEmail || "";
-    detailName.textContent = conv.IsUnknown
-      ? "Unknown WhatsApp Contact"
-      : conv.CustomerName || conv.LeadName || conv.Subject || "—";
+    detailName.textContent = conversationTitle(conv);
     detailContact.textContent = [mobile, email].filter(Boolean).join(" · ") || "—";
 
     const unknownBanner = document.getElementById("crmUnknownBanner");
-    if (unknownBanner) unknownBanner.hidden = !conv.IsUnknown;
+    const linkExistingBtn = document.getElementById("crmLinkExistingBtn");
+    const hasCustomerMatch = !conv.CustomerID && candidateList(conv).length > 0;
+    if (linkExistingBtn) linkExistingBtn.classList.toggle("d-none", !hasCustomerMatch);
+    if (unknownBanner) unknownBanner.hidden = !!conv.CustomerID || (!conv.IsUnknown && !hasCustomerMatch);
 
     const st = document.getElementById("crmDetailStatus");
     if (st && conv.Status) st.value = conv.Status;
@@ -359,6 +548,7 @@
     if (labelF && labelF.value) params.set("label_id", labelF.value);
     const data = await CrmCommon.apiFetch(api.list + "?" + params.toString());
     renderConversations(data.rows || []);
+    maybePromptLinks(data.rows || []);
     const unreadSum = (data.rows || []).reduce(function (n, r) {
       return n + (parseInt(r.UnreadCount, 10) || 0);
     }, 0);
@@ -367,8 +557,7 @@
 
   function showConversation(conv, id) {
     const row = conv || {};
-    subjectEl.textContent =
-      row.CustomerName || row.LeadName || row.Subject || "Conversation #" + id;
+    subjectEl.textContent = conversationTitle(row) || "Conversation #" + id;
     channelEl.textContent = row.Channel || "WhatsApp";
     replyWrap.classList.remove("d-none");
     setContactActions(row);
@@ -437,15 +626,27 @@
               .join("");
         }
       }
+    } catch (_qrErr) {}
+    try {
       if (api.templates) {
-        const tp = await CrmCommon.apiFetch(
-          api.templates + (activeChannel ? "?channel=" + encodeURIComponent(activeChannel) : "")
-        );
+        const params = new URLSearchParams();
+        if (activeChannel) params.set("channel", activeChannel);
+        if (!activeChannel || activeChannel === "WhatsApp") params.set("source", "meta");
+        const query = params.toString();
+        const tp = await CrmCommon.apiFetch(api.templates + (query ? "?" + query : ""));
+        templateRows = tp.rows || [];
+        templateDefaults = tp.defaults || {};
         const sel = document.getElementById("crmTemplateSelect");
-        if (sel) {
+        const helpers = window.JtcsInboxTemplates;
+        if (sel && helpers) {
+          const rendered = helpers.renderTemplateOptions(templateRows, tp.meta_error || "");
+          sel.innerHTML = rendered.html;
+          showTemplateNotice(rendered.notice);
+          hideTemplateVars();
+        } else if (sel) {
           sel.innerHTML =
             '<option value="">Templates…</option>' +
-            (tp.rows || [])
+            templateRows
               .map(function (r) {
                 return (
                   '<option value="' +
@@ -458,7 +659,87 @@
               .join("");
         }
       }
-    } catch (_e) {}
+    } catch (err) {
+      const sel = document.getElementById("crmTemplateSelect");
+      const message = (err && err.message) || "WhatsApp templates could not be loaded.";
+      if (sel && window.JtcsInboxTemplates) {
+        sel.innerHTML = window.JtcsInboxTemplates.renderTemplateOptions([], message).html;
+      }
+      showTemplateNotice(message);
+      hideTemplateVars();
+    }
+  }
+
+  function showTemplateNotice(message) {
+    const notice = document.getElementById("crmTemplateNotice");
+    if (!notice) return;
+    if (!message) {
+      notice.textContent = "";
+      notice.classList.add("d-none");
+      return;
+    }
+    notice.textContent = message;
+    notice.classList.remove("d-none");
+  }
+
+  function hideTemplateVars() {
+    const box = document.getElementById("crmTemplateVars");
+    if (!box) return;
+    box.classList.add("d-none");
+    box.innerHTML = "";
+  }
+
+  function applySelectedTemplate(row) {
+    const helpers = window.JtcsInboxTemplates;
+    const body = document.getElementById("crmReplyBody");
+    const box = document.getElementById("crmTemplateVars");
+    if (!helpers || !body || !box || !row) return;
+    const fields = helpers.variableFields(row, templateDefaults, activeConvMeta);
+    if (!fields.length) {
+      hideTemplateVars();
+      body.value = row.Body || "";
+      return;
+    }
+    const values = {};
+    fields.forEach(function (field) {
+      values[field.key] = field.value;
+    });
+    body.value = helpers.fillTemplateBody(row.Body || "", values);
+    const buttons = (row.Buttons || [])
+      .map(function (button) {
+        return button.text || button.type || "";
+      })
+      .filter(Boolean);
+    box.classList.remove("d-none");
+    box.innerHTML =
+      fields
+        .map(function (field) {
+          return (
+            '<label>' +
+            CrmCommon.escapeHtml(field.label) +
+            '<input type="text" data-template-var="' +
+            CrmCommon.escapeHtml(field.key) +
+            '" value="' +
+            CrmCommon.escapeHtml(field.value) +
+            '">' +
+            "</label>"
+          );
+        })
+        .join("") +
+      (buttons.length
+        ? '<div class="wa-template-buttons">Template buttons: ' +
+          CrmCommon.escapeHtml(buttons.join(", ")) +
+          "</div>"
+        : "");
+    box.querySelectorAll("[data-template-var]").forEach(function (input) {
+      input.addEventListener("input", function () {
+        const next = {};
+        box.querySelectorAll("[data-template-var]").forEach(function (field) {
+          next[field.getAttribute("data-template-var")] = field.value;
+        });
+        body.value = helpers.fillTemplateBody(row.Body || "", next);
+      });
+    });
   }
 
   async function patchConv(body) {
@@ -739,6 +1020,16 @@
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener("change", function () {
+      if (id === "crmTemplateSelect") {
+        const opt = el.options[el.selectedIndex];
+        const index = opt ? parseInt(opt.getAttribute("data-index"), 10) : NaN;
+        const row = templateRows[index];
+        if (row && Array.isArray(row.Variables) && row.Variables.length) {
+          applySelectedTemplate(row);
+          return;
+        }
+        hideTemplateVars();
+      }
       if (!el.value) return;
       document.getElementById("crmReplyBody").value = el.value;
       el.selectedIndex = 0;
@@ -906,10 +1197,23 @@
       const btn = e.target.closest("[data-link-action]");
       if (!btn || !activeConvId || !api.link) return;
       const action = btn.getAttribute("data-link-action");
-      const name = (await JTCSDialog.prompt(
-        "Name for this contact",
-        activeConvMeta && (activeConvMeta.Subject || "")
-      )) || "";
+      const conv = activeConvMeta || convById[activeConvId] || {};
+      if (action === "review_match") {
+        openLinkDialog(conv, "merge");
+        return;
+      }
+      if (action === "create_customer" && candidateList(conv).length) {
+        openLinkDialog(conv, "exists");
+        return;
+      }
+      let name = "";
+      if (action !== "ignore") {
+        name =
+          (await JTCSDialog.prompt(
+            "Name for this contact",
+            activeConvMeta && (activeConvMeta.Subject || "")
+          )) || "";
+      }
       try {
         await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, activeConvId), {
           method: "POST",
@@ -918,8 +1222,58 @@
         selectConversation(activeConvId);
         loadConversations();
       } catch (err) {
+        if (err.data && err.data.already_exists) {
+          conv.link_candidates = err.data.candidates || candidateList(conv);
+          openLinkDialog(conv, "exists");
+          return;
+        }
         CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
       }
+    });
+
+  document.getElementById("crmWaLinkModal") &&
+    document.getElementById("crmWaLinkModal").addEventListener("click", async function (e) {
+      const btn = e.target.closest("[data-wa-link]");
+      if (!btn) return;
+      const kind = btn.getAttribute("data-wa-link");
+      const convId = linkDialogConvId;
+      if (kind === "later") {
+        promptedThisPage[convId] = true;
+        try {
+          await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.link, convId), {
+            method: "POST",
+            body: { action: "dismiss_link" },
+          });
+        } catch (err) {
+          CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+        }
+        const modal = linkModal();
+        if (modal) modal.hide();
+        linkDialogConvId = null;
+        loadConversations();
+        return;
+      }
+      if (kind === "open") {
+        const customerId = selectedLinkCustomerId();
+        if (!customerId) {
+          CrmCommon.showAlert("Select the Customer Master record to open.", "warning");
+          return;
+        }
+        openCustomerRecord(customerId);
+        return;
+      }
+      if (kind === "merge" || kind === "link") {
+        try {
+          await confirmCustomerLink();
+        } catch (err) {
+          CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
+        }
+      }
+    });
+  document.getElementById("crmWaLinkModal") &&
+    document.getElementById("crmWaLinkModal").addEventListener("hidden.bs.modal", function () {
+      if (linkDialogConvId) promptedThisPage[linkDialogConvId] = true;
+      linkDialogConvId = null;
     });
 
   const detailStatus = document.getElementById("crmDetailStatus");

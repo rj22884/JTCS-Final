@@ -160,6 +160,20 @@ class WhatsAppMetaClient:
             },
         )
 
+    def list_message_templates(self, waba_id: str) -> list[dict[str, Any]]:
+        """Read-only GET /{waba-id}/message_templates, following Graph pagination."""
+        waba = (waba_id or "").strip()
+        if not waba:
+            raise MetaGraphError("WABA ID is required to list message templates.")
+        return self._get_all_pages(
+            f"/{waba}/message_templates",
+            {
+                "fields": "name,status,language,category,components,quality_score,rejected_reason",
+                "limit": "100",
+            },
+            max_pages=20,
+        )
+
     def get_business(self, business_id: str) -> dict[str, Any]:
         return self.get(f"/{business_id}", {"fields": "id,name"})
 

@@ -367,6 +367,40 @@ html.jtcs-embed .jtcs-content:has(.wa-inbox) {
   padding-bottom: 0.15rem;
 }
 
+.wa-template-notice {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: #9a3412;
+}
+
+.wa-template-vars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.wa-template-vars label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0;
+  font-size: 0.68rem;
+  color: #3d4a45;
+}
+
+.wa-template-vars input {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.wa-template-buttons {
+  grid-column: 1 / -1;
+  font-size: 0.68rem;
+  color: #667085;
+}
+
 .wa-composer .btn-success {
   background: var(--wa-green);
   border-color: var(--wa-green);

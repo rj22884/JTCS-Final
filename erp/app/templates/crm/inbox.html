@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260818">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261004ctx1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007watpl">
 {% endblock %}
 
 {% block content %}
@@ -125,6 +125,8 @@
             <option value="">Templates…</option>
           </select>
         </div>
+        <div id="crmTemplateNotice" class="wa-template-notice d-none" role="status"></div>
+        <div id="crmTemplateVars" class="wa-template-vars d-none"></div>
         <form id="crmInboxReplyForm" class="wa-compose">
           <div class="wa-compose-tools">
             <select class="form-select form-select-sm crm-reply-channel" id="crmReplyChannel">
@@ -170,6 +172,7 @@
           <div class="alert alert-warning py-2 px-2 mb-2 small">
             <strong>Unknown WhatsApp Contact</strong>
             <div class="d-flex flex-wrap gap-1 mt-2">
+              <button type="button" class="btn btn-sm btn-success d-none" id="crmLinkExistingBtn" data-link-action="review_match">Merge &amp; Link</button>
               <button type="button" class="btn btn-sm btn-primary" data-link-action="create_customer">Create Customer</button>
               <button type="button" class="btn btn-sm btn-outline-primary" data-link-action="create_lead">Create Lead</button>
               <button type="button" class="btn btn-sm btn-outline-secondary" data-link-action="ignore">Ignore</button>
@@ -355,9 +358,33 @@
     </div>
   </div>
 </div>
+<div class="modal fade" id="crmWaLinkModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="crmWaLinkTitle">Link WhatsApp contact</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2" id="crmWaLinkMessage"></p>
+        <div class="small mb-2">
+          <div class="text-muted">WhatsApp Contact</div>
+          <div id="crmWaLinkPhone" class="fw-semibold"></div>
+        </div>
+        <div class="small mb-2" id="crmWaLinkCustomerBlock">
+          <div class="text-muted">Customer Master</div>
+          <div id="crmWaLinkCustomer" class="fw-semibold"></div>
+        </div>
+        <div id="crmWaLinkChoices" class="list-group mb-2 d-none"></div>
+      </div>
+      <div class="modal-footer py-2 flex-wrap" id="crmWaLinkActions"></div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script src="{{ url_for('static', filename='js/crm/crm_common.js') }}?v=20260823dmy1"></script>
-<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261004ctx1"></script>
+<script src="{{ url_for('static', filename='js/crm/inbox_templates.js') }}?v=20261007watpl"></script>
+<script src="{{ url_for('static', filename='js/crm/inbox.js') }}?v=20261007watpl"></script>
 {% endblock %}

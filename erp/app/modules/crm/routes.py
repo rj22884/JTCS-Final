@@ -1088,6 +1088,22 @@ def conversation_link(conversation_id: int):
         )
         return jsonify({"ok": True, "action": "ignore"})
 
+    if action == "dismiss_link":
+        CommunicationService().update_conversation(
+            conversation_id,
+            match_status="PromptDismissed",
+            assigned_by_user_id=_uid(),
+            assigned_by_name=_uname(),
+        )
+        AuditService().log(
+            action_name="WhatsAppLinkDeferred",
+            entity_type="CrmConversation",
+            entity_id=conversation_id,
+            user_id=_uid(),
+            user_name=_uname(),
+        )
+        return jsonify({"ok": True, "action": "dismiss_link"})
+
     if action == "keep_unlinked":
         CommunicationService().update_conversation(
             conversation_id,
@@ -1148,6 +1164,24 @@ def conversation_link(conversation_id: int):
     if action in {"create_customer", "link_customer"}:
         customer_id = payload.get("customer_id")
         matches = link.find_customers_by_mobile(mobile) if mobile else []
+        if action == "create_customer" and not matches and conv.get("ContactEmail"):
+            matches = link.match_customers(email=conv.get("ContactEmail"))
+        if action == "create_customer" and matches and not payload.get("confirm_link"):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "Customer already exists in Customer Master.",
+                    "already_exists": True,
+                    "candidates": [
+                        {
+                            "customer_id": int(item["CustomerID"]),
+                            "customer_name": item.get("CustomerName") or "",
+                            "mobile": item.get("MobileNumber") or item.get("WhatsAppNumber") or mobile,
+                        }
+                        for item in matches
+                    ],
+                }
+            ), 409
         if action == "link_customer":
             if not customer_id:
                 return jsonify(
@@ -1239,7 +1273,7 @@ def conversation_link(conversation_id: int):
     return jsonify(
         {
             "ok": False,
-            "error": "Unknown action. Use create_lead, create_customer, link_customer, keep_unlinked, or ignore.",
+            "error": "Unknown action. Use create_lead, create_customer, link_customer, dismiss_link, keep_unlinked, or ignore.",
         }
     ), 400
 
@@ -1661,10 +1695,14 @@ def quick_replies_create():
 @crm_api_bp.route("/templates", methods=["GET"])
 @login_required
 def templates_list():
+    channel = request.args.get("channel")
+    source = (request.args.get("source") or "").strip().lower()
+    if source == "meta":
+        return jsonify(TemplateService().list_inbox_templates(channel=channel))
     return jsonify(
         {
             "ok": True,
-            "rows": TemplateService().list_templates(channel=request.args.get("channel")),
+            "rows": TemplateService().list_templates(channel=channel),
         }
     )
 

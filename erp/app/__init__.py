@@ -552,6 +552,15 @@ def create_app(config_class: type = Config) -> Flask:
             app.logger.warning("Customer Master / portal schema ensure skipped: %s", exc)
 
         try:
+            from app.repositories.followup_repository import FollowupRepository
+
+            FollowupRepository().ensure_gst_month_column()
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            app.logger.warning("GST follow-up month column ensure skipped: %s", exc)
+
+        try:
             from app.repositories.dynamic_master_fields_repository import (
                 DynamicMasterFieldsRepository,
             )

@@ -17,7 +17,12 @@ from app.models.others import (
     PrintingScanMaster,
     WorkMaster,
 )
-from app.models.bank_cash import OthersBankCashTransaction, PurposeMaster, RdAccountMaster
+from app.models.bank_cash import (
+    OthersBankCashInvoiceAllocation,
+    OthersBankCashTransaction,
+    PurposeMaster,
+    RdAccountMaster,
+)
 from app.models.credentials_master import CredentialsMaster
 from app.models.seo_keyword import SeoKeyword
 from app.models.website_estamp import WebsiteEStampOrder
@@ -88,6 +93,7 @@ __all__ = [
     "OthersIncomeExpenseMaster",
     "OthersIncomeExpenseDetail",
     "OthersBankCashTransaction",
+    "OthersBankCashInvoiceAllocation",
     "PurposeMaster",
     "CredentialsMaster",
     "SeoKeyword",

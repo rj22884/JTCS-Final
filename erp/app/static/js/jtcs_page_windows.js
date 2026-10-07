@@ -8,6 +8,7 @@
     if (!path) return false;
     if (path.indexOf("/api/notifications") !== -1 || path.indexOf("/api/whats-new") !== -1) return false;
     if (path.indexOf("/api/crm/") !== -1) return false;
+    if (path.indexOf("/api/invoices") !== -1) return false;
     if (/\/(read|unread|search|analytics|simulate|draft|sync|reply|attachments|labels|whatsapp|preview|export)(\/|$)/.test(path)) return false;
     if (method === "DELETE" || path.indexOf("/delete") !== -1) return true;
     if (method === "POST" || method === "PUT" || method === "PATCH") {
@@ -304,7 +305,23 @@
     else refreshTaskbar();
   }
 
-  function closeWindow(win) {
+  function closeWindow(win, force) {
+    if (!force && win) {
+      var frame = win.querySelector("iframe");
+      try {
+        var ask = frame && frame.contentWindow && frame.contentWindow.jtcsRequestClose;
+        if (typeof ask === "function") {
+          var result = ask();
+          if (result && typeof result.then === "function") {
+            result.then(function (allow) {
+              if (allow) closeWindow(win, true);
+            });
+            return;
+          }
+          if (result === false) return;
+        }
+      } catch (err) {}
+    }
     if (win && win.parentNode) win.parentNode.removeChild(win);
     var remaining = allWindows();
     if (remaining.length) {
@@ -619,11 +636,49 @@
   });
 
   window.jtcsClosePageWindow = closeWindow;
-
-  if (document.readyState === "loading") {
   window.jtcsEscCloseAll = escCloseAll;
-
+  window.jtcsFinishInvoiceReceiptReturn = function (opts) {
+    opts = opts || {};
+    ensureHosts();
+    var returnPath = "";
+    try {
+      var raw = String(opts.returnPath || "");
+      if (raw) {
+        var parsed = new URL(raw, window.location.origin);
+        if (parsed.origin === window.location.origin) {
+          returnPath = parsed.pathname.replace(/\/+$/, "").toLowerCase();
+        }
+      }
+    } catch (err) {
+      returnPath = "";
+    }
+    var win = opts.windowEl || null;
+    if (win) closeWindow(win, true);
+    if (!returnPath) return { focused: false, closed: !!win };
+    var match =
+      allWindows().filter(function (item) {
+        var key = String(item.dataset.key || "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+        return key === returnPath;
+      })[0] || null;
+    if (match) {
+      if (match.dataset.state === "min") {
+        if (match._jtcsBeforeMin === "restored") restoreWindow(match);
+        else maximizeWindow(match);
+      } else {
+        focusWindow(match);
+      }
+      return { focused: true, closed: !!win, returnPath: returnPath };
+    }
+    var here = window.location.pathname.replace(/\/+$/, "").toLowerCase();
+    return {
+      focused: here === returnPath,
+      closed: !!win,
+      returnPath: returnPath,
+      alreadyOnPage: here === returnPath,
+    };
+  };
   window.jtcsOpenPageWindow = function (href, title) {
+    ensureHosts();
     var target = windowKey(String(href || "").split("?")[0]);
     var existing =
       allWindows().filter(function (win) {
@@ -631,7 +686,23 @@
       })[0] || null;
     if (existing) {
       var frame = existing.querySelector("iframe");
-      if (frame) frame.src = href;
+      if (frame) {
+        var nextHref = String(href || "");
+        var currentSrc = frame.getAttribute("src") || "";
+        if (currentSrc === nextHref) {
+          try {
+            frame.contentWindow.location.reload();
+          } catch (err) {
+            frame.src = "about:blank";
+            frame.src = nextHref;
+          }
+        } else {
+          frame.src = nextHref;
+        }
+        try {
+          existing.dataset.key = windowKey(nextHref);
+        } catch (err) {}
+      }
       if (title) {
         existing.dataset.title = title;
         var label = existing.querySelector(".jtcs-page-win-title");
@@ -645,6 +716,7 @@
     return openPageWindow(href, title);
   };
 
+  if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", ensureHosts);
   } else {
     ensureHosts();
