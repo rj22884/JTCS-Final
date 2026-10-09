@@ -20,9 +20,12 @@
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <link href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260802" rel="stylesheet">
   {% endif %}
+  {% if whatsapp_focused %}
+  <link href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007wahost" rel="stylesheet">
+  {% endif %}
   {% block extra_css %}{% endblock %}
 </head>
-<body class="jtcs-body">
+<body class="jtcs-body{% if whatsapp_focused %} wa-host{% endif %}">
 <div id="jtcsDialogOverlay" class="jtcs-dialog-overlay" hidden role="alertdialog" aria-modal="true" aria-labelledby="jtcsDialogTitle" aria-describedby="jtcsDialogMessage">
   <div class="jtcs-dialog" data-type="info" role="document">
     <div class="jtcs-dialog-accent" aria-hidden="true"></div>
@@ -42,6 +45,11 @@
 </div>
 {% if session.get('user_id') %}
 <div class="jtcs-app-shell">
+  <div class="wa-host-bar">
+    <strong>{{ company_display_name }}</strong>
+    <span>WhatsApp</span>
+    <a href="{{ url_for('auth.logout') }}">Logout</a>
+  </div>
   <div class="jtcs-sticky-chrome">
   {% include 'partials/app_header.html' %}
 

@@ -843,16 +843,17 @@ class GstInvoiceService:
         ),
     }
 
-    def invoice_source_type(self, inv: GstInvoice) -> str:
-        """Stored origin used by delete protection. Follow-up link wins over the label."""
-        if getattr(inv, "FollowupEntryID", None):
+    def invoice_source_type(
+        self,
+        inv: GstInvoice,
+        modules: dict[int, str] | None = None,
+        alive_misc: set[int] | None = None,
+    ) -> str:
+        """Stored origin used by delete protection. Missing source rows unlock Accounting."""
+        kind = self.source_owner(inv, modules=modules, alive_misc=alive_misc)["kind"]
+        if kind == "FOLLOWUP":
             return "FOLLOWUP"
-        if getattr(inv, "MiscEntryID", None):
-            return "MISC"
-        source = self.normalize_bill_source(getattr(inv, "BillSource", None))
-        if source == self.BILL_SOURCE_FOLLOWUP:
-            return "FOLLOWUP"
-        if source == self.BILL_SOURCE_MISCELLANEOUS:
+        if kind == "MISC":
             return "MISC"
         return "MANUAL"
 
@@ -866,6 +867,15 @@ class GstInvoiceService:
         except (TypeError, ValueError):
             return 0
         return value if value > 0 else 0
+
+    def _accounting_owner(self) -> dict:
+        return {
+            "kind": "MANUAL",
+            "module": "ACCOUNTING",
+            "followup_entry_id": None,
+            "misc_entry_id": None,
+            "message": self._OWNER_MESSAGES["ACCOUNTING"],
+        }
 
     def _followup_module_map(self, entry_ids) -> dict[int, str]:
         keys: list[int] = []
@@ -881,21 +891,53 @@ class GstInvoiceService:
         for chunk in self._id_chunks(set(keys)):
             rows = db.session.execute(
                 select(FollowupEntryMaster.EntryID, FollowupEntryMaster.ModuleCode).where(
-                    FollowupEntryMaster.EntryID.in_(list(chunk))
+                    FollowupEntryMaster.EntryID.in_(list(chunk)),
+                    FollowupEntryMaster.IsActive.is_(True),
                 )
             ).all()
             for entry_id, module in rows:
                 found[int(entry_id)] = (module or "").strip().upper()
         return found
 
-    def source_owner(self, inv: GstInvoice, modules: dict[int, str] | None = None) -> dict:
-        """Permanent source of this invoice. IDs only — never a name or bill number."""
+    def _misc_entries_alive(self, entry_ids) -> set[int]:
+        """Active Miscellaneous rows that can still own edit/delete."""
+        keys: list[int] = []
+        for raw in entry_ids or []:
+            key = self._positive_id(raw)
+            if key:
+                keys.append(key)
+        if not keys:
+            return set()
+        from app.models.others import OthersIncomeExpenseMaster
+
+        found: set[int] = set()
+        for chunk in self._id_chunks(set(keys)):
+            rows = db.session.execute(
+                select(OthersIncomeExpenseMaster.EntryID).where(
+                    OthersIncomeExpenseMaster.EntryID.in_(list(chunk)),
+                    OthersIncomeExpenseMaster.IsActive.is_(True),
+                )
+            ).all()
+            for (entry_id,) in rows:
+                found.add(int(entry_id))
+        return found
+
+    def source_owner(
+        self,
+        inv: GstInvoice,
+        modules: dict[int, str] | None = None,
+        alive_misc: set[int] | None = None,
+    ) -> dict:
+        """Source that still owns this invoice. Orphan MISC/Follow-up unlocks Accounting."""
         followup_id = self._positive_id(getattr(inv, "FollowupEntryID", None))
         misc_id = self._positive_id(getattr(inv, "MiscEntryID", None))
         bill_source = self.normalize_bill_source(getattr(inv, "BillSource", None))
         if followup_id:
             if modules is None:
                 modules = self._followup_module_map([followup_id])
+            if followup_id not in modules:
+                # Follow-up row is gone; Accounting must be able to clean the invoice.
+                return self._accounting_owner()
             module = (modules.get(followup_id) or "").strip().upper()
             if module not in {"GST", "TDS", "ITR", "DSC"}:
                 message = (
@@ -912,21 +954,34 @@ class GstInvoiceService:
                 "misc_entry_id": None,
                 "message": message,
             }
-        if misc_id or bill_source == self.BILL_SOURCE_MISCELLANEOUS:
+        if misc_id:
+            if alive_misc is None:
+                alive_misc = self._misc_entries_alive([misc_id])
+            if misc_id not in alive_misc:
+                # MISC entry deleted/inactive — invoice no longer appears in Generate Bill.
+                return self._accounting_owner()
+            from app.models.others import OthersIncomeExpenseMaster
+
+            misc_row = db.session.get(OthersIncomeExpenseMaster, misc_id)
+            bill_hint = ""
+            if misc_row is not None:
+                bill_hint = (getattr(misc_row, "BillNo", None) or getattr(misc_row, "TallyBillNo", None) or "").strip()
+            message = self._OWNER_MESSAGES["MISC"]
+            if bill_hint:
+                message = (
+                    f"{message} Open Activities → Miscellaneous and find bill {bill_hint}."
+                )
             return {
                 "kind": "MISC",
                 "module": "MISC",
                 "followup_entry_id": None,
-                "misc_entry_id": misc_id or None,
-                "message": self._OWNER_MESSAGES["MISC"],
+                "misc_entry_id": misc_id,
+                "message": message,
             }
-        return {
-            "kind": "MANUAL",
-            "module": "ACCOUNTING",
-            "followup_entry_id": None,
-            "misc_entry_id": None,
-            "message": self._OWNER_MESSAGES["ACCOUNTING"],
-        }
+        if bill_source == self.BILL_SOURCE_MISCELLANEOUS:
+            # Label says MISC but there is no live MiscEntryID link.
+            return self._accounting_owner()
+        return self._accounting_owner()
 
     def source_owner_for_id(self, invoice_id: int) -> dict:
         inv = self.repo.get_by_id(int(invoice_id))
@@ -1302,6 +1357,9 @@ class GstInvoiceService:
         modules = self._followup_module_map(
             [getattr(inv, "FollowupEntryID", None) for inv in invoices]
         )
+        alive_misc = self._misc_entries_alive(
+            [getattr(inv, "MiscEntryID", None) for inv in invoices]
+        )
         rows: list[dict] = []
         for inv in invoices:
             value = _q(inv.InvoiceValue)
@@ -1337,7 +1395,7 @@ class GstInvoiceService:
             upi = (getattr(inv, "PayUpiId", None) or "").strip()
             if not upi and getattr(inv, "PaymentBankAccountID", None):
                 upi = upi_by_bank.get(int(inv.PaymentBankAccountID), "")
-            owner = self.source_owner(inv, modules)
+            owner = self.source_owner(inv, modules, alive_misc)
             rows.append(
                 {
                     "invoice_id": inv.InvoiceID,
@@ -1350,7 +1408,7 @@ class GstInvoiceService:
                     "igst_rate": float(inv.IgstRate or 0),
                     "invoice_value": float(value),
                     "bill_source": bill_source,
-                    "source_type": self.invoice_source_type(inv),
+                    "source_type": self.invoice_source_type(inv, modules, alive_misc),
                     "source_module": owner["module"],
                     "source_lock_message": owner["message"],
                     "followup_entry_id": getattr(inv, "FollowupEntryID", None),

@@ -546,3 +546,29 @@ html.jtcs-embed .jtcs-content:has(.wa-inbox) {
 .wa-merge-picks {
   min-width: 5.5rem;
 }
+
+.wa-host-bar {
+  display: none;
+}
+
+body.wa-host .jtcs-sticky-chrome,
+body.wa-host .jtcs-ribbon-toolbar,
+body.wa-host .jtcs-page-head,
+body.wa-host .jtcs-status-bar,
+body.wa-host #jtcsPageTaskbar {
+  display: none !important;
+}
+
+body.wa-host .wa-host-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 0.9rem;
+  background: #075e54;
+  color: #fff;
+}
+
+body.wa-host .wa-host-bar a {
+  margin-left: auto;
+  color: #fff;
+}

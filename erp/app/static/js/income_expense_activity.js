@@ -1872,8 +1872,12 @@
   }
 
   function rowSearchText(row) {
+    const sale = row.sale_invoice || row.linked_invoice || {};
     return [
       row.bill_no,
+      row.tally_bill_no,
+      sale.invoice_no,
+      sale.bill_no,
       row.ledger_kind,
       row.work_name,
       row.account_label,

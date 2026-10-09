@@ -136,7 +136,9 @@ def login():
         if is_fps_session():
             return redirect(url_for("public_report.fps_detail"))
         if session.get("server_user_id"):
-            return redirect(url_for("dashboard.index"))
+            from app.whatsapp_site import home_path
+
+            return redirect(home_path(request.host))
         return redirect(url_for("server_auth.gate"))
 
     if not auth.administrator_exists():

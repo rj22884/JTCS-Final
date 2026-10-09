@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/crm/crm.css') }}?v=20260818">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007merge1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/crm/inbox_whatsapp.css') }}?v=20261007wahost">
 {% endblock %}
 
 {% block content %}
@@ -37,13 +37,17 @@
      data-poll-seconds="{{ poll_seconds|default(15) }}">
 
   <div class="wa-channel-tabs" id="crmChannelTabs" role="tablist">
+    {% if not whatsapp_focused %}
     <button type="button" class="wa-channel-tab is-active" data-channel="">All</button>
-    <button type="button" class="wa-channel-tab" data-channel="WhatsApp"><i class="bi bi-whatsapp"></i> WhatsApp</button>
+    {% endif %}
+    <button type="button" class="wa-channel-tab{% if whatsapp_focused %} is-active{% endif %}" data-channel="WhatsApp"><i class="bi bi-whatsapp"></i> WhatsApp</button>
+    {% if not whatsapp_focused %}
     <button type="button" class="wa-channel-tab" data-channel="Email"><i class="bi bi-envelope"></i> Email</button>
     <button type="button" class="wa-channel-tab" data-channel="Website"><i class="bi bi-globe"></i> Website</button>
     <button type="button" class="wa-channel-tab" data-channel="AI"><i class="bi bi-robot"></i> AI</button>
     <button type="button" class="wa-channel-tab" data-channel="Phone"><i class="bi bi-telephone"></i> Calls</button>
     <button type="button" class="wa-channel-tab" data-channel="SMS"><i class="bi bi-chat-square-text"></i> SMS</button>
+    {% endif %}
   </div>
 
   <div class="crm-inbox-shell wa-shell">

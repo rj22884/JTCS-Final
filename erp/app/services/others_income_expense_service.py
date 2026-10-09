@@ -1264,6 +1264,16 @@ class OthersIncomeExpenseService:
         invoices.delete_invoices_for_bill_if_any(bill_no)
         if tally_no and tally_no != (bill_no or "").strip():
             invoices.delete_invoices_for_bill_if_any(tally_no)
+        from app.models.gst_billing import GstInvoice
+
+        linked_ids = [
+            int(invoice_id)
+            for invoice_id in db.session.scalars(
+                select(GstInvoice.InvoiceID).where(GstInvoice.MiscEntryID == int(entry_id))
+            ).all()
+        ]
+        for invoice_id in linked_ids:
+            invoices.delete_record(invoice_id, enforce_owner=False)
         row = self.entry_repo.get_by_id(entry_id)
         if row is None:
             raise ValueError("Income / expense record not found.")

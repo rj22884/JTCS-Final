@@ -603,6 +603,19 @@ def create_app(config_class: type = Config) -> Flask:
         return None
 
     @app.before_request
+    def enforce_whatsapp_host_scope():
+        from flask import jsonify
+
+        from app.whatsapp_site import gate_decision
+
+        decision = gate_decision(request.host, request.path)
+        if decision is None:
+            return None
+        if decision == "deny":
+            return jsonify({"ok": False, "error": "This site only serves WhatsApp Inbox."}), 403
+        return redirect(decision)
+
+    @app.before_request
     def enforce_fps_user_scope():
         if request.endpoint in (None, "static"):
             return None
@@ -754,6 +767,14 @@ def create_app(config_class: type = Config) -> Flask:
             seo_schema_payload = None
 
         now = now_app()
+
+        def _whatsapp_focused() -> bool:
+            if not has_request_context():
+                return False
+            from app.whatsapp_site import is_whatsapp_host
+
+            return is_whatsapp_host(request.host)
+
         return {
             "app_name": app.config["APP_NAME"],
             "app_version": display_version,
@@ -780,6 +801,7 @@ def create_app(config_class: type = Config) -> Flask:
             "notification_poll_seconds": app.config.get("NOTIFICATION_POLL_SECONDS", 15),
             "is_admin_user": is_admin_user,
             "is_fps_user": is_fps_user,
+            "whatsapp_focused": _whatsapp_focused(),
             "current_login_id": login_id,
             "seo_active_keywords": seo_active_keywords,
             "seo_meta_keywords": seo_meta_keywords,

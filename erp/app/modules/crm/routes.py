@@ -226,7 +226,11 @@ def customer_360(customer_id: int | None = None):
 @crm_bp.route("/inbox", strict_slashes=False)
 @login_required
 def inbox_page():
+    from app.whatsapp_site import is_whatsapp_host
+
     channel = (request.args.get("channel") or "").strip()
+    if is_whatsapp_host(request.host) and not channel:
+        channel = "WhatsApp"
     return render_template(
         "crm/inbox.html",
         page_title="Communication Center",

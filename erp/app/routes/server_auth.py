@@ -15,7 +15,9 @@ def _next_url() -> str:
     target = (request.args.get("next") or request.form.get("next") or "").strip()
     if target.startswith("/") and not target.startswith("//"):
         return target
-    return url_for("dashboard.index")
+    from app.whatsapp_site import home_path
+
+    return home_path(request.host)
 
 
 def _signed_in_user():

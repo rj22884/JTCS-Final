@@ -1393,6 +1393,12 @@
   }
 
   function invoiceSourceType(row) {
+    const moduleName = String((row && row.source_module) || "").toUpperCase();
+    if (moduleName === "ACCOUNTING" || moduleName === "MANUAL") return "MANUAL";
+    if (moduleName === "MISC") return "MISC";
+    if (moduleName === "GST" || moduleName === "TDS" || moduleName === "ITR" || moduleName === "DSC" || moduleName === "FOLLOWUP") {
+      return "FOLLOWUP";
+    }
     const explicit = String((row && row.source_type) || "").toUpperCase();
     if (explicit === "FOLLOWUP" || explicit === "MISC" || explicit === "MANUAL") return explicit;
     if (row && row.followup_entry_id) return "FOLLOWUP";
