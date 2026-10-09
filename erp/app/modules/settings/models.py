@@ -25,8 +25,10 @@ WHATSAPP_PREFERRED_PHONE_DIGITS = "8477005566"
 WHATSAPP_PREFERRED_BUSINESS_ID = "28233322611396750"
 WHATSAPP_PREFERRED_WABA_ID = "1343400904135444"
 WHATSAPP_PREFERRED_APP_ID = "919379641761942"
-# Meta calls this URL on the app host. Do not put the token on the public website.
-WHATSAPP_PUBLIC_WEBHOOK_URL = "https://app.jtcsxpert.com/webhooks/whatsapp"
+# Dedicated WhatsApp app receives inbound Meta events. ERP CRM is not the inbox.
+WHATSAPP_PUBLIC_WEBHOOK_URL = "https://wa.ukdscwala.com/api/whatsapp/webhook"
+# Temporary: Meta may still POST to app.jtcsxpert.com/webhooks/whatsapp until Callback URL is updated.
+WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL = "https://wa.ukdscwala.com/api/whatsapp/webhook"
 
 # Keys that must be encrypted at rest and masked on read.
 SECRET_KEYS: frozenset[str] = frozenset(

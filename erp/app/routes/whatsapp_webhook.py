@@ -1,4 +1,9 @@
-"""Public Meta WhatsApp webhook. Meta calls this URL; it is not a login page."""
+"""Public Meta WhatsApp webhook entry on the ERP host.
+
+Meta may still call this path until the Meta Callback URL is switched to
+wa.ukdscwala.com. The handler forwards to the dedicated WhatsApp app and does
+not store messages in the ERP CRM inbox.
+"""
 
 from flask import Blueprint
 

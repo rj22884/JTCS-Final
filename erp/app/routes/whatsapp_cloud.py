@@ -115,7 +115,7 @@ def index():
         preferred_phone=WHATSAPP_PREFERRED_PHONE_NUMBER,
         preferred_waba=WHATSAPP_PREFERRED_WABA_ID,
         preferred_business=WHATSAPP_PREFERRED_BUSINESS_ID,
-        inbox_url=url_for("crm.inbox_page"),
+        inbox_url="https://wa.ukdscwala.com/",
         state=state,
     )
 

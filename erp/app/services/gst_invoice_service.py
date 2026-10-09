@@ -892,7 +892,7 @@ class GstInvoiceService:
             rows = db.session.execute(
                 select(FollowupEntryMaster.EntryID, FollowupEntryMaster.ModuleCode).where(
                     FollowupEntryMaster.EntryID.in_(list(chunk)),
-                    FollowupEntryMaster.IsActive.is_(True),
+                    FollowupEntryMaster.IsActive == True,  # noqa: E712
                 )
             ).all()
             for entry_id, module in rows:
@@ -915,7 +915,7 @@ class GstInvoiceService:
             rows = db.session.execute(
                 select(OthersIncomeExpenseMaster.EntryID).where(
                     OthersIncomeExpenseMaster.EntryID.in_(list(chunk)),
-                    OthersIncomeExpenseMaster.IsActive.is_(True),
+                    OthersIncomeExpenseMaster.IsActive == True,  # noqa: E712
                 )
             ).all()
             for (entry_id,) in rows:
@@ -1016,6 +1016,9 @@ class GstInvoiceService:
                 return
             raise ValueError(owner["message"])
         if owner["kind"] == "MISC":
+            # Sale / Service Invoice list may delete (and clean the MISC work row).
+            if accounting:
+                return
             if not from_source:
                 raise ValueError(owner["message"])
             stored = owner["misc_entry_id"]
@@ -3309,6 +3312,8 @@ class GstInvoiceService:
 
         def _write() -> str:
             entry_id = getattr(inv, "FollowupEntryID", None)
+            misc_id = self._positive_id(getattr(inv, "MiscEntryID", None))
+            bill_source = self.normalize_bill_source(getattr(inv, "BillSource", None))
             self._remove_sale_daily(inv)
             self._remove_purchase_payment_bank(inv)
             if entry_id:
@@ -3317,6 +3322,41 @@ class GstInvoiceService:
 
             OthersBankCashService().release_invoice_allocations(inv.InvoiceID)
             self.repo.delete(inv)
+            if misc_id or bill_source == self.BILL_SOURCE_MISCELLANEOUS:
+                self._deactivate_misc_source_after_invoice_delete(misc_id, inv)
             return "Invoice deleted successfully."
 
         return persist(_write)
+
+    def _deactivate_misc_source_after_invoice_delete(
+        self, misc_id: int, inv: GstInvoice
+    ) -> None:
+        """Remove the Miscellaneous work row that created this sale invoice."""
+        from app.models.others import OthersIncomeExpenseMaster
+        from app.services.others_income_expense_service import OthersIncomeExpenseService
+
+        svc = OthersIncomeExpenseService()
+        svc.entry_repo.ensure_schema()
+        row = svc.entry_repo.get_by_id(misc_id) if misc_id else None
+        if row is None:
+            # Orphan invoice: try match by tally / invoice number on an active MISC row.
+            for raw in (
+                getattr(inv, "TallyBillNo", None),
+                getattr(inv, "InvoiceNo", None),
+            ):
+                key = (raw or "").strip()
+                if not key:
+                    continue
+                row = svc.entry_repo.find_by_tally_bill_no(key) or svc.entry_repo.find_by_bill_no(key)
+                if row is not None and getattr(row, "IsActive", False):
+                    break
+                row = None
+        if row is None or not getattr(row, "IsActive", False):
+            return
+        bill_no = (row.BillNo or "").strip()
+        try:
+            svc._remove_linked_transactions(bill_no)
+        except Exception:
+            pass
+        if row.IsActive:
+            svc.entry_repo.deactivate(row)

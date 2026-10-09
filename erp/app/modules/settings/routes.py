@@ -557,7 +557,11 @@ def api_whatsapp_unsubscribe_webhooks():
 @bp.route("/api/whatsapp/webhook", methods=["GET", "POST"])
 @csrf.exempt
 def api_whatsapp_webhook():
-    """Meta WhatsApp Cloud API webhook — verify (GET) and persist inbound (POST)."""
+    """Meta webhook entry on ERP host.
+
+    GET verify stays local (Meta may still use this Callback URL).
+    POST events forward to wa.ukdscwala.com and are not stored in ERP CRM.
+    """
     if request.method == "GET":
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
@@ -573,30 +577,46 @@ def api_whatsapp_webhook():
             pass
         return jsonify({"ok": False, "error": "Webhook verification failed"}), 403
 
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    from app.modules.settings.models import WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL
+
+    target = (WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL or "").strip().rstrip("/")
+    if not target:
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook is not configured"}), 503
+
     raw = request.get_data(cache=True, as_text=False) or b""
+    headers = {
+        "Content-Type": request.headers.get("Content-Type") or "application/json",
+        "Accept": "application/json",
+    }
+    sig = request.headers.get("X-Hub-Signature-256")
+    if sig:
+        headers["X-Hub-Signature-256"] = sig
+
     try:
-        from app.modules.settings.services import IntegrationSettingsService
-        from app.modules.settings.whatsapp_meta_client import WhatsAppMetaClient
-
-        cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta")
-        app_secret = (cfg.get("app_secret") or "").strip()
-        sig = request.headers.get("X-Hub-Signature-256")
-        if app_secret:
-            if not sig or not WhatsAppMetaClient.verify_signature(app_secret, raw, sig):
-                return jsonify({"ok": False, "error": "Invalid signature"}), 403
-    except Exception:
-        pass
-
-    payload = request.get_json(silent=True) or {}
-    try:
-        from app.modules.communication.webhook_service import WhatsAppWebhookService
-
-        result = WhatsAppWebhookService().process_payload(payload, raw_body=raw)
-        return jsonify(result)
-    except Exception as exc:
-        # Always ACK to Meta to avoid retry storms; log server-side
-        current_app.logger.exception("WhatsApp webhook processing failed: %s", exc)
-        return jsonify({"ok": True, "received": True, "error": "Webhook processing failed"})
+        req = Request(target, data=raw, method="POST", headers=headers)
+        with urlopen(req, timeout=25) as resp:
+            body = resp.read()
+            status = getattr(resp, "status", 200) or 200
+            content_type = resp.headers.get("Content-Type") or "application/json"
+        return body, status, {"Content-Type": content_type}
+    except HTTPError as exc:
+        err_body = exc.read() if hasattr(exc, "read") else b""
+        current_app.logger.warning(
+            "WhatsApp webhook forward to dedicated app failed HTTP %s", getattr(exc, "code", "?")
+        )
+        if err_body:
+            return err_body, int(exc.code or 502), {
+                "Content-Type": exc.headers.get("Content-Type") if exc.headers else "application/json"
+            }
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook rejected the event"}), int(
+            exc.code or 502
+        )
+    except (URLError, TimeoutError, OSError) as exc:
+        current_app.logger.exception("WhatsApp webhook forward to dedicated app failed: %s", exc)
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook is unreachable"}), 502
 
 
 # ---------------------------------------------------------------------------

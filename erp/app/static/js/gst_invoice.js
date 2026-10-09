@@ -1458,7 +1458,8 @@
     };
     const moduleName = String(record.source_module || "ACCOUNTING").toUpperCase();
     const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
-    if (!accountingOwned && !ownerLaunchMatches(record)) {
+    const miscDeletableFromList = moduleName === "MISC";
+    if (!accountingOwned && !miscDeletableFromList && !ownerLaunchMatches(record)) {
       const message = record.source_lock_message || editingLockMessage
         || "Edit and delete are available only from the module that created this invoice.";
       if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(message, "warning");
@@ -1466,19 +1467,22 @@
       return;
     }
     let creds = null;
+    const deleteMessage = miscDeletableFromList
+      ? "Delete this invoice and its related Miscellaneous work entry?"
+      : "Delete this invoice?";
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!(await JTCSDialog.confirm("Delete this invoice?"))) return;
+      if (!(await JTCSDialog.confirm(deleteMessage))) return;
     } else {
-      creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this invoice?" });
+      creds = await window.JTCSDeleteConfirm.ask({ message: deleteMessage });
       if (!creds) return;
     }
     const body = creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {};
     const launchedFollowup = (launchParams.get("followup_entry_id") || "").trim();
     const launchedMisc = (launchParams.get("misc_entry_id") || "").trim();
-    if (!accountingOwned && launchedMisc) {
+    if (!accountingOwned && !miscDeletableFromList && launchedMisc) {
       body.from_source = true;
       body.misc_entry_id = Number(launchedMisc);
-    } else if (!accountingOwned && launchedFollowup) {
+    } else if (!accountingOwned && !miscDeletableFromList && launchedFollowup) {
       body.from_source = true;
       body.followup_entry_id = Number(launchedFollowup);
     } else {
@@ -1868,6 +1872,7 @@
       const billSource = (row.bill_source || "Manual").toString();
       const moduleName = String(row.source_module || "ACCOUNTING").toUpperCase();
       const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
+      const miscDeletableFromList = moduleName === "MISC";
       const lockMessage = row.source_lock_message || sourceListDeleteMessage(invoiceSourceType(row));
       const tr = document.createElement("tr");
       if (billSource.toLowerCase() === "automatic") {
@@ -1922,11 +1927,17 @@
         escapeHtml(accountingOwned ? "Edit" : lockMessage) +
         '"><i class="bi bi-pencil"></i></button>' +
         '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del' +
-        (accountingOwned ? "" : " is-source-locked") +
+        (accountingOwned || miscDeletableFromList ? "" : " is-source-locked") +
         '" data-id="' +
         row.invoice_id +
         '" title="' +
-        escapeHtml(accountingOwned ? "Delete" : lockMessage) +
+        escapeHtml(
+          accountingOwned || miscDeletableFromList
+            ? miscDeletableFromList
+              ? "Delete invoice and related Miscellaneous work"
+              : "Delete"
+            : lockMessage
+        ) +
         '"><i class="bi bi-trash"></i></button>' +
         '<button type="button" class="btn btn-outline-info btn-sm me-1 inv-g-preview" data-id="' +
         row.invoice_id +
