@@ -561,6 +561,7 @@ def api_whatsapp_webhook():
 
     GET verify stays local (Meta may still use this Callback URL).
     POST events forward to wa.ukdscwala.com and are not stored in ERP CRM.
+    Redeploy 2026-10-09: forward-only path (no CrmConversation write).
     """
     if request.method == "GET":
         mode = request.args.get("hub.mode")

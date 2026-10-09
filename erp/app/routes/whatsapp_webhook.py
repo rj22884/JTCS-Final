@@ -3,6 +3,8 @@
 Meta may still call this path until the Meta Callback URL is switched to
 wa.ukdscwala.com. The handler forwards to the dedicated WhatsApp app and does
 not store messages in the ERP CRM inbox.
+
+Redeploy marker 2026-10-09 — Upload VPS must ship settings/routes forward fix.
 """
 
 from flask import Blueprint
