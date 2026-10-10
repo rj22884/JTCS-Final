@@ -65,6 +65,8 @@ class OthersBankCashTransaction(db.Model):
     InvoiceID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     InvoiceLinkMode: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    WorkID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    WorkTypeID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     CreatedBy: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     IsActive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

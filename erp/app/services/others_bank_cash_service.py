@@ -496,6 +496,15 @@ class OthersBankCashService:
         if link_mode not in {"none", "all", "selected"}:
             link_mode = "selected" if allocations else "none"
         credit_customer_id = self._credit_ledger_customer_id(credit_key)
+        primary_invoice_id = (
+            allocations[0]["invoice_id"] if allocations else getattr(row, "InvoiceID", None)
+        )
+        category = self._invoice_category(primary_invoice_id) if primary_invoice_id else {
+            "work_id": None,
+            "work_type_id": None,
+            "category_name": "",
+            "sub_work_name": "",
+        }
         return {
             "entry_id": row.EntryID,
             "voucher_no": row.VoucherNo,
@@ -517,9 +526,11 @@ class OthersBankCashService:
             "invoice_mode": link_mode,
             "customer_id": self._entry_customer_id(row),
             "customer_name": self._customer_display_name(self._entry_customer_id(row))
-            or self._invoice_customer_name(
-                allocations[0]["invoice_id"] if allocations else getattr(row, "InvoiceID", None)
-            ),
+            or self._invoice_customer_name(primary_invoice_id),
+            "work_id": getattr(row, "WorkID", None) or category.get("work_id"),
+            "work_type_id": getattr(row, "WorkTypeID", None) or category.get("work_type_id"),
+            "category_name": category.get("category_name") or "",
+            "sub_work_name": category.get("sub_work_name") or "",
             "allocations": allocations,
             "advance_allocated": float(self._advance_allocated_total(row)),
             "advance_allocations": self._advance_allocation_rows(row),
@@ -602,6 +613,96 @@ class OthersBankCashService:
         if inv is None:
             return None
         return (getattr(inv, "CustomerName", None) or "").strip() or None
+
+    def _invoice_category(self, invoice_id: int | None) -> dict:
+        """Category / sub-work for a sale invoice (from linked Misc Activity)."""
+        empty = {
+            "work_id": None,
+            "work_type_id": None,
+            "category_name": "",
+            "sub_work_name": "",
+        }
+        if not invoice_id:
+            return empty
+        from app.models.gst_billing import GstInvoice
+        from app.models.others import OthersIncomeExpenseMaster, WorkMaster
+        from app.models.transactions import WorkTypeMaster
+
+        inv = db.session.get(GstInvoice, int(invoice_id))
+        if inv is None:
+            return empty
+        misc_id = getattr(inv, "MiscEntryID", None)
+        if not misc_id:
+            return empty
+        entry = db.session.get(OthersIncomeExpenseMaster, int(misc_id))
+        if entry is None:
+            return empty
+        work_id = int(entry.WorkID) if getattr(entry, "WorkID", None) else None
+        work_type_id = None
+        for line in list(getattr(entry, "detail_lines", None) or []):
+            raw = getattr(line, "WorkTypeID", None)
+            if raw not in (None, ""):
+                try:
+                    work_type_id = int(raw)
+                except (TypeError, ValueError):
+                    work_type_id = None
+                if work_type_id:
+                    break
+        category_name = ""
+        sub_work_name = ""
+        if work_id:
+            work = db.session.get(WorkMaster, work_id)
+            category_name = (getattr(work, "WorkName", None) or "").strip() if work else ""
+        if work_type_id:
+            sub = db.session.get(WorkTypeMaster, work_type_id)
+            if sub is not None:
+                sub_work_name = (
+                    (getattr(sub, "SubWorkType", None) or getattr(sub, "WorkTypeName", None) or "")
+                    .strip()
+                )
+        return {
+            "work_id": work_id,
+            "work_type_id": work_type_id,
+            "category_name": category_name,
+            "sub_work_name": sub_work_name,
+        }
+
+    def _resolve_payment_category(
+        self,
+        form,
+        link_mode: str,
+        allocation_pairs: list[tuple[int, Decimal]],
+    ) -> tuple[int | None, int | None]:
+        """Inherit WorkID/WorkTypeID from the first allocated invoice.
+
+        When invoices are linked, client-sent category values must match the
+        invoice (or be blank). Clearing InvoiceMode clears category fields.
+        """
+        if link_mode == "none" or not allocation_pairs:
+            return None, None
+        primary_invoice_id = int(allocation_pairs[0][0])
+        expected = self._invoice_category(primary_invoice_id)
+        expected_work = expected.get("work_id")
+        expected_sub = expected.get("work_type_id")
+        form_work = self._optional_int(form.get("WorkID") or form.get("work_id"))
+        form_sub = self._optional_int(form.get("WorkTypeID") or form.get("work_type_id"))
+        if form_work and expected_work and int(form_work) != int(expected_work):
+            raise ValueError(
+                "Category must match the selected invoice. Clear the invoice link to choose another category."
+            )
+        if form_sub and expected_sub and int(form_sub) != int(expected_sub):
+            raise ValueError(
+                "Sub Work must match the selected invoice. Clear the invoice link to choose another sub-work."
+            )
+        if form_work and not expected_work:
+            raise ValueError(
+                "Selected invoice has no category. Clear Category or unlink the invoice."
+            )
+        if form_sub and not expected_sub:
+            raise ValueError(
+                "Selected invoice has no sub-work. Clear Sub Work or unlink the invoice."
+            )
+        return expected_work, expected_sub
 
     def _customer_ledger_key(self, customer_id: int) -> str | None:
         row = db.session.execute(
@@ -1155,6 +1256,7 @@ class OthersBankCashService:
             outstanding = Decimal(str(position["outstanding_amount"])).quantize(Decimal("0.01"))
             if outstanding <= 0:
                 continue
+            category = self._invoice_category(int(inv.InvoiceID))
             invoices.append(
                 {
                     "invoice_id": int(inv.InvoiceID),
@@ -1163,6 +1265,10 @@ class OthersBankCashService:
                     "customer_name": (getattr(inv, "CustomerName", None) or "").strip() or None,
                     "contact_person": (getattr(inv, "ContactPerson", None) or "").strip(),
                     "outstanding": outstanding,
+                    "work_id": category.get("work_id"),
+                    "work_type_id": category.get("work_type_id"),
+                    "category_name": category.get("category_name") or "",
+                    "sub_work_name": category.get("sub_work_name") or "",
                     **position,
                 }
             )
@@ -1264,6 +1370,10 @@ class OthersBankCashService:
                     "received_amount": row["received_amount"],
                     "outstanding_amount": row["outstanding_amount"],
                     "payment_status": row["payment_status"],
+                    "work_id": row.get("work_id"),
+                    "work_type_id": row.get("work_type_id"),
+                    "category_name": row.get("category_name") or "",
+                    "sub_work_name": row.get("sub_work_name") or "",
                 }
             )
         return {
@@ -1319,6 +1429,10 @@ class OthersBankCashService:
                 ),
             )
         )
+        work_id, work_type_id = self._resolve_payment_category(
+            form, link_mode, allocation_pairs
+        )
+        primary_invoice_id = int(allocation_pairs[0][0]) if allocation_pairs else None
 
         def _write() -> BankCashSaveResult:
             existing = None
@@ -1414,9 +1528,11 @@ class OthersBankCashService:
                 "Remarks": remarks,
                 "OutBankTransactionID": out_row.JtcsBankTransactionID,
                 "InBankTransactionID": in_row.JtcsBankTransactionID,
-                "InvoiceID": None,
+                "InvoiceID": primary_invoice_id,
                 "InvoiceLinkMode": link_mode,
                 "CustomerID": linked_customer_id if link_mode != "none" else None,
+                "WorkID": work_id,
+                "WorkTypeID": work_type_id,
             }
             if existing is not None:
                 entry = self.entry_repo.update(existing, payload)

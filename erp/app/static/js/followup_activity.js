@@ -1526,6 +1526,8 @@
     els.unverifiedWrap?.classList.toggle("d-none", !show);
   }
 
+  let lastFollowupCustomerId = "";
+
   function clearCustomerSelection() {
     if (els.customerId) els.customerId.value = "";
     if (els.customerSearch) els.customerSearch.value = "";
@@ -1537,6 +1539,7 @@
     if (hasGstFields && els.filingFrequency) els.filingFrequency.value = "";
     hideCustomerResults();
     syncCustomerBillSummary();
+    onFollowupCustomerChanged("");
   }
 
   function hideCustomerResults() {
@@ -1547,7 +1550,8 @@
 
   function selectCustomer(customer) {
     if (!customer) return;
-    if (els.customerId) els.customerId.value = String(customer.customer_id || customer.CustomerID || "");
+    const newId = String(customer.customer_id || customer.CustomerID || "").trim();
+    if (els.customerId) els.customerId.value = newId;
     if (els.customerSearch) {
       els.customerSearch.value = customer.customer_name || customer.CustomerName || "";
     }
@@ -1571,6 +1575,23 @@
     }
     hideCustomerResults();
     syncCustomerBillSummary();
+    onFollowupCustomerChanged(newId);
+  }
+
+  function onFollowupCustomerChanged(newId) {
+    const next = String(newId || "").trim();
+    const prev = lastFollowupCustomerId;
+    if (!next) {
+      lastFollowupCustomerId = "";
+      clearBillingChoice();
+      syncBillingCustomerPanel();
+      return;
+    }
+    if (prev && prev !== next) {
+      clearBillingChoice();
+    }
+    lastFollowupCustomerId = next;
+    syncBillingCustomerPanel();
   }
 
   function normalizeReturnTypeValue(value) {
@@ -2190,11 +2211,32 @@
     savedPaymentReceived = isStageChecked("payment_received");
     paintInvoiceSummary(record.linked_invoice || null);
     const invoiceCb = invoiceStageCheckbox();
+    lastFollowupCustomerId = record.customer_id ? String(record.customer_id) : "";
     if (linkedInvoice) {
       applyBillingChoice(record);
-    } else if (invoiceCb) {
-      invoiceCb.checked = false;
-      clearBillingChoice();
+    } else {
+      if (invoiceCb) invoiceCb.checked = false;
+      const savedType = String(record.billing_type || "").trim().toUpperCase();
+      if (savedType === "SAME_CUSTOMER" && els.billingSame) {
+        els.billingSame.checked = true;
+        if (els.billingOther) els.billingOther.checked = false;
+        if (els.billingCustomerId) els.billingCustomerId.value = "";
+        if (els.billingCustomerSearch) els.billingCustomerSearch.value = "";
+      } else if (savedType === "OTHER_CUSTOMER" && els.billingOther) {
+        els.billingOther.checked = true;
+        if (els.billingSame) els.billingSame.checked = false;
+        if (els.billingCustomerId) {
+          els.billingCustomerId.value = record.billing_customer_id
+            ? String(record.billing_customer_id)
+            : "";
+        }
+        if (els.billingCustomerSearch) {
+          els.billingCustomerSearch.value = record.billing_customer_name || "";
+        }
+      } else {
+        clearBillingChoice();
+      }
+      syncBillingCustomerPanel();
     }
     syncWorkflowPanels();
     setEntryFieldsLocked(true);
@@ -2371,7 +2413,8 @@
   }
 
   function syncBillingCustomerPanel() {
-    const show = isStageChecked("invoice") || creatingInvoice;
+    const customerId = (els.customerId?.value || "").trim();
+    const show = !!customerId;
     els.billingWrap?.classList.toggle("d-none", !show);
     const other = show && billingIsOther();
     els.billingPick?.classList.toggle("d-none", !other);
@@ -2668,14 +2711,14 @@
       payload.quarter = quarter;
     }
     if (entryIdRaw) payload.entry_id = parseInt(entryIdRaw, 10);
-    if (isStageChecked("invoice")) {
-      const choice = billingChoice();
-      if (!choice) {
+    const billingSel = billingChoice();
+    if (billingSel || (linkedInvoice && linkedInvoice.invoice_id)) {
+      if (!billingSel) {
         alert("Please select Same Customer or Other Customer.");
         return;
       }
-      payload.billing_type = choice;
-      if (choice === "OTHER_CUSTOMER") {
+      payload.billing_type = billingSel;
+      if (billingSel === "OTHER_CUSTOMER") {
         const billingId = parseInt(els.billingCustomerId?.value || "", 10);
         if (!billingId) {
           alert("Please select the Billing Customer.");
@@ -3205,6 +3248,7 @@
         els.customerSelected.classList.add("d-none");
       }
       if (els.customerEmail) els.customerEmail.value = "";
+      onFollowupCustomerChanged("");
     }
     clearTimeout(customerSearchTimer);
     customerSearchTimer = setTimeout(function () {
@@ -3261,9 +3305,7 @@
       if (followupId && invoiceCustomer && followupId !== invoiceCustomer && (els.entryId?.value || "").trim()) {
         saveEntry({ keepOpen: true });
       }
-      return;
     }
-    if (isStageChecked("invoice")) beginCreateInvoice();
   });
   els.billingOther?.addEventListener("change", function () {
     syncBillingCustomerPanel();
@@ -3484,6 +3526,7 @@
     const cb = invoiceStageCheckbox();
     creatingInvoice = true;
     if (cb && !(linkedInvoice && linkedInvoice.invoice_id)) cb.checked = false;
+    syncBillingCustomerPanel();
     syncWorkflowPanels();
     const choice = billingChoice();
     if (!choice) {

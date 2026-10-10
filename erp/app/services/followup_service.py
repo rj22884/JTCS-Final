@@ -579,14 +579,25 @@ class FollowupService:
         followup_customer_id: int,
         invoice_checked: bool,
     ) -> tuple[str, int]:
-        """Billing customer is the invoice customer. Follow-up customer stays unchanged."""
-        if not invoice_checked:
-            return "", int(followup_customer_id)
+        """Billing customer is the invoice customer. Follow-up customer stays unchanged.
+
+        Same Customer / Other Customer may be chosen as soon as a follow-up customer
+        is selected — not only after an Invoice stage tick. When an invoice is already
+        linked (or invoice stage is present), Same/Other is required.
+        """
         raw_type = (payload.get("billing_type") or payload.get("BillingType") or "")
         billing_type = str(raw_type).strip().upper()
+        if not billing_type:
+            if invoice_checked:
+                raise ValueError("Please select Same Customer or Other Customer.")
+            return "", int(followup_customer_id)
         if billing_type not in {"SAME_CUSTOMER", "OTHER_CUSTOMER"}:
             raise ValueError("Please select Same Customer or Other Customer.")
+        if followup_customer_id <= 0:
+            raise ValueError("Please select a customer first.")
         if billing_type == "SAME_CUSTOMER":
+            if self.customer_repo.get_by_id(int(followup_customer_id)) is None:
+                raise ValueError("Please select a customer first.")
             return "SAME_CUSTOMER", int(followup_customer_id)
         raw_id = payload.get("billing_customer_id")
         if raw_id in (None, ""):
@@ -1700,12 +1711,12 @@ class FollowupService:
 
         self.followup_repo.ensure_billing_customer_columns()
         invoice_stage = "invoice" in stage_codes
-        if invoice_stage and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
-            linked_invoice = None
-            if entry_id:
-                from app.repositories.gst_invoice_repository import GstInvoiceRepository
+        linked_invoice = None
+        if entry_id and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
+            from app.repositories.gst_invoice_repository import GstInvoiceRepository
 
-                linked_invoice = GstInvoiceRepository().find_by_followup_entry(entry_id)
+            linked_invoice = GstInvoiceRepository().find_by_followup_entry(entry_id)
+        if invoice_stage and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
             if linked_invoice is None:
                 raise ValueError(
                     "Invoice cannot be selected manually. "
@@ -1714,7 +1725,7 @@ class FollowupService:
         billing_type, billing_customer_id = self._resolve_billing_customer(
             payload,
             followup_customer_id=customer_id,
-            invoice_checked="invoice" in stage_codes,
+            invoice_checked=invoice_stage or linked_invoice is not None,
         )
         tax_followup = self.module_code in TAX_FOLLOWUP_MODULES
         if (

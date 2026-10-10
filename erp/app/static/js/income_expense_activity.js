@@ -705,7 +705,12 @@
     }
   }
 
-  const miscInvoicePage = !!document.getElementById("oieInvoiceCheck");
+  const miscInvoicePage = !!(
+    document.getElementById("oieCreateInvoiceBtn")
+    || document.getElementById("oieBillingWrap")
+    || String(window.OIE_FORCE_LEDGER_KIND || "") === "Misc."
+  );
+  let lastMiscCustomerId = "";
 
   function syncMiscWorkflow() {
     const misc = isMiscKind();
@@ -1570,8 +1575,9 @@
 
   function selectCustomer(customer) {
     if (!customer) return;
+    const newId = String(customer.customer_id || customer.CustomerID || "").trim();
     if (els.customerId) {
-      els.customerId.value = String(customer.customer_id || customer.CustomerID || "");
+      els.customerId.value = newId;
     }
     if (els.customerName) {
       els.customerName.value = customer.customer_name || customer.CustomerName || "";
@@ -1589,6 +1595,25 @@
     }
     hideCustomerResults();
     syncCustomerBillSummary();
+    if (miscInvoicePage) {
+      onMiscCustomerChanged(newId);
+    }
+  }
+
+  function onMiscCustomerChanged(newId) {
+    const next = String(newId || "").trim();
+    const prev = lastMiscCustomerId;
+    if (!next) {
+      lastMiscCustomerId = "";
+      clearMiscBilling();
+      syncMiscBillingPanel();
+      return;
+    }
+    if (prev && prev !== next) {
+      clearMiscBilling();
+    }
+    lastMiscCustomerId = next;
+    syncMiscBillingPanel();
   }
 
   function searchCustomers(query) {
@@ -1810,7 +1835,9 @@
     if (miscInvoicePage) {
       paintMiscInvoice(null);
       clearMiscBilling();
+      lastMiscCustomerId = "";
       hideMiscInvoiceEditor();
+      syncMiscBillingPanel();
     }
     resetCategoryLines([{}]);
     resetPaymentLines([{}]);
@@ -2265,6 +2292,9 @@
             : !!record.tally_bill_generated || (record.ledger_kind === "Misc." && hasPayments);
         }
         if (els.customerId) els.customerId.value = record.customer_id ? String(record.customer_id) : "";
+        if (miscInvoicePage) {
+          lastMiscCustomerId = record.customer_id ? String(record.customer_id) : "";
+        }
         if (els.tallyBillNo) {
           els.tallyBillNo.value = record.tally_bill_no || (hasPayments ? record.bill_no || "" : "");
         }
@@ -2589,6 +2619,7 @@
     els.customerName.addEventListener("input", function () {
       if (els.customerId) els.customerId.value = "";
       clearCustomerSelectionHint();
+      if (miscInvoicePage) onMiscCustomerChanged("");
       clearTimeout(customerSearchTimer);
       customerSearchTimer = setTimeout(function () {
         searchCustomers(els.customerName.value);
@@ -2689,7 +2720,8 @@
     const wrap = document.getElementById("oieBillingWrap");
     const pick = document.getElementById("oieBillingPick");
     if (!wrap) return;
-    const show = miscCreatingInvoice || !!(document.getElementById("oieInvoiceCheck")?.checked);
+    const customerId = (els.customerId?.value || "").trim();
+    const show = !!customerId;
     wrap.classList.toggle("d-none", !show);
     pick?.classList.toggle("d-none", !(show && miscBillingChoice() === "OTHER_CUSTOMER"));
   }
@@ -2755,13 +2787,11 @@
   function paintMiscInvoice(invoice) {
     miscLinkedInvoice = invoice && invoice.invoice_id ? invoice : null;
     const box = document.getElementById("oieInvoiceSummary");
-    const check = document.getElementById("oieInvoiceCheck");
     const createBtn = document.getElementById("oieCreateInvoiceBtn");
     document.querySelectorAll("#oieInvoiceActions .oie-inv-act").forEach(function (btn) {
       btn.classList.toggle("d-none", !miscLinkedInvoice);
     });
     if (createBtn) createBtn.classList.toggle("d-none", !!miscLinkedInvoice);
-    if (check) check.checked = !!miscLinkedInvoice;
     if (!box) return;
     if (!miscLinkedInvoice) {
       box.classList.add("d-none");
@@ -2790,6 +2820,7 @@
       const same = document.getElementById("oieBillingSame");
       if (same) same.checked = true;
     }
+    lastMiscCustomerId = followupCustomer ? String(followupCustomer) : lastMiscCustomerId;
     syncMiscBillingPanel();
     loadMiscPayment(miscLinkedInvoice.invoice_id);
     syncMiscWorkflow();
@@ -2970,8 +3001,6 @@
       return;
     }
     miscCreatingInvoice = true;
-    const check = document.getElementById("oieInvoiceCheck");
-    if (check && !miscLinkedInvoice) check.checked = false;
     syncMiscBillingPanel();
     if (!miscBillingChoice()) {
       alert("Please select Same Customer or Other Customer.");
@@ -3035,19 +3064,6 @@
   }
 
   if (miscInvoicePage) {
-    document.getElementById("oieInvoiceCheck")?.addEventListener("change", function (event) {
-      const checkbox = event.target;
-      if (checkbox.checked && !miscLinkedInvoice) {
-        checkbox.checked = false;
-        miscCreatingInvoice = false;
-        syncMiscBillingPanel();
-        if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(MANUAL_INVOICE_MESSAGE, "warning");
-        else alert(MANUAL_INVOICE_MESSAGE);
-        return;
-      }
-      if (!checkbox.checked) miscCreatingInvoice = false;
-      syncMiscBillingPanel();
-    });
     document.getElementById("oieBillingSame")?.addEventListener("change", function () {
       syncMiscBillingPanel();
       if (!this.checked || !miscLinkedInvoice) return;

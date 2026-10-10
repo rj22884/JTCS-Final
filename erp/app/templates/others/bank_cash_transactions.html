@@ -189,6 +189,19 @@
                 <div class="obc-invoice-list" id="obcInvoiceList"></div>
                 <div class="obc-alloc-preview" id="obcAllocationPreview"></div>
               </div>
+              <div class="col-md-6 d-none" id="obcCategoryWrap">
+                <label class="form-label" for="obcCategoryName">Category</label>
+                <input type="text" class="form-control" id="obcCategoryName" readonly tabindex="-1"
+                       placeholder="From selected invoice">
+                <input type="hidden" name="WorkID" id="obcWorkId" value="">
+                <div class="form-text">Taken from the selected invoice (Misc Activity category).</div>
+              </div>
+              <div class="col-md-6 d-none" id="obcSubWorkWrap">
+                <label class="form-label" for="obcSubWorkName">Sub Work</label>
+                <input type="text" class="form-control" id="obcSubWorkName" readonly tabindex="-1"
+                       placeholder="From selected invoice">
+                <input type="hidden" name="WorkTypeID" id="obcWorkTypeId" value="">
+              </div>
             </div>
           </div>
 

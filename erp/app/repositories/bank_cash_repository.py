@@ -275,6 +275,26 @@ class OthersBankCashRepository:
                 )
             )
             self.session.commit()
+        if not self._column_exists("WorkID"):
+            self.session.execute(
+                text(
+                    """
+                    ALTER TABLE dbo.OthersBankCashTransaction
+                    ADD WorkID INT NULL
+                    """
+                )
+            )
+            self.session.commit()
+        if not self._column_exists("WorkTypeID"):
+            self.session.execute(
+                text(
+                    """
+                    ALTER TABLE dbo.OthersBankCashTransaction
+                    ADD WorkTypeID INT NULL
+                    """
+                )
+            )
+            self.session.commit()
         self.session.execute(
             text(
                 """

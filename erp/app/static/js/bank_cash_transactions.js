@@ -36,6 +36,12 @@
     invoiceList: document.getElementById("obcInvoiceList"),
     allocationPreview: document.getElementById("obcAllocationPreview"),
     invoiceHint: document.getElementById("obcInvoiceHint"),
+    categoryWrap: document.getElementById("obcCategoryWrap"),
+    subWorkWrap: document.getElementById("obcSubWorkWrap"),
+    categoryName: document.getElementById("obcCategoryName"),
+    subWorkName: document.getElementById("obcSubWorkName"),
+    workId: document.getElementById("obcWorkId"),
+    workTypeId: document.getElementById("obcWorkTypeId"),
   };
 
   if (!els.gridBody || !window.OBC_API) return;
@@ -632,6 +638,46 @@
     return "₹" + formatMoney(value);
   }
 
+  function clearCategoryFields() {
+    if (els.workId) els.workId.value = "";
+    if (els.workTypeId) els.workTypeId.value = "";
+    if (els.categoryName) els.categoryName.value = "";
+    if (els.subWorkName) els.subWorkName.value = "";
+    if (els.categoryWrap) els.categoryWrap.classList.add("d-none");
+    if (els.subWorkWrap) els.subWorkWrap.classList.add("d-none");
+  }
+
+  function syncCategoryFromInvoices() {
+    const mode = syncInvoiceModeField();
+    if (mode === "none") {
+      clearCategoryFields();
+      return;
+    }
+    let source = null;
+    if (mode === "all") {
+      source = oldestFirst(invoiceRows)[0] || null;
+    } else {
+      const ids = checkedInvoiceIds();
+      const selected = oldestFirst(
+        invoiceRows.filter(function (inv) {
+          return ids.indexOf(String(inv.invoice_id)) >= 0;
+        })
+      );
+      source = selected[0] || null;
+    }
+    if (!source) {
+      clearCategoryFields();
+      return;
+    }
+    if (els.workId) els.workId.value = source.work_id ? String(source.work_id) : "";
+    if (els.workTypeId) els.workTypeId.value = source.work_type_id ? String(source.work_type_id) : "";
+    if (els.categoryName) els.categoryName.value = source.category_name || "";
+    if (els.subWorkName) els.subWorkName.value = source.sub_work_name || "";
+    const show = !!(source.work_id || source.work_type_id || source.category_name || source.sub_work_name);
+    if (els.categoryWrap) els.categoryWrap.classList.toggle("d-none", !show);
+    if (els.subWorkWrap) els.subWorkWrap.classList.toggle("d-none", !show);
+  }
+
   function clearInvoiceLink() {
     invoiceRows = [];
     customerLedgerKey = "";
@@ -643,6 +689,7 @@
       els.customerSuggest.classList.add("d-none");
       els.customerSuggest.innerHTML = "";
     }
+    clearCategoryFields();
     renderInvoiceChoices("none", []);
   }
 
@@ -826,6 +873,7 @@
   function paintAllocation() {
     const mode = syncInvoiceModeField();
     paintInvoicePicker();
+    syncCategoryFromInvoices();
     if (els.invoiceHint) {
       if (mode === "none") {
         els.invoiceHint.textContent =

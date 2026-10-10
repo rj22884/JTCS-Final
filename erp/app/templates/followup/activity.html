@@ -503,7 +503,7 @@
             <label class="form-label">Workflow</label>
             <div class="fu-workflow-checks" id="fuWorkflowChecks">
               {% for stage in workflow_stages %}
-              <div class="form-check form-check-inline fu-stage-item{% if module_code == 'DSC' and stage.stage_code == 'tally_bill_generated' %} d-none{% endif %}" data-stage-code="{{ stage.stage_code }}">
+              <div class="form-check form-check-inline fu-stage-item{% if stage.stage_code == 'invoice' or (module_code == 'DSC' and stage.stage_code == 'tally_bill_generated') %} d-none{% endif %}" data-stage-code="{{ stage.stage_code }}">
                 <input class="form-check-input fu-stage-check" type="checkbox"
                        name="stage_ids" value="{{ stage.stage_id }}" id="fuStage{{ stage.stage_id }}"
                        data-stage-code="{{ stage.stage_code }}">
@@ -569,11 +569,6 @@
             <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="whatsapp" title="Send Invoice on WhatsApp"><i class="bi bi-whatsapp"></i></button>
             <button type="button" class="btn btn-outline-danger btn-sm d-none fu-inv-act" id="fuDeleteInvoiceBtn" data-inv-act="delete" title="Delete Invoice"><i class="bi bi-trash"></i></button>
           </div>
-          <div class="fu-workflow-panel d-none mb-3" id="fuItrFiledWrap" data-stage-panel="return_filed">
-            <label class="form-label" for="fuItrFiledDate">Return Filed Date</label>
-            <input type="date" class="form-control" id="fuItrFiledDate" name="itr_filed_date"
-                   value="{{ default_date }}">
-          </div>
           {% endif %}
 
           <div class="fu-workflow-panel d-none mb-3" id="fuBillingCustomerWrap">
@@ -597,6 +592,14 @@
               <div id="fuBillingCustomerResults" class="list-group fu-customer-results d-none"></div>
             </div>
           </div>
+
+          {% if module_code in ['ITR', 'GST', 'TDS'] %}
+          <div class="fu-workflow-panel d-none mb-3" id="fuItrFiledWrap" data-stage-panel="return_filed">
+            <label class="form-label" for="fuItrFiledDate">Return Filed Date</label>
+            <input type="date" class="form-control" id="fuItrFiledDate" name="itr_filed_date"
+                   value="{{ default_date }}">
+          </div>
+          {% endif %}
 
           {% if module_code == 'DSC' %}
           <div class="fu-workflow-panel mb-3" id="fuTallyBillWrap" data-stage-panel="tally_bill_generated">

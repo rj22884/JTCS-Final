@@ -1603,6 +1603,10 @@ class LedgerExportService:
         A sale invoice is the receivable. The matching follow-up bill amount
         is omitted when that invoice already exists.
         """
+        from app.services.payment_accounting_service import (
+            sql_unpaid_misc_exclusion_for_customer_ledger,
+        )
+
         modules = ", ".join(f"N'{code}'" for code in FOLLOWUP_MODULES)
         not_udhaar = sql_not_udhaar_payment("ba", "pm")
         misc_kind = """
@@ -1611,6 +1615,7 @@ class LedgerExportService:
                 OR LOWER(LTRIM(RTRIM(ISNULL(w.LedgerKind, N'')))) IN (N'misc', N'm')
             )
         """
+        misc_invoiced_exclusion = sql_unpaid_misc_exclusion_for_customer_ledger()
         return f"""
             SELECT
                 e.CustomerID,
@@ -1628,6 +1633,7 @@ class LedgerExportService:
               AND ISNULL(e.IsActive, 1) = 1
               AND ISNULL(e.Amount, 0) > 0
               AND {misc_kind}
+              {misc_invoiced_exclusion}
 
             UNION ALL
 

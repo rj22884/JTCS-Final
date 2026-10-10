@@ -3084,6 +3084,25 @@ class GstInvoiceService:
         self._bind_misc_link(header, payload)
         self._apply_followup_contact(header)
         self._apply_misc_contact(header)
+        # Create Invoice from Misc is idempotent: retry/double-submit updates the
+        # existing linked sale invoice instead of posting a second receivable.
+        misc_id = self._positive_id(header.get("MiscEntryID"))
+        if misc_id:
+            linked_misc = self.repo.find_by_misc_entries([misc_id]).get(int(misc_id))
+            if linked_misc is not None:
+                return self.update_record(
+                    linked_misc.InvoiceID,
+                    {
+                        **payload,
+                        "misc_entry_id": misc_id,
+                        "from_source": True,
+                        "bill_source": self.BILL_SOURCE_MISCELLANEOUS
+                        if bill_source == self.BILL_SOURCE_MANUAL
+                        else bill_source,
+                    },
+                    commit=commit,
+                    enforce_owner=False,
+                )
         tally_key = header.get("TallyBillNo")
         existing = self.repo.find_by_tally_bill_no(tally_key) if tally_key else None
         if existing is not None:

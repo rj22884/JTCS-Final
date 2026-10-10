@@ -792,6 +792,7 @@ class OthersIncomeExpenseService:
         """Point this Miscellaneous invoice at Same Customer or the chosen billing customer.
 
         Contact person stays the entry customer. Follow-up invoices are not touched.
+        Same Customer uses the Misc entry customer id; Other Customer uses the chosen id.
         """
         self.entry_repo.ensure_schema()
         row = self.entry_repo.get_by_id(int(entry_id))
@@ -805,6 +806,11 @@ class OthersIncomeExpenseService:
             billing_id = int(billing_customer_id)
         except (TypeError, ValueError) as exc:
             raise ValueError("Please select the Billing Customer.") from exc
+        if billing_id <= 0:
+            raise ValueError("Please select the Billing Customer.")
+        entry_customer_id = int(getattr(row, "CustomerID", 0) or 0)
+        if entry_customer_id <= 0:
+            raise ValueError("Please select a customer first.")
 
         from app.repositories.gst_invoice_repository import GstInvoiceRepository
         from app.services.gst_invoice_service import GstInvoiceService

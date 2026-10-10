@@ -191,6 +191,59 @@ def sql_unpaid_followup_exclusion_for_customer_ledger() -> str:
     """
 
 
+def sql_unpaid_misc_exclusion_for_customer_ledger() -> str:
+    """Hide a Misc Activity amount when that entry already has a sale invoice.
+
+    Create Invoice posts the receivable as Accounting / Sale / Service Invoice.
+    Showing OthersIncomeExpenseMaster.Amount as well would double the customer debit.
+    Misc rows that never became an invoice stay on the Individual Client ledger.
+    """
+    return """
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.GstInvoice i
+            WHERE i.MiscEntryID = e.EntryID
+               OR (
+                    LTRIM(RTRIM(ISNULL(e.BillNo, N''))) <> N''
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(i.InvoiceNo, N''))))
+                            = UPPER(LTRIM(RTRIM(e.BillNo)))
+                        OR UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                            = UPPER(LTRIM(RTRIM(e.BillNo)))
+                    )
+               )
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.JTCSDailyTransaction d
+            WHERE d.Status = N'Posted'
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
+              AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
+              AND ISNULL(d.SaleAmount, 0) <> 0
+              AND (
+                    (
+                        LTRIM(RTRIM(ISNULL(e.BillNo, N''))) <> N''
+                        AND (
+                            UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.BillNo)))
+                            OR UPPER(LTRIM(RTRIM(ISNULL(d.Remarks, N''))))
+                                = UPPER(LTRIM(RTRIM(e.BillNo)))
+                        )
+                    )
+                    OR (
+                        LTRIM(RTRIM(ISNULL(e.TallyBillNo, N''))) <> N''
+                        AND (
+                            UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                            OR UPPER(LTRIM(RTRIM(ISNULL(d.Remarks, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                        )
+                    )
+              )
+        )
+    """
+
+
 class PaymentAccountingService:
     """Reusable invoice-debit / payment-credit posting."""
 
