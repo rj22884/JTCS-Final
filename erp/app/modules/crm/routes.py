@@ -1089,6 +1089,43 @@ def conversation_customer_matches(conversation_id: int):
     return jsonify({"ok": True, "matches": matches, "count": len(matches)})
 
 
+@crm_api_bp.route("/whatsapp/customer-directory", methods=["GET"])
+def whatsapp_customer_directory():
+    """Token-gated CustomerMaster export for the standalone WhatsApp inbox (name + phone only)."""
+    import hmac
+    import os
+    import re
+
+    provided = (request.headers.get("X-WhatsApp-Sync-Token") or request.args.get("token") or "").strip()
+    expected = (
+        os.environ.get("WHATSAPP_CUSTOMER_SYNC_TOKEN")
+        or current_app.config.get("WHATSAPP_CUSTOMER_SYNC_TOKEN")
+        or ""
+    ).strip()
+    if not expected or not provided or not hmac.compare_digest(provided, expected):
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    from app.repositories.customer_repository import CustomerRepository
+
+    rows = CustomerRepository().list_master(limit=10000)
+    customers = []
+    for row in rows:
+        customer_id = row.get("customer_id")
+        name = (row.get("customer_name") or "").strip()
+        mobile = (row.get("mobile_number") or "").strip()
+        digits = re.sub(r"\D", "", mobile)
+        if not customer_id or not name or len(digits) < 8:
+            continue
+        customers.append(
+            {
+                "id": str(customer_id),
+                "name": name,
+                "mobile": digits,
+            }
+        )
+    return jsonify({"ok": True, "customers": customers, "count": len(customers)})
+
+
 @crm_api_bp.route("/conversations/<int:conversation_id>/link", methods=["POST"])
 @login_required
 def conversation_link(conversation_id: int):
