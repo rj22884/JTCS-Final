@@ -3,6 +3,69 @@
   font-size: 14px;
 }
 
+.fu-generate-bill-wrap {
+  padding: 0.55rem 0.75rem;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.375rem;
+}
+
+.fu-generate-bill-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.fu-generate-bill-radios .form-check-label {
+  font-weight: 600;
+}
+
+.fu-thank-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.fu-bill-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+}
+
+#fuInvoiceStatus.fu-pay-no {
+  color: #dc2626;
+  font-weight: 700;
+  animation: fuStatusBlink 1s ease-in-out infinite;
+}
+
+#fuInvoiceStatus.fu-pay-yes {
+  color: #15803d;
+  font-weight: 700;
+  animation: none;
+}
+
+.fu-bill-no-copy {
+  display: inline-flex;
+  align-items: center;
+}
+
+#fuCustomerBillSummary {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  padding-top: 1.35rem;
+}
+
+#fuCustomerBillSummary .is-overdue {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+@keyframes fuStatusBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
 .fu-required::after {
   content: " *";
   color: #dc3545;
@@ -67,6 +130,154 @@ button.fu-stat-card {
 
 .fu-filter-card {
   height: 100%;
+}
+
+.fu-dsc-toolbar-row {
+  align-items: flex-end;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.fu-dsc-inline-filters input[type="date"],
+.fu-dsc-inline-filters select.form-select {
+  width: 8.4rem;
+}
+
+.fu-module-title {
+  flex: 0 0 auto;
+}
+
+.fu-gst-toolbar-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.fu-gst-inline-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.fu-gst-inline-filters .fu-inline-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fu-gst-inline-filters .fu-inline-field:first-child {
+  flex: 1 1 9rem;
+  max-width: 14rem;
+}
+
+.fu-gst-inline-filters input[type="search"] {
+  min-width: 8rem;
+}
+
+.fu-gst-inline-filters select.form-select,
+.fu-gst-inline-filters input[type="date"] {
+  width: 8.6rem;
+}
+
+.fu-gst-inline-filters .fu-inline-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+.fu-dsc-inline-filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.45rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.fu-dsc-inline-filters .fu-inline-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fu-dsc-inline-filters .fu-inline-field:first-child {
+  flex: 0 1 9rem;
+}
+
+.fu-dsc-inline-filters .fu-dsc-assist {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.fu-dsc-inline-filters .fu-dsc-assist-field {
+  flex: 1 1 11rem;
+  margin-top: 0;
+}
+
+.fu-dsc-inline-filters .form-label {
+  margin-bottom: 0.12rem;
+  font-size: 0.68rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.fu-dsc-inline-filters .fu-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.fu-dsc-top-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.fu-dsc-assist {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.6rem 0.45rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 0.4rem;
+  background: #f8fafc;
+}
+
+.fu-dsc-assist-field + .fu-dsc-assist-field {
+  margin-top: 0.5rem;
+}
+
+.fu-dsc-assist .form-label {
+  margin-bottom: 0.2rem;
+  font-size: 0.78rem;
+}
+
+.fu-dsc-assist-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.fu-dsc-assist-row .form-control {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.fu-dsc-assist-row .btn {
+  flex: 0 0 auto;
+}
+
+.fu-dsc-assist-copy {
+  width: 1.85rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fu-dsc-assist-readonly {
+  background: #eef2f7;
 }
 
 .fu-grid-wrap {
@@ -175,6 +386,78 @@ button.fu-stat-card {
   opacity: 0.9;
 }
 
+#fuEntryModal .modal-dialog:has(.fu-entry-modal.is-invoice-edit) {
+  width: calc(100vw - 0.75rem);
+  max-width: calc(100vw - 0.75rem);
+  height: calc(100vh - 0.75rem);
+  max-height: calc(100vh - 0.75rem);
+  margin: 0.375rem auto;
+}
+
+#fuEntryModal .fu-entry-modal.is-invoice-edit {
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.fu-entry-modal.is-invoice-edit .modal-header {
+  flex: 0 0 auto;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+}
+
+.fu-entry-modal.is-invoice-edit .modal-header .small {
+  display: none;
+}
+
+.fu-entry-modal.is-invoice-edit .modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.fu-entry-modal.is-invoice-edit #fuEntryForm,
+.fu-entry-modal.is-invoice-edit .modal-footer {
+  display: none;
+}
+
+.fu-invoice-editor {
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  background: #fff;
+}
+
+.fu-entry-modal.is-invoice-edit .fu-invoice-editor {
+  display: flex;
+}
+
+.fu-invoice-editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.22rem 0.6rem;
+  border-bottom: 1px solid #d6e4f5;
+  background: #f8fafc;
+  flex: 0 0 auto;
+}
+
+#fuInvoiceEditorFrame {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+}
+
 .fu-entry-modal .modal-header {
   background: #f8fafc;
 }
@@ -263,6 +546,12 @@ button.fu-stat-card {
   padding: 0.15rem 0.4rem;
 }
 
+.fu-thank-btn.disabled,
+.fu-thank-wa:disabled {
+  pointer-events: none;
+  opacity: 0.45;
+}
+
 .fu-pay-remind-btn {
   font-size: 14px;
   padding: 0.2rem 0.45rem;
@@ -317,6 +606,80 @@ button.fu-stat-card {
 
 .fu-workflow-checks .form-check-label {
   font-size: 13px;
+}
+
+.fu-invoice-summary {
+  flex: 1 0 100%;
+  margin: 0.15rem 0 0.35rem;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.fu-invoice-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.65rem;
+}
+
+.fu-invoice-info,
+.fu-pay-adjust {
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.3rem;
+}
+
+.fu-invoice-info {
+  border-left: 3px solid #0b2545;
+}
+
+.fu-invoice-card-title {
+  font-weight: 650;
+  margin-bottom: 0.2rem;
+}
+
+.fu-invoice-info span {
+  color: #5a6b7d;
+  margin-right: 0.25rem;
+}
+
+.fu-pay-adjust {
+  border-left: 3px solid #15803d;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.fu-pay-adjust .fu-invoice-card-title,
+.fu-pay-adjust strong,
+.fu-pay-adjust .fu-pay-label,
+.fu-pay-adjust .fu-pay-status,
+.fu-pay-adjust summary {
+  color: #166534;
+}
+
+.fu-pay-adjust .fu-pay-label {
+  margin-right: 0.25rem;
+}
+
+.fu-pay-details {
+  margin-top: 0.35rem;
+}
+
+.fu-pay-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fu-pay-entry {
+  margin-top: 0.35rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid #bbf7d0;
+}
+
+@media (max-width: 768px) {
+  .fu-invoice-pair {
+    grid-template-columns: 1fr;
+  }
 }
 
 .fu-customer-results {
@@ -402,6 +765,21 @@ button.fu-stat-card {
 .fu-activity-page[data-module="DSC"] .fu-copy-btn.is-copied {
   color: #198754;
   background: rgba(25, 135, 84, 0.1);
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn:disabled {
+  color: #9aa3b2;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.fu-activity-page[data-module="DSC"] .fu-copy-btn.fu-video-link-locked,
+.fu-activity-page[data-module="DSC"] .fu-copy-btn.fu-video-link-locked:disabled {
+  color: #dc3545;
+  background: transparent;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* ITR only: Payment Received rows — light navy + locked controls (Edit / Thank You stay active) */

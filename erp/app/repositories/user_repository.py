@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
@@ -86,6 +86,18 @@ class UserRepository:
         )
         return list(self.session.scalars(stmt).all())
 
+    def list_for_menu_allow(self) -> list[User]:
+        """Active staff users that can be allowed on a menu (not FPS shop logins)."""
+        from app.utils.roles import has_fps_user_role
+
+        stmt = (
+            select(User)
+            .where(User.UserStatus != "Rejected")
+            .where(User.IsActive == True)  # noqa: E712
+            .order_by(User.FullName)
+        )
+        return [user for user in self.session.scalars(stmt).all() if not has_fps_user_role(user.Role)]
+
     def list_all_for_admin(self) -> list[User]:
         """All users for Admin Role → Users grid (excludes rejected)."""
         stmt = select(User).where(User.UserStatus != "Rejected")
@@ -116,11 +128,50 @@ class UserRepository:
         return user
 
 
+_COMPANY_COLUMNS_READY = False
+
+_COMPANY_EXTRA_COLUMNS = (
+    ("AddressLine", "NVARCHAR(500) NULL"),
+    ("City", "NVARCHAR(100) NULL"),
+    ("Pincode", "NVARCHAR(10) NULL"),
+    ("State", "NVARCHAR(100) NULL"),
+    ("StateCode", "NVARCHAR(2) NULL"),
+    ("GSTIN", "NVARCHAR(20) NULL"),
+    ("PAN", "NVARCHAR(20) NULL"),
+    ("CIN", "NVARCHAR(30) NULL"),
+    ("Phone", "NVARCHAR(20) NULL"),
+    ("Email", "NVARCHAR(254) NULL"),
+    ("Website", "NVARCHAR(200) NULL"),
+)
+
+
+def ensure_company_profile_columns() -> None:
+    """Add invoice fields on CompanyProfile once per process."""
+    global _COMPANY_COLUMNS_READY
+    if _COMPANY_COLUMNS_READY:
+        return
+    from app.utils.db_session import commit_schema
+
+    for name, ddl in _COMPANY_EXTRA_COLUMNS:
+        db.session.execute(
+            text(
+                f"""
+                IF OBJECT_ID(N'dbo.CompanyProfile', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.CompanyProfile', N'{name}') IS NULL
+                    ALTER TABLE dbo.CompanyProfile ADD {name} {ddl};
+                """
+            )
+        )
+    commit_schema()
+    _COMPANY_COLUMNS_READY = True
+
+
 class CompanyRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
 
     def get_profile(self) -> CompanyProfile | None:
+        ensure_company_profile_columns()
         stmt = select(CompanyProfile).order_by(CompanyProfile.CompanyID).limit(1)
         return self.session.scalars(stmt).first()
 

@@ -3,7 +3,8 @@ from functools import wraps
 from flask import flash, jsonify, redirect, request, session, url_for
 
 from app.utils.delete_auth import verify_delete_credentials
-from app.utils.roles import ADMIN_ROLES, has_admin_role
+from app.utils.fps_access import FPS_SESSION_EXPIRED, is_fps_session, wants_json_response
+from app.utils.roles import has_admin_role, has_data_backup_role, has_fps_user_role
 
 
 def server_auth_exempt(view):
@@ -13,12 +14,7 @@ def server_auth_exempt(view):
 
 
 def _wants_json() -> bool:
-    return (
-        request.is_json
-        or (request.mimetype or "").startswith("application/json")
-        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        or "application/json" in (request.headers.get("Accept") or "")
-    )
+    return wants_json_response()
 
 
 def login_required(view):
@@ -29,6 +25,14 @@ def login_required(view):
                 return jsonify({"ok": False, "error": "Please sign in to continue."}), 401
             flash("Please sign in to continue.", "warning")
             return redirect(url_for("auth.login", next=request.path))
+        if has_fps_user_role(session.get("role")):
+            if not is_fps_session():
+                session.clear()
+                if _wants_json():
+                    return jsonify({"ok": False, "error": FPS_SESSION_EXPIRED}), 401
+                flash(FPS_SESSION_EXPIRED, "warning")
+                return redirect(url_for("auth.login"))
+            return view(*args, **kwargs)
         if not getattr(view, "_server_auth_exempt", False):
             from app.services.server_auth_service import ServerAuthService
 
@@ -56,6 +60,39 @@ def admin_required(view):
             flash("Administrator access required.", "danger")
             return redirect(url_for("dashboard.index"))
         return view(*args, **kwargs)
+
+    return wrapped
+
+
+def _deny_role(message: str):
+    if _wants_json():
+        return jsonify({"ok": False, "error": message}), 403
+    flash(message, "danger")
+    return redirect(url_for("dashboard.index"))
+
+
+def data_backup_required(view):
+    """Allow Admin plus Manager / Operator / Viewer to use Data Backup."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not has_data_backup_role(session.get("role")):
+            return _deny_role("Data Backup access required.")
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def backup_kind_required(view):
+    """Full/restore stay admin-only; database (.bak) Data Backup is staff-allowed."""
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        kind = str(kwargs.get("kind") or (args[0] if args else "") or "").strip().lower()
+        role = session.get("role")
+        if has_admin_role(role) or (kind == "database" and has_data_backup_role(role)):
+            return view(*args, **kwargs)
+        return _deny_role("Administrator access required.")
 
     return wrapped
 

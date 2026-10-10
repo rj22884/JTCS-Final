@@ -186,3 +186,173 @@
   font-weight: 700;
   white-space: nowrap;
 }
+
+.obc-invoice-list {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid #d6e4f5;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.obc-invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.obc-invoice-table th,
+.obc-invoice-table td {
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid #eef3f8;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.obc-invoice-table th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #607d8b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+}
+
+.obc-account-search {
+  position: relative;
+}
+
+.obc-account-menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow: auto;
+  margin-top: 0.2rem;
+  background: #fff;
+  border: 1px solid #d6e4f5;
+  border-radius: 0.375rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.obc-account-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid #eef3f8;
+  background: #fff;
+  padding: 0.4rem 0.65rem;
+}
+
+.obc-account-item:hover,
+.obc-account-item:focus {
+  background: #f3f8fd;
+}
+
+.obc-account-title {
+  font-weight: 650;
+  color: #1f3b57;
+}
+
+.obc-account-line {
+  font-size: 0.78rem;
+  color: #5c7386;
+}
+
+.obc-invoice-picker {
+  position: relative;
+}
+
+.obc-invoice-picker-btn {
+  width: 100%;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #ced4da;
+  border-radius: 0.375rem;
+  padding: 0.35rem 0.65rem;
+  min-height: 3.1rem;
+}
+
+.obc-invoice-picker-menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow: auto;
+  margin-top: 0.2rem;
+  background: #fff;
+  border: 1px solid #d6e4f5;
+  border-radius: 0.375rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.obc-invoice-picker-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-bottom: 1px solid #eef3f8;
+  background: #fff;
+  padding: 0.4rem 0.65rem;
+}
+
+.obc-invoice-picker-item:last-child {
+  border-bottom: 0;
+}
+
+.obc-invoice-picker-item.is-active,
+.obc-invoice-picker-item:hover {
+  background: #f0f7ff;
+}
+
+.obc-inv-line1,
+.obc-inv-line2 {
+  display: block;
+  line-height: 1.35;
+}
+
+.obc-inv-line1 {
+  font-weight: 650;
+}
+
+.obc-inv-line2 {
+  color: #5a6b7d;
+  font-size: 0.78rem;
+}
+
+.obc-invoice-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  padding: 0.4rem 0.65rem;
+  border-bottom: 1px solid #eef3f8;
+  font-size: 0.82rem;
+}
+
+.obc-invoice-row:last-child {
+  border-bottom: 0;
+}
+
+.obc-invoice-head {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #607d8b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.obc-alloc-preview {
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.obc-alloc-warn {
+  color: #b45309;
+  font-weight: 600;
+}

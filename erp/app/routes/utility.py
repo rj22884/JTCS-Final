@@ -312,6 +312,66 @@ def info_page():
     )
 
 
+def _deploy_selection(payload: dict) -> tuple[str, list[str], dict, list[str]]:
+    target = str(payload.get("target") or "app").strip().lower()
+    if target not in DEPLOY_TARGETS:
+        raise ValueError("Invalid upload target. Use app, web, or both.")
+    modules = payload.get("selected_modules") or []
+    decisions = payload.get("decisions") or {}
+    files = payload.get("files") or []
+    if not isinstance(modules, list) or not isinstance(files, list) or not isinstance(decisions, dict):
+        raise ValueError("Invalid selection payload.")
+    return (
+        target,
+        [str(item) for item in modules],
+        {str(key): str(value) for key, value in decisions.items()},
+        [str(item) for item in files],
+    )
+
+
+@bp.route("/api/deploy/changes", methods=["POST"])
+@login_required
+@admin_required
+def api_deploy_changes():
+    """Read-only git status. Does not commit, push, or contact the VPS."""
+    if is_vps_runtime():
+        return jsonify(ok=False, error="Upload VPS only works on local PC."), 400
+    payload = request.get_json(silent=True) or {}
+    target = str(payload.get("target") or "app").strip().lower()
+    if target not in DEPLOY_TARGETS:
+        return jsonify(ok=False, error="Invalid upload target. Use app, web, or both."), 400
+    try:
+        report = UtilityService().detect_changes(target=target)
+        return jsonify(report)
+    except Exception as exc:
+        current_app.logger.exception("Utility change detection failed")
+        return jsonify(ok=False, error=str(exc)), 500
+
+
+@bp.route("/api/deploy/preview", methods=["POST"])
+@login_required
+@admin_required
+def api_deploy_preview():
+    """Read-only manifest for the current module selection. Does not deploy."""
+    if is_vps_runtime():
+        return jsonify(ok=False, error="Upload VPS only works on local PC."), 400
+    payload = request.get_json(silent=True) or {}
+    try:
+        target, modules, decisions, _files = _deploy_selection(payload)
+        return jsonify(
+            UtilityService().preview_selection(
+                target=target,
+                selected_modules=modules,
+                decisions=decisions,
+            )
+        )
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 400
+    except Exception as exc:
+        current_app.logger.exception("Utility deploy preview failed")
+        return jsonify(ok=False, error=str(exc)), 500
+
+
 @bp.route("/api/deploy", methods=["POST"])
 @login_required
 @admin_required
@@ -322,15 +382,19 @@ def api_deploy():
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password") or "")
     commit_message = str(payload.get("commit_message") or "").strip()
-    target = str(payload.get("target") or "app").strip().lower()
-    if target not in DEPLOY_TARGETS:
-        return jsonify(ok=False, error="Invalid upload target. Use app, web, or both."), 400
+    try:
+        target, modules, decisions, files = _deploy_selection(payload)
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 400
     try:
         result = UtilityService().deploy_to_vps(
             password=password,
             commit_message=commit_message,
             created_by=_actor(),
             target=target,
+            selected_modules=modules,
+            decisions=decisions,
+            files=files,
         )
         return jsonify(result)
     except Exception as exc:
@@ -348,9 +412,10 @@ def api_deploy_stream():
     payload = request.get_json(silent=True) or {}
     password = str(payload.get("password") or "")
     commit_message = str(payload.get("commit_message") or "").strip()
-    target = str(payload.get("target") or "app").strip().lower()
-    if target not in DEPLOY_TARGETS:
-        return jsonify(ok=False, error="Invalid upload target. Use app, web, or both."), 400
+    try:
+        target, modules, decisions, files = _deploy_selection(payload)
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 400
     actor = _actor()
 
     @stream_with_context
@@ -361,6 +426,9 @@ def api_deploy_stream():
                 commit_message=commit_message,
                 created_by=actor,
                 target=target,
+                selected_modules=modules,
+                decisions=decisions,
+                files=files,
             ):
                 yield json.dumps(event, ensure_ascii=False) + "\n"
         except Exception as exc:

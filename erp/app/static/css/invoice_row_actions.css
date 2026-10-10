@@ -1,0 +1,23 @@
+.jtcs-inv-meta {
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.jtcs-inv-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.jtcs-inv-actions .btn {
+  padding: 0.05rem 0.28rem;
+  line-height: 1.1;
+  font-size: 12px;
+}
+
+.fu-invoice-actions .jtcs-inv-actions,
+.fu-invoice-actions .fu-inv-act {
+  margin: 0;
+}

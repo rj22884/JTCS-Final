@@ -106,46 +106,24 @@ class CustomerGroupService:
         include_code: str | None = None,
         labels: dict[str, str] | None = None,
     ) -> list[str]:
-        """Customer Groups allowed for a Chart of Account Group.
-
-        Unused groups stay available (new combinations). Groups already used
-        with other natures are hidden unless include_code keeps a legacy value.
-        Catch-all groups such as 'None above' stay available for every nature.
-        """
+        """All active Customer Groups are listed for any Chart of Account Group."""
+        _ = (chart_nature, usage, nature_by_chart_id, labels)
         if not chart_group_id:
             return []
-        selected_nature = (chart_nature or "").strip()
-        include = (include_code or "").strip().upper()
-        names = labels or {}
         allowed: list[str] = []
+        seen = set()
         for raw in active_codes:
             code = (raw or "").strip()
             if not code:
                 continue
             key = code.upper()
-            label = names.get(key) or names.get(code) or ""
-            if include and key == include:
-                if code not in allowed:
-                    allowed.append(code)
+            if key in seen:
                 continue
-            if is_universal_customer_group(code, label):
-                if code not in allowed:
-                    allowed.append(code)
-                continue
-            used_ids = {int(gid) for gid in (usage.get(key) or usage.get(code) or []) if gid}
-            if not used_ids:
-                allowed.append(code)
-                continue
-            if int(chart_group_id) in used_ids:
-                allowed.append(code)
-                continue
-            used_natures = {
-                (nature_by_chart_id.get(int(gid)) or "").strip()
-                for gid in used_ids
-            }
-            used_natures.discard("")
-            if selected_nature and selected_nature in used_natures:
-                allowed.append(code)
+            seen.add(key)
+            allowed.append(code)
+        include = (include_code or "").strip()
+        if include and include.upper() not in seen:
+            allowed.append(include)
         return allowed
 
     def allowed_group_codes(
@@ -234,7 +212,7 @@ class CustomerGroupService:
             raise ValueError("Group name is required.")
         if self.repository.get_by_code(group_code):
             raise ValueError(f"Group code '{group_code}' already exists.")
-        tabs = self._parse_tab_codes(payload.get("tab_codes") or payload.get("TabCodes"))
+        tabs = list(AVAILABLE_TAB_CODES)
         try:
             display_order = int(payload.get("display_order") or payload.get("DisplayOrder") or 1)
         except (TypeError, ValueError):
@@ -262,7 +240,6 @@ class CustomerGroupService:
         group_name = (payload.get("group_name") or payload.get("GroupName") or row.GroupName).strip()
         if not group_name:
             raise ValueError("Group name is required.")
-        tabs = self._parse_tab_codes(payload.get("tab_codes") or payload.get("TabCodes") or row.TabCodes)
         try:
             display_order = int(payload.get("display_order") or payload.get("DisplayOrder") or row.DisplayOrder)
         except (TypeError, ValueError):
@@ -277,7 +254,6 @@ class CustomerGroupService:
                 row,
                 {
                     "GroupName": group_name,
-                    "TabCodes": ",".join(tabs),
                     "DisplayOrder": display_order,
                     "ActiveStatus": active_status,
                 },
@@ -327,8 +303,4 @@ class CustomerGroupService:
 
     @staticmethod
     def ui_config() -> dict:
-        return {
-            "available_tabs": [
-                {"code": code, "label": TAB_LABELS[code]} for code in AVAILABLE_TAB_CODES
-            ],
-        }
+        return {}

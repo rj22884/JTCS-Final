@@ -2,8 +2,9 @@ from app.models.account_type import AccountTypeMaster
 from app.models.gst_billing import GstInvoice, GstInvoiceLine, ItemMaster
 from app.models.auth import AuthToken, CompanyProfile, User
 from app.models.menu_master import MenuMaster
+from app.models.menu_user_allow import MenuUserAllow
 from app.models.ecourt import ECourtReceiptBatch, ECourtReceiptLine, ECourtSale
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
+from app.models.followup import FollowupEntryMaster, FollowupEntryStage
 from app.models.stamp import StampMaster, StampOcrImage
 from app.models.exceptional_stamp_upload import (
     ExceptionalStampImport,
@@ -31,7 +32,19 @@ from app.models.hr import (
     HrOfferLetter,
     HrWorkLocation,
 )
-from app.models.whats_new import WhatsNewEntry
+from app.models.ration_card import (
+    PdsAroMaster,
+    PdsDistrictMaster,
+    PdsDsoMaster,
+    PdsFpsMaster,
+    PdsGeoImport,
+    PdsRationCardMaster,
+    PdsStateMaster,
+    RationCardMember,
+    RationCardUploadBatch,
+    RationDealerMaster,
+)
+from app.models.whats_new import WhatsNewEntry, WhatsNewRead
 from app.models.app_version import AppVersionHistory
 from app.models.transactions import (
     CustomerMaster,
@@ -46,6 +59,7 @@ from app.models.transactions import (
 
 __all__ = [
     "MenuMaster",
+    "MenuUserAllow",
     "User",
     "CompanyProfile",
     "AuthToken",
@@ -78,10 +92,19 @@ __all__ = [
     "CredentialsMaster",
     "SeoKeyword",
     "WebsiteEStampOrder",
+    "RationDealerMaster",
+    "RationCardUploadBatch",
+    "RationCardMember",
+    "PdsStateMaster",
+    "PdsDistrictMaster",
+    "PdsDsoMaster",
+    "PdsAroMaster",
+    "PdsFpsMaster",
+    "PdsRationCardMaster",
+    "PdsGeoImport",
     "WhatsNewEntry",
     "AppVersionHistory",
     "RdAccountMaster",
-    "FollowupWorkflowStage",
     "FollowupEntryMaster",
     "FollowupEntryStage",
 ]

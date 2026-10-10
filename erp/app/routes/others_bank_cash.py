@@ -22,14 +22,13 @@ def index():
         purposes = PurposeMasterService().list_records(active_only=True)
     except Exception:
         purposes = []
-    account_payload = service.list_accounts()
     return render_template(
         "others/bank_cash_transactions.html",
         page_title="Other Bank/Cash Transactions",
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         default_date=date.today().isoformat(),
-        accounts=account_payload.get("rows") or [],
-        account_groups=account_payload.get("groups") or [],
+        accounts=[],
+        account_groups=[],
         purposes=purposes or [],
         next_voucher=service.next_voucher_no(),
         load_entry_id=request.args.get("load_entry", type=int),
@@ -69,6 +68,26 @@ def grid():
     return jsonify({"ok": True, "rows": OthersBankCashService().list_entries()})
 
 
+@bp.route("/accounts/search", methods=["GET"], strict_slashes=False)
+@login_required
+def search_accounts():
+    term = request.args.get("q") or ""
+    limit = request.args.get("limit", type=int) or 30
+    # Credit Account is the only Money In-Out field that should also match
+    # Customer Master. Debit keeps the bank/chart ledger search.
+    include_customers = (request.args.get("side") or "").strip().lower() == "credit"
+    return jsonify(
+        {
+            "ok": True,
+            "rows": OthersBankCashService().search_accounts(
+                term,
+                limit=limit,
+                include_customers=include_customers,
+            ),
+        }
+    )
+
+
 @bp.route("/accounts", methods=["GET"], strict_slashes=False)
 @login_required
 def accounts():
@@ -80,6 +99,21 @@ def accounts():
             "groups": payload.get("groups") or [],
         }
     )
+
+
+@bp.route("/customer-invoices", methods=["GET"], strict_slashes=False)
+@login_required
+def customer_invoices():
+    raw = (request.args.get("customer_id") or "").strip()
+    entry_raw = (request.args.get("entry_id") or "").strip()
+    entry_id = int(entry_raw) if entry_raw.isdigit() else None
+    try:
+        payload = OthersBankCashService().customer_open_invoices(int(raw), entry_id=entry_id)
+        return jsonify({"ok": True, **payload})
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc) or "Customer is required."}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @bp.route("/next-voucher", methods=["GET"], strict_slashes=False)

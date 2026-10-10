@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/bank_cash_transactions.css') }}?v=20260817obcicon1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/bank_cash_transactions.css') }}?v=20261006acctsearch">
 {% endblock %}
 
 {% block content %}
@@ -112,17 +112,16 @@
             <div class="obc-subsection-title"><i class="bi bi-box-arrow-up-right"></i> Credit (Source / Money Out)</div>
             <div class="row g-3">
               <div class="col-md-8">
-                <label class="form-label obc-required" for="obcCreditAccount">Credit Account</label>
-                <select class="form-select" id="obcCreditAccount" name="CreditLedgerKey" required>
-                  <option value="">Select account...</option>
-                  {% for group in account_groups|default([]) %}
-                  <optgroup label="{{ group.label or group.group_name }}">
-                    {% for acc in group.accounts %}
-                    <option value="{{ acc.ledger_key }}">{{ acc.label }}</option>
-                    {% endfor %}
-                  </optgroup>
-                  {% endfor %}
-                </select>
+                <label class="form-label obc-required" for="obcCreditSearch">Credit Account</label>
+                <div class="obc-account-search" id="obcCreditSearchWrap">
+                  <input type="text" class="form-control" id="obcCreditSearch"
+                         placeholder="Search account, name, mobile, PAN, GSTIN, account no..."
+                         autocomplete="off">
+                  <div id="obcCreditSuggest" class="obc-account-menu d-none" role="listbox"></div>
+                  <select class="d-none" id="obcCreditAccount" name="CreditLedgerKey" required>
+                    <option value="">Select account...</option>
+                  </select>
+                </div>
               </div>
               <div class="col-md-4">
                 <label class="form-label obc-required" for="obcPurpose">Purpose</label>
@@ -141,21 +140,67 @@
             <div class="obc-subsection-title"><i class="bi bi-box-arrow-in-down-left"></i> Debit (Destination / Money In)</div>
             <div class="row g-3">
               <div class="col-12">
-                <label class="form-label obc-required" for="obcDebitAccount">Debit Account</label>
-                <select class="form-select" id="obcDebitAccount" name="DebitLedgerKey" required>
-                  <option value="">Select account (all Assets / Liabilities groups)...</option>
-                  {% for group in account_groups|default([]) %}
-                  <optgroup label="{{ group.label or group.group_name }}">
-                    {% for acc in group.accounts %}
-                    <option value="{{ acc.ledger_key }}">{{ acc.label }}</option>
-                    {% endfor %}
-                  </optgroup>
-                  {% endfor %}
-                </select>
+                <label class="form-label obc-required" for="obcDebitSearch">Debit Account</label>
+                <div class="obc-account-search" id="obcDebitSearchWrap">
+                  <input type="text" class="form-control" id="obcDebitSearch"
+                         placeholder="Search account, name, mobile, PAN, GSTIN, account no..."
+                         autocomplete="off">
+                  <div id="obcDebitSuggest" class="obc-account-menu d-none" role="listbox"></div>
+                  <select class="d-none" id="obcDebitAccount" name="DebitLedgerKey" required>
+                    <option value="">Select account...</option>
+                  </select>
+                </div>
                 <div class="form-text">
                   All Chart of Group ledgers under <strong>Assets</strong> and <strong>Liabilities</strong>
                   (Bank, Cash, RD, Income, Expense, ITR, CSC, etc.).
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="obc-subsection mb-3">
+            <div class="obc-subsection-title">Invoice receipt (optional)</div>
+            <div class="row g-3">
+              <div class="col-md-6 position-relative">
+                <label class="form-label" for="obcCustomerSearch">Customer / Party</label>
+                <input type="search" class="form-control" id="obcCustomerSearch" autocomplete="off"
+                       placeholder="Search customer for Money In">
+                <input type="hidden" id="obcCustomerId" name="CustomerID" value="">
+                <div class="form-text">Filled automatically when Credit Account is a customer ledger.</div>
+                <div id="obcCustomerSuggest" class="list-group position-absolute shadow-sm d-none"
+                     style="z-index: 20; max-height: 180px; overflow: auto;"></div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="obcInvoicePickerBtn">Invoice</label>
+                <div class="obc-invoice-picker" id="obcInvoicePicker">
+                  <button type="button" class="obc-invoice-picker-btn" id="obcInvoicePickerBtn" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="obcInvoicePickerLabel">No Invoice</span>
+                  </button>
+                  <div class="obc-invoice-picker-menu d-none" id="obcInvoicePickerMenu" role="listbox"></div>
+                </div>
+                <select class="form-select d-none" id="obcInvoiceMode" tabindex="-1" aria-hidden="true">
+                  <option value="none">No Invoice</option>
+                  <option value="all">All Invoices</option>
+                </select>
+                <input type="hidden" id="obcInvoiceModeValue" name="InvoiceMode" value="none">
+                <div class="form-text" id="obcInvoiceHint">No Invoice keeps this as a normal transfer. All Invoices links every outstanding invoice of this customer.</div>
+              </div>
+              <div class="col-12 d-none" id="obcInvoiceListWrap">
+                <div class="obc-invoice-list" id="obcInvoiceList"></div>
+                <div class="obc-alloc-preview" id="obcAllocationPreview"></div>
+              </div>
+              <div class="col-md-6 d-none" id="obcCategoryWrap">
+                <label class="form-label" for="obcCategoryName">Category</label>
+                <input type="text" class="form-control" id="obcCategoryName" readonly tabindex="-1"
+                       placeholder="From selected invoice">
+                <input type="hidden" name="WorkID" id="obcWorkId" value="">
+                <div class="form-text">Taken from the selected invoice (Misc Activity category).</div>
+              </div>
+              <div class="col-md-6 d-none" id="obcSubWorkWrap">
+                <label class="form-label" for="obcSubWorkName">Sub Work</label>
+                <input type="text" class="form-control" id="obcSubWorkName" readonly tabindex="-1"
+                       placeholder="From selected invoice">
+                <input type="hidden" name="WorkTypeID" id="obcWorkTypeId" value="">
               </div>
             </div>
           </div>
@@ -183,8 +228,10 @@
   window.OBC_API = {
     save: {{ url_for('others_bank_cash.save_record') | tojson }},
     grid: {{ url_for('others_bank_cash.grid') | tojson }},
-    accounts: {{ url_for('others_bank_cash.accounts') | tojson }},
+    accountSearch: {{ url_for('others_bank_cash.search_accounts') | tojson }},
     nextVoucher: {{ url_for('others_bank_cash.next_voucher') | tojson }},
+    customerInvoices: {{ url_for('others_bank_cash.customer_invoices') | tojson }},
+    customers: {{ url_for('accounting_invoice.api_customers') | tojson }},
     entry: {{ url_for('others_bank_cash.get_record', entry_id=0) | tojson }},
     delete: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
     defaultDate: {{ (default_date or '') | tojson }},
@@ -192,5 +239,6 @@
   };
   window.OBC_AUTO_LOAD_ENTRY_ID = {{ (load_entry_id if load_entry_id is defined else none) | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}?v=20260823dmy1"></script>
+<script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}?v=20261007receiptclose"></script>
 {% endblock %}

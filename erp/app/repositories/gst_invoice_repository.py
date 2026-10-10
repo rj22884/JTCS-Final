@@ -2,20 +2,23 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.gst_billing import GstInvoice, GstInvoiceLine
+from app.utils.db_session import commit_schema
+from app.utils.tally_bill import normalize_tally_bill_key, tally_bill_compact
 
 
 class GstInvoiceRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if GstInvoiceRepository._schema_ready:
             return
         # ItemMaster may be created by its own repo; invoice tables here.
         self.session.execute(
@@ -99,8 +102,19 @@ class GstInvoiceRepository:
             ("PaymentDate", "DATE NULL"),
             ("AmountPaid", "DECIMAL(18,2) NULL"),
             ("TallyBillNo", "NVARCHAR(50) NULL"),
+            ("FollowupEntryID", "INT NULL"),
+            ("MiscEntryID", "INT NULL"),
+            ("PayBankAccounts", "NVARCHAR(2000) NULL"),
+            ("BillApproved", "BIT NULL"),
+            ("BillUnapproveReason", "NVARCHAR(500) NULL"),
+            ("InvoicePaymentReceived", "BIT NULL"),
+            ("InvoicePaymentRemoveReason", "NVARCHAR(500) NULL"),
             ("DailyTransactionID", "INT NULL"),
             ("RoundOffAmount", "DECIMAL(18,2) NOT NULL CONSTRAINT DF_GstInvoice_RoundOff DEFAULT (0)"),
+            (
+                "BillSource",
+                "NVARCHAR(40) NOT NULL CONSTRAINT DF_GstInvoice_BillSource DEFAULT (N'Manual')",
+            ),
         ):
             self.session.execute(
                 text(
@@ -110,7 +124,26 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
+        # Widen BillSource for values like "Miscellaneous"
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.GstInvoice', N'BillSource') IS NOT NULL
+                   AND (
+                        SELECT CHARACTER_MAXIMUM_LENGTH
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = N'dbo'
+                          AND TABLE_NAME = N'GstInvoice'
+                          AND COLUMN_NAME = N'BillSource'
+                   ) < 40
+                BEGIN
+                    ALTER TABLE dbo.GstInvoice ALTER COLUMN BillSource NVARCHAR(40) NOT NULL;
+                END
+                """
+            )
+        )
+        commit_schema(self.session)
         for col, ddl in (
             ("TaxPeriod", "NVARCHAR(20) NULL"),
             ("Quarter", "NVARCHAR(40) NULL"),
@@ -124,14 +157,33 @@ class GstInvoiceRepository:
                     """
                 )
             )
-            self.session.commit()
-        self._schema_ready = True
+            commit_schema(self.session)
+        self.session.execute(
+            text(
+                """
+                IF COL_LENGTH(N'dbo.GstInvoice', N'FollowupEntryID') IS NOT NULL
+                   AND NOT EXISTS (
+                        SELECT 1
+                        FROM sys.indexes
+                        WHERE name = N'IX_GstInvoice_FollowupEntryID'
+                          AND object_id = OBJECT_ID(N'dbo.GstInvoice')
+                   )
+                BEGIN
+                    CREATE INDEX IX_GstInvoice_FollowupEntryID
+                        ON dbo.GstInvoice (FollowupEntryID);
+                END
+                """
+            )
+        )
+        commit_schema(self.session)
+        GstInvoiceRepository._schema_ready = True
 
     def find_by_tally_bill_no(self, bill_no: str) -> GstInvoice | None:
         self.ensure_schema()
-        key = (bill_no or "").strip()
+        key = normalize_tally_bill_key(bill_no)
         if not key:
             return None
+        compact = tally_bill_compact(bill_no)
         invoice_id = self.session.execute(
             text(
                 """
@@ -139,15 +191,68 @@ class GstInvoiceRepository:
                 FROM dbo.GstInvoice
                 WHERE TallyBillNo IS NOT NULL
                   AND LTRIM(RTRIM(TallyBillNo)) <> N''
-                  AND UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_no
+                  AND (
+                        UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_key
+                        OR UPPER(
+                            REPLACE(
+                                REPLACE(LTRIM(RTRIM(TallyBillNo)), N' ', N''),
+                                N'-', N''
+                            )
+                        ) = :bill_compact
+                  )
                 ORDER BY InvoiceID DESC
                 """
             ),
-            {"bill_no": key.upper()},
+            {"bill_key": key, "bill_compact": compact},
         ).scalar()
         if not invoice_id:
             return None
         return self.get_by_id(int(invoice_id))
+
+    def list_ids_for_bill_no(self, bill_no: str) -> list[int]:
+        """Every invoice whose tally bill number or invoice number is this bill."""
+        self.ensure_schema()
+        key = normalize_tally_bill_key(bill_no)
+        compact = tally_bill_compact(bill_no)
+        if not key:
+            return []
+        rows = self.session.execute(
+            text(
+                """
+                SELECT InvoiceID
+                FROM dbo.GstInvoice
+                WHERE (
+                        TallyBillNo IS NOT NULL
+                        AND LTRIM(RTRIM(TallyBillNo)) <> N''
+                        AND (
+                              UPPER(LTRIM(RTRIM(TallyBillNo))) = :bill_key
+                              OR UPPER(
+                                  REPLACE(
+                                      REPLACE(LTRIM(RTRIM(TallyBillNo)), N' ', N''),
+                                      N'-', N''
+                                  )
+                              ) = :bill_compact
+                        )
+                      )
+                   OR (
+                        InvoiceNo IS NOT NULL
+                        AND LTRIM(RTRIM(InvoiceNo)) <> N''
+                        AND (
+                              UPPER(LTRIM(RTRIM(InvoiceNo))) = :bill_key
+                              OR UPPER(
+                                  REPLACE(
+                                      REPLACE(LTRIM(RTRIM(InvoiceNo)), N' ', N''),
+                                      N'-', N''
+                                  )
+                              ) = :bill_compact
+                        )
+                      )
+                ORDER BY InvoiceID
+                """
+            ),
+            {"bill_key": key, "bill_compact": compact},
+        ).scalars()
+        return [int(invoice_id) for invoice_id in rows]
 
     def list_all(
         self,
@@ -174,8 +279,104 @@ class GstInvoiceRepository:
             stmt = stmt.where(GstInvoice.InvoiceDate >= date_from)
         if date_to:
             stmt = stmt.where(GstInvoice.InvoiceDate <= date_to)
-        stmt = stmt.order_by(GstInvoice.InvoiceDate.desc(), GstInvoice.InvoiceID.desc())
+        stmt = stmt.order_by(
+            func.coalesce(GstInvoice.UpdatedAt, GstInvoice.CreatedAt).desc(),
+            GstInvoice.InvoiceID.desc(),
+        )
         return list(self.session.scalars(stmt).all())
+
+    def find_by_followup_entry(self, entry_id: int) -> GstInvoice | None:
+        self.ensure_schema()
+        try:
+            key = int(entry_id)
+        except (TypeError, ValueError):
+            return None
+        if key <= 0:
+            return None
+        stmt = (
+            select(GstInvoice)
+            .where(GstInvoice.FollowupEntryID == key)
+            .order_by(GstInvoice.InvoiceID.desc())
+        )
+        return self.session.scalars(stmt).first()
+
+    def list_ids_for_followup_entry(self, entry_id: int) -> list[int]:
+        """Invoice primary keys linked to one follow-up entry. Never a customer-wide list."""
+        self.ensure_schema()
+        try:
+            key = int(entry_id)
+        except (TypeError, ValueError):
+            return []
+        if key <= 0:
+            return []
+        rows = self.session.scalars(
+            select(GstInvoice.InvoiceID)
+            .where(GstInvoice.FollowupEntryID == key)
+            .order_by(GstInvoice.InvoiceID.asc())
+        ).all()
+        return [int(invoice_id) for invoice_id in rows if invoice_id]
+
+    def find_by_followup_entries(self, entry_ids: list[int]) -> dict[int, GstInvoice]:
+        self.ensure_schema()
+        keys = []
+        for raw in entry_ids or []:
+            try:
+                key = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if key > 0:
+                keys.append(key)
+        if not keys:
+            return {}
+        rows = self.session.scalars(
+            select(GstInvoice).where(GstInvoice.FollowupEntryID.in_(keys))
+        ).all()
+        found: dict[int, GstInvoice] = {}
+        ambiguous: set[int] = set()
+        for inv in rows:
+            entry_id = getattr(inv, "FollowupEntryID", None)
+            if not entry_id:
+                continue
+            key = int(entry_id)
+            if key in ambiguous:
+                continue
+            if key in found:
+                ambiguous.add(key)
+                found.pop(key, None)
+                continue
+            found[key] = inv
+        return found
+
+    def find_by_misc_entries(self, entry_ids: list[int]) -> dict[int, GstInvoice]:
+        self.ensure_schema()
+        keys = []
+        for raw in entry_ids or []:
+            try:
+                key = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if key > 0:
+                keys.append(key)
+        if not keys:
+            return {}
+        rows = self.session.scalars(
+            select(GstInvoice).where(GstInvoice.MiscEntryID.in_(keys))
+        ).all()
+        found: dict[int, GstInvoice] = {}
+        ambiguous: set[int] = set()
+        for inv in rows:
+            entry_id = getattr(inv, "MiscEntryID", None)
+            if not entry_id:
+                continue
+            key = int(entry_id)
+            if key in ambiguous:
+                continue
+            if key in found:
+                ambiguous.add(key)
+                found.pop(key, None)
+                continue
+            found[key] = inv
+        return found
 
     def get_by_id(self, invoice_id: int) -> GstInvoice | None:
         self.ensure_schema()

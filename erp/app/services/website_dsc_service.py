@@ -313,6 +313,24 @@ Email: {self._esc(row.Email)}</p>
                 raise ValueError("Please enter the organization ID.")
             if len(org_address) < 8:
                 raise ValueError("Please enter the organization address.")
+        ocr_verified = bool(data.get("ocr_verified"))
+        ocr_name = _clean(data.get("ocr_name"), 160)
+        ocr_pan = _pan(data.get("ocr_pan") or "") if data.get("ocr_pan") else ""
+        ocr_aadhaar = "".join(ch for ch in str(data.get("ocr_aadhaar") or "") if ch.isdigit())
+        ocr_address = _clean(data.get("ocr_address"), 400)
+
+        def _norm_text(value: str) -> str:
+            return " ".join(str(value or "").upper().split())
+
+        if ocr_verified:
+            if ocr_name and _norm_text(ocr_name) != _norm_text(name):
+                raise ValueError("OCR name and entered name must match before submit.")
+            if ocr_pan and ocr_pan != pan:
+                raise ValueError("OCR PAN and entered PAN must match before submit.")
+            if ocr_aadhaar and ocr_aadhaar != aadhaar_digits:
+                raise ValueError("OCR Aadhaar and entered Aadhaar must match before submit.")
+            if ocr_address and _norm_text(ocr_address) != _norm_text(address):
+                raise ValueError("OCR address and entered address must match before submit.")
         return {
             "dsc_type": DSC_TYPES[dsc_code],
             "dsc_code": dsc_code,
@@ -327,6 +345,11 @@ Email: {self._esc(row.Email)}</p>
             "organization_name": org_name or None,
             "organization_id": org_id or None,
             "organization_address": org_address or None,
+            "ocr_verified": ocr_verified,
+            "ocr_name": ocr_name or None,
+            "ocr_pan": ocr_pan or None,
+            "ocr_aadhaar_last4": _aadhaar_last4(ocr_aadhaar) if ocr_aadhaar else None,
+            "ocr_address": ocr_address or None,
         }
 
     def _apply(self, row: WebsiteDscApplication, parsed: dict, data: dict) -> None:
@@ -343,6 +366,16 @@ Email: {self._esc(row.Email)}</p>
         row.OrganizationId = parsed["organization_id"]
         if hasattr(row, "OrganizationAddress"):
             row.OrganizationAddress = parsed.get("organization_address")
+        if hasattr(row, "OcrVerified"):
+            row.OcrVerified = bool(parsed.get("ocr_verified"))
+        if hasattr(row, "OcrName"):
+            row.OcrName = parsed.get("ocr_name")
+        if hasattr(row, "OcrPan"):
+            row.OcrPan = parsed.get("ocr_pan")
+        if hasattr(row, "OcrAadhaarLast4"):
+            row.OcrAadhaarLast4 = parsed.get("ocr_aadhaar_last4")
+        if hasattr(row, "OcrAddress"):
+            row.OcrAddress = parsed.get("ocr_address")
         row.Amount = PROFESSIONAL_CHARGE
         try:
             row.PayableAmount = float(data.get("payable_amount") or PROFESSIONAL_CHARGE)
@@ -374,7 +407,11 @@ Email: {self._esc(row.Email)}</p>
             "auth_letter_name": row.AuthLetterName or "",
             "pan_doc_name": getattr(row, "PanDocName", None) or "",
             "aadhaar_doc_name": getattr(row, "AadhaarDocName", None) or "",
+            "aadhaar_back_doc_name": getattr(row, "AadhaarBackDocName", None) or "",
             "org_id_doc_name": getattr(row, "OrgIdDocName", None) or "",
+            "ocr_verified": bool(getattr(row, "OcrVerified", False)),
+            "ocr_name": getattr(row, "OcrName", None) or "",
+            "ocr_pan": getattr(row, "OcrPan", None) or "",
             "amount": float(row.Amount or PROFESSIONAL_CHARGE),
             "payable_amount": float(row.PayableAmount or row.Amount or PROFESSIONAL_CHARGE),
             "pay_method": row.PayMethod or "",

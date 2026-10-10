@@ -11,6 +11,7 @@ from app.modules.settings.crypto import encrypt_value, mask_access_token
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.services import IntegrationSettingsService
 from app.modules.settings.whatsapp_meta_client import MetaGraphError, WhatsAppMetaClient
+from app.modules.settings.models import WHATSAPP_PUBLIC_WEBHOOK_URL
 from app.modules.settings.whatsapp_oauth_service import is_test_phone_display
 
 logger = logging.getLogger(__name__)
@@ -264,18 +265,36 @@ class WhatsAppHealthService:
         waba_id = (cfg.get("waba_id") or "").strip()
         if not waba_id:
             raise ValueError("WABA ID is required to subscribe webhooks.")
+        callback = (cfg.get("webhook_url") or "").strip() or WHATSAPP_PUBLIC_WEBHOOK_URL
+        verify = (cfg.get("webhook_verify_token") or "").strip()
+        if not verify:
+            raise ValueError(
+                "Webhook verify token is missing. Generate it on the WhatsApp page and Save."
+            )
         client = self._client(cfg)
         try:
-            raw = client.subscribe_app_to_waba(waba_id)
+            client.register_messages_webhook(
+                app_id=(cfg.get("app_id") or "").strip(),
+                app_secret=(cfg.get("app_secret") or "").strip(),
+                callback_url=callback,
+                verify_token=verify,
+                fields="messages",
+            )
+            raw = client.subscribe_app_to_waba(
+                waba_id,
+                override_callback_uri=callback,
+                verify_token=verify,
+            )
         except MetaGraphError as exc:
             self._upsert("connection_status", "Webhook Failed")
             raise ValueError(f"Webhook subscribe failed: {exc}") from exc
-        fields = ", ".join(DEFAULT_EVENTS)
-        self._upsert("webhook_subscribed_fields", fields)
+        self._upsert("webhook_subscribed_fields", "messages")
+        self._upsert("webhook_url", callback)
         return {
             "ok": True,
-            "message": "App subscribed to WABA webhooks.",
-            "subscribed_fields": list(DEFAULT_EVENTS),
+            "message": "Incoming WhatsApp messages will be delivered to the CRM inbox.",
+            "subscribed_fields": ["messages"],
+            "webhook_url": callback,
             "raw": raw,
         }
 

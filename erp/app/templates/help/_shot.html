@@ -1,0 +1,63 @@
+{% macro help_shot(shot, image_url, index) %}
+<figure class="help-shot">
+  <figcaption class="help-shot-cap">{{ shot.caption }}</figcaption>
+  {% if image_url %}
+  <div class="help-shot-live">
+    <img src="{{ image_url }}" alt="{{ shot.caption }}" class="help-shot-img">
+  </div>
+  {% else %}
+  <div class="help-mock" role="img" aria-label="{{ shot.caption }}">
+    <div class="help-mock-chrome">
+      <span class="help-mock-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="help-mock-url">{{ shot.title }}</span>
+    </div>
+    {% if shot.ribbon %}
+    <div class="help-mock-ribbon">
+      {% for item in shot.ribbon %}
+      <span class="help-mock-rib{% if loop.last %} is-on{% endif %}">{{ item }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="help-mock-body">
+      {% if shot.fields %}
+      <div class="help-mock-fields">
+        {% for label, value in shot.fields %}
+        <label>
+          <span>{{ label }}</span>
+          <em>{{ value }}</em>
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if shot.columns %}
+      <table class="help-mock-table">
+        <thead>
+          <tr>
+            {% for col in shot.columns %}
+            <th>{{ col }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in shot.rows %}
+          <tr>
+            {% for cell in row %}
+            <td>{{ cell }}</td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if shot.highlights %}
+      <ul class="help-mock-notes">
+        {% for note in shot.highlights %}
+        <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</figure>
+{% endmacro %}

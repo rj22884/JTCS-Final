@@ -64,7 +64,7 @@
           <tbody>
             {% for c in data.conversations %}
             <tr>
-              <td><a href="{{ url_for('crm.inbox_page') }}?c={{ c.ConversationID }}&channel={{ c.Channel or '' }}">{{ c.Subject or '—' }}</a></td>
+              <td><a href="{{ url_for('crm.inbox_page') }}?c={{ c.ConversationID }}&channel={{ c.Channel or '' }}">{% if c.Channel == 'WhatsApp' %}Open WhatsApp conversation{% else %}{{ c.Subject or '—' }}{% endif %}</a></td>
               <td>{{ c.Channel or '—' }}</td>
               <td>{{ c.Status or '—' }}</td>
               <td>{{ c.UnreadCount or 0 }}</td>

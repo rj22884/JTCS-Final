@@ -153,7 +153,7 @@ class CommunicationService:
                 """
                 SELECT TOP 1 c.ConversationID, c.CustomerID, c.LeadID, c.Subject, c.Channel,
                        c.Status, c.Priority, c.AssignedUserID, c.UnreadCount, c.ContactMobile,
-                       c.ContactEmail, c.ExternalThreadKey, c.MatchStatus
+                       c.ContactEmail, c.ExternalThreadKey, c.MatchStatus, c.CreatedDate
                 FROM dbo.CrmConversation c
                 WHERE c.IsActive = 1
                   AND c.Status <> N'Closed'
@@ -253,6 +253,81 @@ class CommunicationService:
             ).scalar()
         )
 
+    def email_needs_html(self, external_message_id: str) -> bool:
+        """Stored email whose HTML body has not been saved yet."""
+        ensure_crm_schema()
+        if not external_message_id:
+            return False
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 BodyHtml
+                FROM dbo.CrmMessage
+                WHERE ExternalMessageID = :eid AND Channel = N'Email'
+                """
+            ),
+            {"eid": external_message_id[:128]},
+        ).first()
+        if row is None:
+            return False
+        return not (row[0] or "").strip()
+
+    def save_email_html(
+        self,
+        external_message_id: str,
+        *,
+        body: str,
+        body_html: str,
+        drop_inline_image: bool,
+    ) -> None:
+        """Replace a flattened email body with the formatted HTML copy."""
+        ensure_crm_schema()
+        preview = " ".join((body or "").split())[:100]
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.CrmMessage
+                SET Body = :body,
+                    BodyHtml = :body_html,
+                    AttachmentPath = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentPath END,
+                    AttachmentName = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentName END,
+                    AttachmentMimeType = CASE
+                        WHEN :drop_image = 1 AND ISNULL(AttachmentMimeType, N'') LIKE N'image/%'
+                        THEN NULL ELSE AttachmentMimeType END
+                WHERE ExternalMessageID = :eid AND Channel = N'Email'
+                """
+            ),
+            {
+                "body": body or "(no body)",
+                "body_html": body_html,
+                "drop_image": 1 if drop_inline_image else 0,
+                "eid": external_message_id[:128],
+            },
+        )
+        db.session.commit()
+        db.session.execute(
+            text(
+                """
+                UPDATE c
+                SET LastMessagePreview = :preview
+                FROM dbo.CrmConversation c
+                INNER JOIN dbo.CrmMessage m ON m.ConversationID = c.ConversationID
+                WHERE m.ExternalMessageID = :eid
+                  AND m.Channel = N'Email'
+                  AND m.CreatedDate = (
+                      SELECT MAX(x.CreatedDate) FROM dbo.CrmMessage x
+                      WHERE x.ConversationID = c.ConversationID
+                  )
+                """
+            ),
+            {"preview": preview, "eid": external_message_id[:128]},
+        )
+        db.session.commit()
+
     def add_message(
         self,
         conversation_id: int,
@@ -266,6 +341,7 @@ class CommunicationService:
         attachment_mime_type: str | None = None,
         attachment_size_bytes: int | None = None,
         media_type: str | None = None,
+        body_html: str | None = None,
         external_message_id: str | None = None,
         delivery_status: str | None = None,
         error_detail: str | None = None,
@@ -289,13 +365,13 @@ class CommunicationService:
             text(
                 """
                 INSERT INTO dbo.CrmMessage
-                    (ConversationID, Direction, Channel, Body, AttachmentPath, AttachmentName,
+                    (ConversationID, Direction, Channel, Body, BodyHtml, AttachmentPath, AttachmentName,
                      AttachmentMimeType, AttachmentSizeBytes, MediaType, ExternalMessageID,
                      DeliveryStatus, StatusUpdatedAt, ErrorDetail, IsTest,
                      CreatedByUserID, CreatedByName, IsInternalNote)
                 OUTPUT INSERTED.MessageID
                 VALUES
-                    (:cid, :direction, :channel, :body, :apath, :aname,
+                    (:cid, :direction, :channel, :body, :body_html, :apath, :aname,
                      :amime, :asize, :mtype, :eid,
                      :dstatus, :now, :err, :is_test,
                      :uid, :uname, :internal)
@@ -306,6 +382,7 @@ class CommunicationService:
                 "direction": direction[:20],
                 "channel": channel[:50],
                 "body": body,
+                "body_html": (body_html or "") or None,
                 "apath": attachment_path,
                 "aname": attachment_name,
                 "amime": (attachment_mime_type or "")[:100] or None,
@@ -324,7 +401,7 @@ class CommunicationService:
         unread_sql = "UnreadCount = UnreadCount + 1," if bump_unread and direction == "Inbound" else ""
         inbound_sql = "LastInboundAt = :now," if direction == "Inbound" else ""
         outbound_sql = "LastOutboundAt = :now," if direction == "Outbound" else ""
-        preview = (body or "")[:240]
+        preview = " ".join((body or "").split())[:100]
         if direction == "Inbound":
             status_sql = """
                 Status = CASE
@@ -544,7 +621,9 @@ class CommunicationService:
             ),
             params,
         ).mappings().all()
-        return {"total": int(total), "page": page, "page_size": page_size, "rows": [dict(r) for r in rows]}
+        rows_out = [dict(r) for r in rows]
+        self._attach_link_suggestions(rows_out)
+        return {"total": int(total), "page": page, "page_size": page_size, "rows": rows_out}
 
     def get_conversation(self, conversation_id: int) -> dict | None:
         ensure_crm_schema()
@@ -576,19 +655,51 @@ class CommunicationService:
                 LEFT JOIN dbo.CustomerMaster cm ON cm.CustomerID = c.CustomerID
                 LEFT JOIN dbo.CrmLead l ON l.LeadID = c.LeadID
                 LEFT JOIN dbo.Users u ON u.UserID = c.AssignedUserID
-                WHERE c.ConversationID = :id AND c.IsActive = 1
+                WHERE c.ConversationID = :id
                 """
             ),
             {"id": conversation_id},
         ).mappings().first()
-        return dict(row) if row else None
+        if not row:
+            return None
+        record = dict(row)
+        self._attach_link_suggestions([record])
+        return record
+
+    def _attach_link_suggestions(self, rows: list[dict]) -> None:
+        """Suggest Customer Master matches. Does not write a link."""
+        from app.modules.communication.customer_link_service import CustomerLinkService
+
+        pending = [
+            row
+            for row in rows
+            if not row.get("CustomerID") and (row.get("Channel") or "") == "WhatsApp"
+        ]
+        if not pending:
+            for row in rows:
+                row.setdefault("link_candidates", [])
+                row.setdefault("link_prompt", False)
+            return
+        link = CustomerLinkService()
+        for row in rows:
+            if row.get("CustomerID") or (row.get("Channel") or "") != "WhatsApp":
+                row["link_candidates"] = []
+                row["link_prompt"] = False
+                continue
+            candidates = link.link_suggestions(
+                mobile=row.get("ContactMobile") or row.get("ExternalThreadKey"),
+                email=row.get("ContactEmail"),
+            )
+            row["link_candidates"] = candidates
+            status = (row.get("MatchStatus") or "").strip()
+            row["link_prompt"] = bool(candidates) and status != "PromptDismissed"
 
     def list_messages(self, conversation_id: int) -> list[dict]:
         ensure_crm_schema()
         rows = db.session.execute(
             text(
                 """
-                SELECT MessageID, ConversationID, Direction, Channel, Body, AttachmentPath,
+                SELECT MessageID, ConversationID, Direction, Channel, Body, BodyHtml, AttachmentPath,
                        AttachmentName, AttachmentMimeType, AttachmentSizeBytes, MediaType,
                        ExternalMessageID, DeliveryStatus, StatusUpdatedAt, ErrorDetail,
                        ISNULL(IsStarred, 0) AS IsStarred,
@@ -603,6 +714,64 @@ class CommunicationService:
         ).mappings().all()
         return [dict(r) for r in rows]
 
+    def get_message(self, message_id: int) -> dict | None:
+        ensure_crm_schema()
+        row = db.session.execute(
+            text(
+                """
+                SELECT MessageID, ConversationID, Direction, Channel, Body, AttachmentPath,
+                       AttachmentName, AttachmentMimeType, AttachmentSizeBytes, MediaType
+                FROM dbo.CrmMessage
+                WHERE MessageID = :id
+                """
+            ),
+            {"id": message_id},
+        ).mappings().first()
+        return dict(row) if row else None
+
+    def delete_message(self, message_id: int) -> bool:
+        ensure_crm_schema()
+        msg = self.get_message(message_id)
+        if not msg:
+            return False
+        db.session.execute(
+            text("DELETE FROM dbo.CrmMessage WHERE MessageID = :id"),
+            {"id": int(message_id)},
+        )
+        db.session.commit()
+        return True
+
+    def update_message_attachment(
+        self,
+        message_id: int,
+        *,
+        attachment_path: str | None = None,
+        attachment_name: str | None = None,
+        attachment_mime_type: str | None = None,
+        attachment_size_bytes: int | None = None,
+    ) -> None:
+        ensure_crm_schema()
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.CrmMessage
+                SET AttachmentPath = COALESCE(:path, AttachmentPath),
+                    AttachmentName = COALESCE(:name, AttachmentName),
+                    AttachmentMimeType = COALESCE(:mime, AttachmentMimeType),
+                    AttachmentSizeBytes = COALESCE(:size, AttachmentSizeBytes)
+                WHERE MessageID = :id
+                """
+            ),
+            {
+                "id": message_id,
+                "path": attachment_path,
+                "name": (attachment_name or "")[:240] or None,
+                "mime": (attachment_mime_type or "")[:100] or None,
+                "size": attachment_size_bytes,
+            },
+        )
+        db.session.commit()
+
     def mark_read(self, conversation_id: int) -> None:
         ensure_crm_schema()
         db.session.execute(
@@ -614,6 +783,28 @@ class CommunicationService:
                 """
             ),
             {"id": conversation_id, "now": datetime.utcnow()},
+        )
+        db.session.commit()
+        db.session.execute(
+            text(
+                """
+                UPDATE dbo.Notification
+                SET IsRead = 1, ReadDate = :now
+                WHERE IsRead = 0
+                  AND ISNULL(IsArchived, 0) = 0
+                  AND (
+                        (EntityType = N'CrmConversation' AND EntityID = :id)
+                     OR LinkURL LIKE :link_end
+                     OR LinkURL LIKE :link_amp
+                  )
+                """
+            ),
+            {
+                "id": conversation_id,
+                "now": datetime.utcnow(),
+                "link_end": f"%c={int(conversation_id)}",
+                "link_amp": f"%c={int(conversation_id)}&%",
+            },
         )
         db.session.commit()
 
@@ -636,9 +827,12 @@ class CommunicationService:
         match_status: str | None = None,
         customer_set: bool = False,
         lead_set: bool = False,
+        commit: bool = True,
     ) -> None:
-        ensure_crm_schema()
-        existing = self.get_conversation(conversation_id)
+        existing = None
+        if commit:
+            ensure_crm_schema()
+            existing = self.get_conversation(conversation_id)
         sets = ["ModifiedDate = :now"]
         params: dict = {"id": conversation_id, "now": datetime.utcnow()}
         if status:
@@ -684,6 +878,9 @@ class CommunicationService:
             text(f"UPDATE dbo.CrmConversation SET {', '.join(sets)} WHERE ConversationID = :id"),
             params,
         )
+        if not commit:
+            db.session.flush()
+            return
         db.session.commit()
 
         from app.modules.shared.audit_service import AuditService

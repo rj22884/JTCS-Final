@@ -1,13 +1,19 @@
 {% extends 'layouts/base.html' %}
 
+{% set api_bp = api_blueprint|default('others_income_expense') %}
+{% set force_kind = force_ledger_kind|default('') %}
+{% set hide_misc = hide_misc|default(false) %}
+{% set records_title = module_title|default('Income / Expense Records') %}
+
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260827misc1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20261006miscbill">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261006owner">
 {% endblock %}
 
 {% block content %}
-<div class="oie-activity-page">
+<div class="oie-activity-page{% if force_kind %} oie-force-kind{% endif %}">
   <div class="jtcs-card mb-2 py-2 px-3">
     <div class="d-flex flex-wrap align-items-center gap-2">
       <button type="button" class="btn btn-primary btn-sm" id="oieNewEntryBtn">
@@ -38,7 +44,7 @@
         <span class="oie-stat-split-item">Bank <strong id="oieStatExpenseBank">0.00</strong></span>
       </div>
     </button>
-    <button type="button" class="oie-stat-card oie-stat-misc" data-kind-filter="Misc." title="Filter Misc.">
+    <button type="button" class="oie-stat-card oie-stat-misc{% if hide_misc and not force_kind %} d-none{% endif %}" data-kind-filter="Misc." title="Filter Misc.">
       <div class="oie-stat-label">Misc.</div>
       <div class="oie-stat-value" id="oieStatMiscAmount">0.00</div>
       <div class="oie-stat-meta"><span id="oieStatMiscCount">0</span> record(s)</div>
@@ -62,7 +68,9 @@
           <option value="">All</option>
           <option value="Income">Income</option>
           <option value="Expense">Expense</option>
+          {% if not hide_misc or force_kind == 'Misc.' %}
           <option value="Misc.">Misc.</option>
+          {% endif %}
         </select>
       </div>
       <div class="col-md-2">
@@ -85,14 +93,14 @@
 
   <div class="jtcs-card oie-grid-panel mb-2">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-      <div class="oie-section-head mb-0">Income / Expense Records</div>
+      <div class="oie-section-head mb-0">{{ records_title }}</div>
     </div>
     <div class="table-responsive oie-grid-wrap">
       <table class="table table-sm table-hover table-striped align-middle mb-0" id="oieDataGrid">
         <thead>
           <tr>
             <th class="oie-sortable" data-sort-key="bill_no">Bill No. <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
-            <th class="oie-sortable" data-sort-key="ledger_kind">Type <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            <th class="oie-sortable{% if force_kind == 'Misc.' %} d-none{% endif %}" data-sort-key="ledger_kind">Type <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="work_date">Work Date <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable oie-col-category" data-sort-key="work_name">Category <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable oie-col-account" data-sort-key="account_label">Account <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
@@ -101,13 +109,16 @@
             <th class="oie-sortable" data-sort-key="mobile_number">Mobile <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="remarks">Remarks <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="created_date">Created <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            {% if force_kind == 'Misc.' %}
+            <th>Invoice</th>
+            {% endif %}
             <th class="text-end">Actions</th>
           </tr>
         </thead>
         <tbody id="oieDataGridBody"></tbody>
       </table>
     </div>
-    <div id="oieGridEmpty" class="small text-muted py-3 d-none">No income / expense records yet.</div>
+    <div id="oieGridEmpty" class="small text-muted py-3 d-none">No {{ records_title|lower }} yet.</div>
     <div class="oie-pager d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
       <div class="d-flex align-items-center gap-2">
         <label class="form-label mb-0 small text-muted" for="oiePageSize">Rows</label>
@@ -141,6 +152,9 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="EntryID" id="EntryID" value="">
           <input type="hidden" name="CustomerID" id="oieCustomerId" value="">
+          {% if force_kind == 'Misc.' %}
+          <input type="hidden" name="MiscInvoiceWorkflow" value="1">
+          {% endif %}
 
           <div class="row g-3 mb-2">
             <div class="col-md-4">
@@ -154,7 +168,7 @@
             </div>
             <div class="col-md-4">
               <fieldset class="oie-entry-type-fieldset">
-                <legend class="oie-required">Income / Expense / Misc.</legend>
+                <legend class="oie-required">{% if hide_misc and not force_kind %}Income / Expense{% else %}Income / Expense / Misc.{% endif %}</legend>
                 <div class="d-flex flex-wrap gap-4">
                   <div class="form-check">
                     <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindIncome"
@@ -166,11 +180,13 @@
                            value="Expense">
                     <label class="form-check-label" for="LedgerKindExpense">Expense</label>
                   </div>
+                  {% if not hide_misc or force_kind == 'Misc.' %}
                   <div class="form-check">
                     <input class="form-check-input" type="radio" name="LedgerKind" id="LedgerKindMisc"
                            value="Misc.">
                     <label class="form-check-label" for="LedgerKindMisc">Misc.</label>
                   </div>
+                  {% endif %}
                 </div>
               </fieldset>
             </div>
@@ -179,10 +195,10 @@
           <div class="oie-entry-section mb-3">
             <div class="oie-entry-section-title">
               <span class="oie-entry-section-num">2</span>
-              <span id="oieCategoryLabel">Income Categories</span>
+              <span id="oieCategoryLabel">Category Master</span>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <label class="form-label oie-required mb-0">Categories</label>
+              <label class="form-label oie-required mb-0">Category Master</label>
               <button type="button" class="btn btn-sm oie-entry-add-payment" id="oieAddCategoryBtn">
                 <i class="bi bi-plus-lg"></i> Add Category
               </button>
@@ -223,38 +239,97 @@
                        id="oieWorkDone">
                 <label class="form-check-label" for="oieWorkDone">Work Done</label>
               </div>
-              <div class="form-check form-check-inline oie-stage-item">
+              {% if force_kind == 'Misc.' %}
+              <div id="oieInvoiceSummary" class="oie-invoice-summary d-none" aria-live="polite">
+                <div class="oie-invoice-pair">
+                  <div class="oie-invoice-info">
+                    <div class="oie-invoice-card-title">Invoice Information</div>
+                    <div><span>Invoice No.:</span> <strong id="oieInvoiceNo"></strong></div>
+                    <div><span>Invoice Date:</span> <strong id="oieInvoiceDate"></strong></div>
+                    <div><span>Invoice Amount:</span> <strong id="oieInvoiceAmount"></strong></div>
+                  </div>
+                  <div class="oie-pay-adjust" id="oiePaymentAdjust">
+                    <div class="oie-invoice-card-title">Payment Adjustment</div>
+                    <div id="oiePaymentAdjustBody"></div>
+                  </div>
+                </div>
+              </div>
+              {% else %}
+              <div class="form-check form-check-inline oie-stage-item d-none">
                 <input class="form-check-input" type="checkbox" name="TallyBillGenerated" value="1"
-                       id="oieTallyBillGenerated" disabled>
+                       id="oieTallyBillGenerated">
                 <label class="form-check-label" for="oieTallyBillGenerated">Tally Bill Generated</label>
-                <button type="button" class="btn btn-outline-primary btn-sm ms-1 oie-auto-bill-btn d-none"
-                        id="oieAutoBillBtn">
-                  Generate Automated Bill
-                </button>
+              </div>
+              {% endif %}
+            </div>
+            {% if force_kind == 'Misc.' %}
+            <div class="oie-invoice-actions d-flex flex-wrap gap-1 mt-2" id="oieInvoiceActions">
+              <button type="button" class="btn btn-primary btn-sm" id="oieCreateInvoiceBtn">Create Invoice</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none oie-inv-act" data-inv-act="edit" title="Edit Invoice"><i class="bi bi-pencil"></i></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none oie-inv-act" data-inv-act="preview" title="Preview Invoice"><i class="bi bi-eye"></i></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none oie-inv-act" data-inv-act="print" title="Print Invoice"><i class="bi bi-printer"></i></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none oie-inv-act" data-inv-act="pdf" title="Download Invoice PDF"><i class="bi bi-file-earmark-pdf"></i></button>
+              <button type="button" class="btn btn-outline-secondary btn-sm d-none oie-inv-act" data-inv-act="png" title="Download Invoice PNG"><i class="bi bi-image"></i></button>
+              <button type="button" class="btn btn-outline-success btn-sm d-none oie-inv-act" data-inv-act="whatsapp" title="Send Invoice on WhatsApp"><i class="bi bi-whatsapp"></i></button>
+              <button type="button" class="btn btn-outline-danger btn-sm d-none oie-inv-act" data-inv-act="delete" title="Delete Invoice"><i class="bi bi-trash"></i></button>
+            </div>
+            <div class="oie-billing-wrap d-none mt-2" id="oieBillingWrap">
+              <div class="mb-2">
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="oie_billing_type" id="oieBillingSame" value="SAME_CUSTOMER">
+                  <label class="form-check-label" for="oieBillingSame">Same Customer</label>
+                </div>
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input" type="radio" name="oie_billing_type" id="oieBillingOther" value="OTHER_CUSTOMER">
+                  <label class="form-check-label" for="oieBillingOther">Other Customer</label>
+                </div>
+              </div>
+              <div id="oieBillingPick" class="position-relative d-none">
+                <label class="form-label oie-required" for="oieBillingSearch">Billing Customer</label>
+                <input type="hidden" id="oieBillingCustomerId" value="">
+                <input type="text" class="form-control" id="oieBillingSearch" placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+                <div id="oieBillingResults" class="list-group oie-customer-results d-none"></div>
               </div>
             </div>
+            {% endif %}
             <div class="oie-tally-bill-wrap d-none mt-2" id="oieTallyBillWrap">
               <div class="row g-3">
-                <div class="col-md-4">
-                  <label class="form-label" for="oieTallyBillNo">Tally Bill Number</label>
-                  <input type="text" class="form-control" id="oieTallyBillNo" name="TallyBillNo"
-                         maxlength="50" placeholder="Bill / invoice number">
+                <div class="col-md-6">
+                  <label class="form-label" for="oieTallyBillNo">Bill Number</label>
+                  <div class="input-group">
+                    <input type="text" class="form-control" id="oieTallyBillNo" name="TallyBillNo"
+                           maxlength="50" placeholder="Bill number" readonly disabled>
+                    <button type="button" class="btn btn-outline-secondary oie-bill-no-copy" id="oieBillNoCopy" title="Copy">
+                      <i class="bi bi-copy"></i>
+                    </button>
+                  </div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="oieTallyBillDate">Bill Date</label>
-                  <input type="date" class="form-control" id="oieTallyBillDate" name="TallyBillDate"
-                         value="{{ default_date }}">
+                <div class="col-md-6 d-none" id="oieCustomerBillSummary"></div>
+              </div>
+              <div class="oie-generate-bill-wrap mt-3" id="oieGenerateBillWrap">
+                <div class="oie-generate-bill-head">
+                  <div class="oie-pay-received-choice">
+                    <div class="oie-generate-bill-label mb-1">Payment Received</div>
+                    <div class="oie-generate-bill-radios" role="radiogroup" aria-label="Payment Received">
+                      <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="oiePaymentReceivedHere"
+                               id="oiePaymentReceivedYes" value="yes">
+                        <label class="form-check-label" for="oiePaymentReceivedYes">YES</label>
+                      </div>
+                      <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="oiePaymentReceivedHere"
+                               id="oiePaymentReceivedNo" value="no" checked>
+                        <label class="form-check-label" for="oiePaymentReceivedNo">NO</label>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div class="col-md-4">
-                  <label class="form-label" for="oieTallyBillAmount">Bill Amount (₹)</label>
-                  <input type="number" class="form-control" id="oieTallyBillAmount" name="TallyBillAmount"
-                         min="0" step="0.01" placeholder="0.00">
-                </div>
+                <div class="small mt-2 d-none" id="oieInvoiceStatus"></div>
               </div>
             </div>
           </div>
 
-          <div class="oie-entry-section mb-3" id="oiePaymentSection">
+          <div class="oie-entry-section mb-3{% if force_kind == 'Misc.' %} d-none{% endif %}" id="oiePaymentSection">
             <div class="oie-entry-section-title">
               <span class="oie-entry-section-num" id="oiePaymentSectionNum">3</span> Payment Details
             </div>
@@ -271,7 +346,7 @@
             </div>
             <div id="oiePaymentLines" class="oie-payment-lines"></div>
             {% if not payment_modes %}
-            <div class="small text-danger mt-1">No active bank accounts found in JtcsBankAccountMaster.</div>
+            <div class="small text-danger mt-1">No bank accounts marked QR/Bill Received in Bank Master.</div>
             {% endif %}
             </fieldset>
           </div>
@@ -292,8 +367,19 @@
           <div class="d-flex flex-wrap gap-2 oie-form-actions">
             <button type="submit" class="btn btn-primary" id="oieSaveBtn">Save</button>
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-outline-primary d-none" id="oieEditBtn">Edit</button>
+            <button type="button" class="btn btn-outline-danger d-none" id="oieDeleteBtn">Delete</button>
           </div>
         </form>
+        {% if force_kind == 'Misc.' %}
+        <div id="oieInvoiceEditor" class="oie-invoice-editor">
+          <div class="oie-invoice-editor-bar">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="oieInvoiceEditorBack">← Back to Entry</button>
+            <span class="fw-semibold">Edit Invoice</span>
+          </div>
+          <iframe id="oieInvoiceEditorFrame" title="Edit Invoice"></iframe>
+        </div>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -383,17 +469,33 @@
   window.OIE_EXPENSE_WORK_TYPES = {{ expense_work_types | tojson }};
   window.OIE_MISC_WORK_TYPES = {{ misc_work_types | tojson }};
   window.OIE_BANK_ACCOUNTS = {{ payment_modes | tojson }};
-  window.OIE_GRID_URL = {{ url_for('others_income_expense.grid') | tojson }};
-  window.OIE_SAVE_URL = {{ url_for('others_income_expense.save_record') | tojson }};
-  window.OIE_NEXT_BILL_URL = {{ url_for('others_income_expense.next_bill_no') | tojson }};
-  window.OIE_SUB_WORKS_URL = {{ url_for('others_income_expense.sub_works') | tojson }};
-  window.OIE_RECORD_URL = {{ url_for('others_income_expense.record', entry_id=0) | tojson }};
-  window.OIE_DELETE_URL = {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }};
-  window.OIE_CUSTOMER_SEARCH_URL = {{ url_for('others_income_expense.customer_search') | tojson }};
-  window.OIE_CUSTOMER_CREATE_URL = {{ url_for('others_income_expense.customer_create') | tojson }};
+  window.OIE_GRID_URL = {{ url_for(api_bp ~ '.grid') | tojson }};
+  window.OIE_SAVE_URL = {{ url_for(api_bp ~ '.save_record') | tojson }};
+  window.OIE_NEXT_BILL_URL = {{ url_for(api_bp ~ '.next_bill_no') | tojson }};
+  window.OIE_SUB_WORKS_URL = {{ url_for(api_bp ~ '.sub_works') | tojson }};
+  window.OIE_RECORD_URL = {{ url_for(api_bp ~ '.record', entry_id=0) | tojson }};
+  window.OIE_DELETE_URL = {{ url_for(api_bp ~ '.delete_record', entry_id=0) | tojson }};
+  window.OIE_CUSTOMER_SEARCH_URL = {{ url_for(api_bp ~ '.customer_search') | tojson }};
+  window.OIE_CUSTOMER_CREATE_URL = {{ url_for(api_bp ~ '.customer_create') | tojson }};
+  {% if force_kind == 'Misc.' %}
+  window.OIE_GENERATE_BILL_URL = {{ url_for('miscellaneous.generate_bill_page') | tojson }};
+  window.OIE_INVOICE_STATUS_URL = {{ url_for('miscellaneous.generate_bill_invoice') | tojson }};
+  window.OIE_INVOICE_WORKFLOW_URL = {{ url_for('accounting_invoice.api_invoice_workflow', invoice_id=0) | tojson }};
+  window.OIE_INVOICE_DELETE_URL = {{ url_for('miscellaneous.delete_generated_bill_invoices') | tojson }};
+  window.OIE_PAYMENT_RECEIVED_URL = {{ url_for('miscellaneous.mark_payment_received') | tojson }};
+  window.OIE_BILLING_CUSTOMER_URL = {{ url_for('miscellaneous.reassign_billing_customer', entry_id=0) | tojson }};
+  window.OIE_CUSTOMER_BILL_SUMMARY_URL = {{ url_for('accounting_invoice.api_customer_bill_summary') | tojson }};
+  {% else %}
+  window.OIE_GENERATE_BILL_URL = "";
+  {% endif %}
+  window.OIE_COMPANY_STATE_CODE = {{ (company.state_code if company is defined and company else '05') | tojson }};
   window.OIE_CSRF = {{ csrf_token() | tojson }};
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
+  window.OIE_FORCE_LEDGER_KIND = {{ force_kind | tojson }};
+  window.OIE_HIDE_MISC = {{ hide_misc | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20260827misc1"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261006invedit"></script>
+<script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261009orphanunlock"></script>
 {% endblock %}

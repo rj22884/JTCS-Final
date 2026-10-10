@@ -57,6 +57,8 @@
   let currentMetric = "";
   let currentLabel = "";
   let currentAccountId = "";
+  let currentSalePart = "";
+  let currentSaleScope = "";
   let todayActivityMode = false;
   let sourceRows = [];
   let currentRows = [];
@@ -336,10 +338,17 @@
     return false;
   }
 
+  function rowHasOpenableSource(row) {
+    if (!row || row.source === "opening") return false;
+    if (String(row.source_module || "") === "bank_orphan") return false;
+    return !!(row.source_url && (row.can_open === true || row.can_open === 1 || row.can_open === "1" || row.source_url));
+  }
+
   function rowCanEdit(row) {
     if (!row || todayActivityMode) return false;
     if (row.source === "opening") return false;
-    return !!(rowHasSourceLink(row) || (row.source === "manual" && row.can_edit));
+    if (String(row.source_module || "") === "bank_orphan") return false;
+    return !!(rowHasOpenableSource(row) || (row.source === "manual" && row.can_edit));
   }
 
   function resolveDeleteUrl(row) {
@@ -355,6 +364,12 @@
     if (mod === "ecourt" && urls.ecourt) return apiUrl(urls.ecourt, id);
     if (mod === "income_expense" && urls.income_expense) {
       return apiUrl(urls.income_expense, id);
+    }
+    if (mod === "miscellaneous" && urls.miscellaneous) {
+      return apiUrl(urls.miscellaneous, id);
+    }
+    if (mod === "bank_orphan" && urls.bank_orphan) {
+      return apiUrl(urls.bank_orphan, id);
     }
     if (mod === "bank_cash" && urls.bank_cash) return apiUrl(urls.bank_cash, id);
     if (mod === "printing_scanning") {
@@ -414,8 +429,12 @@
         running_balance: null,
         running_balance_num: null,
       });
-      // Keep "click here for more" when module link is present (e.g. Cash Deposit / OBC).
-      if (rowHasSourceLink(prepared)) prepared.can_open = true;
+      // Keep "click here for more" when a real module URL is present.
+      if (prepared.source_url) prepared.can_open = true;
+      if (String(prepared.source_module || "") === "bank_orphan") {
+        prepared.can_open = false;
+        prepared.source_url = "";
+      }
       return prepared;
     });
 
@@ -546,6 +565,13 @@
       alert("Source entry is not available for this row.");
       return;
     }
+    if (
+      currentMetric === "pending_sale" &&
+      typeof window.jtcsOpenPageWindow === "function"
+    ) {
+      window.jtcsOpenPageWindow(row.source_url, row.work || "Miscellaneous");
+      return;
+    }
 
     if (row.row_key && String(row.row_key).indexOf("recent-") !== 0) {
       selectMetricRow(row.row_key);
@@ -650,8 +676,12 @@
             escapeHtml(formatMoney(row.running_balance)) +
             "</td>"
           : "";
-        const moreCell = rowHasSourceLink(row)
-          ? '<td><button type="button" class="btn btn-link btn-sm p-0 dash-open-source">click here for more</button></td>'
+        const moreLabel =
+          currentMetric === "pending_sale" ? "Detail" : "click here for more";
+        const moreCell = rowHasOpenableSource(row)
+          ? '<td><button type="button" class="btn btn-link btn-sm p-0 dash-open-source">' +
+            moreLabel +
+            "</button></td>"
           : '<td class="text-muted small">—</td>';
         const canDel = rowCanDelete(row);
         const actionsCell = canDel
@@ -730,6 +760,9 @@
     } else {
       el.classList.remove("is-negative");
     }
+    if (window.JTCSCurrencyNotesMatch && typeof window.JTCSCurrencyNotesMatch.sync === "function") {
+      window.JTCSCurrencyNotesMatch.sync();
+    }
   }
 
   function resetFilters() {
@@ -753,6 +786,13 @@
         encodeURIComponent(currentMetric);
       if (currentAccountId) {
         url += "&account_id=" + encodeURIComponent(currentAccountId);
+      }
+      if (currentMetric === "pending_sale") {
+        url +=
+          "&part=" +
+          encodeURIComponent(currentSalePart || "sale") +
+          "&scope=" +
+          encodeURIComponent(currentSaleScope || "today");
       }
     } else {
       if (!cfg.detailsUrl) return Promise.resolve();
@@ -840,10 +880,12 @@
     loadDetails();
   }
 
-  function openTodayActivity(metric, label, accountId) {
+  function openTodayActivity(metric, label, accountId, salePart, saleScope) {
     currentMetric = metric;
     currentLabel = label || metric;
     currentAccountId = accountId || "";
+    currentSalePart = salePart || "";
+    currentSaleScope = saleScope || "";
     setTodayActivityMode(true);
     if (els.title) els.title.textContent = currentLabel;
     if (els.sub) els.sub.textContent = "Loading...";
@@ -1001,18 +1043,93 @@
       bank_account: tr.getAttribute("data-bank-account") || "",
       amount: tr.getAttribute("data-amount") || "",
       is_expense: tr.getAttribute("data-is-expense") === "1",
+      source_lock_message: tr.getAttribute("data-source-lock") || "",
     };
   }
 
   function openRecentSource(tr) {
     const row = recentRowFromEl(tr);
     if (!row) return;
+    if (row.source_lock_message) {
+      alert(row.source_lock_message);
+      return;
+    }
     if (!row.can_open || !row.source_url) {
       alert("Source entry form is not available for this transaction.");
       return;
     }
     openSourceEntry(row);
   }
+
+  let dashRefreshTimer = null;
+  let dashRefreshRunning = false;
+  let dashRefreshAgain = false;
+
+  function swapDashNode(selector, doc) {
+    const next = doc.querySelector(selector);
+    const current = document.querySelector(selector);
+    if (!next || !current) return;
+    current.replaceWith(document.importNode(next, true));
+  }
+
+  function runDashboardRefresh() {
+    if (!document.querySelector(".dash-page")) return Promise.resolve();
+    if (dashRefreshRunning) {
+      dashRefreshAgain = true;
+      return Promise.resolve();
+    }
+    dashRefreshAgain = false;
+    dashRefreshRunning = true;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const url = new URL(window.location.href);
+    url.searchParams.set("_", String(Date.now()));
+    return fetch(url.toString(), {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        Accept: "text/html",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cache-Control": "no-cache",
+      },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("Dashboard refresh failed.");
+        return res.text();
+      })
+      .then(function (html) {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        if (!doc.querySelector(".dash-today-metrics")) return;
+        swapDashNode(".dash-today-metrics", doc);
+        swapDashNode("#dashMetricCards", doc);
+        const nextTxn = doc.querySelector(".dash-today-txn");
+        const txn = document.querySelector(".dash-today-txn");
+        if (nextTxn && txn) txn.textContent = nextTxn.textContent;
+        const nextRecent = doc.querySelector("#dashRecentBody");
+        const recent = document.getElementById("dashRecentBody");
+        if (nextRecent && recent) recent.innerHTML = nextRecent.innerHTML;
+        if (window.JTCSIcons && typeof window.JTCSIcons.scan === "function") {
+          const page = document.querySelector(".dash-page");
+          if (page) window.JTCSIcons.scan(page);
+        }
+        if (window.JTCSCurrencyNotesMatch && typeof window.JTCSCurrencyNotesMatch.sync === "function") {
+          window.JTCSCurrencyNotesMatch.sync();
+        }
+        window.scrollTo(scrollX, scrollY);
+        document.dispatchEvent(new CustomEvent("jtcs-dashboard-data-changed"));
+      })
+      .catch(function () {})
+      .finally(function () {
+        dashRefreshRunning = false;
+        if (dashRefreshAgain) window.jtcsRefreshDashboard();
+      });
+  }
+
+  window.jtcsRefreshDashboard = function () {
+    dashRefreshAgain = true;
+    clearTimeout(dashRefreshTimer);
+    dashRefreshTimer = setTimeout(runDashboardRefresh, 150);
+  };
 
   const recentBody = document.getElementById("dashRecentBody");
   if (recentBody) {
@@ -1030,20 +1147,30 @@
     });
   }
 
-  document.querySelectorAll(".dash-metric-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      openMetric(btn.getAttribute("data-metric"), btn.getAttribute("data-label"));
-    });
-  });
-
-  document.querySelectorAll(".dash-today-metric-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
+  document.querySelector(".dash-page")?.addEventListener("click", function (event) {
+    const pending = event.target.closest(".dash-pending-sale-val");
+    if (pending) {
       openTodayActivity(
-        btn.getAttribute("data-today-metric"),
-        btn.getAttribute("data-label"),
-        btn.getAttribute("data-account-id")
+        "pending_sale",
+        pending.getAttribute("data-label"),
+        "",
+        pending.getAttribute("data-sale-part"),
+        pending.getAttribute("data-sale-scope")
       );
-    });
+      return;
+    }
+    const todayBtn = event.target.closest(".dash-today-metric-btn");
+    if (todayBtn) {
+      openTodayActivity(
+        todayBtn.getAttribute("data-today-metric"),
+        todayBtn.getAttribute("data-label"),
+        todayBtn.getAttribute("data-account-id")
+      );
+      return;
+    }
+    const metricBtn = event.target.closest(".dash-metric-btn");
+    if (!metricBtn) return;
+    openMetric(metricBtn.getAttribute("data-metric"), metricBtn.getAttribute("data-label"));
   });
 
   els.grid?.addEventListener("click", function (event) {

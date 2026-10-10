@@ -76,13 +76,20 @@ class FinancialStatementsService:
         payload["meta"] = self.meta(key, d1, d2)
         return payload
 
+    def _ledgers(
+        self, date_from: date, date_to: date, search: str | None = None
+    ) -> list[dict[str, Any]]:
+        return self.engine.compute_ledger_balances(
+            date_from=date_from, date_to=date_to, search=search
+        )
+
     def balance_sheet(
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
         """Liabilities (left) / Assets (right) — Tally layout."""
-        ledgers = self.engine.compute_ledger_balances(
-            date_from=date_from, date_to=date_to, search=search
-        )
+        return self._balance_sheet_from_ledgers(self._ledgers(date_from, date_to, search))
+
+    def _balance_sheet_from_ledgers(self, ledgers: list[dict[str, Any]]) -> dict[str, Any]:
         # Hide ledgers whose closing is zero for the selected period
         # (opening + period movements within From–To).
         ledgers = [
@@ -138,9 +145,9 @@ class FinancialStatementsService:
     def profit_and_loss(
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
-        ledgers = self.engine.compute_ledger_balances(
-            date_from=date_from, date_to=date_to, search=search
-        )
+        return self._profit_and_loss_from_ledgers(self._ledgers(date_from, date_to, search))
+
+    def _profit_and_loss_from_ledgers(self, ledgers: list[dict[str, Any]]) -> dict[str, Any]:
         incomes = [l for l in ledgers if l.get("nature") == "Income"]
         expenses = [l for l in ledgers if l.get("nature") == "Expense"]
         groups_by_id = {
@@ -181,6 +188,97 @@ class FinancialStatementsService:
             ],
             "gross_profit": gross,
             "net_profit": net,
+        }
+
+    def compact_summaries(self, date_from: date, date_to: date) -> dict[str, Any]:
+        """Top-level Balance Sheet + P&L totals from one ledger pass."""
+        money = self.engine.money
+        ledgers = self.engine.compute_ledger_balances(date_from=date_from, date_to=date_to)
+        visible = [
+            led
+            for led in ledgers
+            if abs(money(led.get("closing"))) >= Decimal("0.01")
+        ]
+        liabilities = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(visible, natures={"Liability"}),
+            side="liability",
+        )
+        assets = self.engine.sort_tally_roots(
+            self.engine.rollup_groups(visible, natures={"Asset"}),
+            side="asset",
+        )
+        pl_net = self._pl_net(ledgers)
+        if pl_net != ZERO:
+            liabilities.append(
+                {
+                    "GroupID": 0,
+                    "GroupName": "Profit & Loss A/c",
+                    "GroupNature": "Liability",
+                    "children": [],
+                    "ledgers": [],
+                    "closing": pl_net,
+                    "display_closing": abs(pl_net),
+                    "has_children": False,
+                    "is_pl_transfer": True,
+                }
+            )
+        liab_total = sum((money(n["closing"]) for n in liabilities), ZERO)
+        asset_total = sum((money(n["closing"]) for n in assets), ZERO)
+
+        incomes = [led for led in ledgers if led.get("nature") == "Income"]
+        expenses = [led for led in ledgers if led.get("nature") == "Expense"]
+        groups_by_id = {
+            int(g["GroupID"]): g for g in self.engine.load_groups(active_only=False)
+        }
+
+        def is_direct(led: dict) -> bool:
+            return self.engine.is_trading_group(led.get("group_id"), groups_by_id)
+
+        def section_total(items: list[dict], nature: str) -> Decimal:
+            nodes = self.engine.rollup_groups(items, natures={nature})
+            return sum((money(n["closing"]) for n in nodes), ZERO)
+
+        di = section_total([led for led in incomes if is_direct(led)], "Income")
+        de = section_total([led for led in expenses if is_direct(led)], "Expense")
+        ii = section_total([led for led in incomes if not is_direct(led)], "Income")
+        ie = section_total([led for led in expenses if not is_direct(led)], "Expense")
+        gross = di - de
+        net = gross + ii - ie
+
+        def bs_lines(nodes: list[dict]) -> list[dict[str, Any]]:
+            lines = []
+            for node in nodes:
+                display = node.get("display_closing")
+                if display is None:
+                    display = node.get("closing")
+                lines.append(
+                    {
+                        "name": node.get("GroupName") or "—",
+                        "amount": str(money(display)),
+                        "is_pl": bool(node.get("is_pl_transfer")),
+                    }
+                )
+            return lines
+
+        return {
+            "date_from": date_from.isoformat(),
+            "date_to": date_to.isoformat(),
+            "balance_sheet": {
+                "liabilities": bs_lines(liabilities),
+                "assets": bs_lines(assets),
+                "liabilities_total": str(money(liab_total)),
+                "assets_total": str(money(asset_total)),
+                "difference": str(money(asset_total - liab_total)),
+                "balanced": abs(asset_total - liab_total) < Decimal("0.01"),
+            },
+            "profit_loss": {
+                "direct_income": str(money(di)),
+                "direct_expenses": str(money(de)),
+                "gross_profit": str(money(gross)),
+                "indirect_income": str(money(ii)),
+                "indirect_expenses": str(money(ie)),
+                "net_profit": str(money(net)),
+            },
         }
 
     def trial_balance(
@@ -379,21 +477,9 @@ class FinancialStatementsService:
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
         self.engine.ensure_schema()
-        self._recompute_depreciation(date_to)
         needle = (search or "").strip().lower()
         fa_group_ids = self.engine.group_ids_under_names({"fixed assets"})
-        rows = db.session.execute(
-            text(
-                """
-                SELECT AssetID, AssetName, PurchaseDate, PurchaseValue, DepreciationRate,
-                       OpeningAccumulatedDep, CurrentYearDepreciation,
-                       AccumulatedDepreciation, WDV, Method, GroupID, AccountID
-                FROM dbo.FixedAssetMaster
-                WHERE IsActive = 1
-                ORDER BY AssetName
-                """
-            )
-        ).mappings().all()
+        rows = self._computed_fixed_assets(date_to)
         account_group: dict[int, int] = {}
         try:
             coa_rows = db.session.execute(
@@ -495,8 +581,9 @@ class FinancialStatementsService:
     def ratio_analysis(
         self, date_from: date, date_to: date, *, search: str | None = None
     ) -> dict[str, Any]:
-        bs = self.balance_sheet(date_from, date_to, search=search)
-        pnl = self.profit_and_loss(date_from, date_to, search=search)
+        ledgers = self._ledgers(date_from, date_to, search)
+        bs = self._balance_sheet_from_ledgers(ledgers)
+        pnl = self._profit_and_loss_from_ledgers(ledgers)
         assets = self.engine.money(bs["right"]["total"])
         liabilities = self.engine.money(bs["left"]["total"])
         net_profit = self.engine.money(pnl["net_profit"])
@@ -536,58 +623,78 @@ class FinancialStatementsService:
         ]
         return {"layout": "ratios", "ratios": ratios, "assets": assets, "liabilities": liabilities, "net_profit": net_profit}
 
-    def _recompute_depreciation(self, as_of: date) -> None:
-        rows = db.session.execute(
-            text(
-                """
-                SELECT AssetID, PurchaseDate, PurchaseValue, DepreciationRate,
-                       OpeningAccumulatedDep, Method
-                FROM dbo.FixedAssetMaster WHERE IsActive = 1
-                """
-            )
-        ).mappings().all()
-        fy_start = self.engine.fy_start(as_of)
+    def _computed_fixed_assets(self, as_of: date) -> list[dict[str, Any]]:
+        """WDV / current-year depreciation in memory — no write on report load."""
+        from app.services.depreciation_service import DepreciationService
+
+        svc = DepreciationService()
+        try:
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT
+                        f.AssetID, f.AssetName, f.PurchaseDate, f.PurchaseValue,
+                        f.DepreciationRate, f.OpeningAccumulatedDep, f.Method,
+                        f.GroupID, f.AccountID, i.OpeningBalanceDate
+                    FROM dbo.FixedAssetMaster f
+                    LEFT JOIN dbo.ItemMaster i ON i.ItemID = f.ItemID
+                    WHERE f.IsActive = 1
+                    ORDER BY f.AssetName
+                    """
+                )
+            ).mappings().all()
+        except Exception:
+            db.session.rollback()
+            rows = db.session.execute(
+                text(
+                    """
+                    SELECT AssetID, AssetName, PurchaseDate, PurchaseValue,
+                           DepreciationRate, OpeningAccumulatedDep, Method,
+                           GroupID, AccountID, NULL AS OpeningBalanceDate
+                    FROM dbo.FixedAssetMaster
+                    WHERE IsActive = 1
+                    ORDER BY AssetName
+                    """
+                )
+            ).mappings().all()
+        out: list[dict[str, Any]] = []
         for r in rows:
             purchase = r["PurchaseDate"]
             if isinstance(purchase, datetime):
                 purchase = purchase.date()
             rate = self.engine.money(r["DepreciationRate"])
             cost = self.engine.money(r["PurchaseValue"])
-            open_acc = self.engine.money(r["OpeningAccumulatedDep"])
             method = (r.get("Method") or "WDV").upper()
-            wdv_open = cost - open_acc
-            if wdv_open < ZERO:
-                wdv_open = ZERO
-            # Full year if purchased before FY; else proportionate months
-            if purchase and purchase > as_of:
-                cy = ZERO
-            else:
-                months = 12
-                if purchase and purchase > fy_start:
-                    months = max(1, (as_of.year - purchase.year) * 12 + as_of.month - purchase.month + 1)
-                    months = min(12, months)
-                if method == "SL":
-                    cy = (cost * rate / Decimal("100") * Decimal(months) / Decimal("12")).quantize(Decimal("0.01"))
-                else:
-                    cy = (wdv_open * rate / Decimal("100") * Decimal(months) / Decimal("12")).quantize(Decimal("0.01"))
-            acc = open_acc + cy
-            wdv = cost - acc
+            calc = svc.calculate(
+                cost=cost,
+                rate=rate,
+                purchase_date=purchase,
+                opening_date=r.get("OpeningBalanceDate"),
+                as_of=as_of,
+                method=method,
+            )
+            cy = self.engine.money(calc["current_year"])
+            wdv = self.engine.money(calc["wdv"])
+            acc = self.engine.money(calc.get("accumulated", cost - wdv))
             if wdv < ZERO:
                 wdv = ZERO
-            db.session.execute(
-                text(
-                    """
-                    UPDATE dbo.FixedAssetMaster
-                    SET CurrentYearDepreciation = :cy,
-                        AccumulatedDepreciation = :acc,
-                        WDV = :wdv,
-                        UpdatedDate = SYSUTCDATETIME()
-                    WHERE AssetID = :id
-                    """
-                ),
-                {"cy": cy, "acc": acc, "wdv": wdv, "id": r["AssetID"]},
+            out.append(
+                {
+                    "AssetID": r["AssetID"],
+                    "AssetName": r.get("AssetName"),
+                    "PurchaseDate": r.get("PurchaseDate"),
+                    "PurchaseValue": r.get("PurchaseValue"),
+                    "DepreciationRate": r.get("DepreciationRate"),
+                    "OpeningAccumulatedDep": r.get("OpeningAccumulatedDep"),
+                    "CurrentYearDepreciation": cy,
+                    "AccumulatedDepreciation": acc,
+                    "WDV": wdv,
+                    "Method": r.get("Method") or "WDV",
+                    "GroupID": r.get("GroupID"),
+                    "AccountID": r.get("AccountID"),
+                }
             )
-        db.session.commit()
+        return out
 
     def serialize_node(self, node: dict) -> dict:
         """JSON-safe tree node."""

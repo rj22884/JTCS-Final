@@ -8,18 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.extensions import db
 
 
-class FollowupWorkflowStage(db.Model):
-    __tablename__ = "FollowupWorkflowStage"
-
-    StageID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ModuleCode: Mapped[str] = mapped_column(Unicode(10), nullable=False)
-    StageCode: Mapped[str] = mapped_column(Unicode(50), nullable=False)
-    StageName: Mapped[str] = mapped_column(Unicode(100), nullable=False)
-    DisplayOrder: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    ActiveStatus: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-
-
 class FollowupEntryMaster(db.Model):
     __tablename__ = "FollowupEntryMaster"
 
@@ -27,11 +15,17 @@ class FollowupEntryMaster(db.Model):
     ModuleCode: Mapped[str] = mapped_column(Unicode(10), nullable=False)
     WorkDate: Mapped[date] = mapped_column(Date, nullable=False)
     TaxPeriod: Mapped[str] = mapped_column(Unicode(20), nullable=False)
+    GstMonth: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     CustomerID: Mapped[int] = mapped_column(Integer, db.ForeignKey("CustomerMaster.CustomerID"), nullable=False)
+    BillingType: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    BillingCustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ReturnType: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     FormType: Mapped[str | None] = mapped_column(Unicode(30), nullable=True)
     Quarter: Mapped[str | None] = mapped_column(Unicode(10), nullable=True)
     ApplicationNumber: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
+    DscType: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    DscClass: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    DscYear: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     Location: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
     IntroducedBy: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
     BillNo: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
@@ -60,8 +54,8 @@ class FollowupEntryStage(db.Model):
 
     EntryStageID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     EntryID: Mapped[int] = mapped_column(Integer, db.ForeignKey("FollowupEntryMaster.EntryID"), nullable=False)
-    StageID: Mapped[int] = mapped_column(Integer, db.ForeignKey("FollowupWorkflowStage.StageID"), nullable=False)
+    StageID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    StageCode: Mapped[str | None] = mapped_column(Unicode(50), nullable=True)
     CompletedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     entry: Mapped["FollowupEntryMaster"] = relationship("FollowupEntryMaster", back_populates="stages")
-    stage: Mapped["FollowupWorkflowStage"] = relationship("FollowupWorkflowStage")

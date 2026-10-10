@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Integer, Unicode
+from sqlalchemy import Boolean, Date, DateTime, Integer, Unicode, UnicodeText
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
@@ -15,6 +15,8 @@ class WhatsNewEntry(db.Model):
     FeatureKey: Mapped[str] = mapped_column(Unicode(120), nullable=False, unique=True)
     Title: Mapped[str] = mapped_column(Unicode(200), nullable=False)
     Detail: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
+    Workflow: Mapped[str | None] = mapped_column(UnicodeText, nullable=True)
+    VideoPath: Mapped[str | None] = mapped_column(Unicode(400), nullable=True)
     UrlPath: Mapped[str | None] = mapped_column(Unicode(250), nullable=True)
     Badge: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
     EntryDate: Mapped[date] = mapped_column(Date, nullable=False)
@@ -25,3 +27,15 @@ class WhatsNewEntry(db.Model):
 
     def __repr__(self) -> str:
         return f"<WhatsNewEntry {self.EntryID}: {self.FeatureKey}>"
+
+
+class WhatsNewRead(db.Model):
+    __tablename__ = "WhatsNewRead"
+
+    ReadID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    UserID: Mapped[int] = mapped_column(Integer, nullable=False)
+    EntryID: Mapped[int] = mapped_column(Integer, nullable=False)
+    ReadDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self) -> str:
+        return f"<WhatsNewRead user={self.UserID} entry={self.EntryID}>"

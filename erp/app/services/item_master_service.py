@@ -3,15 +3,23 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.extensions import db
+from app.models.transactions import WorkTypeMaster
 from app.repositories.item_master_repository import ItemMasterRepository
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 
 def _q2(value: Decimal) -> Decimal:
@@ -25,6 +33,70 @@ def _q3(value: Decimal) -> Decimal:
 class ItemMasterService:
     def __init__(self, repository: ItemMasterRepository | None = None):
         self.repo = repository or ItemMasterRepository()
+        self._fa_group_ids: set[int] | None = None
+        self._inv_group_ids: set[int] | None = None
+        self._group_names: dict[int, str] | None = None
+
+    def _fixed_asset_group_ids(self) -> set[int]:
+        if self._fa_group_ids is None:
+            try:
+                from app.services.depreciation_service import DepreciationService
+
+                self._fa_group_ids = DepreciationService().fixed_asset_group_ids()
+            except Exception:
+                self._fa_group_ids = set()
+        return self._fa_group_ids
+
+    def _is_fixed_asset_group(self, group_id) -> bool:
+        if not group_id:
+            return False
+        try:
+            return int(group_id) in self._fixed_asset_group_ids()
+        except (TypeError, ValueError):
+            return False
+
+    def _investment_group_ids(self) -> set[int]:
+        if self._inv_group_ids is None:
+            try:
+                from app.services.depreciation_service import DepreciationService
+
+                self._inv_group_ids = DepreciationService().investment_group_ids()
+            except Exception:
+                self._inv_group_ids = set()
+        return self._inv_group_ids
+
+    def _is_investment_group(self, group_id) -> bool:
+        if not group_id:
+            return False
+        try:
+            return int(group_id) in self._investment_group_ids()
+        except (TypeError, ValueError):
+            return False
+
+    def _chart_group_names(self) -> dict[int, str]:
+        if self._group_names is not None:
+            return self._group_names
+        names: dict[int, str] = {}
+        try:
+            from app.services.chart_group_service import ChartGroupService
+
+            for item in ChartGroupService().list_records():
+                gid = item.get("group_id")
+                if not gid:
+                    continue
+                names[int(gid)] = (item.get("group_name") or "").strip()
+        except Exception:
+            names = {}
+        self._group_names = names
+        return names
+
+    def _chart_group_name(self, group_id) -> str:
+        if not group_id:
+            return ""
+        try:
+            return self._chart_group_names().get(int(group_id), "") or ""
+        except (TypeError, ValueError):
+            return ""
 
     @staticmethod
     def _money(value, default: str = "0", *, places: str = "0.01") -> Decimal:
@@ -47,14 +119,49 @@ class ItemMasterService:
         except ValueError as exc:
             raise ValueError("Opening balance date is invalid.") from exc
 
-    @staticmethod
-    def _serialize(row) -> dict:
+    def _sub_work_map_by_item_id(self) -> dict[int, dict]:
+        """Map ItemID → Sub Work Type (from WorkTypeMaster link)."""
+        mapping: dict[int, dict] = {}
+        try:
+            rows = db.session.scalars(
+                select(WorkTypeMaster).where(
+                    WorkTypeMaster.ItemID.is_not(None),
+                    WorkTypeMaster.ActiveStatus == True,  # noqa: E712
+                )
+            ).all()
+        except Exception:
+            return mapping
+        for row in rows:
+            try:
+                item_id = int(row.ItemID)
+            except (TypeError, ValueError):
+                continue
+            if not item_id:
+                continue
+            mapping[item_id] = {
+                "sub_work_type": (row.SubWorkType or "").strip(),
+                "work_name": (row.WorkTypeName or "").strip(),
+                "work_type_id": int(row.WorkTypeID),
+            }
+        return mapping
+
+    def _serialize(self, row, *, sub_work: dict | None = None) -> dict:
         gst_applicable = bool(getattr(row, "GstApplicable", True))
         opening_qty = getattr(row, "OpeningQty", None)
         opening_rate = getattr(row, "OpeningRate", None)
         opening_balance = getattr(row, "OpeningBalance", None)
         opening_date = getattr(row, "OpeningBalanceDate", None)
+        purchase_date = getattr(row, "PurchaseDate", None)
         chart_group_id = getattr(row, "ChartGroupID", None)
+        dep_rate = getattr(row, "DepreciationRate", None)
+        app_rate = getattr(row, "AppreciationRate", None)
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        profile = DynamicMasterFieldService().profile_key_for_group(chart_group_id)
+        is_fixed_asset = profile == "fixed_assets"
+        is_investment = profile == "investments"
+        linked = sub_work or {}
+        sub_work_type = linked.get("sub_work_type") or ""
         return {
             "item_id": row.ItemID,
             "item_code": row.ItemCode or "",
@@ -64,6 +171,11 @@ class ItemMasterService:
             "hsn_sac_type": row.HsnSacType or "SAC",
             "unit": row.Unit or "NOS",
             "default_rate": str(row.DefaultRate if row.DefaultRate is not None else "0.00"),
+            "depreciation_rate": str(dep_rate if dep_rate is not None else "0.00"),
+            "appreciation_rate": str(app_rate if app_rate is not None else "0.00"),
+            "purchase_date": purchase_date.isoformat() if purchase_date else "",
+            "is_fixed_asset": is_fixed_asset,
+            "is_investment": is_investment,
             "gst_applicable": gst_applicable,
             "gst_rate_percent": str(row.GstRatePercent if row.GstRatePercent is not None else "0.00"),
             "opening_qty": str(opening_qty if opening_qty is not None else "0.000"),
@@ -71,15 +183,31 @@ class ItemMasterService:
             "opening_balance": str(opening_balance if opening_balance is not None else "0.00"),
             "opening_balance_date": opening_date.isoformat() if opening_date else "",
             "chart_group_id": int(chart_group_id) if chart_group_id else None,
+            "chart_group_name": self._chart_group_name(chart_group_id),
             "order_no": int(row.OrderNo or 100),
             "is_active": bool(row.IsActive),
             "created_at": row.CreatedAt.isoformat() if row.CreatedAt else "",
             "updated_at": row.UpdatedAt.isoformat() if row.UpdatedAt else "",
+            "sub_work_type": sub_work_type,
+            "from_sub_work": bool(sub_work_type),
+            "sub_work_name": linked.get("work_name") or "",
+            "work_type_id": linked.get("work_type_id"),
         }
 
     def list_records(self, *, search: str | None = None, active_only: bool = False) -> list[dict]:
+        # Item Master = standalone items + Sub Work Master (auto-linked for invoices).
+        try:
+            from app.services.sub_work_master_service import SubWorkMasterService
+
+            SubWorkMasterService().ensure_item_links()
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+        sub_map = self._sub_work_map_by_item_id()
         return [
-            self._serialize(row)
+            self._serialize(row, sub_work=sub_map.get(int(row.ItemID)))
             for row in self.repo.list_all(search=search, active_only=active_only)
         ]
 
@@ -104,7 +232,8 @@ class ItemMasterService:
         row = self.repo.get_by_id(item_id)
         if row is None:
             raise ValueError("Item not found.")
-        return self._serialize(row)
+        sub_map = self._sub_work_map_by_item_id()
+        return self._serialize(row, sub_work=sub_map.get(int(row.ItemID)))
 
     def _parse(self, payload: dict, *, existing=None) -> dict:
         code = (payload.get("item_code") or payload.get("ItemCode") or "").strip().upper()
@@ -196,6 +325,17 @@ class ItemMasterService:
             raise ValueError("Qty cannot be negative.")
         if opening_rate < 0:
             raise ValueError("Rate cannot be negative.")
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        dyn = DynamicMasterFieldService()
+        dyn.validate_required(
+            {
+                **payload,
+                "opening_balance_date": opening_date.isoformat() if opening_date else "",
+            },
+            chart_group_id,
+        )
+        extras = dyn.extra_db_values(payload, chart_group_id, opening_date=opening_date)
 
         return {
             "ItemCode": code[:40],
@@ -211,10 +351,18 @@ class ItemMasterService:
             "OpeningRate": _q2(opening_rate),
             "OpeningBalance": opening_balance,
             "OpeningBalanceDate": opening_date,
+            "PurchaseDate": extras["PurchaseDate"],
+            "DepreciationRate": extras["DepreciationRate"],
+            "AppreciationRate": extras["AppreciationRate"],
             "ChartGroupID": chart_group_id,
             "OrderNo": order_no,
             "IsActive": is_active,
         }
+
+    def _sync_fixed_asset(self, row) -> None:
+        from app.services.depreciation_service import DepreciationService
+
+        DepreciationService().sync_item_row(row)
 
     def create_record(self, payload: dict) -> dict:
         data = self._parse(payload)
@@ -223,6 +371,7 @@ class ItemMasterService:
 
         def _write() -> dict:
             row = self.repo.create({**data, "CreatedAt": datetime.utcnow()})
+            self._sync_fixed_asset(row)
             return self._serialize(row)
 
         try:
@@ -235,13 +384,19 @@ class ItemMasterService:
         if row is None:
             raise ValueError("Item not found.")
         data = self._parse(payload, existing=row)
+        # Sub Work linked items: Item Name stays locked to Sub Work Type.
+        sub_map = self._sub_work_map_by_item_id()
+        linked = sub_map.get(int(item_id))
+        if linked and linked.get("sub_work_type"):
+            data["ItemName"] = linked["sub_work_type"][:200]
         other = self.repo.find_by_code(data["ItemCode"])
         if other and other.ItemID != row.ItemID:
             raise ValueError(f"Item Code '{data['ItemCode']}' already exists.")
 
         def _write() -> dict:
             updated = self.repo.update(row, {**data, "UpdatedAt": datetime.utcnow()})
-            return self._serialize(updated)
+            self._sync_fixed_asset(updated)
+            return self._serialize(updated, sub_work=linked)
 
         try:
             return persist(_write)
@@ -254,6 +409,22 @@ class ItemMasterService:
             raise ValueError("Item not found.")
         label = (row.ItemName or row.ItemCode or "Item").strip()
         ledger = ledger_payload("item", item_id)
+
+        if is_ledger_clear("item", item_id):
+            def _hard() -> str:
+                from app.services.depreciation_service import DepreciationService
+
+                DepreciationService().deactivate_item_asset(item_id)
+                purge_clear_ledger_refs("item", item_id)
+                self.repo.delete(row)
+                return "Item permanently deleted from the database."
+
+            try:
+                return persist(_hard)
+            except IntegrityError as exc:
+                raise_if_integrity_in_use(exc, label, ledger=ledger)
+                raise
+
         raise_if_ledger_in_use("item", item_id, label)
         assert_master_unused(
             table="ItemMaster",
@@ -272,6 +443,9 @@ class ItemMasterService:
         )
 
         def _write() -> str:
+            from app.services.depreciation_service import DepreciationService
+
+            DepreciationService().deactivate_item_asset(item_id)
             self.repo.delete(row)
             return "Item deleted successfully."
 

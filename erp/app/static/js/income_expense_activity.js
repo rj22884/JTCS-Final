@@ -63,6 +63,13 @@
     tallyBillNo: document.getElementById("oieTallyBillNo"),
     tallyBillDate: document.getElementById("oieTallyBillDate"),
     tallyBillAmount: document.getElementById("oieTallyBillAmount"),
+    generateBillWrap: document.getElementById("oieGenerateBillWrap"),
+    generateBillLabel: document.getElementById("oieGenerateBillLabel"),
+    generateBillYes: document.getElementById("oieGenerateBillYes"),
+    generateBillNo: document.getElementById("oieGenerateBillNo"),
+    paymentReceivedYes: document.getElementById("oiePaymentReceivedYes"),
+    paymentReceivedNo: document.getElementById("oiePaymentReceivedNo"),
+    invoiceStatus: document.getElementById("oieInvoiceStatus"),
     paymentSection: document.getElementById("oiePaymentSection"),
     paymentFieldset: document.getElementById("oiePaymentFieldset"),
     paymentLockedHint: document.getElementById("oiePaymentLockedHint"),
@@ -122,9 +129,55 @@
   }
 
   function currentLedgerKind() {
+    if (window.OIE_FORCE_LEDGER_KIND) {
+      return String(window.OIE_FORCE_LEDGER_KIND);
+    }
     if (els.ledgerExpense && els.ledgerExpense.checked) return "Expense";
     if (els.ledgerMisc && els.ledgerMisc.checked) return "Misc.";
     return "Income";
+  }
+
+  function applyForcedLedgerKindUi() {
+    const forced = window.OIE_FORCE_LEDGER_KIND ? String(window.OIE_FORCE_LEDGER_KIND) : "";
+    if (window.OIE_HIDE_MISC && !forced) {
+      els.statsRow?.querySelectorAll(".oie-stat-misc").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+      if (els.gridFilterKind) {
+        Array.from(els.gridFilterKind.options).forEach(function (opt) {
+          if (opt.value === "Misc.") opt.hidden = true;
+        });
+        if (els.gridFilterKind.value === "Misc.") els.gridFilterKind.value = "";
+      }
+      if (els.ledgerMisc) {
+        els.ledgerMisc.closest(".form-check")?.classList.add("d-none");
+        if (els.ledgerMisc.checked && els.ledgerIncome) els.ledgerIncome.checked = true;
+      }
+      const legend = form.querySelector(".oie-entry-type-fieldset legend");
+      if (legend) legend.textContent = "Income / Expense";
+    }
+    if (!forced) return;
+    if (forced === "Misc." && els.ledgerMisc) {
+      els.ledgerMisc.checked = true;
+    } else if (forced === "Expense" && els.ledgerExpense) {
+      els.ledgerExpense.checked = true;
+    } else if (els.ledgerIncome) {
+      els.ledgerIncome.checked = true;
+    }
+    const typeFieldset = form.querySelector(".oie-entry-type-fieldset");
+    if (typeFieldset) typeFieldset.classList.add("d-none");
+    if (els.statsRow && forced === "Misc.") {
+      els.statsRow.querySelectorAll(".oie-stat-income, .oie-stat-expense").forEach(function (el) {
+        el.classList.add("d-none");
+      });
+    }
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = forced;
+      Array.from(els.gridFilterKind.options).forEach(function (opt) {
+        if (opt.value && opt.value !== forced) opt.hidden = true;
+      });
+      els.gridFilterKind.closest(".col-md-2")?.classList.add("d-none");
+    }
   }
 
   function isMiscKind() {
@@ -139,41 +192,580 @@
     return !!(els.tallyBill && els.tallyBill.checked);
   }
 
-  function isPaymentActive() {
-    return !isMiscKind() || isTallyChecked();
+  function miscPaymentBox() {
+    return document.getElementById("oieMiscPaymentReceived");
   }
+
+  function isPaymentReceivedYes() {
+    if (miscInvoicePage) return !!(miscPaymentBox() && miscPaymentBox().checked);
+    return !!(els.paymentReceivedYes && els.paymentReceivedYes.checked);
+  }
+
+  function setPaymentReceivedChoice(yes) {
+    const box = miscPaymentBox();
+    if (miscInvoicePage && box) box.checked = !!yes;
+    if (els.paymentReceivedYes) els.paymentReceivedYes.checked = !!yes;
+    if (els.paymentReceivedNo) els.paymentReceivedNo.checked = !yes;
+  }
+
+  function isPaymentActive() {
+    if (miscInvoicePage) return isPaymentReceivedYes();
+    if (!isMiscKind()) return true;
+    return isTallyChecked() && isPaymentReceivedYes();
+  }
+
+  let lastSaleRecord = null;
+
+  function sourcePaymentReceived() {
+    return isPaymentReceivedYes();
+  }
+
+  function pushPaymentReceived(paid) {
+    const billNo = (els.billNo?.value || els.tallyBillNo?.value || "").trim();
+    if (!billNo || !window.OIE_PAYMENT_RECEIVED_URL) return Promise.resolve();
+    return fetch(window.OIE_PAYMENT_RECEIVED_URL, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": window.OIE_CSRF || "",
+      },
+      body: JSON.stringify({ bill_no: billNo, payment_received: !!paid }),
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        if (!res.ok || !data.ok) throw new Error(data.error || "Unable to update Payment Received.");
+        return data;
+      });
+    });
+  }
+
+  let approveInFlight = false;
+  let autoApproveFor = 0;
+
+  function saleStatusText(record) {
+    if (!record) return "";
+    const approved = record.bill_approved ? "Approved" : "Approve pending";
+    const paid = sourcePaymentReceived() ? "Yes" : "No";
+    const no = record.invoice_no ? record.invoice_no + " — " : "";
+    let text = "Sale invoice " + no + approved + " · Payment Received: " + paid;
+    const amount = Number(record.invoice_value);
+    if (Number.isFinite(amount)) {
+      text +=
+        " · Total Invoice Amount: ₹" +
+        amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    return text;
+  }
+
+  function paintInvoiceStatus(record) {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    box.classList.remove("oie-pay-no", "oie-pay-yes");
+    if (!record) {
+      box.textContent = "";
+      box.classList.add("d-none");
+      return;
+    }
+    box.textContent = saleStatusText(record);
+    box.classList.remove("d-none");
+    if (sourcePaymentReceived()) box.classList.add("oie-pay-yes");
+    else box.classList.add("oie-pay-no");
+  }
+
+  function saleIsApproved() {
+    return !!(lastSaleRecord && lastSaleRecord.bill_approved);
+  }
+
+  let entryFieldsLocked = false;
+
+  function approvedEditMessage() {
+    const paid = isPaymentReceivedYes() || !!(lastSaleRecord && lastSaleRecord.payment_received);
+    if (paid) {
+      return "Payment aa chuki hai aur admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+    }
+    return "Admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+  }
+
+  async function ensureEntryChangeAllowed() {
+    await refreshInvoiceStatus();
+    if (!saleIsApproved()) return true;
+    const message = approvedEditMessage();
+    if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+    else alert(message);
+    return false;
+  }
+
+  function syncEntryActionButtons() {
+    const existing = isEditMode();
+    const editBtn = document.getElementById("oieEditBtn");
+    const deleteBtn = document.getElementById("oieDeleteBtn");
+    if (editBtn) editBtn.classList.toggle("d-none", !existing);
+    if (deleteBtn) deleteBtn.classList.toggle("d-none", !existing);
+  }
+
+  function setEntryFieldsLocked(locked) {
+    entryFieldsLocked = !!locked;
+    if (!form) return;
+    form.querySelectorAll("input, select, textarea, button").forEach(function (el) {
+      if (el.id === "oieEditBtn" || el.id === "oieDeleteBtn" || el.id === "oieBillNoCopy") return;
+      if (el.getAttribute("data-bs-dismiss") === "modal") return;
+      if (el.type === "hidden") return;
+      el.disabled = !!locked;
+    });
+    if (els.tallyBillNo) els.tallyBillNo.disabled = true;
+    const billCopyBtn = document.getElementById("oieBillNoCopy");
+    if (billCopyBtn) billCopyBtn.disabled = false;
+    if (els.paymentFieldset) els.paymentFieldset.disabled = !!locked;
+    if (miscInvoicePage) {
+      ["oieBillingSame", "oieBillingOther", "oieBillingSearch"].forEach(function (id) {
+        const el = document.getElementById(id);
+        if (el) el.disabled = false;
+      });
+      document.querySelectorAll("#oieInvoiceActions button").forEach(function (btn) {
+        btn.disabled = false;
+      });
+    }
+    const saveBtn = document.getElementById("oieSaveBtn");
+    if (saveBtn) saveBtn.disabled = !!locked;
+    if (!locked) syncMiscWorkflow();
+    syncEntryActionButtons();
+  }
+
+  function hasCreditPayment() {
+    const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+    for (let i = 0; i < lines.length; i++) {
+      const select = lines[i].querySelector("select");
+      const text =
+        (select && select.selectedOptions && select.selectedOptions[0] && select.selectedOptions[0].textContent) ||
+        "";
+      if (/credit/i.test(text)) return true;
+    }
+    return false;
+  }
+
+  function syncGenerateBillPrompt(_lookupDone) {
+    const approved = saleIsApproved();
+    [els.paymentReceivedYes, els.paymentReceivedNo].forEach(
+      function (input) {
+        if (input) input.disabled = approved || entryFieldsLocked;
+      }
+    );
+    if (!isPaymentReceivedYes()) autoApproveFor = 0;
+    const fieldsPaymentOn = isPaymentActive();
+    const creditOpen = approved && hasCreditPayment() && !entryFieldsLocked;
+    const fieldsOn = !entryFieldsLocked && (creditOpen || (!approved && fieldsPaymentOn));
+    if (creditOpen) els.paymentSection?.classList.remove("d-none");
+    if (els.paymentFieldset) els.paymentFieldset.disabled = !fieldsOn;
+    els.paymentSection?.classList.toggle("oie-payment-section-locked", !fieldsOn && !creditOpen);
+  }
+
+  async function refreshInvoiceStatus() {
+    const box = els.invoiceStatus;
+    if (!box) return;
+    const billNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
+    if (!isTallyChecked() || !billNo || !window.OIE_INVOICE_STATUS_URL) {
+      lastSaleRecord = null;
+      paintInvoiceStatus(null);
+      syncGenerateBillPrompt(true);
+      return;
+    }
+    try {
+      const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.found || !data.record) {
+        lastSaleRecord = null;
+        paintInvoiceStatus(null);
+        syncGenerateBillPrompt(true);
+        return;
+      }
+      lastSaleRecord = data.record;
+      paintInvoiceStatus(data.record);
+      syncGenerateBillPrompt(true);
+    } catch (_err) {
+      paintInvoiceStatus(null);
+      syncGenerateBillPrompt(true);
+    }
+  }
+
+  function resetGenerateBillChoice() {
+    if (els.generateBillYes) els.generateBillYes.checked = false;
+    if (els.generateBillNo) els.generateBillNo.checked = true;
+    syncCustomerBillSummary();
+  }
+
+  function keepGenerateBillYes() {
+    if (els.generateBillYes) els.generateBillYes.checked = true;
+    if (els.generateBillNo) els.generateBillNo.checked = false;
+    syncCustomerBillSummary();
+  }
+
+  function formatInrAmount(value) {
+    const amount = Number(value);
+    const safe = Number.isFinite(amount) ? amount : 0;
+    return "₹" + safe.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  let billSummarySeq = 0;
+
+  function syncCustomerBillSummary() {
+    const box = document.getElementById("oieCustomerBillSummary");
+    if (!box) return;
+    const show = isMiscKind() && !!(els.generateBillYes && els.generateBillYes.checked);
+    box.classList.toggle("d-none", !show);
+    if (!show) {
+      box.innerHTML = "";
+      return;
+    }
+    const customerId = (els.customerId?.value || "").trim();
+    if (!customerId || !window.OIE_CUSTOMER_BILL_SUMMARY_URL) {
+      box.innerHTML = '<div class="small text-muted">Select a customer to see previous bills.</div>';
+      return;
+    }
+    const seq = ++billSummarySeq;
+    box.innerHTML = '<div class="small text-muted">Loading previous bills…</div>';
+    const url = new URL(window.OIE_CUSTOMER_BILL_SUMMARY_URL, window.location.origin);
+    url.searchParams.set("customer_id", customerId);
+    fetch(url.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (seq !== billSummarySeq) return;
+        if (!data.ok) throw new Error(data.error || "Unable to load previous bills.");
+        const overdue = Number(data.overdue_amount) || 0;
+        box.innerHTML =
+          '<div><span class="text-muted">Cumulative Invoice Total</span><br><strong>' +
+          formatInrAmount(data.invoice_total) +
+          "</strong></div>" +
+          '<div class="mt-1"><span class="text-muted">Payment Received Total</span><br><strong>' +
+          formatInrAmount(data.payment_received_total) +
+          "</strong></div>" +
+          '<div class="mt-1"><span class="text-muted">Overdue Amount</span><br><strong class="' +
+          (overdue > 0 ? "is-overdue" : "") +
+          '">' +
+          formatInrAmount(overdue) +
+          "</strong></div>";
+      })
+      .catch(function () {
+        if (seq !== billSummarySeq) return;
+        box.innerHTML = '<div class="small text-danger">Unable to load previous bills.</div>';
+      });
+  }
+
+  function copyBillNumber(button) {
+    const value = (els.tallyBillNo?.value || "").trim();
+    if (!value) return;
+    const done = function () {
+      const icon = button && button.querySelector("i");
+      if (!icon) return;
+      icon.className = "bi bi-check2";
+      window.setTimeout(function () {
+        icon.className = "bi bi-copy";
+      }, 1200);
+    };
+    const fallback = function () {
+      const area = document.createElement("textarea");
+      area.value = value;
+      document.body.appendChild(area);
+      area.select();
+      try { document.execCommand("copy"); } catch (_err) { /* ignore */ }
+      area.remove();
+      done();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done).catch(fallback);
+      return;
+    }
+    fallback();
+  }
+
+  async function lookupGeneratedInvoice(billNo) {
+    if (!billNo || !window.OIE_INVOICE_STATUS_URL) return null;
+    const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+    url.searchParams.set("bill_no", billNo);
+    const res = await fetch(url.toString(), { credentials: "same-origin" });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!data.ok || !data.found || !data.record) return null;
+    return data.record;
+  }
+
+  async function declineGeneratedBill() {
+    const billNo = (els.tallyBillNo?.value || els.billNo?.value || "").trim();
+    const record = await lookupGeneratedInvoice(billNo);
+    if (!record) return;
+    keepGenerateBillYes();
+    const sure = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?",
+          { title: "Delete related bills", okLabel: "Yes", cancelLabel: "No", type: "warning" }
+        )
+      : window.confirm(
+          "All payment received bills and invoices related to this bill will be deleted. Are you sure?"
+        );
+    if (!sure) return;
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: "Enter your User ID and password to delete the invoices related to this bill.",
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    }
+    if (!creds || !creds.user_id || !creds.password) return;
+    const permanent = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "This will permanently delete all invoices related to this bill.",
+          { title: "Permanently delete", okLabel: "Yes", cancelLabel: "No", type: "danger" }
+        )
+      : window.confirm("This will permanently delete all invoices related to this bill.");
+    if (!permanent) return;
+    const res = await fetch(window.OIE_INVOICE_DELETE_URL, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": window.OIE_CSRF || csrfToken(),
+      },
+      body: JSON.stringify({
+        bill_no: billNo,
+        user_id: creds.user_id,
+        password: creds.password,
+      }),
+    });
+    const data = await res.json().catch(function () {
+      return {};
+    });
+    if (!res.ok || !data.ok) {
+      const message = data.error || "Unable to delete the related invoices.";
+      if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+      else alert(message);
+      return;
+    }
+    resetGenerateBillChoice();
+    lastSaleRecord = null;
+    paintInvoiceStatus(null);
+    syncGenerateBillPrompt(true);
+    if (window.JTCSDialog?.alert) {
+      window.JTCSDialog.alert(data.message || "Related invoices deleted.", "success");
+    }
+  }
+
+  function categoryLineData(line) {
+    if (!line) {
+      return {
+        item: "",
+        item_id: "",
+        gst_rate_percent: "18",
+        hsn_sac: "",
+        unit: "NOS",
+        rate: "",
+      };
+    }
+    const sub = line.querySelector(".oie-category-subwork");
+    const amount = line.querySelector(".oie-category-amount");
+    const opt = sub && sub.selectedIndex >= 0 ? sub.options[sub.selectedIndex] : null;
+    return {
+      item: opt && opt.value ? (opt.textContent || "").trim() : "",
+      item_id: opt ? opt.getAttribute("data-item-id") || "" : "",
+      gst_rate_percent: opt ? opt.getAttribute("data-gst-rate") || "18" : "18",
+      hsn_sac: opt ? opt.getAttribute("data-hsn") || "" : "",
+      unit: opt ? opt.getAttribute("data-unit") || "NOS" : "NOS",
+      rate: amount && amount.value !== "" ? amount.value : "",
+    };
+  }
+
+  function firstCategoryLineData() {
+    return categoryLineData(els.categoryLines?.querySelector(".oie-category-line"));
+  }
+
+  function collectCategoryLinesForBill() {
+    const lines = [];
+    els.categoryLines?.querySelectorAll(".oie-category-line").forEach(function (line) {
+      const data = categoryLineData(line);
+      if (data.item) lines.push(data);
+    });
+    return lines;
+  }
+
+  function taxYearFromDate(iso) {
+    const parts = String(iso || "").trim().split("-");
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    if (!year || !month) return "";
+    const start = month >= 4 ? year : year - 1;
+    return start + "-" + String(start + 1).slice(-2);
+  }
+
+  function collectGenerateBillSeed() {
+    const billNo = (els.billNo?.value || "").trim();
+    const seed = {
+      date: (els.workDate?.value || "").trim(),
+      tax_year: taxYearFromDate(els.workDate?.value),
+      invoice_no: billNo,
+      bill_no: billNo,
+      tally_bill_no: (els.tallyBillNo?.value || billNo).trim(),
+      customer_id: (els.customerId?.value || "").trim(),
+      customer_name: (els.customerName?.value || "").trim(),
+      mobile: (els.mobileNumber?.value || "").trim(),
+      item: "",
+      sub_work: "",
+      item_id: "",
+      gst_rate_percent: "",
+      hsn_sac: "",
+      unit: "NOS",
+      rate: "",
+      lines: [],
+      state_code: (window.OIE_COMPANY_STATE_CODE || "05").trim(),
+      source: "Miscellaneous",
+      payment_received: isPaymentReceivedYes(),
+      entry_id: (els.entryId && els.entryId.value) || "",
+    };
+    if (lastSaleRecord && lastSaleRecord.invoice_id) {
+      seed.open_edit = true;
+      seed.invoice_id = lastSaleRecord.invoice_id;
+    }
+    return seed;
+  }
+
+  function openGenerateBillPopup(presetSeed) {
+    if (!presetSeed && (!isMiscKind() || !isTallyChecked())) return;
+    const seed = presetSeed || collectGenerateBillSeed();
+    if (!seed.invoice_no) {
+      alert("Bill Number is required before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    if (!seed.customer_name) {
+      alert("Please enter Customer Name before generating bill.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      sessionStorage.setItem("oieMiscGenerateBill", JSON.stringify(seed));
+    } catch (_err) {
+      /* ignore quota errors */
+    }
+    const url = window.OIE_GENERATE_BILL_URL || "/activities/miscellaneous/generate-bill";
+    if (!url) {
+      alert("Generate bill is available only for Miscellaneous.");
+      resetGenerateBillChoice();
+      return;
+    }
+    const host = window.top || window;
+    if (typeof host.jtcsOpenPageWindow === "function") {
+      let existing = null;
+      try {
+        const path = new URL(url, window.location.origin);
+        const key = path.pathname.replace(/\/+$/, "") + path.search;
+        existing = host.document.querySelector(
+          '.jtcs-page-win[data-key="' + key.replace(/"/g, "") + '"]'
+        );
+      } catch (_err) {
+        existing = null;
+      }
+      host.jtcsOpenPageWindow(url, "Generate Bill");
+      if (existing) {
+        const frame = existing.querySelector("iframe");
+        if (frame) frame.src = url;
+      }
+      return;
+    }
+    const width = Math.round(14.4 * 96);
+    const height = Math.round(9.1 * 96);
+    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
+    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
+    const features = [
+      "width=" + width,
+      "height=" + height,
+      "left=" + left,
+      "top=" + top,
+      "menubar=no",
+      "toolbar=no",
+      "location=no",
+      "status=no",
+      "resizable=yes",
+      "scrollbars=yes",
+    ].join(",");
+    const win = window.open(url, "oieMiscGenerateBillWindow", features);
+    if (!win) {
+      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
+      resetGenerateBillChoice();
+      return;
+    }
+    try {
+      win.focus();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  const miscInvoicePage = !!(
+    document.getElementById("oieCreateInvoiceBtn")
+    || document.getElementById("oieBillingWrap")
+    || String(window.OIE_FORCE_LEDGER_KIND || "") === "Misc."
+  );
+  let lastMiscCustomerId = "";
 
   function syncMiscWorkflow() {
     const misc = isMiscKind();
     els.miscWorkflowWrap?.classList.toggle("d-none", !misc);
+    if (miscInvoicePage && misc) {
+      if (els.tallyBillWrap) els.tallyBillWrap.classList.add("d-none");
+      els.paymentSection?.classList.add("d-none");
+      if (els.paymentFieldset) els.paymentFieldset.disabled = true;
+      els.paymentSection?.classList.remove("oie-payment-section-locked");
+      if (els.paymentLockedHint) els.paymentLockedHint.classList.add("d-none");
+      if (els.remarksSectionNum) els.remarksSectionNum.textContent = "4";
+      syncMiscBillingPanel();
+      return;
+    }
     if (!misc) {
       if (els.workDone) els.workDone.checked = false;
       if (els.tallyBill) {
         els.tallyBill.checked = false;
         els.tallyBill.disabled = true;
       }
+      resetGenerateBillChoice();
     } else if (els.tallyBill) {
       const workDone = isWorkDoneChecked();
       els.tallyBill.disabled = !workDone;
-      if (!workDone) els.tallyBill.checked = false;
+      if (!workDone) {
+        els.tallyBill.checked = false;
+        resetGenerateBillChoice();
+      }
     }
-    const tally = isTallyChecked();
-    els.tallyBillWrap?.classList.toggle("d-none", !tally);
-    els.autoBillBtn?.classList.toggle("d-none", !tally);
-    if (tally && els.tallyBillDate && !els.tallyBillDate.value) {
-      els.tallyBillDate.value = window.OIE_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
+    const showBill = isMiscKind() && (isWorkDoneChecked() || isTallyChecked());
+    els.tallyBillWrap?.classList.toggle("d-none", !showBill);
+    if (!showBill) {
+      resetGenerateBillChoice();
+      setPaymentReceivedChoice(false);
     }
-    if (tally && els.tallyBillAmount && !(els.tallyBillAmount.value || "").trim()) {
-      const cat = getCategoryTotal();
-      if (cat > 0) els.tallyBillAmount.value = cat.toFixed(2);
+    if (showBill && els.tallyBillNo && !(els.tallyBillNo.value || "").trim() && els.billNo) {
+      els.tallyBillNo.value = (els.billNo.value || "").trim();
     }
+    if (els.tallyBillNo) els.tallyBillNo.disabled = true;
+    refreshInvoiceStatus();
     const paymentOn = isPaymentActive();
+    els.paymentSection?.classList.toggle("d-none", isMiscKind() && !paymentOn);
     if (els.paymentFieldset) els.paymentFieldset.disabled = !paymentOn;
     els.paymentSection?.classList.toggle("oie-payment-section-locked", !paymentOn);
     els.paymentLockedHint?.classList.toggle("d-none", paymentOn);
     if (els.paymentSectionNum) els.paymentSectionNum.textContent = misc ? "4" : "3";
     if (els.remarksSectionNum) els.remarksSectionNum.textContent = misc ? "5" : "4";
-    if (paymentOn) ensurePaymentLines();
+    if (paymentOn) {
+      ensurePaymentLines();
+      const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length === 1 && getPaymentTotal() <= 0) {
+        syncFirstPaymentFromCategories();
+      }
+    }
+    syncGenerateBillPrompt();
   }
 
   function isEditMode() {
@@ -197,15 +789,15 @@
   }
 
   function categoryLabelText(kind) {
-    if (kind === "Expense") return "Expense Categories";
-    if (kind === "Misc.") return "Misc. Categories";
-    return "Income Categories";
+    if (kind === "Expense") return "Category Master (Expense)";
+    if (kind === "Misc.") return "Category Master (Misc.)";
+    return "Category Master (Income)";
   }
 
   function categorySelectLabelText(kind) {
-    if (kind === "Expense") return "Expense Category *";
-    if (kind === "Misc.") return "Work / Category *";
-    return "Income Category *";
+    if (kind === "Expense") return "Category *";
+    if (kind === "Misc.") return "Category *";
+    return "Category *";
   }
 
   function syncLedgerLabels() {
@@ -245,7 +837,7 @@
     select.required = true;
     const optEmpty = document.createElement("option");
     optEmpty.value = "";
-    optEmpty.textContent = "-- Select --";
+    optEmpty.textContent = "-- Select Category --";
     select.appendChild(optEmpty);
 
     const types = workTypesForKind(currentLedgerKind());
@@ -322,7 +914,10 @@
       return;
     }
     const amountInput = lines[0].querySelector(".oie-payment-amount");
-    if (!amountInput) return;
+    if (!amountInput || lines[0].dataset.paymentCleared === "1") {
+      updatePaymentSummary();
+      return;
+    }
     const categoryTotal = getCategoryTotal();
     // Keep payment in sync when there is a single payment line.
     amountInput.value = categoryTotal > 0 ? categoryTotal.toFixed(2) : "0";
@@ -374,6 +969,12 @@
           const opt = document.createElement("option");
           opt.value = String(row.work_type_id);
           opt.textContent = row.sub_work_type;
+          if (row.item_id) opt.setAttribute("data-item-id", String(row.item_id));
+          if (row.gst_rate_percent != null) {
+            opt.setAttribute("data-gst-rate", String(row.gst_rate_percent));
+          }
+          if (row.hsn_sac) opt.setAttribute("data-hsn", String(row.hsn_sac));
+          if (row.unit) opt.setAttribute("data-unit", String(row.unit));
           select.appendChild(opt);
         });
         const want = selectedId || select.dataset.pendingValue || "";
@@ -500,8 +1101,12 @@
       const subSelect = lines[i].querySelector(".oie-category-subwork");
       const amount = lines[i].querySelector(".oie-category-amount");
       if (!select?.value) return "Each category must be selected.";
-      if (seen[select.value]) return "Duplicate categories are not allowed.";
-      seen[select.value] = true;
+      const lineKey =
+        kind === "Misc."
+          ? select.value + ":" + (subSelect?.value || "")
+          : select.value;
+      if (seen[lineKey]) return "Duplicate categories are not allowed.";
+      seen[lineKey] = true;
       if (kind === "Misc." && subSelect && !subSelect.disabled) {
         const hasOptions = Array.from(subSelect.options).some(function (o) { return o.value; });
         if (hasOptions && !subSelect.value) {
@@ -572,11 +1177,24 @@
     return String(item.bank_account_id || "");
   }
 
+  function isQrBillReceivedAccount(item) {
+    const flag = item && item.qr_bill_received;
+    return flag === true || flag === 1 || flag === "1";
+  }
+
+  function paymentReceivedAccounts() {
+    return (window.OIE_BANK_ACCOUNTS || []).filter(isQrBillReceivedAccount);
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select oie-payment-bank";
     select.required = true;
-    const accounts = window.OIE_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
+    const blank = document.createElement("option");
+    blank.value = "";
+    blank.textContent = "-- Select --";
+    select.appendChild(blank);
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -591,6 +1209,20 @@
       opt.textContent = paymentModeLabel(item);
       select.appendChild(opt);
     });
+    if (
+      selectedValue &&
+      !Array.from(select.options).some(function (opt) {
+        return opt.value === String(selectedValue);
+      })
+    ) {
+      const current = (window.OIE_BANK_ACCOUNTS || []).find(function (item) {
+        return paymentModeValue(item) === String(selectedValue);
+      });
+      const opt = document.createElement("option");
+      opt.value = String(selectedValue);
+      opt.textContent = current ? paymentModeLabel(current) : "Current account";
+      select.appendChild(opt);
+    }
     autoSelectPaymentBank(select, selectedValue);
     return select;
   }
@@ -605,6 +1237,10 @@
       select.value = String(preferredValue);
       return;
     }
+    if (!preferredValue) {
+      select.value = "";
+      return;
+    }
     const cashOption = Array.from(select.options).find(function (opt) {
       return opt.value && opt.textContent.trim() === "Cash";
     });
@@ -612,10 +1248,7 @@
       select.value = cashOption.value;
       return;
     }
-    const firstOption = Array.from(select.options).find(function (opt) {
-      return opt.value;
-    });
-    if (firstOption) select.value = firstOption.value;
+    select.value = "";
   }
 
   function getPaymentTotal() {
@@ -648,17 +1281,42 @@
       "small ms-auto " + (matched || !categoryTotal ? "text-success" : "text-danger");
   }
 
+  function clearPaymentLine(line) {
+    const select = line.querySelector("select");
+    const amount = line.querySelector(".oie-payment-amount");
+    const date = line.querySelector(".oie-payment-date");
+    line.dataset.paymentCleared = "1";
+    if (select) {
+      select.value = "";
+      select.required = false;
+    }
+    if (amount) {
+      amount.value = "";
+      amount.required = false;
+    }
+    if (date) {
+      date.value = defaultPaymentDate();
+      date.required = false;
+      delete date.dataset.userEdited;
+    }
+    if (lastSaleRecord) paintInvoiceStatus(lastSaleRecord);
+  }
+
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".oie-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
   function syncFirstPaymentAmount() {
     updatePaymentSummary();
+  }
+
+  function remainingPaymentAmount() {
+    const rem = Math.round((getCategoryTotal() - getPaymentTotal()) * 100) / 100;
+    return rem > 0 ? rem : 0;
   }
 
   function defaultPaymentDate() {
@@ -691,6 +1349,7 @@
     bankLabel.className = "form-label";
     bankLabel.textContent = "Payment Mode *";
     const select = buildPaymentSelect(options.bank_account_id || options.bankAccountId);
+    select.name = "PaymentBankAccountID[]";
     bankWrap.appendChild(bankLabel);
     bankWrap.appendChild(select);
 
@@ -703,6 +1362,7 @@
     dateInput.type = "date";
     dateInput.className = "form-control oie-payment-date";
     dateInput.required = true;
+    dateInput.name = "PaymentDate[]";
     dateInput.value = options.payment_date || defaultPaymentDate();
     dateInput.addEventListener("change", function () {
       dateInput.dataset.userEdited = "1";
@@ -721,8 +1381,16 @@
     amount.min = "0";
     amount.className = "form-control oie-payment-amount";
     amount.required = true;
+    amount.name = "PaymentAmount[]";
     amount.value = options.amount != null && options.amount !== "" ? options.amount : "0";
-    amount.addEventListener("input", updatePaymentSummary);
+    amount.addEventListener("input", function () {
+      if (String(amount.value || "").trim() !== "") line.dataset.paymentCleared = "";
+      updatePaymentSummary();
+      if (lastSaleRecord) paintInvoiceStatus(lastSaleRecord);
+    });
+    select.addEventListener("change", function () {
+      if (select.value) line.dataset.paymentCleared = "";
+    });
     amountWrap.appendChild(amountLabel);
     amountWrap.appendChild(amount);
 
@@ -734,7 +1402,12 @@
     removeBtn.innerHTML = '<i class="bi bi-trash"></i>';
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".oie-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+      if (lines.length <= 1) {
+        clearPaymentLine(line);
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();
@@ -763,9 +1436,11 @@
 
   function validatePaymentLines() {
     if (!isPaymentActive()) return null;
-    const paymentTotal = getPaymentTotal();
-    if (isMiscKind() && paymentTotal <= 0) return null;
     const lines = els.paymentLines?.querySelectorAll(".oie-payment-line") || [];
+    const paymentTotal = getPaymentTotal();
+    const extraLines = lines.length > 1;
+    const mustValidate = !isMiscKind() || paymentTotal > 0 || extraLines;
+    if (!mustValidate) return null;
     if (!lines.length) return "At least one payment mode is required.";
     for (let i = 0; i < lines.length; i++) {
       const bank = lines[i].querySelector(".oie-payment-bank");
@@ -790,36 +1465,63 @@
       el.remove();
     });
     if (!isPaymentActive()) return;
+    if (els.paymentFieldset) els.paymentFieldset.disabled = false;
     const lines = els.paymentLines.querySelectorAll(".oie-payment-line");
-    lines.forEach(function (line) {
+    lines.forEach(function (line, index) {
       const bank = line.querySelector(".oie-payment-bank");
       const amount = line.querySelector(".oie-payment-amount");
       const paymentDate = line.querySelector(".oie-payment-date");
       if (!bank || !amount) return;
 
+      bank.disabled = false;
+      amount.disabled = false;
+      if (paymentDate) paymentDate.disabled = false;
+      bank.removeAttribute("name");
+      amount.removeAttribute("name");
+      if (paymentDate) paymentDate.removeAttribute("name");
+
       const wrap = document.createElement("div");
       wrap.className = "oie-payment-sync d-none";
+      wrap.setAttribute("aria-hidden", "true");
 
       const bankHidden = document.createElement("input");
       bankHidden.type = "hidden";
       bankHidden.name = "PaymentBankAccountID[]";
       bankHidden.value = bank.value || "";
+      bankHidden.className = "oie-payment-sync";
 
       const amountHidden = document.createElement("input");
       amountHidden.type = "hidden";
       amountHidden.name = "PaymentAmount[]";
       amountHidden.value = amount.value || "0";
+      amountHidden.className = "oie-payment-sync";
 
       const dateHidden = document.createElement("input");
       dateHidden.type = "hidden";
       dateHidden.name = "PaymentDate[]";
       dateHidden.value = paymentDate?.value || defaultPaymentDate();
+      dateHidden.className = "oie-payment-sync";
+
+      const indexHidden = document.createElement("input");
+      indexHidden.type = "hidden";
+      indexHidden.name = "PaymentLineIndex[]";
+      indexHidden.value = String(index);
+      indexHidden.className = "oie-payment-sync";
 
       wrap.appendChild(bankHidden);
       wrap.appendChild(amountHidden);
       wrap.appendChild(dateHidden);
+      wrap.appendChild(indexHidden);
       form.appendChild(wrap);
     });
+    if (isPaymentReceivedYes() || getPaymentTotal() > 0) {
+      const flag = document.createElement("input");
+      flag.type = "hidden";
+      flag.name = "PaymentReceived";
+      flag.value = "1";
+      flag.className = "oie-payment-sync";
+      form.appendChild(flag);
+    }
   }
 
   function fetchNextBillNo() {
@@ -873,8 +1575,9 @@
 
   function selectCustomer(customer) {
     if (!customer) return;
+    const newId = String(customer.customer_id || customer.CustomerID || "").trim();
     if (els.customerId) {
-      els.customerId.value = String(customer.customer_id || customer.CustomerID || "");
+      els.customerId.value = newId;
     }
     if (els.customerName) {
       els.customerName.value = customer.customer_name || customer.CustomerName || "";
@@ -891,6 +1594,26 @@
       els.customerSelected.classList.remove("d-none");
     }
     hideCustomerResults();
+    syncCustomerBillSummary();
+    if (miscInvoicePage) {
+      onMiscCustomerChanged(newId);
+    }
+  }
+
+  function onMiscCustomerChanged(newId) {
+    const next = String(newId || "").trim();
+    const prev = lastMiscCustomerId;
+    if (!next) {
+      lastMiscCustomerId = "";
+      clearMiscBilling();
+      syncMiscBillingPanel();
+      return;
+    }
+    if (prev && prev !== next) {
+      clearMiscBilling();
+    }
+    lastMiscCustomerId = next;
+    syncMiscBillingPanel();
   }
 
   function searchCustomers(query) {
@@ -1109,6 +1832,13 @@
     }
     if (els.ledgerIncome) els.ledgerIncome.checked = true;
     syncLedgerLabels();
+    if (miscInvoicePage) {
+      paintMiscInvoice(null);
+      clearMiscBilling();
+      lastMiscCustomerId = "";
+      hideMiscInvoiceEditor();
+      syncMiscBillingPanel();
+    }
     resetCategoryLines([{}]);
     resetPaymentLines([{}]);
     return fetchNextBillNo();
@@ -1118,6 +1848,7 @@
     resetForm().then(function () {
       ensureCategoryLines();
       ensurePaymentLines();
+      setEntryFieldsLocked(false);
       if (entryModal) entryModal.show();
     });
   }
@@ -1168,8 +1899,12 @@
   }
 
   function rowSearchText(row) {
+    const sale = row.sale_invoice || row.linked_invoice || {};
     return [
       row.bill_no,
+      row.tally_bill_no,
+      sale.invoice_no,
+      sale.bill_no,
       row.ledger_kind,
       row.work_name,
       row.account_label,
@@ -1376,6 +2111,14 @@
     els.pagerNav.innerHTML = items.join("");
   }
 
+  function miscInvoiceCell(row) {
+    const invoice = row.sale_invoice;
+    if (!invoice || !invoice.invoice_id || !window.JtcsInvoiceActions) {
+      return "<td>—</td>";
+    }
+    return '<td data-misc-entry-id="' + escapeHtml(row.entry_id) + '">' + window.JtcsInvoiceActions.summaryHtml(invoice) + "</td>";
+  }
+
   function renderGrid(options) {
     if (!els.gridBody) return;
     const opts = options || {};
@@ -1406,19 +2149,21 @@
           "<td>" +
           escapeHtml(row.bill_no) +
           "</td>" +
-          "<td>" +
-          ledgerBadge(row.ledger_kind) +
-          (row.ledger_kind === "Misc."
-            ? (row.work_done
-                ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? '<td class="d-none"></td>'
+            : "<td>" +
+              ledgerBadge(row.ledger_kind) +
+              (row.ledger_kind === "Misc."
+                ? (row.work_done
+                    ? '<span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                    : "") +
+                  (row.tally_bill_generated
+                    ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
+                    : row.work_done
+                      ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
+                      : "")
                 : "") +
-              (row.tally_bill_generated
-                ? '<span class="badge text-bg-primary oie-wf-badge">Tally Bill</span>'
-                : row.work_done
-                  ? '<span class="badge text-bg-warning oie-wf-badge">Bill Pending</span>'
-                  : "")
-            : "") +
-          "</td>" +
+              "</td>") +
           "<td>" +
           escapeHtml(formatDisplayDate(row.work_date)) +
           "</td>" +
@@ -1426,6 +2171,14 @@
           escapeHtml(category) +
           '">' +
           escapeHtml(category) +
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? (row.work_done
+                ? ' <span class="badge text-bg-success oie-wf-badge">Work Done</span>'
+                : "") +
+              (row.sale_invoice && row.sale_invoice.invoice_id
+                ? ' <span class="badge text-bg-primary oie-wf-badge">Invoice</span>'
+                : "")
+            : "") +
           "</td>" +
           '<td class="oie-account-cell">' +
           escapeHtml(row.account_label || "—") +
@@ -1445,6 +2198,7 @@
           "<td>" +
           escapeHtml(formatDisplayDate(row.created_date)) +
           "</td>" +
+          (window.OIE_FORCE_LEDGER_KIND === "Misc." ? miscInvoiceCell(row) : "") +
           '<td class="text-end text-nowrap">' +
           '<button type="button" class="btn btn-outline-secondary btn-sm oie-grid-edit-btn" data-id="' +
           row.entry_id +
@@ -1470,7 +2224,11 @@
 
   function clearGridFilters() {
     if (els.gridSearch) els.gridSearch.value = "";
-    if (els.gridFilterKind) els.gridFilterKind.value = "";
+    if (els.gridFilterKind) {
+      els.gridFilterKind.value = window.OIE_FORCE_LEDGER_KIND
+        ? String(window.OIE_FORCE_LEDGER_KIND)
+        : "";
+    }
     if (els.gridDateFrom) els.gridDateFrom.value = "";
     if (els.gridDateTo) els.gridDateTo.value = "";
     sortState = { key: "work_date", dir: "desc" };
@@ -1483,7 +2241,13 @@
     return fetch(url, { headers: { Accept: "application/json" } })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
-        allGridRows = data.rows || [];
+        let rows = data.rows || [];
+        if (window.OIE_HIDE_MISC && !window.OIE_FORCE_LEDGER_KIND) {
+          rows = rows.filter(function (row) {
+            return row.ledger_kind !== "Misc.";
+          });
+        }
+        allGridRows = rows;
         renderGridFromStart();
       })
       .catch(function (err) {
@@ -1518,13 +2282,19 @@
           return parseFloat(p.amount || "0") > 0;
         });
         if (els.workDone) {
-          els.workDone.checked = !!record.work_done || (record.ledger_kind === "Misc." && hasPayments);
+          els.workDone.checked = miscInvoicePage
+            ? !!record.work_done
+            : !!record.work_done || (record.ledger_kind === "Misc." && hasPayments);
         }
         if (els.tallyBill) {
-          els.tallyBill.checked =
-            !!record.tally_bill_generated || (record.ledger_kind === "Misc." && hasPayments);
+          els.tallyBill.checked = miscInvoicePage
+            ? !!record.tally_bill_generated
+            : !!record.tally_bill_generated || (record.ledger_kind === "Misc." && hasPayments);
         }
         if (els.customerId) els.customerId.value = record.customer_id ? String(record.customer_id) : "";
+        if (miscInvoicePage) {
+          lastMiscCustomerId = record.customer_id ? String(record.customer_id) : "";
+        }
         if (els.tallyBillNo) {
           els.tallyBillNo.value = record.tally_bill_no || (hasPayments ? record.bill_no || "" : "");
         }
@@ -1545,15 +2315,45 @@
         if (els.remarks) els.remarks.value = record.remarks || "";
         clearCustomerSelectionHint();
         hideCustomerResults();
+        if (miscInvoicePage) paintMiscInvoice(record.linked_invoice || null);
         if (els.customerId) els.customerId.value = record.customer_id ? String(record.customer_id) : "";
         if (els.customerSelected && record.customer_id) {
           els.customerSelected.textContent = "Customer selected from master";
           els.customerSelected.classList.remove("d-none");
         }
+        setPaymentReceivedChoice(
+          miscInvoicePage
+            ? !!(record.linked_invoice && record.linked_invoice.invoice_id) &&
+                (hasPayments || !!record.payment_received)
+            : hasPayments || !!record.payment_received
+        );
         resetPaymentLines(record.payments && record.payments.length ? record.payments : [{}]);
         syncMiscWorkflow();
+        setEntryFieldsLocked(true);
         if (entryModal) entryModal.show();
       });
+  }
+
+  async function gridDeleteAllowed(row) {
+    const billNo = ((row && (row.tally_bill_no || row.bill_no)) || "").trim();
+    const maybeBilled = !!(row && (row.tally_bill_generated || row.sale_invoice));
+    if (!maybeBilled || !billNo || !window.OIE_INVOICE_STATUS_URL) return true;
+    try {
+      const url = new URL(window.OIE_INVOICE_STATUS_URL, window.location.origin);
+      url.searchParams.set("bill_no", billNo);
+      const res = await fetch(url.toString(), { credentials: "same-origin" });
+      const data = await res.json();
+      if (!data.ok || !data.found || !data.record || !data.record.bill_approved) return true;
+      const paid = !!(row && row.payment_received) || !!(data.record && data.record.payment_received);
+      const message = paid
+        ? "Payment aa chuki hai aur admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao."
+        : "Admin ne approve kar diya hai. Isko edit ya delete karne ke liye pehle admin se unapprove karwao.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+      else alert(message);
+      return false;
+    } catch (_err) {
+      return true;
+    }
   }
 
   async function deleteEntry(entryId) {
@@ -1575,6 +2375,7 @@
       })
       .then(function (data) {
         if (data.ok) {
+          entryModal?.hide();
           loadGrid();
         } else {
           alert(data.error || "Delete failed.");
@@ -1619,65 +2420,14 @@
     if (!(els.tallyBillNo?.value || "").trim()) {
       return "Tally bill number is required when Tally Bill Generated is checked.";
     }
-    const billAmount = parseFloat(els.tallyBillAmount?.value || "0");
-    if (!billAmount || billAmount <= 0) {
-      return "Bill amount is required when Tally Bill Generated is checked.";
-    }
     if (!(els.customerName?.value || "").trim()) {
       return "Customer name is required when Tally Bill Generated is checked.";
     }
     return null;
   }
 
-  function openAutomatedBill() {
-    const customerId = (els.customerId?.value || "").trim();
-    if (!customerId) {
-      alert("Please select a customer first.");
-      return;
-    }
-    const params = new URLSearchParams();
-    params.set("customer_id", customerId);
-    const customerName = (els.customerName?.value || "").trim();
-    if (customerName) params.set("customer_name", customerName);
-    const url = "/accounting/invoice?" + params.toString();
-    const width = Math.min(1600, Math.max(1280, Math.floor((screen.availWidth || 1400) * 0.92)));
-    const height = Math.min(1000, Math.max(820, Math.floor((screen.availHeight || 900) * 0.92)));
-    const left = Math.max(0, Math.floor(((screen.availWidth || width) - width) / 2));
-    const top = Math.max(0, Math.floor(((screen.availHeight || height) - height) / 2));
-    const features = [
-      "width=" + width,
-      "height=" + height,
-      "left=" + left,
-      "top=" + top,
-      "menubar=yes",
-      "toolbar=yes",
-      "location=yes",
-      "status=yes",
-      "resizable=yes",
-      "scrollbars=yes",
-    ].join(",");
-    const win = window.open(url, "jtcsAccountingInvoiceWindow", features);
-    if (!win) {
-      alert("Pop-up blocked. Please allow pop-ups for this site, then try again.");
-      return;
-    }
-    try {
-      win.focus();
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  window.OIE_applyBillingResult = function (data) {
-    if (!data) return;
-    if (els.tallyBillNo && data.bill_no) els.tallyBillNo.value = data.bill_no;
-    if (els.tallyBillAmount && data.bill_amount != null) els.tallyBillAmount.value = data.bill_amount;
-    if (els.tallyBillDate && data.bill_date) els.tallyBillDate.value = data.bill_date;
-    if (els.tallyBill) els.tallyBill.checked = true;
-    syncMiscWorkflow();
-  };
-
   function saveEntry() {
+    if (entryFieldsLocked) return Promise.resolve();
     const categoryError = validateCategoryLines();
     if (categoryError) {
       alert(categoryError);
@@ -1699,7 +2449,10 @@
     const saveBtn = document.getElementById("oieSaveBtn");
     if (saveBtn) saveBtn.disabled = true;
     const saveUrl = window.OIE_SAVE_URL || "/others/income-expense/save";
+    const tallyNoDisabled = !!(els.tallyBillNo && els.tallyBillNo.disabled);
+    if (tallyNoDisabled) els.tallyBillNo.disabled = false;
     const body = new FormData(form);
+    if (tallyNoDisabled) els.tallyBillNo.disabled = true;
     return fetch(saveUrl, {
       method: "POST",
       body: body,
@@ -1711,6 +2464,13 @@
     })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
+        if (data && data.entry_id && els.entryId) {
+          els.entryId.value = String(data.entry_id);
+          editingEntryId = parseInt(data.entry_id, 10) || editingEntryId;
+        }
+        if (miscInvoicePage && miscCreatingInvoice) {
+          return loadGrid().then(function () { return data; });
+        }
         entryModal?.hide();
         return loadGrid().then(function () {
           return data;
@@ -1739,7 +2499,23 @@
 
   form.addEventListener("submit", function (event) {
     event.preventDefault();
+    if (entryFieldsLocked) return;
     ensureBillNoThenSave();
+  });
+
+  document.getElementById("oieEditBtn")?.addEventListener("click", function () {
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      setEntryFieldsLocked(false);
+    });
+  });
+
+  document.getElementById("oieDeleteBtn")?.addEventListener("click", function () {
+    if (!editingEntryId) return;
+    ensureEntryChangeAllowed().then(function (allowed) {
+      if (!allowed) return;
+      deleteEntry(editingEntryId);
+    });
   });
 
   if (els.newEntryBtn) {
@@ -1829,7 +2605,8 @@
   }
   if (els.addPaymentBtn) {
     els.addPaymentBtn.addEventListener("click", function () {
-      addPaymentLine({});
+      const rem = remainingPaymentAmount();
+      addPaymentLine({ amount: rem > 0 ? rem.toFixed(2) : "" });
     });
   }
   if (els.addCategoryBtn) {
@@ -1842,6 +2619,7 @@
     els.customerName.addEventListener("input", function () {
       if (els.customerId) els.customerId.value = "";
       clearCustomerSelectionHint();
+      if (miscInvoicePage) onMiscCustomerChanged("");
       clearTimeout(customerSearchTimer);
       customerSearchTimer = setTimeout(function () {
         searchCustomers(els.customerName.value);
@@ -1899,12 +2677,644 @@
     });
   });
 
+  const MANUAL_INVOICE_MESSAGE =
+    "Invoice cannot be selected manually. Please click 'Create Invoice' to generate the invoice first.";
+  let miscLinkedInvoice = null;
+  let miscCreatingInvoice = false;
+  let miscInvoiceEditorOpen = false;
+  let miscAllowModalHide = false;
+  let miscPayToken = 0;
+
+  function miscMoney(value) {
+    const amount = Number(value || 0);
+    return "₹" + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function miscFormatDate(iso) {
+    const text = String(iso || "").slice(0, 10);
+    const parts = text.split("-");
+    if (parts.length !== 3) return text || "—";
+    return parts[2] + "/" + parts[1] + "/" + parts[0];
+  }
+
+  function clearMiscBilling() {
+    const same = document.getElementById("oieBillingSame");
+    const other = document.getElementById("oieBillingOther");
+    const id = document.getElementById("oieBillingCustomerId");
+    const search = document.getElementById("oieBillingSearch");
+    const results = document.getElementById("oieBillingResults");
+    if (same) same.checked = false;
+    if (other) other.checked = false;
+    if (id) id.value = "";
+    if (search) search.value = "";
+    results?.classList.add("d-none");
+  }
+
+  function miscBillingChoice() {
+    if (document.getElementById("oieBillingSame")?.checked) return "SAME_CUSTOMER";
+    if (document.getElementById("oieBillingOther")?.checked) return "OTHER_CUSTOMER";
+    return "";
+  }
+
+  function syncMiscBillingPanel() {
+    const wrap = document.getElementById("oieBillingWrap");
+    const pick = document.getElementById("oieBillingPick");
+    if (!wrap) return;
+    const customerId = (els.customerId?.value || "").trim();
+    const show = !!customerId;
+    wrap.classList.toggle("d-none", !show);
+    pick?.classList.toggle("d-none", !(show && miscBillingChoice() === "OTHER_CUSTOMER"));
+  }
+
+  function paintMiscPayment(adjustment) {
+    const body = document.getElementById("oiePaymentAdjustBody");
+    if (!body) return;
+    if (!adjustment) {
+      body.innerHTML = '<div class="oie-pay-status">Payment Not Received</div>';
+      return;
+    }
+    const entries = adjustment.entries || [];
+    let html = "";
+    if (!entries.length) {
+      html += '<div class="oie-pay-status">Payment Not Received</div>';
+    } else if (entries.length === 1) {
+      const entry = entries[0];
+      html += '<div><span class="oie-pay-label">Money In/Out Amount Adjusted</span> <strong>' + miscMoney(entry.money_inout_transaction_amount) + "</strong></div>";
+      html += '<div><span class="oie-pay-label">Amount Adjusted to This Invoice</span> <strong>' + miscMoney(entry.allocated_amount) + "</strong></div>";
+      html += '<div><span class="oie-pay-label">Remaining Amount from This Money In/Out Entry</span> <strong>' + miscMoney(entry.remaining_money_inout_amount) + "</strong></div>";
+    } else {
+      html += "<details class=\"oie-pay-details\"><summary>" + entries.length + " Money In/Out entries</summary>";
+      entries.forEach(function (entry) {
+        html += '<div class="oie-pay-entry">';
+        html += "<div><strong>" + escapeHtml(miscFormatDate(entry.work_date)) + "</strong></div>";
+        html += "<div>Money In/Out Amount Adjusted <strong>" + miscMoney(entry.money_inout_transaction_amount) + "</strong></div>";
+        html += "<div>Amount Adjusted to This Invoice <strong>" + miscMoney(entry.allocated_amount) + "</strong></div>";
+        html += "<div>Remaining Amount from This Money In/Out Entry <strong>" + miscMoney(entry.remaining_money_inout_amount) + "</strong></div>";
+        html += "</div>";
+      });
+      html += "</details>";
+    }
+    html += "<div>Customer Total Sale Amount <strong>" + miscMoney(adjustment.customer_total_sale) + "</strong></div>";
+    html += "<div>Customer Total Received Amount <strong>" + miscMoney(adjustment.customer_total_received) + "</strong></div>";
+    html += "<div>Customer Outstanding Amount <strong>" + miscMoney(adjustment.customer_outstanding) + "</strong></div>";
+    body.innerHTML = html;
+  }
+
+  function loadMiscPayment(invoiceId) {
+    const body = document.getElementById("oiePaymentAdjustBody");
+    const id = parseInt(invoiceId, 10);
+    if (!id) {
+      paintMiscPayment(null);
+      return;
+    }
+    const token = ++miscPayToken;
+    if (body) body.innerHTML = "";
+    fetch("/accounting/api/invoices/" + id + "/payment-adjustment", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (token !== miscPayToken) return;
+        paintMiscPayment(data && data.ok ? data.adjustment : null);
+      })
+      .catch(function () {
+        if (token !== miscPayToken) return;
+        paintMiscPayment(null);
+      });
+  }
+
+  function paintMiscInvoice(invoice) {
+    miscLinkedInvoice = invoice && invoice.invoice_id ? invoice : null;
+    const box = document.getElementById("oieInvoiceSummary");
+    const createBtn = document.getElementById("oieCreateInvoiceBtn");
+    document.querySelectorAll("#oieInvoiceActions .oie-inv-act").forEach(function (btn) {
+      btn.classList.toggle("d-none", !miscLinkedInvoice);
+    });
+    if (createBtn) createBtn.classList.toggle("d-none", !!miscLinkedInvoice);
+    if (!box) return;
+    if (!miscLinkedInvoice) {
+      box.classList.add("d-none");
+      paintMiscPayment(null);
+      syncMiscBillingPanel();
+      syncMiscWorkflow();
+      return;
+    }
+    box.classList.remove("d-none");
+    const no = document.getElementById("oieInvoiceNo");
+    const dt = document.getElementById("oieInvoiceDate");
+    const amt = document.getElementById("oieInvoiceAmount");
+    if (no) no.textContent = miscLinkedInvoice.invoice_no || "—";
+    if (dt) dt.textContent = miscFormatDate(miscLinkedInvoice.invoice_date);
+    if (amt) amt.textContent = miscMoney(miscLinkedInvoice.invoice_value);
+    const followupCustomer = parseInt(els.customerId?.value || "0", 10) || 0;
+    const invoiceCustomer = parseInt(miscLinkedInvoice.customer_id || "0", 10) || 0;
+    if (invoiceCustomer && followupCustomer && invoiceCustomer !== followupCustomer) {
+      const other = document.getElementById("oieBillingOther");
+      if (other) other.checked = true;
+      const id = document.getElementById("oieBillingCustomerId");
+      const search = document.getElementById("oieBillingSearch");
+      if (id) id.value = String(invoiceCustomer);
+      if (search) search.value = miscLinkedInvoice.customer_name || "";
+    } else if (followupCustomer) {
+      const same = document.getElementById("oieBillingSame");
+      if (same) same.checked = true;
+    }
+    lastMiscCustomerId = followupCustomer ? String(followupCustomer) : lastMiscCustomerId;
+    syncMiscBillingPanel();
+    loadMiscPayment(miscLinkedInvoice.invoice_id);
+    syncMiscWorkflow();
+  }
+
+  function miscInvoiceFrame() {
+    return document.getElementById("oieInvoiceEditorFrame");
+  }
+
+  function miscInvoiceShell() {
+    return document.querySelector("#oieEntryModal .oie-entry-modal");
+  }
+
+  function hideMiscInvoiceEditor() {
+    miscInvoiceShell()?.classList.remove("is-invoice-edit");
+    const frame = miscInvoiceFrame();
+    if (frame) frame.src = "about:blank";
+    miscInvoiceEditorOpen = false;
+  }
+
+  function showMiscInvoiceEditor() {
+    const invoiceId = miscLinkedInvoice ? parseInt(miscLinkedInvoice.invoice_id, 10) : 0;
+    if (!invoiceId) {
+      alert("Unable to edit invoice: Invoice ID is missing or invalid.");
+      return;
+    }
+    const frame = miscInvoiceFrame();
+    const shell = miscInvoiceShell();
+    if (!frame || !shell) return;
+    const params = new URLSearchParams();
+    params.set("edit", String(invoiceId));
+    params.set("fu_embed", "1");
+    params.set("misc_entry_id", (els.entryId?.value || "").trim());
+    appendMiscInclusiveParams(params);
+    const customerId = (els.customerId?.value || "").trim();
+    if (customerId) params.set("contact_customer_id", customerId);
+    appendMiscReceiptOrigin(params);
+    const choice = miscBillingChoice();
+    if (choice === "SAME_CUSTOMER" || choice === "OTHER_CUSTOMER") {
+      const billCustomerId = selectedMiscBillingId();
+      if (!billCustomerId) {
+        alert(choice === "OTHER_CUSTOMER"
+          ? "Please select the Billing Customer."
+          : "Please select a customer first.");
+        return;
+      }
+      params.set("misc_bill_customer_id", billCustomerId);
+    }
+    frame.src = "/accounting/invoice/sale?" + params.toString();
+    shell.classList.add("is-invoice-edit");
+    miscInvoiceEditorOpen = true;
+  }
+
+  function miscInvoiceDirty() {
+    const frame = miscInvoiceFrame();
+    try {
+      return !!(frame && frame.contentWindow && frame.contentWindow.jtcsInvoiceIsDirty && frame.contentWindow.jtcsInvoiceIsDirty());
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function confirmMiscUnsaved() {
+    const message = "You have unsaved changes in this invoice. Are you sure you want to close without saving?";
+    if (window.JTCSDialog && JTCSDialog.confirm) {
+      return JTCSDialog.confirm(message, { title: "Unsaved invoice", okLabel: "Discard Changes", cancelLabel: "Cancel", type: "warning" });
+    }
+    return Promise.resolve(window.confirm(message));
+  }
+
+  function settleMiscInvoiceEditor() {
+    if (!miscInvoiceEditorOpen) return Promise.resolve(true);
+    if (!miscInvoiceDirty()) {
+      hideMiscInvoiceEditor();
+      return Promise.resolve(true);
+    }
+    return confirmMiscUnsaved().then(function (discard) {
+      if (!discard) return false;
+      hideMiscInvoiceEditor();
+      return true;
+    });
+  }
+
+  function miscInclusiveSeeds() {
+    if (!miscInvoicePage) return [];
+    const seeds = [];
+    els.categoryLines?.querySelectorAll(".oie-category-line").forEach(function (line) {
+      const data = categoryLineData(line);
+      const amount = parseFloat(data.rate);
+      if (!(amount > 0)) return;
+      seeds.push({
+        item_id: data.item_id || "",
+        gst_rate_percent: data.item_id ? data.gst_rate_percent || "0" : "0",
+        amount: amount,
+        particulars: data.item || "",
+        hsn_sac: data.hsn_sac || "",
+        unit: data.unit || "NOS",
+      });
+    });
+    return seeds;
+  }
+
+  function appendMiscInclusiveParams(params) {
+    const seeds = miscInclusiveSeeds();
+    if (!seeds.length) return;
+    params.set("misc_inclusive", "1");
+    params.set("misc_lines", JSON.stringify(seeds));
+  }
+
+  function selectedMiscBillingId() {
+    if (miscBillingChoice() === "OTHER_CUSTOMER") {
+      return (document.getElementById("oieBillingCustomerId")?.value || "").trim();
+    }
+    if (miscBillingChoice() === "SAME_CUSTOMER") return (els.customerId?.value || "").trim();
+    return "";
+  }
+
+  function appendMiscReceiptOrigin(params) {
+    if (!window.JtcsInvoiceReceiptReturn || !params) return;
+    const origin = String(window.OIE_FORCE_LEDGER_KIND || "") === "Misc." ? "MISC" : "";
+    window.JtcsInvoiceReceiptReturn.appendModuleReturn(
+      params,
+      origin,
+      window.location.pathname + window.location.search
+    );
+  }
+
+  function openMiscInvoiceWindow() {
+    const choice = miscBillingChoice();
+    if (!choice) {
+      alert("Please select Same Customer or Other Customer.");
+      return false;
+    }
+    const customerId = selectedMiscBillingId();
+    if (choice === "OTHER_CUSTOMER" && !customerId) {
+      alert("Please select the Billing Customer.");
+      document.getElementById("oieBillingSearch")?.focus();
+      return false;
+    }
+    if (!customerId) {
+      alert("Please select a customer first.");
+      return false;
+    }
+    const params = new URLSearchParams();
+    params.set("open_form", "1");
+    params.set("customer_id", customerId);
+    const contactId = (els.customerId?.value || "").trim();
+    if (contactId) params.set("contact_customer_id", contactId);
+    const entryId = (els.entryId?.value || "").trim();
+    if (entryId) params.set("misc_entry_id", entryId);
+    appendMiscInclusiveParams(params);
+    appendMiscReceiptOrigin(params);
+    if (choice !== "OTHER_CUSTOMER") {
+      const name = (els.customerName?.value || "").trim();
+      if (name) params.set("customer_name", name);
+    }
+    const host = window.top || window;
+    if (typeof host.jtcsOpenPageWindow !== "function") {
+      alert("Invoice window could not be opened in this page. Refresh and try again.");
+      return false;
+    }
+    host.jtcsOpenPageWindow("/accounting/invoice/sale?" + params.toString(), "Sale / Service Invoice");
+    return true;
+  }
+
+  function ensureMiscSaved() {
+    const existing = (els.entryId?.value || "").trim();
+    if (existing) return Promise.resolve(existing);
+    return saveEntry().then(function () {
+      return (els.entryId?.value || "").trim();
+    });
+  }
+
+  function beginMiscCreateInvoice() {
+    const customerId = (els.customerId?.value || "").trim();
+    if (!customerId) {
+      alert("Please select a customer before opening the Invoice module.");
+      return;
+    }
+    miscCreatingInvoice = true;
+    syncMiscBillingPanel();
+    if (!miscBillingChoice()) {
+      alert("Please select Same Customer or Other Customer.");
+      return;
+    }
+    if (miscBillingChoice() === "OTHER_CUSTOMER" && !(document.getElementById("oieBillingCustomerId")?.value || "").trim()) {
+      alert("Please select the Billing Customer.");
+      document.getElementById("oieBillingSearch")?.focus();
+      return;
+    }
+    ensureMiscSaved().then(function (entryId) {
+      if (!entryId) return;
+      openMiscInvoiceWindow();
+    }).catch(function (err) {
+      alert(err.message || "Unable to open the Invoice module.");
+    });
+  }
+
+  function reassignMiscBilling(billingCustomerId) {
+    const entryId = (els.entryId?.value || "").trim();
+    const billingId = String(billingCustomerId || "").trim();
+    if (!entryId || !billingId || !miscLinkedInvoice || !miscLinkedInvoice.invoice_id) return;
+    if (String(miscLinkedInvoice.customer_id || "") === billingId) return;
+    const url = apiUrl(window.OIE_BILLING_CUSTOMER_URL, entryId);
+    fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": csrfToken() || window.OIE_CSRF || "",
+      },
+      body: JSON.stringify({ billing_customer_id: Number(billingId) }),
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { ok: res.ok && data.ok, data: data };
+        });
+      })
+      .then(function (payload) {
+        if (!payload.ok || !payload.data.invoice) {
+          throw new Error((payload.data && payload.data.error) || "Unable to change the billing customer.");
+        }
+        const invoice = payload.data.invoice;
+        paintMiscInvoice(Object.assign({}, miscLinkedInvoice, {
+          customer_id: invoice.customer_id,
+          customer_name: invoice.customer_name,
+          contact_mobile: invoice.contact_mobile,
+          invoice_no: invoice.invoice_no || miscLinkedInvoice.invoice_no,
+          invoice_date: invoice.invoice_date || miscLinkedInvoice.invoice_date,
+          invoice_value: invoice.invoice_value != null ? invoice.invoice_value : miscLinkedInvoice.invoice_value,
+        }));
+        loadGrid();
+      })
+      .catch(function (err) {
+        const message = err.message || "Unable to change the billing customer.";
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+        else alert(message);
+        paintMiscInvoice(miscLinkedInvoice);
+      });
+  }
+
+  if (miscInvoicePage) {
+    document.getElementById("oieBillingSame")?.addEventListener("change", function () {
+      syncMiscBillingPanel();
+      if (!this.checked || !miscLinkedInvoice) return;
+      const sameId = (els.customerId?.value || "").trim();
+      if (!sameId) {
+        alert("Please select a customer first.");
+        this.checked = false;
+        syncMiscBillingPanel();
+        return;
+      }
+      reassignMiscBilling(sameId);
+    });
+    document.getElementById("oieBillingOther")?.addEventListener("change", syncMiscBillingPanel);
+    document.getElementById("oieCreateInvoiceBtn")?.addEventListener("click", beginMiscCreateInvoice);
+    document.getElementById("oieInvoiceEditorBack")?.addEventListener("click", function () {
+      settleMiscInvoiceEditor();
+    });
+    els.entryModalEl?.addEventListener("hide.bs.modal", function (event) {
+      if (miscAllowModalHide || !miscInvoiceEditorOpen) return;
+      event.preventDefault();
+      settleMiscInvoiceEditor().then(function (done) {
+        if (!done) return;
+        miscAllowModalHide = true;
+        entryModal?.hide();
+        miscAllowModalHide = false;
+      });
+    });
+    document.getElementById("oieInvoiceActions")?.addEventListener("click", function (event) {
+      const btn = event.target.closest(".oie-inv-act");
+      if (!btn || !window.JtcsInvoiceActions || !miscLinkedInvoice) return;
+      if (btn.getAttribute("data-inv-act") === "edit") {
+        showMiscInvoiceEditor();
+        return;
+      }
+      window.JtcsInvoiceActions.run(btn.getAttribute("data-inv-act"), miscLinkedInvoice, {
+        miscEntryId: (els.entryId?.value || "").trim(),
+        onDeleted: function () {
+          miscCreatingInvoice = false;
+          paintMiscInvoice(null);
+          clearMiscBilling();
+          loadGrid();
+        },
+      });
+    });
+    let billingTimer = null;
+    document.getElementById("oieBillingSearch")?.addEventListener("input", function () {
+      const input = document.getElementById("oieBillingSearch");
+      const results = document.getElementById("oieBillingResults");
+      const q = (input?.value || "").trim();
+      if (document.getElementById("oieBillingCustomerId")) {
+        document.getElementById("oieBillingCustomerId").value = "";
+      }
+      clearTimeout(billingTimer);
+      if (!results || q.length < 2) {
+        results?.classList.add("d-none");
+        return;
+      }
+      billingTimer = setTimeout(function () {
+        const url = (window.OIE_CUSTOMER_SEARCH_URL || "") + "?q=" + encodeURIComponent(q);
+        fetch(url, { headers: { Accept: "application/json" } })
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            const list = (data && data.rows) || [];
+            results.innerHTML = list.map(function (row) {
+              const sub = [row.mobile_number, row.pan_number].filter(Boolean).join(" · ");
+              return '<button type="button" class="list-group-item list-group-item-action oie-billing-pick" data-id="' +
+                escapeHtml(row.customer_id) + '" data-name="' + escapeHtml(row.customer_name) + '"><strong>' +
+                escapeHtml(row.customer_name) + "</strong>" +
+                (sub ? '<div class="small text-muted">' + escapeHtml(sub) + "</div>" : "") + "</button>";
+            }).join("") || '<div class="list-group-item text-muted">No customers found</div>';
+            results.classList.remove("d-none");
+          })
+          .catch(function () { results.classList.add("d-none"); });
+      }, 280);
+    });
+    document.getElementById("oieBillingResults")?.addEventListener("click", function (event) {
+      const pick = event.target.closest(".oie-billing-pick");
+      if (!pick) return;
+      const id = document.getElementById("oieBillingCustomerId");
+      const search = document.getElementById("oieBillingSearch");
+      if (id) id.value = pick.getAttribute("data-id") || "";
+      if (search) search.value = pick.getAttribute("data-name") || "";
+      document.getElementById("oieBillingResults")?.classList.add("d-none");
+      if (miscLinkedInvoice) reassignMiscBilling(pick.getAttribute("data-id") || "");
+    });
+    window.addEventListener("message", function (event) {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data || {};
+      if (data.type === "jtcs-invoice-receipt-closed") {
+        if (String(window.OIE_FORCE_LEDGER_KIND || "") !== "Misc.") return;
+        if (String(data.receipt_origin || "").trim().toUpperCase() !== "MISC") return;
+        hideMiscInvoiceEditor();
+        return;
+      }
+      const currentId = (els.entryId?.value || "").trim();
+      if (!data.misc_entry_id) return;
+      if (data.misc_entry_id && currentId && String(data.misc_entry_id) !== currentId) return;
+      if (data.type === "jtcs-invoice-saved" && data.record) {
+        paintMiscInvoice({
+          invoice_id: data.record.invoice_id,
+          invoice_no: data.record.invoice_no,
+          invoice_date: data.record.invoice_date,
+          invoice_value: data.record.invoice_value,
+          customer_id: data.record.customer_id,
+          customer_name: data.record.customer_name,
+          contact_mobile: data.record.contact_mobile,
+        });
+        miscCreatingInvoice = false;
+        loadGrid();
+        if (miscInvoiceEditorOpen) setTimeout(hideMiscInvoiceEditor, 0);
+      }
+      if (data.type === "jtcs-invoice-deleted") {
+        paintMiscInvoice(null);
+        clearMiscBilling();
+        loadGrid();
+      }
+    });
+  }
+
   els.workDone?.addEventListener("change", syncMiscWorkflow);
   els.tallyBill?.addEventListener("change", syncMiscWorkflow);
-  els.autoBillBtn?.addEventListener("click", openAutomatedBill);
+  els.tallyBillNo?.addEventListener("change", refreshInvoiceStatus);
+  els.tallyBillNo?.addEventListener("blur", refreshInvoiceStatus);
+  window.jtcsRefreshInvoiceStatus = refreshInvoiceStatus;
+  window.addEventListener("focus", refreshInvoiceStatus);
+
+  els.paymentLines?.addEventListener("change", function (ev) {
+    if (!ev.target.closest("select")) return;
+    if (saleIsApproved()) syncGenerateBillPrompt();
+  });
+
+  els.paymentLines?.addEventListener("input", function () {
+    if (!lastSaleRecord) return;
+    paintInvoiceStatus(lastSaleRecord);
+  });
+
+  async function declineExistingPayment() {
+    const hasPayment = getPaymentTotal() > 0;
+    if (!hasPayment) {
+      setPaymentReceivedChoice(false);
+      syncMiscWorkflow();
+      return;
+    }
+    setPaymentReceivedChoice(true);
+    const sure = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "Payment already received for this bill will be deleted. Are you sure?",
+          { title: "Delete payment", okLabel: "Yes", cancelLabel: "No", type: "warning" }
+        )
+      : window.confirm("Payment already received for this bill will be deleted. Are you sure?");
+    if (!sure) return;
+    let creds = null;
+    if (window.JTCSDeleteConfirm?.ask) {
+      creds = await window.JTCSDeleteConfirm.ask({
+        message: "Enter your User ID and password to delete this payment.",
+        title: "Confirm",
+        confirmLabel: "Confirm",
+        confirmIcon: "bi-shield-lock",
+        variant: "warning",
+      });
+    }
+    if (!creds || !creds.user_id || !creds.password) return;
+    const permanent = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(
+          "This will permanently delete the payment on this bill.",
+          { title: "Permanently delete", okLabel: "Yes", cancelLabel: "No", type: "danger" }
+        )
+      : window.confirm("This will permanently delete the payment on this bill.");
+    if (!permanent) return;
+    resetPaymentLines([{}]);
+    const line = els.paymentLines?.querySelector(".oie-payment-line");
+    if (line) clearPaymentLine(line);
+    setPaymentReceivedChoice(false);
+    syncMiscWorkflow();
+    if (lastSaleRecord) paintInvoiceStatus(lastSaleRecord);
+    await pushPaymentReceived(false);
+  }
+
+  els.paymentReceivedYes?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (!isPaymentReceivedYes()) return;
+      if (els.tallyBill && isWorkDoneChecked()) els.tallyBill.checked = true;
+      syncMiscWorkflow();
+      if (lastSaleRecord) paintInvoiceStatus(lastSaleRecord);
+      pushPaymentReceived(true).catch(function (err) {
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(err.message || String(err), "error");
+      });
+    }, 0);
+  });
+
+  els.paymentReceivedNo?.addEventListener("click", function () {
+    setTimeout(function () {
+      if (els.paymentReceivedNo && !els.paymentReceivedNo.checked) return;
+      declineExistingPayment().catch(function (err) {
+        setPaymentReceivedChoice(true);
+        const message = err.message || String(err);
+        if (window.JTCSDialog?.alert) window.JTCSDialog.alert(message, "error");
+        else alert(message);
+      });
+    }, 0);
+  });
+
+  document.getElementById("oieBillNoCopy")?.addEventListener("click", function () {
+    copyBillNumber(this);
+  });
 
   if (els.gridBody) {
     els.gridBody.addEventListener("click", function (event) {
+      const invoiceBtn = event.target.closest(".jtcs-inv-act");
+      if (invoiceBtn && window.JtcsInvoiceActions) {
+        event.preventDefault();
+        const holder = invoiceBtn.closest("[data-invoice-json]");
+        let invoice = null;
+        if (holder) {
+          try { invoice = JSON.parse(holder.getAttribute("data-invoice-json") || "{}"); }
+          catch (_err) { invoice = null; }
+        }
+        if (!invoice || !invoice.invoice_id) {
+          const id = parseInt(invoiceBtn.getAttribute("data-invoice-id") || "", 10);
+          if (id) invoice = { invoice_id: id };
+        }
+        if (!invoice) return;
+        const miscEntryId = invoiceBtn.closest("[data-misc-entry-id]")
+          ? invoiceBtn.closest("[data-misc-entry-id]").getAttribute("data-misc-entry-id")
+          : "";
+        const action = invoiceBtn.getAttribute("data-inv-act");
+        if (action === "edit") {
+          const row = allGridRows.find(function (item) {
+            return String(item.entry_id) === String(miscEntryId);
+          }) || {};
+          openGenerateBillPopup({
+            entry_id: miscEntryId,
+            invoice_id: invoice.invoice_id,
+            open_edit: true,
+            date: row.work_date || "",
+            invoice_no: invoice.invoice_no || row.tally_bill_no || row.bill_no || "",
+            bill_no: row.bill_no || "",
+            tally_bill_no: row.tally_bill_no || row.bill_no || invoice.invoice_no || "",
+            customer_id: invoice.customer_id || row.customer_id || "",
+            customer_name: invoice.customer_name || row.customer_name || "",
+            mobile: invoice.contact_mobile || row.mobile_number || "",
+            source: "Miscellaneous",
+          });
+          return;
+        }
+        window.JtcsInvoiceActions.run(action, invoice, {
+          miscEntryId: miscEntryId,
+          onDeleted: function () { loadGrid(); },
+        });
+        return;
+      }
       const editBtn = event.target.closest(".oie-grid-edit-btn");
       if (editBtn) {
         loadEntry(editBtn.getAttribute("data-id"));
@@ -1912,7 +3322,15 @@
       }
       const deleteBtn = event.target.closest(".oie-grid-delete-btn");
       if (deleteBtn) {
-        deleteEntry(deleteBtn.getAttribute("data-id"));
+        event.preventDefault();
+        const entryId = deleteBtn.getAttribute("data-id");
+        const row = allGridRows.find(function (item) {
+          return String(item.entry_id) === String(entryId);
+        });
+        gridDeleteAllowed(row).then(function (allowed) {
+          if (!allowed) return;
+          deleteEntry(entryId);
+        });
       }
     });
   }
@@ -1926,6 +3344,13 @@
 
   resetCategoryLines([{}]);
   resetPaymentLines([{}]);
+  applyForcedLedgerKindUi();
+  syncLedgerLabels();
+  window.addEventListener("message", function (event) {
+    if (event.origin !== window.location.origin) return;
+    const data = event.data || {};
+    if (data.type === "jtcs-misc-invoice-saved") loadGrid();
+  });
   loadGrid();
   if (window.OIE_AUTO_LOAD_ENTRY_ID) {
     var autoId = parseInt(window.OIE_AUTO_LOAD_ENTRY_ID, 10);

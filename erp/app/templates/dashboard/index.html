@@ -3,44 +3,75 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20260823cash2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004kpisize3">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
 {% block content %}
 <div class="dash-page">
-  {% if system_health_alerts %}
-  <div class="alert alert-danger py-2 mb-3" role="alert">
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
-      <div>
-        <strong><i class="bi bi-hdd-rack"></i> System Health</strong>
-        <ul class="mb-0 small mt-1">
-          {% for a in system_health_alerts %}
-          <li>{{ a.title }}{% if a.message %} — {{ a.message }}{% endif %}</li>
-          {% endfor %}
-        </ul>
+  <div class="dash-kpi-row">
+    {% for item in watch_cards.followups %}
+    {% set kpi_icon = {
+      'ITR': 'bi-currency-rupee',
+      'GST': 'bi-receipt',
+      'TDS': 'bi-percent',
+      'DSC': 'bi-usb-drive',
+      'MISC': 'bi-collection'
+    }.get(item.code, item.icon) %}
+    <a class="dash-kpi dash-kpi--{{ item.tone }}" href="{{ item.url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi {{ kpi_icon }}"></i></span>
+      <i class="bi {{ kpi_icon }} dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">{{ item.label }}</div>
+      <div class="dash-kpi-value">{{ item.count }}</div>
+      <div class="dash-kpi-source">{{ item.source }}</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">{{ item.paid }} paid</span>
+        <span>{{ item.billed }} tally</span>
       </div>
-      <a class="btn btn-sm btn-outline-dark"
-         href="{{ url_for('system_health.index') }}">Mission Control</a>
-    </div>
-  </div>
-  {% endif %}
-  {% if integration_health_alerts %}
-  <div class="alert alert-warning py-2 mb-3" role="alert">
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2">
-      <div>
-        <strong><i class="bi bi-heart-pulse"></i> Integration Health</strong>
-        <ul class="mb-0 small mt-1">
-          {% for a in integration_health_alerts %}
-          <li>{{ a.title }}{% if a.message %} — {{ a.message }}{% endif %}</li>
-          {% endfor %}
-        </ul>
+      <div class="dash-kpi-bar-row">
+        <span>{{ item.bar_label }}</span>
+        <strong>{{ item.percent }} %</strong>
       </div>
-      <a class="btn btn-sm btn-outline-dark"
-         href="{{ url_for('integration_settings.index') }}?tab=health">Open dashboard</a>
-    </div>
+      <div class="dash-kpi-track"><span style="width: {{ item.percent }}%"></span></div>
+    </a>
+    {% endfor %}
+
+    <a class="dash-kpi dash-kpi--teal" href="{{ watch_cards.messages.url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi bi-chat-dots"></i></span>
+      <i class="bi bi-chat-dots dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">Messages</div>
+      <div class="dash-kpi-value">{{ watch_cards.messages.unread }}</div>
+      <div class="dash-kpi-source">Communication Center</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">WA {{ watch_cards.messages.whatsapp_unread }}/{{ watch_cards.messages.whatsapp_total }}</span>
+        <span>Email {{ watch_cards.messages.email_unread }}/{{ watch_cards.messages.email_total }}</span>
+      </div>
+      <div class="dash-kpi-bar-row">
+        <span>Read</span>
+        <strong>{{ watch_cards.messages.percent }} %</strong>
+      </div>
+      <div class="dash-kpi-track"><span style="width: {{ watch_cards.messages.percent }}%"></span></div>
+    </a>
+
+    <a class="dash-kpi dash-kpi--amber" href="{{ watch_cards.court_fee_url or '#' }}">
+      <span class="dash-kpi-icon"><i class="bi bi-bank"></i></span>
+      <i class="bi bi-bank dash-kpi-ghost" aria-hidden="true"></i>
+      <div class="dash-kpi-title">Court Fee</div>
+      <div class="dash-kpi-value">{{ watch_cards.court_fee_unsold }}</div>
+      <div class="dash-kpi-source">e-Court receipts</div>
+      <div class="dash-kpi-meta">
+        <span class="dash-kpi-chip">{{ watch_cards.court_fee_sold }} sold</span>
+        <span>{{ watch_cards.court_fee_total }} imported</span>
+      </div>
+      <div class="dash-kpi-bar-row">
+        <span>Sold</span>
+        <strong>{{ watch_cards.court_fee_percent }} %</strong>
+      </div>
+      <div class="dash-kpi-track"><span style="width: {{ watch_cards.court_fee_percent }}%"></span></div>
+    </a>
   </div>
-  {% endif %}
+
+  <div class="dash-home">
   <div class="dash-top-row">
     <div class="dash-today-wrap">
       <div class="jtcs-metric-card dash-today-card">
@@ -60,56 +91,79 @@
             <div class="small text-muted">Cash</div>
             <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
           </button>
+          <div class="dash-today-metric-stack">
           <button type="button" class="dash-today-metric dash-metric-btn dash-today-closing"
                   data-metric="cash_closing_balance" data-label="Cash Closing Balance"
                   title="View Cash Closing Balance">
             <div class="small text-muted">Cash Closing Balance</div>
-            <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
-                    data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+            <div class="dash-today-amt-row">
+              <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
+                      data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+              <span class="dash-notes-match-emoji" id="dashCashCloseEmoji" aria-hidden="true"></span>
+            </div>
           </button>
-          {% if today_activity.bank_lines %}
-            {% for bank in today_activity.bank_lines %}
-            <button type="button" class="dash-today-metric dash-today-metric-btn"
-                    data-today-metric="bank"
-                    data-account-id="{{ bank.account_id or '' }}"
-                    data-label="{{ bank.label }}"
-                    title="View {{ bank.label }} details">
-              <div class="small text-muted">{{ bank.label }}</div>
-              <strong class="{% if bank.amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(bank.amount) }}</strong>
-            </button>
-            {% endfor %}
-          {% else %}
-            <button type="button" class="dash-today-metric dash-today-metric-btn"
-                    data-today-metric="bank" data-label="Bank" title="View Bank details">
-              <div class="small text-muted">Bank</div>
-              <strong class="{% if today_activity.bank_total < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.bank_total) }}</strong>
-            </button>
-          {% endif %}
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="income" data-label="Income" title="View Income details">
-            <div class="small text-muted">Income</div>
-            <strong class="{% if today_activity.income_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.income_amount) }}</strong>
+          <button type="button" class="dash-today-metric dash-notes-sub" id="dashCurrencyNotesBtn"
+                  title="Enter currency notes closing">
+            <div class="small text-muted">Currency Notes Closing</div>
+            <div class="dash-today-amt-row">
+              <strong id="dashCurrencyNotesTotal">₹ {{ '%.2f'|format(currency_notes.total_amount or 0) }}</strong>
+              <span class="dash-notes-match-emoji" id="dashNotesCloseEmoji" aria-hidden="true"></span>
+            </div>
           </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="expense" data-label="Expense" title="View Expense details">
-            <div class="small text-muted">Expense</div>
-            <strong class="{% if today_activity.expense_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.expense_amount) }}</strong>
-          </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="sales" data-label="Sales" title="View Sales details">
-            <div class="small text-muted">Sales</div>
-            <strong class="{% if today_activity.sale_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.sale_amount) }}</strong>
-          </button>
-          <button type="button" class="dash-today-metric dash-today-metric-btn"
-                  data-today-metric="total" data-label="Total Amount" title="View Total Amount details">
-            <div class="small text-muted">Total Amount</div>
-            <strong class="{% if today_activity.total_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.total_amount) }}</strong>
-          </button>
+          </div>
+          <div class="dash-today-metric dash-pending-sale-card" title="Generated bills waiting for receiving">
+            <div class="small text-muted">Sale / Pending</div>
+            <table class="dash-pending-sale-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Today</th>
+                  <th>Cumulative</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th>Total Sale</th>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="sale" data-sale-scope="today"
+                            data-label="Total Sale — Today">₹ {{ '%.2f'|format(today_activity.sale_total_today) }}</button>
+                  </td>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="sale" data-sale-scope="cumulative"
+                            data-label="Total Sale — Cumulative">₹ {{ '%.2f'|format(today_activity.sale_total_cumulative) }}</button>
+                  </td>
+                </tr>
+                <tr>
+                  <th>Pending Amount</th>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="pending" data-sale-scope="today"
+                            data-label="Pending Amount — Today">₹ {{ '%.2f'|format(today_activity.pending_amount_today) }}</button>
+                  </td>
+                  <td>
+                    <button type="button" class="dash-pending-sale-val"
+                            data-today-metric="pending_sale" data-sale-part="pending" data-sale-scope="cumulative"
+                            data-label="Pending Amount — Cumulative">₹ {{ '%.2f'|format(today_activity.pending_amount_cumulative) }}</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="dash-period-bar-wrap">
+    <div class="dash-period-bar-wrap dash-tools">
+      <div class="dash-custom-slot" id="dashCustomSlot" data-user-id="{{ session.get('user_id') or '' }}">
+        <div class="dash-custom-tools">
+          <button type="button" class="dash-custom-tool" id="dashCustomAdd" title="Add card">+</button>
+          <button type="button" class="dash-custom-tool" id="dashCustomRemove" title="Remove selected card">−</button>
+        </div>
+        <div class="dash-custom-cards" id="dashCustomCards"></div>
+      </div>
+      <div class="dash-search-stack">
       <div class="dash-ledger-search" id="dashLedgerSearchBox">
         <label class="dash-ledger-search-title" for="dashLedgerSearch">Search Ledger Here</label>
         <div class="dash-ledger-search-field">
@@ -151,14 +205,9 @@
           <button type="button" class="btn btn-sm btn-outline-primary {% if period_preset == 'custom' %}active{% endif %}"
                   id="dashCustomDatesBtn">Custom Dates</button>
         </div>
-        <div class="dash-period-showing small text-muted">
-          Showing {{ date_from | display_date }} — {{ date_to | display_date }}
-        </div>
       </form>
-    </div>
-  </div>
-
-  <div class="row g-2 mb-3" id="dashMetricCards">
+      </div>
+  <div class="dash-metric-group" id="dashMetricCards">
     <div class="col-6 col-md-4 col-xl">
       <button type="button" class="jtcs-metric-card dash-metric-btn dash-metric-income w-100 text-start"
               data-metric="total_income" data-label="Total Income">
@@ -229,6 +278,32 @@
               </table>
             </div>
           </div>
+          {% set _bb_asset = bank_asset_closing_total|abs %}
+          {% set _bb_liab = bank_liability_closing_total|abs %}
+          {% set _bb_max = _bb_asset if _bb_asset > _bb_liab else _bb_liab %}
+          {% set _bb_sum = _bb_asset + _bb_liab %}
+          {% set _bb_asset_h = ((_bb_asset / _bb_max) * 46) if _bb_max else 0 %}
+          {% set _bb_liab_h = ((_bb_liab / _bb_max) * 46) if _bb_max else 0 %}
+          {% set _bb_asset_pct = ((_bb_asset / _bb_sum) * 100) if _bb_sum else 0 %}
+          {% set _bb_liab_pct = ((_bb_liab / _bb_sum) * 100) if _bb_sum else 0 %}
+          <div class="dash-bank-balance-chart" role="img"
+               aria-label="Asset {{ '%.1f'|format(_bb_asset_pct) }} percent, Liability {{ '%.1f'|format(_bb_liab_pct) }} percent">
+            <div class="dash-bank-balance-pcts">
+              <span class="is-asset" title="Asset {{ '%.1f'|format(_bb_asset_pct) }}%">{{ '%.1f'|format(_bb_asset_pct) }}%</span>
+              <span class="is-liability" title="Liability {{ '%.1f'|format(_bb_liab_pct) }}%">{{ '%.1f'|format(_bb_liab_pct) }}%</span>
+            </div>
+            <svg viewBox="0 0 40 50" preserveAspectRatio="none" focusable="false">
+              <line x1="3" y1="48.5" x2="37" y2="48.5" stroke="#cbd5e1" stroke-width="1"></line>
+              <rect class="is-asset" x="6" y="{{ '%.1f'|format(48 - _bb_asset_h) }}" width="11"
+                    height="{{ '%.1f'|format(_bb_asset_h) }}" rx="1.6" fill="#0f766e">
+                <title>Asset ₹ {{ '%.2f'|format(bank_asset_closing_total) }} ({{ '%.1f'|format(_bb_asset_pct) }}%)</title>
+              </rect>
+              <rect class="is-liability" x="23" y="{{ '%.1f'|format(48 - _bb_liab_h) }}" width="11"
+                    height="{{ '%.1f'|format(_bb_liab_h) }}" rx="1.6" fill="#be123c">
+                <title>Liability ₹ {{ '%.2f'|format(bank_liability_closing_total) }} ({{ '%.1f'|format(_bb_liab_pct) }}%)</title>
+              </rect>
+            </svg>
+          </div>
           <div class="dash-bank-closing-wrap dash-bank-balance-col-wrap is-liability">
             <button type="button" class="dash-metric-btn dash-bank-balance-col is-liability"
                     data-metric="bank_closing_balance" data-label="Bank Liability Closing Balance">
@@ -286,9 +361,11 @@
       </button>
     </div>
   </div>
+    </div>
+  </div>
 
-  <div class="row g-3">
-    <div class="col-lg-8">
+  <div class="row g-3 dash-home-rest">
+    <div class="col-12">
       <div class="jtcs-card dash-recent-card">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h2 class="h6 mb-0">Recent Daily Transactions</h2>
@@ -319,6 +396,7 @@
                     data-bank-account="{{ row.bank_account or '' }}"
                     data-amount="{{ row.amount or '' }}"
                     data-is-expense="{{ '1' if row.is_expense else '0' }}"
+                    data-source-lock="{{ row.source_lock_message or '' }}"
                     {% if row.can_open %}role="button" tabindex="0" title="Open source entry form"{% endif %}>
                   <td class="text-nowrap">{{ (row.entry_datetime or row.entry_date) | display_datetime }}</td>
                   <td>{{ row.work }}</td>
@@ -336,44 +414,7 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-4">
-      <div class="jtcs-card mb-0 dash-arch-card">
-        <h2 class="h6 text-muted text-uppercase mb-2">Architecture</h2>
-        <ul class="small mb-0">
-          <li><code>JTCSDailyTransaction</code> — business work</li>
-          <li><code>JtcsBankTransaction</code> — money movement</li>
-          <li class="mt-2 text-muted"><i class="bi bi-database-check"></i> Database connected to: <code>{{ db_connection_display }}</code></li>
-        </ul>
-
-        <div class="dash-whats-new">
-          <h3 class="dash-whats-new-title">
-            <i class="bi bi-stars"></i> What’s New
-          </h3>
-          {% if whats_new %}
-          <ul class="dash-whats-new-list">
-            {% for item in whats_new %}
-            <li class="dash-whats-new-item">
-              <div class="dash-whats-new-meta">
-                <span class="dash-whats-new-date">{{ item.date_display }}</span>
-                {% if item.badge %}
-                <span class="dash-whats-new-badge dash-whats-new-badge--{{ item.badge|lower }}">{{ item.badge }}</span>
-                {% endif %}
-              </div>
-              {% if item.href %}
-              <a class="dash-whats-new-link" href="{{ item.href }}">{{ item.title }}</a>
-              {% else %}
-              <span class="dash-whats-new-heading">{{ item.title }}</span>
-              {% endif %}
-              <p class="dash-whats-new-detail">{{ item.detail }}</p>
-            </li>
-            {% endfor %}
-          </ul>
-          {% else %}
-          <p class="dash-whats-new-empty text-muted small mb-0">No recent updates.</p>
-          {% endif %}
-        </div>
-      </div>
-    </div>
+  </div>
   </div>
 
   <section class="dash-analytics" aria-label="Business analytics">
@@ -657,6 +698,52 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="dashCurrencyNotesModal" tabindex="-1" aria-labelledby="dashCurrencyNotesTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="dashCurrencyNotesTitle">Currency Notes Closing</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">
+          Daily physical-note count. This does not change Cash Closing Balance.
+        </p>
+        <div class="mb-3">
+          <label class="form-label" for="dashNotesDate">Date</label>
+          <input type="date" class="form-control form-control-sm" id="dashNotesDate"
+                 value="{{ system_date.isoformat() }}">
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0" id="dashNotesGrid">
+            <thead>
+              <tr>
+                <th>Currency notes</th>
+                <th class="text-end">Total Notes</th>
+                <th class="text-end">Total Amount</th>
+              </tr>
+            </thead>
+            <tbody id="dashNotesBody"></tbody>
+            <tfoot>
+              <tr class="fw-semibold">
+                <td>Total</td>
+                <td class="text-end" id="dashNotesTotalCount">0</td>
+                <td class="text-end" id="dashNotesTotalAmount">₹ 0.00</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary btn-sm" id="dashNotesSaveBtn">
+          <i class="bi bi-check2"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -671,6 +758,8 @@
     detailsUrl: {{ url_for('dashboard.metric_details') | tojson }},
     analyticsUrl: {{ url_for('dashboard.analytics') | tojson }},
     todayDetailsUrl: {{ url_for('dashboard.today_activity_details') | tojson }},
+    notesUrl: {{ url_for('dashboard.currency_notes_get') | tojson }},
+    notesSaveUrl: {{ url_for('dashboard.currency_notes_save') | tojson }},
     createUrl: {{ url_for('dashboard.manual_entry_create') | tojson }},
     updateUrlTemplate: {{ url_for('dashboard.manual_entry_update', entry_id=0) | tojson }},
     deleteUrlTemplate: {{ url_for('dashboard.manual_entry_delete', entry_id=0) | tojson }},
@@ -691,6 +780,8 @@
       stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
       ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
       income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      miscellaneous: {{ url_for('miscellaneous.delete_record', entry_id=0) | tojson }},
+      bank_orphan: {{ url_for('dashboard.bank_orphan_source_delete', bank_transaction_id=0) | tojson }},
       bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
       printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
       printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
@@ -711,6 +802,8 @@
       stamp: {{ url_for('stamp.stamp_delete', stamp_id=0) | tojson }},
       ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0) | tojson }},
       income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0) | tojson }},
+      miscellaneous: {{ url_for('miscellaneous.delete_record', entry_id=0) | tojson }},
+      bank_orphan: {{ url_for('dashboard.bank_orphan_source_delete', bank_transaction_id=0) | tojson }},
       bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0) | tojson }},
       printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0) | tojson }},
       printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0) | tojson }},
@@ -723,8 +816,50 @@
   };
 </script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20260823dmy1"></script>
-<script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20260817charts1"></script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20260820group1"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261006owner"></script>
+<script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20261001dash1"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261006owner"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20260819dash2"></script>
+<div class="modal fade" id="dashCustomModal" tabindex="-1" aria-labelledby="dashCustomModalTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h2 class="modal-title h6" id="dashCustomModalTitle">Add card</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label" for="dashCustomSource">Source</label>
+        <select class="form-select form-select-sm mb-2" id="dashCustomSource">
+          <option value="ledger">Ledger</option>
+          <option value="work">Work</option>
+          <option value="custom">Custom field</option>
+        </select>
+        <div id="dashCustomPickWrap">
+          <label class="form-label" for="dashCustomSearch">Select</label>
+          <input type="search" class="form-control form-control-sm mb-1" id="dashCustomSearch" placeholder="Type ledger or work" autocomplete="off">
+          <div class="list-group small" id="dashCustomPickList"></div>
+        </div>
+        <div id="dashCustomFieldWrap" class="d-none">
+          <label class="form-label" for="dashCustomName">Field name</label>
+          <input type="text" class="form-control form-control-sm mb-2" id="dashCustomName" placeholder="Card name">
+          <label class="form-label" for="dashCustomCalc">Calculation</label>
+          <select class="form-select form-select-sm" id="dashCustomCalc">
+            <option value="total_income">Total Income</option>
+            <option value="total_expenses">Total Expenses</option>
+            <option value="total_sales">Total Sales</option>
+            <option value="cash_received">Cash Received</option>
+            <option value="bank_received">Bank Received</option>
+            <option value="income_minus_expense">Income − Expenses</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="dashCustomSave">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard_custom_cards.js') }}?v=20261004custom1"></script>
+<script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20261001dash1"></script>
 {% endblock %}

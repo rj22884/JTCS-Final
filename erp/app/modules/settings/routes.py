@@ -9,6 +9,7 @@ from flask import (
     Blueprint,
     Flask,
     Response,
+    abort,
     current_app,
     flash,
     jsonify,
@@ -26,6 +27,7 @@ from app.modules.settings.controllers import IntegrationSettingsController
 from app.modules.settings.repositories import IntegrationSettingsRepository
 from app.modules.settings.whatsapp_oauth_service import WhatsAppOAuthService
 from app.modules.settings.whatsapp_meta_client import MetaGraphError
+from app.modules.settings.google_drive_oauth_service import GoogleDriveOAuthService
 from app.services.menu_service import MenuService
 
 bp = Blueprint("integration_settings", __name__, url_prefix="/admin/integrations")
@@ -34,11 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 def ensure_integration_settings_bootstrap() -> None:
-    repo = IntegrationSettingsRepository()
-    repo.ensure_schema()
-    repo.ensure_audit_schema()
-    repo.ensure_health_schema()
-    repo.ensure_menu()
+    """Permanently hide Integration Settings from menus. Do not recreate the page."""
+    IntegrationSettingsRepository().deactivate_menu()
 
 
 def register_integration_csrf_json_handler(app: Flask) -> None:
@@ -75,17 +74,7 @@ def register_integration_csrf_json_handler(app: Flask) -> None:
 @login_required
 @admin_required
 def index():
-    ctrl = IntegrationSettingsController()
-    ctx = ctrl.page_context()
-    return render_template(
-        "settings/integration_settings.html",
-        page_title="Integration Settings",
-        breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
-        providers=ctx["providers"],
-        catalog=ctx["catalog"],
-        whatsapp_card=ctx.get("whatsapp_card"),
-        testable_fields=ctx.get("testable_fields") or {},
-    )
+    abort(404)
 
 
 @bp.route("/api/settings", methods=["GET"])
@@ -342,6 +331,65 @@ def api_whatsapp_oauth_callback():
         return _back(error=True)
 
 
+@bp.route("/api/google-drive/connect", methods=["GET"])
+@login_required
+def api_google_drive_connect():
+    return_to = (request.args.get("return_to") or "").strip() or None
+    try:
+        result = GoogleDriveOAuthService().start_connect(return_to=return_to)
+        wants_json = "application/json" in (request.headers.get("Accept") or "")
+        if wants_json or request.args.get("format") == "json":
+            return jsonify(result)
+        return redirect(result["authorize_url"])
+    except ValueError as exc:
+        if request.args.get("format") == "json" or "application/json" in (
+            request.headers.get("Accept") or ""
+        ):
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        flash(str(exc), "danger")
+        return redirect(url_for("integration_settings.index"))
+    except Exception:
+        logger.exception("Google Drive connect failed")
+        return jsonify({"ok": False, "error": "Unable to start Google Drive connect."}), 500
+
+
+@bp.route("/api/google-drive/oauth/callback", methods=["GET"])
+@csrf.exempt
+@login_required
+def api_google_drive_oauth_callback():
+    try:
+        result = GoogleDriveOAuthService().handle_callback(
+            code=request.args.get("code"),
+            state=request.args.get("state"),
+            error=request.args.get("error_description") or request.args.get("error"),
+        )
+        flash(result.get("message") or "Google Drive connected.", "success")
+        return_to = (result.get("return_to") or "").strip()
+        if return_to.startswith("/") and not return_to.startswith("//"):
+            sep = "&" if "?" in return_to else "?"
+            return redirect(return_to + sep + "drive_connected=1")
+        return redirect(url_for("integration_settings.index") + "?gdrive_connect=1")
+    except ValueError as exc:
+        logger.warning("Google Drive OAuth callback rejected: %s", exc)
+        flash(str(exc), "danger")
+        return_to = GoogleDriveOAuthService().pop_return_to()
+        if return_to.startswith("/") and not return_to.startswith("//"):
+            sep = "&" if "?" in return_to else "?"
+            return redirect(return_to + sep + "drive_oauth_error=1")
+        return redirect(url_for("integration_settings.index") + "?gdrive_oauth_error=1")
+    except Exception:
+        logger.exception("Google Drive OAuth callback failed")
+        flash("Google Drive OAuth failed. Connect again within 15 minutes.", "danger")
+        return redirect(url_for("integration_settings.index") + "?gdrive_oauth_error=1")
+
+
+@bp.route("/api/google-drive/status", methods=["GET"])
+@login_required
+def api_google_drive_status():
+    return_to = (request.args.get("return_to") or "").strip() or None
+    return jsonify(GoogleDriveOAuthService().connection_info(return_to=return_to))
+
+
 @bp.route("/api/whatsapp/pending-step", methods=["GET"])
 @login_required
 @admin_required
@@ -509,7 +557,12 @@ def api_whatsapp_unsubscribe_webhooks():
 @bp.route("/api/whatsapp/webhook", methods=["GET", "POST"])
 @csrf.exempt
 def api_whatsapp_webhook():
-    """Meta WhatsApp Cloud API webhook — verify (GET) and persist inbound (POST)."""
+    """Meta webhook entry on ERP host.
+
+    GET verify stays local (Meta may still use this Callback URL).
+    POST events forward to wa.ukdscwala.com and are not stored in ERP CRM.
+    Redeploy 2026-10-09: forward-only path (no CrmConversation write).
+    """
     if request.method == "GET":
         mode = request.args.get("hub.mode")
         token = request.args.get("hub.verify_token")
@@ -525,30 +578,46 @@ def api_whatsapp_webhook():
             pass
         return jsonify({"ok": False, "error": "Webhook verification failed"}), 403
 
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request, urlopen
+
+    from app.modules.settings.models import WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL
+
+    target = (WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL or "").strip().rstrip("/")
+    if not target:
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook is not configured"}), 503
+
     raw = request.get_data(cache=True, as_text=False) or b""
+    headers = {
+        "Content-Type": request.headers.get("Content-Type") or "application/json",
+        "Accept": "application/json",
+    }
+    sig = request.headers.get("X-Hub-Signature-256")
+    if sig:
+        headers["X-Hub-Signature-256"] = sig
+
     try:
-        from app.modules.settings.services import IntegrationSettingsService
-        from app.modules.settings.whatsapp_meta_client import WhatsAppMetaClient
-
-        cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta")
-        app_secret = (cfg.get("app_secret") or "").strip()
-        sig = request.headers.get("X-Hub-Signature-256")
-        if app_secret:
-            if not sig or not WhatsAppMetaClient.verify_signature(app_secret, raw, sig):
-                return jsonify({"ok": False, "error": "Invalid signature"}), 403
-    except Exception:
-        pass
-
-    payload = request.get_json(silent=True) or {}
-    try:
-        from app.modules.communication.webhook_service import WhatsAppWebhookService
-
-        result = WhatsAppWebhookService().process_payload(payload, raw_body=raw)
-        return jsonify(result)
-    except Exception as exc:
-        # Always ACK to Meta to avoid retry storms; log server-side
-        current_app.logger.exception("WhatsApp webhook processing failed: %s", exc)
-        return jsonify({"ok": True, "received": True, "error": "Webhook processing failed"})
+        req = Request(target, data=raw, method="POST", headers=headers)
+        with urlopen(req, timeout=25) as resp:
+            body = resp.read()
+            status = getattr(resp, "status", 200) or 200
+            content_type = resp.headers.get("Content-Type") or "application/json"
+        return body, status, {"Content-Type": content_type}
+    except HTTPError as exc:
+        err_body = exc.read() if hasattr(exc, "read") else b""
+        current_app.logger.warning(
+            "WhatsApp webhook forward to dedicated app failed HTTP %s", getattr(exc, "code", "?")
+        )
+        if err_body:
+            return err_body, int(exc.code or 502), {
+                "Content-Type": exc.headers.get("Content-Type") if exc.headers else "application/json"
+            }
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook rejected the event"}), int(
+            exc.code or 502
+        )
+    except (URLError, TimeoutError, OSError) as exc:
+        current_app.logger.exception("WhatsApp webhook forward to dedicated app failed: %s", exc)
+        return jsonify({"ok": False, "error": "Dedicated WhatsApp webhook is unreachable"}), 502
 
 
 # ---------------------------------------------------------------------------
