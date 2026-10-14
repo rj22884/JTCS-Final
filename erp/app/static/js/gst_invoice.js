@@ -800,6 +800,51 @@
     };
   }
 
+  function askApproveDecision(preferred) {
+    const modalEl = document.getElementById("invApproveDecisionModal");
+    const okBtn = document.getElementById("invApproveDecisionOk");
+    const approveRadio = document.getElementById("invDecideApprove");
+    const rejectRadio = document.getElementById("invDecideReject");
+    const msg = document.getElementById("invApproveDecisionMsg");
+    if (!modalEl || !okBtn || !approveRadio || !rejectRadio || !window.bootstrap?.Modal) {
+      const pick = window.confirm(
+        preferred === "reject"
+          ? "Reject this bill status? OK = Reject, Cancel = abort."
+          : "Approve this bill? OK = Approve, Cancel = abort."
+      );
+      if (!pick) return Promise.resolve(null);
+      return Promise.resolve(preferred === "reject" ? "reject" : "approve");
+    }
+    if (msg) {
+      msg.textContent = "Choose Approve or Reject, then press OK. Cancel keeps the current status.";
+    }
+    approveRadio.checked = preferred !== "reject";
+    rejectRadio.checked = preferred === "reject";
+    return new Promise(function (resolve) {
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      let settled = false;
+      const finish = function (value) {
+        if (settled) return;
+        settled = true;
+        okBtn.removeEventListener("click", onOk);
+        modalEl.removeEventListener("hidden.bs.modal", onHidden);
+        resolve(value);
+      };
+      const onOk = function () {
+        const decision = rejectRadio.checked ? "reject" : "approve";
+        modalEl.removeEventListener("hidden.bs.modal", onHidden);
+        finish(decision);
+        modal.hide();
+      };
+      const onHidden = function () {
+        finish(null);
+      };
+      okBtn.addEventListener("click", onOk);
+      modalEl.addEventListener("hidden.bs.modal", onHidden);
+      modal.show();
+    });
+  }
+
   function clearStatusAuthIfIdle() {
     const removingApproval = savedBillApproved && !(els.billApproved && els.billApproved.checked);
     const removingPayment = savedPaymentReceived && !paymentReceivedYes();
@@ -1788,7 +1833,13 @@
     }
     const wasApproved = approve.dataset.saved === "1";
     const wasPaid = paid.dataset.saved === "1";
-    const nowApproved = !!approve.checked;
+    const preferred = approve.checked ? "approve" : "reject";
+    approve.checked = wasApproved;
+    syncTickLabel(approve);
+    const decision = await askApproveDecision(preferred);
+    if (!decision) return;
+    const nowApproved = decision === "approve";
+    if (nowApproved === wasApproved) return;
     const removingApproval = wasApproved && !nowApproved;
     let auth = null;
     if (removingApproval) {
@@ -1802,6 +1853,8 @@
         return;
       }
     }
+    approve.checked = nowApproved;
+    syncTickLabel(approve);
     const payload = {
       bill_approved: nowApproved,
       payment_received: wasPaid,
@@ -2127,24 +2180,40 @@
 
   els.billApproved?.addEventListener("change", async function () {
     if (applyingTallyStatus) return;
+    const preferred = this.checked ? "approve" : "reject";
+    applyingTallyStatus = true;
+    this.checked = savedBillApproved;
     updateBillStatusLabel();
-    if (savedBillApproved && !this.checked) {
+    applyingTallyStatus = false;
+    const decision = await askApproveDecision(preferred);
+    if (!decision) {
+      clearStatusAuthIfIdle();
+      return;
+    }
+    const nowApproved = decision === "approve";
+    if (nowApproved === savedBillApproved) {
+      clearStatusAuthIfIdle();
+      return;
+    }
+    if (savedBillApproved && !nowApproved) {
       const result = await confirmProtectedChange(
         "Removing approval needs your User ID and password.",
         "Reason for removing approval"
       );
       if (!result) {
-        applyingTallyStatus = true;
-        this.checked = true;
-        updateBillStatusLabel();
-        applyingTallyStatus = false;
+        clearStatusAuthIfIdle();
         return;
       }
       statusAuth = { user_id: result.user_id, password: result.password };
       showReason(els.unapproveReason, result.reason);
-      return;
+    } else {
+      statusAuth = null;
+      hideReason(els.unapproveReason, true);
     }
-    if (this.checked) hideReason(els.unapproveReason, true);
+    applyingTallyStatus = true;
+    this.checked = nowApproved;
+    updateBillStatusLabel();
+    applyingTallyStatus = false;
     clearStatusAuthIfIdle();
   });
 
@@ -2344,7 +2413,13 @@
       showTickRightsPopup();
       return;
     }
-    const nowApproved = !!reviewApproved.checked;
+    const preferred = reviewApproved.checked ? "approve" : "reject";
+    reviewApproved.checked = !!reviewState.saved;
+    paintReviewStatus();
+    const decision = await askApproveDecision(preferred);
+    if (!decision) return;
+    const nowApproved = decision === "approve";
+    if (nowApproved === !!reviewState.saved) return;
     const removingApproval = reviewState.saved && !nowApproved;
     let auth = null;
     if (removingApproval) {
@@ -2358,6 +2433,8 @@
         return;
       }
     }
+    reviewApproved.checked = nowApproved;
+    paintReviewStatus();
     const payload = { bill_approved: nowApproved, payment_received: true };
     if (auth) {
       payload.user_id = auth.user_id;

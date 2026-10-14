@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261004kpisize3">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261014modalchrome">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260831txn1">
 {% endblock %}
 
@@ -111,7 +111,8 @@
             </div>
           </button>
           </div>
-          <div class="dash-today-metric dash-pending-sale-card" title="Generated bills waiting for receiving">
+          <div class="dash-today-metric dash-pending-sale-card"
+               title="Stamp, e-Court and Invoice sales (converted invoices only when Approved) — Cumulative is current FY (01/04–31/03)">
             <div class="small text-muted">Sale / Pending</div>
             <table class="dash-pending-sale-table">
               <thead>

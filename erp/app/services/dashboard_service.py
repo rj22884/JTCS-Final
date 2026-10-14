@@ -1054,7 +1054,11 @@ class DashboardService:
         )
 
     def pending_sale_totals(self, system_date: date | None = None) -> dict:
-        """Generated Miscellaneous sale bills: inclusive total and unpaid balance."""
+        """Stamp + e-Court + Invoice sale totals.
+
+        Today = system date. Cumulative = current financial year (01/04–31/03).
+        Converted invoices count only when Bill Approved is ticked.
+        """
         system_date = system_date or date.today()
         try:
             from app.services.gst_invoice_service import GstInvoiceService
@@ -1062,25 +1066,191 @@ class DashboardService:
             GstInvoiceService().rebifurcate_miscellaneous_inclusive()
         except Exception:
             db.session.rollback()
-        rows = self._miscellaneous_sale_rows()
+        fy_from, fy_to = self.fiscal_year_bounds(system_date)
+        fy_through = system_date if system_date <= fy_to else fy_to
+        rows = self._pending_sale_rows()
         sale_today = Decimal("0.00")
-        sale_all = Decimal("0.00")
+        sale_fy = Decimal("0.00")
         pending_today = Decimal("0.00")
-        pending_all = Decimal("0.00")
+        pending_fy = Decimal("0.00")
         for row in rows:
+            inv_date = row["invoice_date"]
+            if inv_date is None:
+                continue
             amount = row["sale_amount"]
             pending = row["pending_amount"]
-            sale_all += amount
-            pending_all += pending
-            if row["invoice_date"] == system_date:
+            if inv_date == system_date:
                 sale_today += amount
                 pending_today += pending
+            if fy_from <= inv_date <= fy_through:
+                sale_fy += amount
+                pending_fy += pending
         return {
             "sale_today": sale_today.quantize(Decimal("0.01")),
-            "sale_cumulative": sale_all.quantize(Decimal("0.01")),
+            "sale_cumulative": sale_fy.quantize(Decimal("0.01")),
             "pending_today": pending_today.quantize(Decimal("0.01")),
-            "pending_cumulative": pending_all.quantize(Decimal("0.01")),
+            "pending_cumulative": pending_fy.quantize(Decimal("0.01")),
+            "fy_from": fy_from,
+            "fy_to": fy_to,
         }
+
+    def _pending_sale_rows(self) -> list[dict]:
+        """Sale / Pending card rows: Stamp, e-Court, and Invoice (approved converted bills)."""
+        rows = []
+        rows.extend(self._stamp_sale_rows())
+        rows.extend(self._ecourt_sale_rows())
+        rows.extend(self._invoice_sale_rows())
+        rows.sort(
+            key=lambda r: (
+                r.get("invoice_date") or date.min,
+                str(r.get("invoice_no") or ""),
+                int(r.get("invoice_id") or 0),
+            ),
+            reverse=True,
+        )
+        return rows
+
+    def _daily_module_sale_rows(
+        self,
+        *,
+        work_type: str,
+        sub_work_type: str,
+        work_label: str,
+        source_module: str,
+        row_prefix: str,
+    ) -> list[dict]:
+        """Posted daily SaleAmount rows for Stamp / e-Court (paid at sale time)."""
+        from flask import url_for
+
+        daily_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    TransactionID,
+                    TransactionDate,
+                    ReferenceNo,
+                    CustomerName,
+                    ISNULL(SaleAmount, 0) AS SaleAmount,
+                    StampID
+                FROM JTCSDailyTransaction
+                WHERE Status = N'Posted'
+                  AND WorkType = :work_type
+                  AND SubWorkType = :sub_work_type
+                  AND ISNULL(SaleAmount, 0) <> 0
+                ORDER BY TransactionDate DESC, TransactionID DESC
+                """
+            ),
+            {"work_type": work_type, "sub_work_type": sub_work_type},
+        ).mappings().all()
+        result = []
+        for row in daily_rows:
+            sale_amount = Decimal(str(row["SaleAmount"] or 0)).quantize(Decimal("0.01"))
+            if sale_amount == 0:
+                continue
+            tid = int(row["TransactionID"])
+            stamp_id = row["StampID"]
+            source_url = None
+            source_module_id = tid
+            if source_module == "stamp" and stamp_id:
+                source_module_id = int(stamp_id)
+                source_url = url_for("stamp.stamp_activity", load_stamp=source_module_id)
+            elif source_module == "ecourt":
+                source_url = url_for("ecourt.ecourt_activity")
+            result.append(
+                {
+                    "invoice_id": tid,
+                    "invoice_date": row["TransactionDate"],
+                    "invoice_no": (row["ReferenceNo"] or "").strip(),
+                    "customer": (row["CustomerName"] or "").strip() or "—",
+                    "work": work_label,
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00"),
+                    "received": True,
+                    "entry_id": source_module_id,
+                    "source_url": source_url,
+                    "source_module": source_module,
+                    "bill_no": (row["ReferenceNo"] or "").strip(),
+                    "row_prefix": row_prefix,
+                }
+            )
+        return result
+
+    def _stamp_sale_rows(self) -> list[dict]:
+        return self._daily_module_sale_rows(
+            work_type="SHCIL",
+            sub_work_type="Stamp Activity",
+            work_label="Stamp",
+            source_module="stamp",
+            row_prefix="stamp",
+        )
+
+    def _ecourt_sale_rows(self) -> list[dict]:
+        return self._daily_module_sale_rows(
+            work_type="SHCIL",
+            sub_work_type="e-Court Activity",
+            work_label="e-Court",
+            source_module="ecourt",
+            row_prefix="ecourt",
+        )
+
+    def _invoice_sale_rows(self) -> list[dict]:
+        """Sale invoices for the card.
+
+        Converted (Miscellaneous) bills count only when Bill Approved is ticked.
+        Other sale invoices always count.
+        """
+        from flask import url_for
+
+        from app.models.gst_billing import GstInvoice
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        svc = GstInvoiceService()
+        try:
+            svc.repo.ensure_schema()
+        except Exception:
+            db.session.rollback()
+            return []
+        invoices = list(
+            db.session.scalars(
+                select(GstInvoice)
+                .where(GstInvoice.VoucherType == GstInvoiceService.VOUCHER_SALE)
+                .order_by(GstInvoice.InvoiceDate.desc(), GstInvoice.InvoiceID.desc())
+            ).all()
+        )
+        result = []
+        for inv in invoices:
+            bill_source = svc.normalize_bill_source(getattr(inv, "BillSource", None))
+            is_converted = (
+                bill_source == GstInvoiceService.BILL_SOURCE_MISCELLANEOUS
+                or bool(getattr(inv, "MiscEntryID", None))
+            )
+            approved = bool(getattr(inv, "BillApproved", False))
+            # Converted invoices: only after Approve tick (e.g. JTCS/2027/00330).
+            if is_converted and not approved:
+                continue
+            sale_amount = Decimal(str(inv.InvoiceValue or 0)).quantize(Decimal("0.01"))
+            if sale_amount == 0:
+                continue
+            iid = int(inv.InvoiceID)
+            received = bool(getattr(inv, "InvoicePaymentReceived", False))
+            result.append(
+                {
+                    "invoice_id": iid,
+                    "invoice_date": inv.InvoiceDate,
+                    "invoice_no": inv.InvoiceNo or "",
+                    "customer": (inv.CustomerName or "").strip() or "—",
+                    "work": "Invoice",
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00") if received else sale_amount,
+                    "received": received,
+                    "entry_id": iid,
+                    "source_url": url_for("accounting_invoice.invoice_sale", edit=iid),
+                    "source_module": "invoice",
+                    "bill_no": (getattr(inv, "TallyBillNo", None) or inv.InvoiceNo or "").strip(),
+                    "row_prefix": "invoice",
+                }
+            )
+        return result
 
     def _miscellaneous_sale_rows(self) -> list[dict]:
         """Generated Miscellaneous bills. Pending means payment is not received yet."""
@@ -1150,7 +1320,9 @@ class DashboardService:
                     "received": received,
                     "entry_id": int(entry.EntryID),
                     "source_url": url_for("miscellaneous.index", load_entry=int(entry.EntryID)),
+                    "source_module": "miscellaneous",
                     "bill_no": entry.BillNo or "",
+                    "row_prefix": "misc",
                 }
             )
         return result
@@ -1977,7 +2149,7 @@ class DashboardService:
         scope: str | None,
         system_date: date | None = None,
     ) -> dict:
-        """Summary grid of Miscellaneous bills behind the Sale / Pending card."""
+        """Summary grid behind the Sale / Pending card (Stamp, e-Court, Invoice)."""
         system_date = system_date or date.today()
         part_key = (part or "sale").strip().lower()
         if part_key not in {"sale", "pending"}:
@@ -1985,9 +2157,18 @@ class DashboardService:
         scope_key = (scope or "today").strip().lower()
         if scope_key not in {"today", "cumulative"}:
             scope_key = "today"
-        rows_src = self._miscellaneous_sale_rows()
+        fy_from, fy_to = self.fiscal_year_bounds(system_date)
+        fy_through = system_date if system_date <= fy_to else fy_to
+        rows_src = self._pending_sale_rows()
         if scope_key == "today":
             rows_src = [row for row in rows_src if row["invoice_date"] == system_date]
+        else:
+            rows_src = [
+                row
+                for row in rows_src
+                if row["invoice_date"] is not None
+                and fy_from <= row["invoice_date"] <= fy_through
+            ]
         if part_key == "pending":
             rows_src = [row for row in rows_src if row["pending_amount"] > 0]
         grid = []
@@ -1997,9 +2178,11 @@ class DashboardService:
             total += amount
             entry_date = row["invoice_date"].isoformat() if row["invoice_date"] else ""
             status = "Received" if row["received"] else "Pending"
+            prefix = row.get("row_prefix") or "psale"
+            module = row.get("source_module") or "miscellaneous"
             grid.append(
                 {
-                    "row_key": f"psale-{row['invoice_id']}",
+                    "row_key": f"{prefix}-{row['invoice_id']}",
                     "source": "system",
                     "can_edit": False,
                     "can_delete": False,
@@ -2009,7 +2192,7 @@ class DashboardService:
                     "work": row["work"],
                     "customer": row["customer"],
                     "amount": str(amount),
-                    "source_module": "miscellaneous",
+                    "source_module": module,
                     "source_module_id": row["entry_id"],
                     "source_url": row["source_url"],
                     "can_open": bool(row["source_url"]),
@@ -2020,13 +2203,13 @@ class DashboardService:
         when = (
             system_date.isoformat()
             if scope_key == "today"
-            else f"all · as of {system_date.isoformat()}"
+            else f"FY {fy_from.isoformat()} – {fy_through.isoformat()}"
         )
         return {
             "metric_key": "pending_sale",
             "metric_label": f"{part_label} — {scope_label}",
-            "date_from": system_date.isoformat() if scope_key == "today" else "",
-            "date_to": system_date.isoformat() if scope_key == "today" else "",
+            "date_from": system_date.isoformat() if scope_key == "today" else fy_from.isoformat(),
+            "date_to": system_date.isoformat() if scope_key == "today" else fy_through.isoformat(),
             "total": str(total.quantize(Decimal("0.01"))),
             "opening_balance": None,
             "rows": grid,

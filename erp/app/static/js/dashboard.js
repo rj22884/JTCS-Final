@@ -569,7 +569,7 @@
       currentMetric === "pending_sale" &&
       typeof window.jtcsOpenPageWindow === "function"
     ) {
-      window.jtcsOpenPageWindow(row.source_url, row.work || "Miscellaneous");
+      window.jtcsOpenPageWindow(row.source_url, row.work || "Sale");
       return;
     }
 

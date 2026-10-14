@@ -1591,6 +1591,24 @@ a.dash-watch-link:hover {
   position: relative;
 }
 
+/* Today's Activity detail: sit below sticky header/menu so nav does not overlap */
+#dashMetricModal .modal-dialog:not(.modal-fullscreen) {
+  margin-top: max(1.25rem, calc(var(--jtcs-sticky-offset, 7.25rem)));
+}
+#dashMetricModal:not(.dash-modal-maximized) {
+  padding-top: 0.25rem;
+}
+body.modal-open:has(#dashMetricModal.show) .jtcs-sticky-chrome {
+  z-index: 1080;
+}
+#dashMetricModal {
+  z-index: 1055;
+}
+#dashMetricModal + .modal-backdrop,
+body.modal-open:has(#dashMetricModal.show) .modal-backdrop:not(.dash-source-backdrop) {
+  z-index: 1050;
+}
+
 #dashActivityPickModal {
   z-index: 1065;
 }

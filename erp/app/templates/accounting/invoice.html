@@ -347,6 +347,34 @@
   </div>
 </div>
 
+<div class="modal fade" id="invApproveDecisionModal" tabindex="-1" aria-labelledby="invApproveDecisionTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="invApproveDecisionTitle">Bill Status</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-3 small text-muted" id="invApproveDecisionMsg">Choose Approve or Reject, then OK.</p>
+        <div class="d-flex flex-column gap-2">
+          <label class="form-check border rounded px-3 py-2 mb-0">
+            <input class="form-check-input" type="radio" name="invApproveDecision" id="invDecideApprove" value="approve">
+            <span class="form-check-label fw-semibold text-success">Approve</span>
+          </label>
+          <label class="form-check border rounded px-3 py-2 mb-0">
+            <input class="form-check-input" type="radio" name="invApproveDecision" id="invDecideReject" value="reject">
+            <span class="form-check-label fw-semibold text-danger">Reject</span>
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal" id="invApproveDecisionCancel">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="invApproveDecisionOk">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="invPreviewModal" tabindex="-1" aria-labelledby="invPreviewModalTitle" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable modal-xl">
     <div class="modal-content">
@@ -405,5 +433,5 @@
   };
 </script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261009miscdelete"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261014approvePopup"></script>
 {% endblock %}
