@@ -79,6 +79,14 @@ class BankAccountClosingLine:
 
 
 @dataclass
+class TodayActivityBucket:
+    """Count + amount pair for Today's Activity summary rows."""
+
+    count: int = 0
+    amount: Decimal = Decimal("0.00")
+
+
+@dataclass
 class TodayActivitySummary:
     """Always based on the permanent system date (independent of Period)."""
 
@@ -95,6 +103,14 @@ class TodayActivitySummary:
     sale_total_cumulative: Decimal = Decimal("0.00")
     pending_amount_today: Decimal = Decimal("0.00")
     pending_amount_cumulative: Decimal = Decimal("0.00")
+    invoice: TodayActivityBucket | None = None
+    court_fee: TodayActivityBucket | None = None
+    stamp: TodayActivityBucket | None = None
+    cash_received: TodayActivityBucket | None = None
+    bank_received: TodayActivityBucket | None = None
+    # Receipts bifurcation: mode → category → amount
+    # modes: cash|bank ; categories: court_fee|stamp|misc
+    receipts: dict | None = None
 
 
 class DashboardService:
@@ -1037,6 +1053,10 @@ class DashboardService:
         bank_total = sum((line.amount for line in bank_lines), Decimal("0.00"))
 
         sale_card = self.pending_sale_totals(system_date)
+        module_today = self._today_module_sale_buckets(
+            system_date, rows=sale_card.get("rows")
+        )
+        receipt_card = self._today_receipt_breakdown(system_date)
         return TodayActivitySummary(
             system_date=system_date,
             transaction_count=int(row["txn_count"] or 0),
@@ -1051,7 +1071,174 @@ class DashboardService:
             sale_total_cumulative=sale_card["sale_cumulative"],
             pending_amount_today=sale_card["pending_today"],
             pending_amount_cumulative=sale_card["pending_cumulative"],
+            invoice=module_today["invoice"],
+            court_fee=module_today["court_fee"],
+            stamp=module_today["stamp"],
+            cash_received=receipt_card["cash_received"],
+            bank_received=receipt_card["bank_received"],
+            receipts=receipt_card["receipts"],
         )
+
+    def _empty_receipt_grid(self) -> dict:
+        zero = Decimal("0.00")
+        return {
+            "cash": {"court_fee": zero, "stamp": zero, "misc": zero},
+            "bank": {"court_fee": zero, "stamp": zero, "misc": zero},
+        }
+
+    def _today_module_sale_buckets(
+        self,
+        system_date: date,
+        rows: list[dict] | None = None,
+    ) -> dict[str, TodayActivityBucket]:
+        """Today-only Invoice / Court Fee / Stamp sale counts and amounts."""
+        buckets = {
+            "invoice": TodayActivityBucket(),
+            "court_fee": TodayActivityBucket(),
+            "stamp": TodayActivityBucket(),
+        }
+        key_by_module = {
+            "invoice": "invoice",
+            "ecourt": "court_fee",
+            "stamp": "stamp",
+        }
+        for row in rows if rows is not None else self._pending_sale_rows():
+            if row.get("invoice_date") != system_date:
+                continue
+            key = key_by_module.get(str(row.get("source_module") or ""))
+            if not key:
+                continue
+            amount = Decimal(str(row.get("sale_amount") or 0)).quantize(Decimal("0.01"))
+            if amount == 0:
+                continue
+            buckets[key].count += 1
+            buckets[key].amount = (buckets[key].amount + amount).quantize(Decimal("0.01"))
+        return buckets
+
+    def _today_receipt_breakdown(self, system_date: date) -> dict:
+        """Cash/Bank money-in for system date, bifurcated by Court Fee / Stamp / Misc.
+
+        Classification:
+        - Court Fee / Stamp: posted payment splits on e-Court / Stamp Activity
+          (real cash/bank legs only — BankTransactionID present).
+        - Misc (Money In): OBC vouchers where money enters Cash/Bank from a
+          non-bank credit side (customer / CoA). Bank↔Bank transfers are excluded.
+
+        cash_received / bank_received postcard totals = sum of that mode's
+        Court Fee + Stamp + Misc cells (same figures as the Receipts table).
+        """
+        receipts = self._empty_receipt_grid()
+        cash_count = 0
+        bank_count = 0
+
+        payment_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CASE
+                        WHEN LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) = N'cash'
+                        THEN N'cash' ELSE N'bank'
+                    END AS pay_mode,
+                    CASE
+                        WHEN d.SubWorkType = N'e-Court Activity' THEN N'court_fee'
+                        WHEN d.SubWorkType = N'Stamp Activity' THEN N'stamp'
+                        ELSE N''
+                    END AS category,
+                    ISNULL(p.Amount, 0) AS amount
+                FROM JTCSDailyTransactionPayment p
+                INNER JOIN JTCSDailyTransaction d
+                    ON d.TransactionID = p.TransactionID
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = p.BankAccountID
+                WHERE d.Status = N'Posted'
+                  AND d.TransactionDate = :system_date
+                  AND d.SubWorkType IN (N'e-Court Activity', N'Stamp Activity')
+                  AND ISNULL(p.Amount, 0) > 0
+                  AND ISNULL(d.ExpenseAmount, 0) = 0
+                  AND p.BankTransactionID IS NOT NULL
+                """
+            ),
+            {"system_date": system_date},
+        ).mappings().all()
+
+        for item in payment_rows:
+            category = str(item["category"] or "")
+            if category not in ("court_fee", "stamp"):
+                continue
+            mode = "cash" if item["pay_mode"] == "cash" else "bank"
+            amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
+            if amount <= 0:
+                continue
+            receipts[mode][category] = (receipts[mode][category] + amount).quantize(
+                Decimal("0.01")
+            )
+            if mode == "cash":
+                cash_count += 1
+            else:
+                bank_count += 1
+
+        # Misc (Money In): OBC Debit destination is Cash/Bank; credit side is
+        # not a bank account (excludes Bank Transfer / bank↔bank contra).
+        misc_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CASE
+                        WHEN LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) = N'cash'
+                        THEN N'cash' ELSE N'bank'
+                    END AS pay_mode,
+                    ISNULL(e.Amount, 0) AS amount
+                FROM OthersBankCashTransaction e
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = e.DebitBankAccountID
+                WHERE e.IsActive = 1
+                  AND e.WorkDate = :system_date
+                  AND ISNULL(e.Amount, 0) > 0
+                  AND e.DebitBankAccountID IS NOT NULL
+                  AND (
+                        e.CreditBankAccountID IS NULL
+                        OR ISNULL(e.CreditLedgerKey, N'') NOT LIKE N'bank-%'
+                      )
+                """
+            ),
+            {"system_date": system_date},
+        ).mappings().all()
+
+        for item in misc_rows:
+            mode = "cash" if item["pay_mode"] == "cash" else "bank"
+            amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
+            if amount <= 0:
+                continue
+            receipts[mode]["misc"] = (receipts[mode]["misc"] + amount).quantize(
+                Decimal("0.01")
+            )
+            if mode == "cash":
+                cash_count += 1
+            else:
+                bank_count += 1
+
+        cash_amount = (
+            receipts["cash"]["court_fee"]
+            + receipts["cash"]["stamp"]
+            + receipts["cash"]["misc"]
+        ).quantize(Decimal("0.01"))
+        bank_amount = (
+            receipts["bank"]["court_fee"]
+            + receipts["bank"]["stamp"]
+            + receipts["bank"]["misc"]
+        ).quantize(Decimal("0.01"))
+
+        return {
+            "cash_received": TodayActivityBucket(
+                count=cash_count,
+                amount=cash_amount,
+            ),
+            "bank_received": TodayActivityBucket(
+                count=bank_count,
+                amount=bank_amount,
+            ),
+            "receipts": receipts,
+        }
 
     def pending_sale_totals(self, system_date: date | None = None) -> dict:
         """Stamp + e-Court + Invoice sale totals.
@@ -1092,6 +1279,7 @@ class DashboardService:
             "pending_cumulative": pending_fy.quantize(Decimal("0.01")),
             "fy_from": fy_from,
             "fy_to": fy_to,
+            "rows": rows,
         }
 
     def _pending_sale_rows(self) -> list[dict]:

@@ -1099,8 +1099,12 @@
       })
       .then(function (html) {
         const doc = new DOMParser().parseFromString(html, "text/html");
-        if (!doc.querySelector(".dash-today-metrics")) return;
-        swapDashNode(".dash-today-metrics", doc);
+        if (!doc.querySelector(".dash-today-body") && !doc.querySelector(".dash-today-metrics")) return;
+        if (doc.querySelector(".dash-today-body")) {
+          swapDashNode(".dash-today-body", doc);
+        } else {
+          swapDashNode(".dash-today-metrics", doc);
+        }
         swapDashNode("#dashMetricCards", doc);
         const nextTxn = doc.querySelector(".dash-today-txn");
         const txn = document.querySelector(".dash-today-txn");

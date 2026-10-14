@@ -124,10 +124,10 @@
 
 .dash-home {
   display: grid;
-  grid-template-columns: max-content minmax(10rem, 1fr) minmax(0, 36.2rem) 17.5rem;
+  grid-template-columns: minmax(22rem, 1.55fr) minmax(0, 36.2rem) 17.5rem;
   grid-template-areas:
-    "today custom metrics side"
-    "rest rest rest rest";
+    "today metrics side"
+    "rest rest rest";
   column-gap: 0.75rem;
   row-gap: 0.65rem;
   align-items: start;
@@ -148,7 +148,7 @@
 
 .dash-today-wrap {
   flex: 0 0 auto;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
 }
@@ -413,75 +413,6 @@ a.dash-watch-link:hover {
   display: contents;
 }
 
-.dash-custom-slot {
-  grid-area: custom;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.45rem;
-  min-width: 0;
-  min-height: 4rem;
-}
-
-.dash-custom-tools {
-  display: flex;
-  gap: 0.35rem;
-}
-
-.dash-custom-tool {
-  width: 1.8rem;
-  height: 1.8rem;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  background: #fff;
-  color: #1e3a5f;
-  font-size: 1.15rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.dash-custom-cards {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  align-items: flex-start;
-}
-
-.dash-custom-card {
-  width: max-content;
-  max-width: 100%;
-  min-width: 8.5rem;
-  padding: 0.55rem 0.7rem 0.5rem;
-  border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  box-shadow: 0 8px 20px rgba(24, 39, 75, 0.06);
-  text-align: left;
-  cursor: pointer;
-}
-
-.dash-custom-card.is-selected {
-  border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
-}
-
-.dash-custom-card .dash-custom-label {
-  display: block;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #64748b;
-}
-
-.dash-custom-card .dash-custom-value {
-  display: block;
-  margin-top: 0.15rem;
-  font-size: 1.15rem;
-  font-weight: 700;
-  line-height: 1.15;
-  color: #1e3a5f;
-  white-space: nowrap;
-}
-
 .dash-search-stack {
   grid-area: side;
   display: flex;
@@ -721,9 +652,128 @@ a.dash-watch-link:hover {
   border-left: 4px solid var(--jtcs-secondary, #243b7b);
   position: relative;
   height: auto;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   margin-bottom: 0;
+}
+
+.dash-today-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.dash-today-postcard-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.dash-today-postcard {
+  box-sizing: border-box;
+  width: 9.75rem;
+  min-width: 8.75rem;
+  max-width: 10.9rem;
+  min-height: 5.5rem;
+  flex: 1 1 8.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.45rem 0.55rem 0.5rem;
+  border: 1px solid #dce3ef;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  box-shadow: 0 4px 12px rgba(24, 39, 75, 0.06);
+  border-top: 3px solid #243b7b;
+}
+
+.dash-today-postcard--invoice { border-top-color: #0f4c81; }
+.dash-today-postcard--court { border-top-color: #b45309; }
+.dash-today-postcard--stamp { border-top-color: #0f766e; }
+.dash-today-postcard--cash { border-top-color: #15803d; }
+.dash-today-postcard--bank { border-top-color: #1d4ed8; }
+
+.dash-today-postcard-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #1e3a5f;
+  line-height: 1.2;
+}
+
+.dash-today-postcard-meta {
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.25;
+}
+
+.dash-today-postcard-meta strong {
+  color: #1e3a5f;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-today-postcard-amt {
+  margin-top: auto;
+  font-size: 0.72rem;
+  color: #64748b;
+  line-height: 1.25;
+}
+
+.dash-today-postcard-amt strong {
+  display: inline;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #0f4c81;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dash-receipts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.dash-receipts-table th,
+.dash-receipts-table td {
+  padding: 0.28rem 0.4rem;
+  border-bottom: 1px solid #e8edf5;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.dash-receipts-table thead th {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #f5f7fb;
+}
+
+.dash-receipts-table tbody th {
+  font-weight: 600;
+  color: #1e3a5f;
+  text-align: left;
+}
+
+.dash-receipts-table tbody td {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #1e3a5f;
+}
+
+.dash-receipts-table .dash-receipts-title {
+  text-align: center;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #243b7b;
+  background: #eef3fb;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .dash-today-header {
@@ -1423,15 +1473,21 @@ a.dash-watch-link:hover {
 }
 
 #dashMetricModal.dash-modal-maximized .modal-dialog {
-  max-width: 100%;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--jtcs-sticky-offset);
+  bottom: 0;
+  max-width: none;
+  width: auto;
+  height: auto;
   margin: 0;
+  transform: none;
 }
 
 #dashMetricModal.dash-modal-maximized .modal-content {
-  height: 100vh;
-  max-height: 100vh;
+  height: 100%;
+  max-height: none;
   border-radius: 0;
   border: 0;
   display: flex;
@@ -1591,24 +1647,6 @@ a.dash-watch-link:hover {
   position: relative;
 }
 
-/* Today's Activity detail: sit below sticky header/menu so nav does not overlap */
-#dashMetricModal .modal-dialog:not(.modal-fullscreen) {
-  margin-top: max(1.25rem, calc(var(--jtcs-sticky-offset, 7.25rem)));
-}
-#dashMetricModal:not(.dash-modal-maximized) {
-  padding-top: 0.25rem;
-}
-body.modal-open:has(#dashMetricModal.show) .jtcs-sticky-chrome {
-  z-index: 1080;
-}
-#dashMetricModal {
-  z-index: 1055;
-}
-#dashMetricModal + .modal-backdrop,
-body.modal-open:has(#dashMetricModal.show) .modal-backdrop:not(.dash-source-backdrop) {
-  z-index: 1050;
-}
-
 #dashActivityPickModal {
   z-index: 1065;
 }
@@ -1631,15 +1669,21 @@ body.modal-open .modal-backdrop.dash-source-backdrop {
 }
 
 #dashSourceEntryModal.dash-modal-maximized .modal-dialog {
-  max-width: 100%;
-  width: 100%;
-  height: 100%;
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--jtcs-sticky-offset);
+  bottom: 0;
+  max-width: none;
+  width: auto;
+  height: auto;
   margin: 0;
+  transform: none;
 }
 
 #dashSourceEntryModal.dash-modal-maximized .modal-content {
-  height: 100vh;
-  max-height: 100vh;
+  height: 100%;
+  max-height: none;
   border-radius: 0;
   border: 0;
   display: flex;
@@ -1726,7 +1770,6 @@ body.modal-open .modal-backdrop.dash-source-backdrop {
     grid-area: tools;
     grid-template-columns: 1fr;
     grid-template-areas:
-      "custom"
       "metrics"
       "side";
     width: 100%;

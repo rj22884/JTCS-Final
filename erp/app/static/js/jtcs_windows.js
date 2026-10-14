@@ -7,6 +7,20 @@
 
   var dragState = null;
 
+  function chromeTopPad() {
+    var chrome = document.querySelector(".jtcs-sticky-chrome");
+    var top = 0;
+    if (chrome) top = Math.round(chrome.getBoundingClientRect().bottom);
+    if (top < 40) {
+      var styles = window.getComputedStyle(document.documentElement);
+      var headerH = parseFloat(styles.getPropertyValue("--jtcs-header-h")) || 76;
+      var menuH = parseFloat(styles.getPropertyValue("--jtcs-menu-h")) || 42;
+      top = Math.round(headerH + menuH);
+    }
+    document.documentElement.style.setProperty("--jtcs-sticky-offset", top + "px");
+    return top;
+  }
+
   function isInteractive(el) {
     if (!el || !el.closest) return false;
     return !!el.closest(
@@ -29,16 +43,29 @@
   }
 
   function toolsHost(header) {
-    var existing = header.querySelector(".jtcs-win-tools");
-    if (existing) return existing;
-    var auto = header.querySelector(":scope > .ms-auto, :scope > .d-flex.ms-auto");
+    var existing = header.querySelector(
+      ".jtcs-win-tools, .jtcs-win-tools-host, .dash-modal-header-actions, .obc-modal-header-actions"
+    );
+    if (existing) {
+      existing.classList.add("jtcs-win-tools-host");
+      return existing;
+    }
+    var auto = header.querySelector(
+      ":scope > .ms-auto, :scope > .d-flex.ms-auto, :scope > [class*='modal-header-actions']"
+    );
     if (auto) {
       auto.classList.add("jtcs-win-tools-host");
       return auto;
     }
+    /* Prefer inserting tools before an existing close button so controls stay one row */
+    var closeBtn = header.querySelector(":scope > .btn-close");
     var host = document.createElement("div");
     host.className = "jtcs-win-tools d-flex align-items-center gap-1 ms-auto";
-    header.appendChild(host);
+    if (closeBtn && closeBtn.parentNode === header) {
+      header.insertBefore(host, closeBtn);
+    } else {
+      header.appendChild(host);
+    }
     return host;
   }
 
@@ -70,11 +97,13 @@
     if (state === "max") {
       dialog.classList.add("jtcs-win-maximized");
       if (modal) modal.classList.add("jtcs-win-maximized");
+      var topPad = chromeTopPad();
+      var height = Math.max(240, window.innerHeight - topPad - 8);
       dialog.style.position = "fixed";
       dialog.style.left = "8px";
-      dialog.style.top = "8px";
+      dialog.style.top = topPad + "px";
       dialog.style.width = Math.max(320, window.innerWidth - 16) + "px";
-      dialog.style.height = Math.max(240, window.innerHeight - 16) + "px";
+      dialog.style.height = height + "px";
       dialog.style.margin = "0";
       dialog.style.maxWidth = "none";
       dialog.style.transform = "none";
@@ -135,10 +164,11 @@
     if (!dragState) return;
     var left = dragState.origLeft + (ev.clientX - dragState.startX);
     var top = dragState.origTop + (ev.clientY - dragState.startY);
+    var minTop = chromeTopPad();
     var maxLeft = Math.max(8, window.innerWidth - 80);
-    var maxTop = Math.max(8, window.innerHeight - 48);
+    var maxTop = Math.max(minTop, window.innerHeight - 48);
     left = Math.min(Math.max(-40, left), maxLeft);
-    top = Math.min(Math.max(0, top), maxTop);
+    top = Math.min(Math.max(minTop, top), maxTop);
     dragState.dialog.style.left = left + "px";
     dragState.dialog.style.top = top + "px";
   });
@@ -205,7 +235,11 @@
         });
       }
     }
-    if (!hasClose(header, modal)) {
+    /* Keep native close as the last control in the tools row */
+    var existingClose = header.querySelector(".btn-close, [data-bs-dismiss='modal'].btn-close");
+    if (existingClose && existingClose.parentNode !== host) {
+      host.appendChild(existingClose);
+    } else if (!hasClose(header, modal)) {
       var closeBtn = document.createElement("button");
       closeBtn.type = "button";
       closeBtn.className = "btn-close";
@@ -276,12 +310,17 @@
   }
 
   document.addEventListener("show.bs.modal", function (ev) {
+    chromeTopPad();
     if (ev && ev.target) enhanceBootstrapModal(ev.target);
   });
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", scan);
+    document.addEventListener("DOMContentLoaded", function () {
+      chromeTopPad();
+      scan();
+    });
   } else {
+    chromeTopPad();
     scan();
   }
 

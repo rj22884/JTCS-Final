@@ -45,46 +45,47 @@ html.jtcs-embed .stamp-erp-page {
   height: 100%;
 }
 
+/*
+  Sticky chrome must sit above page content but BELOW Bootstrap modals
+  (backdrop 1050 / modal 1055). Previous z-index 4030 painted the navbar
+  on top of every modal (reports, dialogs, etc.).
+*/
 .jtcs-sticky-chrome {
   position: sticky;
   top: 0;
-  z-index: 4030;
+  z-index: 1030;
   background: #fff;
+  flex-shrink: 0;
+}
+
+/* Keep menu above maximized windows so title-bar controls stay clear below it */
+body:has(.modal.show.dash-modal-maximized) .jtcs-sticky-chrome,
+body:has(.modal.show.obc-modal-maximized) .jtcs-sticky-chrome,
+body:has(.modal.show.jtcs-win-maximized) .jtcs-sticky-chrome,
+body:has(.jtcs-page-win.is-max:not(.is-min)) .jtcs-sticky-chrome {
+  z-index: 1060;
 }
 
 .jtcs-sticky-chrome .jtcs-app-header,
 .jtcs-sticky-chrome .jtcs-menu-bar {
   position: relative;
   top: auto;
+  z-index: auto;
 }
 
 .jtcs-app-header {
-  z-index: 6;
   overflow: visible;
-}
-.jtcs-menu-bar {
-  z-index: 4;
 }
 .jtcs-sticky-chrome .jtcs-app-header {
-  z-index: 6;
   overflow: visible;
-}
-.jtcs-sticky-chrome .jtcs-menu-bar {
-  z-index: 4;
-}
-.jtcs-sticky-chrome:has(.jtcs-notify-menu.show) .jtcs-app-header {
-  z-index: 8;
-  overflow: visible;
-}
-.jtcs-sticky-chrome:has(.jtcs-notify-menu.show) .jtcs-menu-bar {
-  z-index: 1;
 }
 .jtcs-header-notify {
   position: relative;
   z-index: 2;
 }
+.jtcs-sticky-chrome .dropdown-menu,
 .jtcs-notify-menu.show {
-  z-index: 8;
+  z-index: 1035;
 }
 
 a.jtcs-menu-link.jtcs-menu-held,
@@ -93,9 +94,10 @@ a.jtcs-top-link.jtcs-menu-held {
   opacity: 0.45;
   cursor: default;
 }
+/* Custom ribbon dropdowns: above chrome, still below modal layer */
 .jtcs-dropdown-panel,
 .jtcs-flyout-sub {
-  z-index: 4100;
+  z-index: 1040;
 }
 
 .jtcs-page-windows {
@@ -103,8 +105,10 @@ a.jtcs-top-link.jtcs-menu-held {
   left: 0;
   right: 0;
   bottom: 0;
-  top: 0;
-  z-index: 1500;
+  /* Host itself starts below sticky header + menu */
+  top: var(--jtcs-sticky-offset, calc(var(--jtcs-header-h, 76px) + var(--jtcs-menu-h, 42px)));
+  /* Below sticky chrome (1030) and Bootstrap modals (1055) */
+  z-index: 1020;
   pointer-events: none;
 }
 
@@ -170,6 +174,7 @@ a.jtcs-top-link.jtcs-menu-held {
   font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 .jtcs-page-win-bar button:hover {
@@ -197,6 +202,8 @@ a.jtcs-top-link.jtcs-menu-held {
   align-items: center;
   gap: 0.25rem;
   margin-left: auto;
+  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .jtcs-page-win-frame {
@@ -215,7 +222,7 @@ a.jtcs-top-link.jtcs-menu-held {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 2050;
+  z-index: 1025;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;

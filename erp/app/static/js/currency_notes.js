@@ -7,9 +7,8 @@
 
   const cfg = window.DASHBOARD || {};
   const DENOMS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
-  const btn = document.getElementById("dashCurrencyNotesBtn");
   const modalEl = document.getElementById("dashCurrencyNotesModal");
-  if (!btn || !modalEl || !window.bootstrap) return;
+  if (!modalEl || !window.bootstrap) return;
 
   const els = {
     date: document.getElementById("dashNotesDate"),

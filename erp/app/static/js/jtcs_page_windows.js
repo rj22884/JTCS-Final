@@ -122,20 +122,44 @@
     return windowsEl ? Array.prototype.slice.call(windowsEl.querySelectorAll(".jtcs-page-win")) : [];
   }
 
-  function workArea() {
+  function fallbackChromeOffset() {
+    var styles = window.getComputedStyle(document.documentElement);
+    var headerH = parseFloat(styles.getPropertyValue("--jtcs-header-h")) || 76;
+    var menuH = parseFloat(styles.getPropertyValue("--jtcs-menu-h")) || 42;
+    return Math.round(headerH + menuH);
+  }
+
+  function syncChromeOffset() {
     var top = 0;
-    var header = document.querySelector(".jtcs-app-header");
-    var menu = document.querySelector(".jtcs-menu-bar");
-    if (header) top = Math.max(top, header.getBoundingClientRect().bottom);
-    if (menu) top = Math.max(top, menu.getBoundingClientRect().bottom);
-    top = Math.round(top);
+    var chrome = document.querySelector(".jtcs-sticky-chrome");
+    if (chrome) {
+      top = Math.round(chrome.getBoundingClientRect().bottom);
+    } else {
+      var header = document.querySelector(".jtcs-app-header");
+      var menu = document.querySelector(".jtcs-menu-bar");
+      if (header) top = Math.max(top, header.getBoundingClientRect().bottom);
+      if (menu) top = Math.max(top, menu.getBoundingClientRect().bottom);
+      top = Math.round(top);
+    }
+    var hostBar = document.querySelector(".wa-host-bar");
+    if (hostBar && hostBar.offsetParent !== null) {
+      top = Math.max(top, Math.round(hostBar.getBoundingClientRect().bottom));
+    }
+    if (top < 40) top = fallbackChromeOffset();
+    document.documentElement.style.setProperty("--jtcs-sticky-offset", top + "px");
+    return top;
+  }
+
+  function workArea() {
+    /* page-windows host is already offset below chrome; coords are host-relative */
+    var chromeTop = syncChromeOffset();
     var bottomGap = 0;
     if (taskbarEl && !taskbarEl.hidden) bottomGap = taskbarEl.getBoundingClientRect().height || 42;
     return {
       left: 0,
-      top: top,
+      top: 0,
       width: window.innerWidth,
-      height: Math.max(240, window.innerHeight - top - bottomGap),
+      height: Math.max(240, window.innerHeight - chromeTop - bottomGap),
     };
   }
 
@@ -540,8 +564,15 @@
   });
 
   window.addEventListener("resize", function () {
+    syncChromeOffset();
     relayoutAll();
   });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", syncChromeOffset);
+  } else {
+    syncChromeOffset();
+  }
 
   document.addEventListener(
     "click",
