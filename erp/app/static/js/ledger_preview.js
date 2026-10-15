@@ -162,25 +162,103 @@
     return parseMoney(raw != null && raw !== "" ? raw : td.textContent);
   }
 
-  function groupKey(tr, mode) {
-    if (mode === "date") {
-      return (tr.querySelector('[data-col="date"]')?.textContent || "").trim() || "—";
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const PERIOD_MODES = { week: 1, month: 1, quarter: 1, year: 1 };
+  const GROUP_LABELS = {
+    week: "Week",
+    month: "Month",
+    quarter: "Quarter",
+    year: "Year",
+    debit: "Debit",
+    credit: "Credit",
+  };
+
+  function pad2(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function formatDmY(d) {
+    return pad2(d.getDate()) + "/" + pad2(d.getMonth() + 1) + "/" + d.getFullYear();
+  }
+
+  function isoDay(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+
+  function fyLabel(startYear) {
+    return "FY " + startYear + "-" + String(startYear + 1).slice(-2);
+  }
+
+  function rowDate(tr) {
+    const td = tr.querySelector('[data-col="date"]');
+    if (!td) return null;
+    const iso = String(td.getAttribute("data-sort-value") || "").trim();
+    const isoMatch = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
     }
+    const text = String(td.textContent || "").trim();
+    const shown = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!shown) return null;
+    return new Date(Number(shown[3]), Number(shown[2]) - 1, Number(shown[1]));
+  }
+
+  function fyParts(d) {
+    const month = d.getMonth();
+    if (month >= 3) {
+      return { quarter: Math.floor((month - 3) / 3) + 1, year: d.getFullYear() };
+    }
+    return { quarter: 4, year: d.getFullYear() - 1 };
+  }
+
+  function periodGroup(tr, mode) {
+    const d = rowDate(tr);
+    if (!d) return { key: "9999-99-99", label: "—" };
+    if (mode === "week") {
+      const weekday = d.getDay();
+      const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() + mondayOffset);
+      const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+      return {
+        key: isoDay(start),
+        label: "Week: " + formatDmY(start) + " – " + formatDmY(end),
+      };
+    }
+    if (mode === "month") {
+      return {
+        key: d.getFullYear() + "-" + pad2(d.getMonth() + 1),
+        label: "Month: " + MONTH_NAMES[d.getMonth()] + " " + d.getFullYear(),
+      };
+    }
+    const fy = fyParts(d);
+    if (mode === "quarter") {
+      return {
+        key: fy.year + "-Q" + fy.quarter,
+        label: "Quarter: Q" + fy.quarter + " " + fyLabel(fy.year),
+      };
+    }
+    return { key: String(fy.year), label: "Year: " + fyLabel(fy.year) };
+  }
+
+  function groupKey(tr, mode) {
+    if (PERIOD_MODES[mode]) return periodGroup(tr, mode).key;
     return rowMoney(tr, mode === "debit" ? "debit" : "credit").toFixed(2);
   }
 
-  function groupLabel(mode, key) {
-    if (mode === "date") return "Date: " + key;
+  function groupLabel(mode, key, tr) {
+    if (PERIOD_MODES[mode]) return periodGroup(tr, mode).label;
     if (mode === "debit") return "Debit: " + formatMoney(parseFloat(key));
     return "Credit: " + formatMoney(parseFloat(key));
   }
 
   function updateGroupButtons() {
     const els = toolbar();
-    const labels = { date: "Date", debit: "Debit", credit: "Credit" };
     if (els.groupBtn) {
       els.groupBtn.innerHTML = groupBy
-        ? '<i class="bi bi-collection"></i> Group By: ' + (labels[groupBy] || groupBy)
+        ? '<i class="bi bi-collection"></i> Group By: ' + (GROUP_LABELS[groupBy] || groupBy)
         : '<i class="bi bi-collection"></i> Group By';
       els.groupBtn.classList.toggle("active", !!groupBy);
     }
@@ -222,10 +300,17 @@
       const key = groupKey(tr, groupBy);
       if (!Object.prototype.hasOwnProperty.call(index, key)) {
         index[key] = groups.length;
-        groups.push({ key: key, rows: [] });
+        groups.push({ key: key, rows: [], label: groupLabel(groupBy, key, tr) });
       }
       groups[index[key]].rows.push(tr);
     });
+    if (PERIOD_MODES[groupBy]) {
+      groups.sort(function (a, b) {
+        if (a.key < b.key) return -1;
+        if (a.key > b.key) return 1;
+        return 0;
+      });
+    }
 
     opening.forEach(function (tr) {
       tbody.appendChild(tr);
@@ -243,7 +328,7 @@
       header.className = "ledger-group-header";
       header.innerHTML =
         '<td colspan="2"><strong>' +
-        escapeHtml(groupLabel(groupBy, group.key)) +
+        escapeHtml(group.label) +
         "</strong> <span class=\"text-muted\">(" +
         countLabel +
         ")</span></td>" +
@@ -261,7 +346,9 @@
       const total = document.createElement("tr");
       total.className = "ledger-group-total";
       total.innerHTML =
-        '<td colspan="2"><strong>Total Debit / Credit</strong></td>' +
+        '<td colspan="2"><strong>' +
+        escapeHtml(PERIOD_MODES[groupBy] ? GROUP_LABELS[groupBy] + " Total" : "Total Debit / Credit") +
+        "</strong></td>" +
         '<td class="text-end"><strong>' +
         formatMoney(debit) +
         "</strong></td>" +
@@ -490,7 +577,7 @@
     const groupOpt = event.target.closest(".ledger-group-by-opt");
     if (groupOpt && modal.contains(groupOpt)) {
       event.preventDefault();
-      setGroupBy(groupOpt.getAttribute("data-group-by") || "date");
+      setGroupBy(groupOpt.getAttribute("data-group-by") || "");
       return;
     }
     if (event.target.closest("#ledgerPreviewRemoveGroup")) {
