@@ -46,6 +46,7 @@
           <th>ID</th>
           <th>Work Name</th>
           <th>Ledger Kind</th>
+          <th>Chart of Account Group</th>
           <th class="text-end">Actions</th>
         </tr>
       </thead>
@@ -90,5 +91,5 @@
   window.WORK_MASTER_CSRF = {{ csrf_token() | tojson }};
   window.WORK_MASTER_INITIAL_ROWS = {{ initial_rows | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/masters_work_types.js') }}"></script>
+<script src="{{ url_for('static', filename='js/masters_work_types.js') }}?v=20260906grp1"></script>
 {% endblock %}

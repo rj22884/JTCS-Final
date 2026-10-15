@@ -1,0 +1,388 @@
+.jtcs-other-login-page .jtcs-auth-card {
+  width: min(100%, 980px);
+}
+
+.jtcs-fps-login-page .jtcs-auth-card {
+  position: relative;
+  width: min(100%, 720px);
+}
+
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("../fonts/NotoSansDevanagari-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans Devanagari";
+  src: url("../fonts/NotoSansDevanagari-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+.fps-bg-notice {
+  display: block;
+  position: static;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  color: #006400;
+  font-family: "Noto Sans Devanagari", "Nirmala UI", Mangal, "Source Sans 3", sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: left;
+  background: transparent;
+  animation: fps-bg-notice-blink 1s step-end infinite;
+}
+
+.fps-bg-notice-title {
+  font-size: 1.05em;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.fps-bg-notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@keyframes fps-bg-notice-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.18;
+  }
+}
+
+.jtcs-other-login-page .jtcs-auth-shell {
+  place-items: start center;
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.ol-entry-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid rgba(14, 116, 144, 0.28);
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 100%);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  box-shadow: 0 6px 16px rgba(14, 116, 144, 0.08);
+}
+
+.ol-entry-card:hover {
+  border-color: #0e7490;
+  box-shadow: 0 8px 20px rgba(14, 116, 144, 0.16);
+  color: inherit;
+}
+
+.ol-entry-kicker {
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0e7490;
+  font-weight: 700;
+  margin-bottom: 0.2rem;
+}
+
+.ol-auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ol-auth-divider::before,
+.ol-auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #dbe4ee;
+}
+
+.ol-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+}
+
+@media (min-width: 720px) {
+  .ol-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.ol-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid #d7e3ea;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: #fff;
+  text-decoration: none;
+  color: inherit;
+}
+
+.ol-card-enabled {
+  border-color: rgba(14, 116, 144, 0.45);
+  box-shadow: 0 4px 12px rgba(14, 116, 144, 0.08);
+}
+
+.ol-card-enabled:hover {
+  border-color: #0e7490;
+  color: inherit;
+}
+
+.ol-card-disabled {
+  background: #f8fafc;
+  opacity: 0.78;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.ol-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #ecfeff;
+  color: #0e7490;
+  font-size: 1.15rem;
+  flex: 0 0 auto;
+}
+
+.ol-card-disabled .ol-card-icon {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.ol-card-body {
+  min-width: 0;
+}
+
+.ol-card-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  margin: 0 0 0.15rem;
+}
+
+.ol-card-sub {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.ol-card-action {
+  white-space: nowrap;
+  justify-self: end;
+}
+
+.ol-coming-soon {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #e2e8f0;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+}
+
+.ol-fps-list {
+  display: grid;
+  gap: 0.75rem;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.ol-fps-item {
+  border: 1px solid #d7e3ea;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: #fff;
+}
+
+.ol-fps-item-name {
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.ol-fps-item dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.75rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+}
+
+.ol-fps-item dt {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.ol-fps-item dd {
+  margin: 0;
+}
+
+.ol-selected {
+  border: 1px solid rgba(14, 116, 144, 0.4);
+  background: #f0fdfa;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.ol-selected-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #0e7490;
+  font-weight: 700;
+}
+
+.ol-selected-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0.2rem 0 0.6rem;
+}
+
+.ol-selected-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.ol-selected-meta dt {
+  color: #64748b;
+  font-weight: 600;
+}
+
+.ol-cascade {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+.ol-cascade-field .form-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 0.25rem;
+}
+
+.ol-cascade-field .form-select:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+html.jtcs-form-phone .ol-cascade,
+html.jtcs-os-android .ol-cascade,
+html.jtcs-os-ios .ol-cascade {
+  grid-template-columns: 1fr;
+}
+
+html.jtcs-form-phone .ol-cascade-field .form-select,
+html.jtcs-os-android .ol-cascade-field .form-select,
+html.jtcs-os-ios .ol-cascade-field .form-select {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.rc-fps-readonly .rc-dealer-lookup,
+.rc-fps-readonly #rcFpsBlock,
+.rc-fps-readonly #rcUploadForm > div,
+.rc-fps-readonly #rcGenerateBtn,
+.rc-fps-readonly #rcDealerAddBtn {
+  display: none !important;
+}
+
+@media (max-width: 719.98px) {
+  .jtcs-other-login-page .jtcs-auth-card,
+  .jtcs-fps-login-page .jtcs-auth-card {
+    width: 100%;
+    padding: 1.1rem 0.9rem 1.25rem;
+  }
+
+  .ol-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-areas:
+      "icon body"
+      "action action";
+    row-gap: 0.55rem;
+  }
+
+  .ol-card-icon { grid-area: icon; }
+  .ol-card-body { grid-area: body; }
+  .ol-card-action {
+    grid-area: action;
+    justify-self: stretch;
+    text-align: center;
+  }
+
+  .ol-card-action.btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .ol-coming-soon {
+    display: inline-flex;
+    justify-content: center;
+    width: 100%;
+    min-height: 40px;
+    align-items: center;
+  }
+
+  .ol-fps-item .btn,
+  #fpsLoginBtn {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .ol-fps-list {
+    max-height: none;
+  }
+
+  .ol-fps-item dl,
+  .ol-selected-meta {
+    grid-template-columns: 1fr;
+    gap: 0.05rem 0;
+  }
+
+  .ol-fps-item dt,
+  .ol-selected-meta dt {
+    margin-top: 0.35rem;
+  }
+}
+
+html.jtcs-form-phone .ol-grid {
+  grid-template-columns: 1fr;
+}
+
+html.jtcs-form-phone .ol-card {
+  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-areas:
+    "icon body"
+    "action action";
+}
+
+html.jtcs-form-phone .ol-card-action {
+  grid-area: action;
+  justify-self: stretch;
+}
+
+html.jtcs-form-phone .ol-card-action.btn,
+html.jtcs-form-phone #fpsLoginBtn,
+html.jtcs-form-phone .ol-fps-item .btn {
+  width: 100%;
+  min-height: 44px;
+}

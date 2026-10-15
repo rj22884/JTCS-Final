@@ -2,17 +2,384 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import and_, delete, or_, select, text
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.orm import Session, joinedload, load_only
 
 from app.extensions import db
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage, FollowupWorkflowStage
+from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+
+
+_DSC_SETTING_SCHEMA_READY = False
+_FOLLOWUP_MASTER_RETIRED = False
+_STAGE_CODE_UNIQUE_READY = False
+_MANUAL_STAGE_READY = False
+_GST_CASE_INDEX_READY = False
 
 
 class FollowupRepository:
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
         self._entry_master_columns: set[str] | None = None
+
+    def retire_followup_master(self) -> None:
+        """Copy stage codes onto entry ticks, then drop FollowupWorkflowStage.
+
+        Stage names live in FIXED_WORKFLOW_STAGES. The master table is not recreated.
+        """
+        global _FOLLOWUP_MASTER_RETIRED
+        if _FOLLOWUP_MASTER_RETIRED:
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NULL
+                    ALTER TABLE dbo.FollowupEntryStage ADD StageCode NVARCHAR(50) NULL;
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NOT NULL
+                BEGIN
+                    UPDATE es
+                    SET es.StageCode = s.StageCode
+                    FROM dbo.FollowupEntryStage es
+                    INNER JOIN dbo.FollowupWorkflowStage s ON s.StageID = es.StageID
+                    WHERE es.StageCode IS NULL OR LTRIM(RTRIM(es.StageCode)) = N'';
+
+                    UPDATE dbo.FollowupEntryStage
+                    SET StageCode = N'return_filed'
+                    WHERE StageCode IN (N'gstr1_filed', N'gstr3b_filed');
+                END
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropFk NVARCHAR(MAX) = N'';
+                    SELECT @dropFk = @dropFk
+                        + N'ALTER TABLE dbo.FollowupEntryStage DROP CONSTRAINT '
+                        + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                      AND fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
+                    IF @dropFk <> N''
+                        EXEC sp_executesql @dropFk;
+                END
+                """
+            )
+        )
+        self.session.commit()
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropRef NVARCHAR(MAX) = N'';
+                    SELECT @dropRef = @dropRef
+                        + N'ALTER TABLE '
+                        + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
+                        + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
+                        + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
+                    IF @dropRef <> N''
+                        EXEC sp_executesql @dropRef;
+                    IF COL_LENGTH(N'dbo.FollowupEntryStage', N'StageID') IS NOT NULL
+                        ALTER TABLE dbo.FollowupEntryStage ALTER COLUMN StageID INT NULL;
+                    DROP TABLE dbo.FollowupWorkflowStage;
+                END;
+
+                IF OBJECT_ID(N'dbo.MenuUserAllow', N'U') IS NOT NULL
+                    DELETE a
+                    FROM dbo.MenuUserAllow AS a
+                    INNER JOIN dbo.MenuMaster AS m ON m.MenuID = a.MenuID
+                    WHERE ISNULL(m.MenuURL, N'') LIKE N'/masters/followup%'
+                       OR m.MenuName IN (
+                            N'Followup Master', N'ITR Followup Master', N'DSC Followup Master',
+                            N'TDS Followup Master', N'GST Followup Master'
+                       );
+
+                DELETE FROM dbo.MenuMaster
+                WHERE ISNULL(MenuURL, N'') LIKE N'/masters/followup%'
+                   OR MenuName IN (
+                        N'Followup Master', N'ITR Followup Master', N'DSC Followup Master',
+                        N'TDS Followup Master', N'GST Followup Master'
+                   );
+
+                IF OBJECT_ID(N'dbo.RationCardFollowupMaster', N'U') IS NOT NULL
+                BEGIN
+                    DECLARE @dropRcf NVARCHAR(MAX) = N'';
+                    SELECT @dropRcf = @dropRcf
+                        + N'ALTER TABLE '
+                        + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
+                        + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
+                        + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.referenced_object_id = OBJECT_ID(N'dbo.RationCardFollowupMaster')
+                       OR fk.parent_object_id = OBJECT_ID(N'dbo.RationCardFollowupMaster');
+                    IF @dropRcf <> N''
+                        EXEC sp_executesql @dropRcf;
+                    DROP TABLE dbo.RationCardFollowupMaster;
+                END;
+
+                DELETE FROM dbo.MenuMaster
+                WHERE MenuURL = N'/public-report/ration-card/followup'
+                   OR (
+                        MenuName = N'Followup'
+                        AND ParentMenuID IN (
+                            SELECT MenuID FROM dbo.MenuMaster WHERE MenuName = N'Ration Card Report'
+                        )
+                   );
+                """
+            )
+        )
+        self.session.commit()
+        self.ensure_stage_code_unique()
+        _FOLLOWUP_MASTER_RETIRED = True
+
+    def ensure_stage_code_unique(self) -> None:
+        """Allow several ticks on one entry.
+
+        UX_FollowupEntryStage is UNIQUE (EntryID, StageID). New ticks store the
+        stage code and leave StageID empty. SQL Server treats those empty ids as
+        the same key, so the second tick cannot be saved. Uniqueness is the
+        stage code instead. Existing rows are kept.
+        """
+        global _STAGE_CODE_UNIQUE_READY
+        if _STAGE_CODE_UNIQUE_READY:
+            self.ensure_manual_stage_descriptions()
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
+                    RETURN;
+
+                ;WITH ranked AS (
+                    SELECT
+                        EntryStageID,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY EntryID, StageCode
+                            ORDER BY EntryStageID
+                        ) AS rn
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode IS NOT NULL
+                      AND LTRIM(RTRIM(StageCode)) <> N''
+                )
+                DELETE FROM dbo.FollowupEntryStage
+                WHERE EntryStageID IN (SELECT EntryStageID FROM ranked WHERE rn > 1);
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.key_constraints
+                    WHERE name = N'UX_FollowupEntryStage'
+                      AND parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                )
+                    ALTER TABLE dbo.FollowupEntryStage DROP CONSTRAINT UX_FollowupEntryStage;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_FollowupEntryStage'
+                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                      AND is_unique = 1
+                )
+                   AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.key_constraints
+                    WHERE name = N'UX_FollowupEntryStage'
+                      AND parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                   )
+                    DROP INDEX UX_FollowupEntryStage ON dbo.FollowupEntryStage;
+
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_FollowupEntryStage_Code'
+                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                )
+                    CREATE UNIQUE INDEX UX_FollowupEntryStage_Code
+                        ON dbo.FollowupEntryStage (EntryID, StageCode)
+                        WHERE StageCode IS NOT NULL;
+                """
+            )
+        )
+        self.session.commit()
+        self.ensure_manual_stage_descriptions()
+        _STAGE_CODE_UNIQUE_READY = True
+
+    def ensure_manual_stage_descriptions(self) -> None:
+        """Store the stage name on ITR, GST, TDS and DSC ticks.
+
+        The stage-code master is not used. Existing codes such as
+        documents_received become Documents Received, and StageID is cleared.
+        """
+        global _MANUAL_STAGE_READY
+        if _MANUAL_STAGE_READY:
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
+                    RETURN;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_FollowupEntryStage_Code'
+                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                )
+                    DROP INDEX UX_FollowupEntryStage_Code ON dbo.FollowupEntryStage;
+
+                UPDATE es
+                SET es.StageID = NULL,
+                    es.StageCode = CASE LOWER(LTRIM(RTRIM(es.StageCode)))
+                        WHEN N'documents_received' THEN N'Documents Received'
+                        WHEN N'return_filed' THEN N'Return Filed'
+                        WHEN N'gstr1_filed' THEN N'Return Filed'
+                        WHEN N'gstr3b_filed' THEN N'Return Filed'
+                        WHEN N'payment_received' THEN N'Payment Received'
+                        WHEN N'itr_filed' THEN N'Return Filed'
+                        WHEN N'invoice' THEN N'Invoice'
+                        WHEN N'tally_bill_generated' THEN N'Tally Bill Generated'
+                        WHEN N'unverified' THEN N'Unverified'
+                        WHEN N'application_received' THEN N'Application Received'
+                        WHEN N'application_no' THEN N'Application Received'
+                        WHEN N'kyc' THEN N'KYC'
+                        WHEN N'download_status' THEN N'Download Status'
+                        ELSE es.StageCode
+                    END
+                FROM dbo.FollowupEntryStage es
+                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
+                WHERE e.ModuleCode IN (N'ITR', N'GST', N'TDS', N'DSC')
+                  AND es.StageCode IS NOT NULL;
+
+                UPDATE es
+                SET es.StageCode = N'Return Filed'
+                FROM dbo.FollowupEntryStage es
+                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
+                WHERE e.ModuleCode = N'TDS'
+                  AND es.StageCode IN (N'kyc', N'KYC');
+
+                UPDATE es
+                SET es.StageCode = N'Invoice'
+                FROM dbo.FollowupEntryStage es
+                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
+                WHERE e.ModuleCode IN (N'ITR', N'GST', N'TDS')
+                  AND es.StageCode IN (N'tally_bill_generated', N'Tally Bill Generated');
+
+                ;WITH ranked AS (
+                    SELECT
+                        EntryStageID,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY EntryID, StageCode
+                            ORDER BY EntryStageID
+                        ) AS rn
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode IS NOT NULL
+                      AND LTRIM(RTRIM(StageCode)) <> N''
+                )
+                DELETE FROM dbo.FollowupEntryStage
+                WHERE EntryStageID IN (SELECT EntryStageID FROM ranked WHERE rn > 1);
+
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_FollowupEntryStage_Code'
+                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
+                )
+                    CREATE UNIQUE INDEX UX_FollowupEntryStage_Code
+                        ON dbo.FollowupEntryStage (EntryID, StageCode)
+                        WHERE StageCode IS NOT NULL;
+                """
+            )
+        )
+        self.session.commit()
+        _MANUAL_STAGE_READY = True
+
+    def ensure_dsc_setting_schema(self) -> None:
+        global _DSC_SETTING_SCHEMA_READY
+        if _DSC_SETTING_SCHEMA_READY:
+            return
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.DscFollowupSetting', N'U') IS NULL
+                BEGIN
+                    CREATE TABLE dbo.DscFollowupSetting (
+                        SettingKey NVARCHAR(40) NOT NULL,
+                        SettingValue NVARCHAR(500) NULL,
+                        ModifiedBy NVARCHAR(150) NULL,
+                        ModifiedDate DATETIME NULL,
+                        CONSTRAINT PK_DscFollowupSetting PRIMARY KEY (SettingKey)
+                    );
+                END
+                """
+            )
+        )
+        self.session.commit()
+        _DSC_SETTING_SCHEMA_READY = True
+
+    def list_dsc_settings(self) -> dict[str, str]:
+        self.ensure_dsc_setting_schema()
+        rows = self.session.execute(
+            text("SELECT SettingKey, SettingValue FROM dbo.DscFollowupSetting")
+        ).all()
+        return {str(key): (value or "").strip() for key, value in rows}
+
+    def upsert_dsc_setting(self, key: str, value: str | None, *, modified_by: str) -> str:
+        self.ensure_dsc_setting_schema()
+        cleaned = (value or "").strip()
+        existing = self.session.execute(
+            text("SELECT SettingKey FROM dbo.DscFollowupSetting WHERE SettingKey = :key"),
+            {"key": key},
+        ).scalar()
+        if existing:
+            self.session.execute(
+                text(
+                    """
+                    UPDATE dbo.DscFollowupSetting
+                    SET SettingValue = :value,
+                        ModifiedBy = :modified_by,
+                        ModifiedDate = :now
+                    WHERE SettingKey = :key
+                    """
+                ),
+                {
+                    "key": key,
+                    "value": cleaned or None,
+                    "modified_by": modified_by[:150],
+                    "now": datetime.utcnow(),
+                },
+            )
+        else:
+            self.session.execute(
+                text(
+                    """
+                    INSERT INTO dbo.DscFollowupSetting
+                        (SettingKey, SettingValue, ModifiedBy, ModifiedDate)
+                    VALUES
+                        (:key, :value, :modified_by, :now)
+                    """
+                ),
+                {
+                    "key": key,
+                    "value": cleaned or None,
+                    "modified_by": modified_by[:150],
+                    "now": datetime.utcnow(),
+                },
+            )
+        self.session.flush()
+        return cleaned
 
     def _entry_master_columns_set(self) -> set[str]:
         if self._entry_master_columns is None:
@@ -49,8 +416,16 @@ class FollowupRepository:
             columns.append("e.FormType")
         if "Quarter" in available:
             columns.append("e.Quarter")
+        if "GstMonth" in available:
+            columns.append("e.GstMonth")
         if "ApplicationNumber" in available:
             columns.insert(columns.index("e.BillNo"), "e.ApplicationNumber")
+        if "DscType" in available:
+            columns.append("e.DscType")
+        if "DscClass" in available:
+            columns.append("e.DscClass")
+        if "DscYear" in available:
+            columns.append("e.DscYear")
         if "Location" in available:
             columns.append("e.Location")
         if "IntroducedBy" in available:
@@ -63,6 +438,10 @@ class FollowupRepository:
             columns.append("e.ReturnFilingStatus")
         if "FilingDate" in available:
             columns.append("e.FilingDate")
+        if "BillingType" in available:
+            columns.append("e.BillingType")
+        if "BillingCustomerID" in available:
+            columns.append("e.BillingCustomerID")
         columns.extend(
             [
                 "e.PANNumber",
@@ -88,6 +467,21 @@ class FollowupRepository:
         ).scalars().first()
         if cust_cols:
             columns.append("c.FilingFrequency")
+        for extra in ("DateOfBirth", "EmployeeCode", "AadhaarNumber"):
+            found = self.session.execute(
+                text(
+                    """
+                    SELECT c.name
+                    FROM sys.columns c
+                    INNER JOIN sys.objects o ON o.object_id = c.object_id
+                    WHERE o.type = 'U' AND o.name = 'CustomerMaster'
+                      AND c.name = :col
+                    """
+                ),
+                {"col": extra},
+            ).scalars().first()
+            if found:
+                columns.append("c." + extra)
         return ",\n                ".join(columns)
 
     def entry_master_columns(self) -> set[str]:
@@ -101,11 +495,17 @@ class FollowupRepository:
             "ModuleCode",
             "WorkDate",
             "TaxPeriod",
+            "GstMonth",
             "CustomerID",
+            "BillingType",
+            "BillingCustomerID",
             "ReturnType",
             "FormType",
             "Quarter",
             "ApplicationNumber",
+            "DscType",
+            "DscClass",
+            "DscYear",
             "Location",
             "IntroducedBy",
             "BillNo",
@@ -156,6 +556,59 @@ class FollowupRepository:
         if changed:
             self.session.flush()
             self._entry_master_columns = None
+
+    def ensure_gst_month_column(self) -> None:
+        """Nullable month for GST follow-up. Existing rows stay NULL."""
+        available = set(self._entry_master_columns_set())
+        if "GstMonth" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD GstMonth NVARCHAR(20) NULL")
+            )
+            self.session.flush()
+            self._entry_master_columns = None
+        self._ensure_gst_case_index()
+
+    def _ensure_gst_case_index(self) -> None:
+        """One active GST row per customer, month, and tax year.
+
+        Rows with a blank month are left alone so older entries stay valid.
+        """
+        global _GST_CASE_INDEX_READY
+        if _GST_CASE_INDEX_READY:
+            return
+        if "GstMonth" not in set(self._entry_master_columns_set()):
+            return
+        self.session.execute(
+            text(
+                """
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'UX_Followup_GST_CustomerMonthYear'
+                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryMaster')
+                )
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM dbo.FollowupEntryMaster
+                    WHERE ModuleCode = N'GST'
+                      AND ISNULL(IsActive, 1) = 1
+                      AND GstMonth IS NOT NULL
+                      AND LTRIM(RTRIM(GstMonth)) <> N''
+                    GROUP BY CustomerID, TaxPeriod, GstMonth
+                    HAVING COUNT(*) > 1
+                )
+                BEGIN
+                    CREATE UNIQUE INDEX UX_Followup_GST_CustomerMonthYear
+                        ON dbo.FollowupEntryMaster (CustomerID, TaxPeriod, GstMonth)
+                        WHERE ModuleCode = N'GST'
+                          AND IsActive = 1
+                          AND GstMonth IS NOT NULL;
+                END
+                """
+            )
+        )
+        self.session.flush()
+        _GST_CASE_INDEX_READY = True
 
     def ensure_filing_status_columns(self) -> None:
         available = set(self._entry_master_columns_set())
@@ -244,12 +697,47 @@ class FollowupRepository:
                 text("ALTER TABLE dbo.FollowupEntryMaster ADD IntroducedBy NVARCHAR(200) NULL")
             )
             changed = True
+        if "DscType" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscType NVARCHAR(20) NULL")
+            )
+            changed = True
+        if "DscClass" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscClass NVARCHAR(20) NULL")
+            )
+            changed = True
+        if "DscYear" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD DscYear NVARCHAR(20) NULL")
+            )
+            changed = True
         if changed:
             self.session.flush()
             self._entry_master_columns = None
 
+    def ensure_billing_customer_columns(self) -> None:
+        """Invoice billing customer is stored by id and never replaces the follow-up customer."""
+        available = set(self._entry_master_columns_set())
+        changed = False
+        if "BillingType" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD BillingType NVARCHAR(20) NULL")
+            )
+            changed = True
+        if "BillingCustomerID" not in available:
+            self.session.execute(
+                text("ALTER TABLE dbo.FollowupEntryMaster ADD BillingCustomerID INT NULL")
+            )
+            changed = True
+        if changed:
+            self.session.flush()
+            self._entry_master_columns = None
+            if not (self.session.new or self.session.dirty or self.session.deleted):
+                self.session.commit()
+
     def ensure_dsc_extra_columns(self) -> None:
-        """Ensure Location / IntroducedBy exist for DSC entry form."""
+        """Ensure Location, Introduced by, and DSC type/class/year exist."""
         self.ensure_application_number_column()
 
     def ensure_gst_return_filed_stage(self) -> None:
@@ -387,12 +875,13 @@ class FollowupRepository:
         return row
 
     def get_entry(self, entry_id: int) -> FollowupEntryMaster | None:
+        self.ensure_billing_customer_columns()
         load_cols = self._orm_loadable_columns()
         stmt = (
             select(FollowupEntryMaster)
             .options(
                 load_only(*load_cols),
-                joinedload(FollowupEntryMaster.stages).joinedload(FollowupEntryStage.stage),
+                joinedload(FollowupEntryMaster.stages),
             )
             .where(FollowupEntryMaster.EntryID == entry_id)
         )
@@ -485,6 +974,38 @@ class FollowupRepository:
             stmt = stmt.where(FollowupEntryMaster.EntryID != exclude_entry_id)
         return self.session.scalars(stmt).first()
 
+    def find_active_gst_month_duplicate(
+        self,
+        *,
+        customer_id: int,
+        tax_period: str,
+        gst_month: str,
+        exclude_entry_id: int | None = None,
+    ) -> FollowupEntryMaster | None:
+        """Active GST row for the same customer, month, and tax year.
+
+        NULL months are not duplicates of each other, so older rows stay valid.
+        """
+        self.ensure_billing_customer_columns()
+        month = (gst_month or "").strip()
+        period = (tax_period or "").strip()
+        if not customer_id or not month or not period:
+            return None
+        stmt = (
+            select(FollowupEntryMaster)
+            .where(
+                FollowupEntryMaster.ModuleCode == "GST",
+                FollowupEntryMaster.IsActive == True,  # noqa: E712
+                FollowupEntryMaster.CustomerID == customer_id,
+                FollowupEntryMaster.TaxPeriod == period,
+                func.lower(func.ltrim(func.rtrim(FollowupEntryMaster.GstMonth))) == month.lower(),
+            )
+            .order_by(FollowupEntryMaster.EntryID.desc())
+        )
+        if exclude_entry_id:
+            stmt = stmt.where(FollowupEntryMaster.EntryID != exclude_entry_id)
+        return self.session.scalars(stmt).first()
+
     def update_entry(self, row: FollowupEntryMaster, data: dict) -> FollowupEntryMaster:
         for key, value in self._filter_entry_data(data).items():
             setattr(row, key, value)
@@ -496,35 +1017,36 @@ class FollowupRepository:
         self.session.flush()
         return row
 
-    def replace_entry_stages(self, entry_id: int, stage_ids: list[int]) -> None:
+    def replace_entry_stages(self, entry_id: int, stage_codes: list[str]) -> None:
         """Replace completed stages for an entry.
 
         Must go through the ORM relationship when the entry is already loaded.
         A bulk DELETE + session.add bypasses delete-orphan on FollowupEntryMaster.stages
         and can drop newly added stages (e.g. payment_received) on the final flush.
         """
+        self.ensure_stage_code_unique()
+        from app.services.followup_service import stage_description
+
         now = datetime.utcnow()
-        unique_ids: list[int] = []
-        seen: set[int] = set()
-        for stage_id in stage_ids:
-            try:
-                sid = int(stage_id)
-            except (TypeError, ValueError):
+        unique_codes: list[str] = []
+        seen: set[str] = set()
+        for raw in stage_codes:
+            code = (str(raw) if raw is not None else "").strip().lower()
+            if not code or code in seen:
                 continue
-            if sid in seen:
-                continue
-            seen.add(sid)
-            unique_ids.append(sid)
+            seen.add(code)
+            unique_codes.append(code)
 
         entry = self.session.get(FollowupEntryMaster, entry_id)
         if entry is not None:
             entry.stages.clear()
             self.session.flush()
-            for sid in unique_ids:
+            for code in unique_codes:
                 entry.stages.append(
                     FollowupEntryStage(
                         EntryID=entry_id,
-                        StageID=sid,
+                        StageID=None,
+                        StageCode=stage_description(code),
                         CompletedDate=now,
                     )
                 )
@@ -532,11 +1054,12 @@ class FollowupRepository:
             return
 
         self.session.execute(delete(FollowupEntryStage).where(FollowupEntryStage.EntryID == entry_id))
-        for sid in unique_ids:
+        for code in unique_codes:
             self.session.add(
                 FollowupEntryStage(
                     EntryID=entry_id,
-                    StageID=sid,
+                    StageID=None,
+                    StageCode=stage_description(code),
                     CompletedDate=now,
                 )
             )
@@ -554,6 +1077,7 @@ class FollowupRepository:
         date_to: str | None = None,
         limit: int = 500,
     ) -> list[dict]:
+        self.ensure_billing_customer_columns()
         sql = f"""
             SELECT
                 {self._entry_select_columns()}
@@ -571,6 +1095,10 @@ class FollowupRepository:
                 OR e.PANNumber LIKE :search_upper
                 OR e.BillNo LIKE :search_upper
                 OR ISNULL(c.EmailID, N'') LIKE :search
+            """
+            if module_code == "GST":
+                sql += " OR ISNULL(e.GstMonth, N'') LIKE :search"
+            sql += """
               )
             """
             params["search"] = f"%{search.strip()}%"
@@ -593,38 +1121,54 @@ class FollowupRepository:
             params["date_to"] = dt
 
         sql += " ORDER BY e.WorkDate DESC, e.EntryID DESC"
+        self.retire_followup_master()
         rows = list(self.session.execute(text(sql), params).mappings().all())
         results = [dict(row) for row in rows[:limit]]
 
-        stage_rows = self.list_stages(module_code)
-        stage_map = {s.StageID: s for s in stage_rows}
+        from app.services.followup_service import (
+            FIXED_WORKFLOW_STAGES,
+            canonical_stage_code,
+            stage_description,
+        )
+
+        stage_meta = {
+            code: (name, order)
+            for code, name, order in FIXED_WORKFLOW_STAGES.get(module_code, ())
+        }
         completed = self.session.execute(
             text(
                 """
-                SELECT es.EntryID, es.StageID, s.StageCode, s.StageName, s.DisplayOrder
+                SELECT es.EntryID, es.StageCode
                 FROM FollowupEntryStage es
-                INNER JOIN FollowupWorkflowStage s ON s.StageID = es.StageID
                 INNER JOIN FollowupEntryMaster e ON e.EntryID = es.EntryID
                 WHERE e.ModuleCode = :module AND e.IsActive = 1
+                  AND es.StageCode IS NOT NULL
                 """
             ),
             {"module": module_code},
         ).mappings().all()
         by_entry: dict[int, list] = {}
         for row in completed:
-            by_entry.setdefault(row["EntryID"], []).append(dict(row))
+            code = canonical_stage_code(row["StageCode"])
+            name, order = stage_meta.get(code, (stage_description(code), 0))
+            by_entry.setdefault(row["EntryID"], []).append(
+                {
+                    "StageID": code,
+                    "StageCode": code,
+                    "StageName": name,
+                    "DisplayOrder": order,
+                }
+            )
 
-        payment_stage = next((s for s in stage_rows if s.StageCode == "payment_received"), None)
         for item in results:
             entry_stages = sorted(
                 by_entry.get(item["EntryID"], []),
                 key=lambda x: x.get("DisplayOrder") or 0,
             )
             item["completed_stages"] = entry_stages
-            item["workflow_status"] = self._workflow_status(entry_stages, stage_rows)
-            item["payment_received"] = bool(
-                payment_stage
-                and any(es["StageID"] == payment_stage.StageID for es in entry_stages)
+            item["workflow_status"] = self._workflow_status(entry_stages, [])
+            item["payment_received"] = any(
+                (es.get("StageCode") or "") == "payment_received" for es in entry_stages
             )
             item["has_tally_bill"] = any(es.get("StageCode") == "tally_bill_generated" for es in entry_stages)
             if item.get("BillAmount") is not None:
@@ -653,12 +1197,10 @@ class FollowupRepository:
     def _workflow_status(completed: list[dict], all_stages: list[FollowupWorkflowStage]) -> str:
         if not completed:
             return "Pending"
-        if any((row.get("StageCode") or "").lower() == "unverified" for row in completed):
-            return "Unverified"
 
         # Prefer highest DisplayOrder among completed progress stages.
         # Using completed rows directly avoids empty all_stages / id-mismatch edge cases
-        # (e.g. Payment Received must win over Tally Bill Generated).
+        # (e.g. Payment Received must win over Invoice).
         progress = [
             row
             for row in completed

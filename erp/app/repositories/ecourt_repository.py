@@ -327,6 +327,87 @@ class ECourtRepository:
                 result[key] = ", ".join(accounts)
         return result
 
+    def grid_sale_lookup(self) -> dict[str, dict]:
+        """Sold-receipt facts for the activity grid.
+
+        Two queries for the whole tree. The old path queried sales and daily
+        rows again for every stationery group.
+        """
+        sale_rows = self.session.execute(
+            select(
+                ECourtSale.ReceiptNo,
+                ECourtSale.DailyTransactionID,
+                ECourtSale.CreatedDate,
+                JTCSDailyTransaction.TransactionDate,
+                JTCSDailyTransaction.SaleAmount,
+            ).outerjoin(
+                JTCSDailyTransaction,
+                JTCSDailyTransaction.TransactionID == ECourtSale.DailyTransactionID,
+            )
+        ).all()
+        if not sale_rows:
+            return {}
+
+        pay_rows = self.session.execute(
+            select(
+                JTCSDailyTransactionPayment.TransactionID,
+                JTCSDailyTransactionPayment.PaymentSequence,
+                JtcsBankAccountMaster.AccountNumber,
+                JtcsBankAccountMaster.MaskedAccountNumber,
+                JtcsBankAccountMaster.BankName,
+            )
+            .join(
+                JtcsBankAccountMaster,
+                JtcsBankAccountMaster.JtcsBankAccountID
+                == JTCSDailyTransactionPayment.BankAccountID,
+            )
+            .where(
+                JTCSDailyTransactionPayment.TransactionID.in_(
+                    select(ECourtSale.DailyTransactionID)
+                    .where(ECourtSale.DailyTransactionID.is_not(None))
+                    .scalar_subquery()
+                )
+            )
+            .order_by(
+                JTCSDailyTransactionPayment.TransactionID,
+                JTCSDailyTransactionPayment.PaymentSequence,
+            )
+        ).all()
+
+        daily_accounts: dict[int, list[str]] = {}
+        for txn_id, _seq, account_no, masked, bank_name in pay_rows:
+            label = (
+                (account_no or "").strip()
+                or (masked or "").strip()
+                or (bank_name or "").strip()
+            )
+            if not label or not txn_id:
+                continue
+            bucket = daily_accounts.setdefault(int(txn_id), [])
+            if label not in bucket:
+                bucket.append(label)
+
+        result: dict[str, dict] = {}
+        for receipt_no, daily_id, created, txn_date, sale_amount in sale_rows:
+            key = (receipt_no or "").strip().upper()
+            if not key:
+                continue
+            if txn_date is not None:
+                date_text = txn_date.isoformat() if hasattr(txn_date, "isoformat") else str(txn_date)[:10]
+            elif created is not None:
+                date_text = created.date().isoformat() if hasattr(created, "date") else str(created)[:10]
+            else:
+                date_text = ""
+            amount = Decimal(str(sale_amount)) if sale_amount is not None else None
+            accounts = daily_accounts.get(int(daily_id), []) if daily_id else []
+            result[key] = {
+                "daily_id": int(daily_id) if daily_id else None,
+                "transaction_date": date_text,
+                "sale_amount": amount,
+                "account_number": ", ".join(accounts),
+            }
+        return result
+
     def get_sale_by_receipt(self, receipt_no: str) -> ECourtSale | None:
         stmt = select(ECourtSale).where(ECourtSale.ReceiptNo == receipt_no.strip().upper())
         return self.session.scalars(stmt).first()

@@ -42,6 +42,7 @@
         <tr>
           <th>ID</th>
           <th>Group Name</th>
+          <th>Nature</th>
           <th>Under</th>
           <th>Status</th>
           <th class="text-end">Actions</th>
@@ -54,7 +55,7 @@
 </div>
 
 <div class="modal fade" id="cgmModal" tabindex="-1" aria-labelledby="cgmModalTitle" aria-hidden="true" data-bs-backdrop="static">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="cgmModalTitle">Add Group</h5>
@@ -64,22 +65,42 @@
         <div class="modal-body">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" id="cgmId" value="">
-          <div class="mb-3">
-            <label class="form-label" for="cgmName">Group Name *</label>
-            <input type="text" class="form-control" id="cgmName" maxlength="150" required
-                   placeholder="e.g. Sundry Debtors">
+          <div class="row g-2">
+            <div class="col-md-6">
+              <label class="form-label" for="cgmName">Group Name *</label>
+              <input type="text" class="form-control" id="cgmName" maxlength="150" required
+                     placeholder="e.g. Sundry Debtors">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="cgmParent">Under *</label>
+              <select class="form-select" id="cgmParent" required>
+                <option value="Assets">Assets (Primary)</option>
+                <option value="Liabilities">Liabilities (Primary)</option>
+              </select>
+              <div class="form-text">Same as Tally: choose the parent group, e.g. Investments.</div>
+            </div>
           </div>
-          <div class="mb-3">
-            <label class="form-label" for="cgmParent">Under *</label>
-            <select class="form-select" id="cgmParent" required>
-              <option value="Assets">Assets (Primary)</option>
-              <option value="Liabilities">Liabilities (Primary)</option>
-            </select>
-            <div class="form-text">Same as Tally: choose the parent group, e.g. Investments.</div>
-          </div>
-          <div class="form-check">
+          <div class="form-check mt-2 mb-3">
             <input class="form-check-input" type="checkbox" id="cgmIsActive" checked>
             <label class="form-check-label" for="cgmIsActive">Active</label>
+          </div>
+
+          <div class="border rounded p-3 bg-light-subtle">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <h6 class="mb-0">Customer Master Fields</h6>
+              <span class="small text-muted">Tick fields that should appear when this Chart of Account Group is selected.</span>
+              <div class="ms-auto d-flex flex-wrap gap-2">
+                <input type="search" class="form-control form-control-sm" id="cgmFieldSearch"
+                       placeholder="Search fields..." style="min-width: 180px;">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="cgmAddFieldBtn">
+                  <i class="bi bi-plus-lg"></i> Add Field
+                </button>
+              </div>
+            </div>
+            <div class="small text-muted mb-2">
+              Customer Name is always mandatory. Required is only for fields you tick as required.
+            </div>
+            <div id="cgmFieldList" class="cgm-field-list"></div>
           </div>
         </div>
         <div class="modal-footer">
@@ -92,6 +113,52 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="cgmFieldModal" tabindex="-1" aria-labelledby="cgmFieldModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cgmFieldModalTitle">Add Field</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="cgmFieldForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" id="cgmFieldKey" value="">
+          <div class="mb-3">
+            <label class="form-label" for="cgmFieldLabel">Field Label *</label>
+            <input type="text" class="form-control" id="cgmFieldLabel" maxlength="150" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="cgmFieldType">Field Type *</label>
+            <select class="form-select" id="cgmFieldType" required>
+              <option value="text">Text</option>
+              <option value="textarea">Long text</option>
+              <option value="date">Date</option>
+              <option value="number">Number</option>
+              <option value="percent">Percent</option>
+              <option value="email">Email</option>
+              <option value="select">Dropdown</option>
+            </select>
+          </div>
+          <div class="mb-0">
+            <label class="form-label" for="cgmFieldHint">Hint</label>
+            <input type="text" class="form-control" id="cgmFieldHint" maxlength="400">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="cgmFieldSaveBtn">
+            <i class="bi bi-save"></i> Save Field
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dynamic_master_fields.css') }}?v=20260906dyn13">
 {% endblock %}
 
 {% block extra_js %}
@@ -101,10 +168,15 @@
     record: {{ url_for('masters_chart_group.get_record', group_id=0) | tojson }},
     create: {{ url_for('masters_chart_group.create_record') | tojson }},
     update: {{ url_for('masters_chart_group.update_record', group_id=0) | tojson }},
-    delete: {{ url_for('masters_chart_group.delete_record', group_id=0) | tojson }}
+    delete: {{ url_for('masters_chart_group.delete_record', group_id=0) | tojson }},
+    dynCatalog: {{ url_for('dynamic_master_fields.catalog') | tojson }},
+    dynCreateField: {{ url_for('dynamic_master_fields.create_catalog_field') | tojson }},
+    dynUpdateField: {{ url_for('dynamic_master_fields.update_catalog_field', field_key='KEY') | tojson }},
+    dynDeleteField: {{ url_for('dynamic_master_fields.delete_catalog_field', field_key='KEY') | tojson }}
   };
   window.CHART_GROUP_INITIAL_ROWS = {{ initial_rows | tojson }};
   window.CHART_GROUP_CSRF = {{ csrf_token() | tojson }};
+  window.CHART_GROUP_DYN_CATALOG = {{ dyn_catalog | default({}) | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/chart_group_master.js') }}?v=20260819cgm2"></script>
+<script src="{{ url_for('static', filename='js/chart_group_master.js') }}?v=20260906dyn13"></script>
 {% endblock %}

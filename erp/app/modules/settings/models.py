@@ -22,8 +22,14 @@ WHATSAPP_SEND_REQUIRED_KEYS: tuple[str, ...] = (
 # JTCS production WhatsApp Cloud number. Phone Number ID is resolved from Graph.
 WHATSAPP_PREFERRED_PHONE_NUMBER = "+91 84770 05566"
 WHATSAPP_PREFERRED_PHONE_DIGITS = "8477005566"
-WHATSAPP_PREFERRED_BUSINESS_ID = "1050633393832558"
-WHATSAPP_PREFERRED_WABA_ID = "12967889023654318"
+WHATSAPP_PREFERRED_BUSINESS_ID = "28233322611396750"
+WHATSAPP_PREFERRED_WABA_ID = "1343400904135444"
+WHATSAPP_PREFERRED_APP_ID = "919379641761942"
+# Dedicated WhatsApp app receives inbound Meta events. ERP CRM is not the inbox.
+# Redeploy marker 2026-10-09: VPS must pull this so ERP stops storing CRM WhatsApp chats.
+WHATSAPP_PUBLIC_WEBHOOK_URL = "https://wa.ukdscwala.com/api/whatsapp/webhook"
+# Temporary: Meta may still POST to app.jtcsxpert.com/webhooks/whatsapp until Callback URL is updated.
+WHATSAPP_DEDICATED_WEBHOOK_FORWARD_URL = "https://wa.ukdscwala.com/api/whatsapp/webhook"
 
 # Keys that must be encrypted at rest and masked on read.
 SECRET_KEYS: frozenset[str] = frozenset(
@@ -36,6 +42,7 @@ SECRET_KEYS: frozenset[str] = frozenset(
         "client_secret",
         "password",
         "smtp_password",
+        "imap_password",
         "auth_token",
         "private_key",
         "secret_key",
@@ -80,11 +87,38 @@ PROVIDER_FIELDS: dict[str, list[dict[str, str]]] = {
         {"key": "use_ssl", "label": "Use SSL", "input": "checkbox"},
         {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
     ],
+    "imap": [
+        {"key": "server", "label": "IMAP Server", "input": "text"},
+        {"key": "port", "label": "Port", "input": "number"},
+        {"key": "username", "label": "Username", "input": "text"},
+        {"key": "imap_password", "label": "Password", "input": "password"},
+        {"key": "folder", "label": "Folder", "input": "text"},
+        {"key": "use_ssl", "label": "Use SSL", "input": "checkbox"},
+        {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
+    ],
     "google": [
         {"key": "client_id", "label": "Client ID", "input": "text"},
         {"key": "client_secret", "label": "Client Secret", "input": "password"},
         {"key": "project_id", "label": "Project ID", "input": "text"},
         {"key": "api_key", "label": "API Key", "input": "password"},
+        {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
+    ],
+    "google_drive": [
+        # OAuth Web Client for Drive backup upload (drive.file scope).
+        # Legacy GENERIC api_key/api_secret remain readable as fallback Client ID/Secret.
+        {"key": "client_id", "label": "OAuth Client ID", "input": "text", "section": "oauth"},
+        {"key": "client_secret", "label": "OAuth Client Secret", "input": "password", "section": "oauth"},
+        {"key": "api_key", "label": "Legacy Client ID / API Key", "input": "password", "hidden": "1"},
+        {"key": "api_secret", "label": "Legacy Client Secret / API Secret", "input": "password", "hidden": "1"},
+        {"key": "oauth_redirect_uri", "label": "OAuth Redirect URI", "input": "readonly", "section": "oauth"},
+        {"key": "connected_email", "label": "Connected Google Account", "input": "readonly", "section": "oauth"},
+        {"key": "refresh_token", "label": "Refresh Token", "input": "password", "hidden": "1"},
+        {"key": "access_token", "label": "Access Token", "input": "password", "hidden": "1"},
+        {"key": "token_expires_at", "label": "Token Expires At (UTC)", "input": "readonly", "hidden": "1"},
+        {"key": "folder_id", "label": "JTCS Backup Folder ID", "input": "readonly", "hidden": "1"},
+        {"key": "folder_name", "label": "Backup Folder Name", "input": "readonly", "hidden": "1"},
+        {"key": "endpoint_url", "label": "Endpoint URL", "input": "text", "hidden": "1"},
+        {"key": "notes", "label": "Notes", "input": "textarea"},
         {"key": "connection_status", "label": "Connection Status", "input": "readonly"},
     ],
     "openai": [

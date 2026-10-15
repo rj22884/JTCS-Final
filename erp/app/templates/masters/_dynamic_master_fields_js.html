@@ -1,0 +1,4 @@
+<script>
+  window.JTCS_DYN_MASTER_FIELDS = {{ dyn_master_fields | default({}) | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/dynamic_master_fields.js') }}?v=20260906dyn13"></script>

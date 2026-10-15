@@ -138,7 +138,7 @@ class ReportService:
                 SELECT TransactionDate, BankName, Description, Debit, Credit, Remarks,
                        JtcsBankTransactionID
                 FROM JtcsBankTransaction
-                WHERE BankName <> N'Cash'
+                WHERE LOWER(LTRIM(RTRIM(ISNULL(BankName, N'')))) <> N'cash'
                   AND TransactionDate BETWEEN :start_date AND :end_date
                   {bank_filter}
                 ORDER BY BankName, TransactionDate, JtcsBankTransactionID

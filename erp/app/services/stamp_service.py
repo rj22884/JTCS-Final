@@ -73,11 +73,11 @@ class StampService:
         if not certificate_date:
             raise ValueError("Certificate Date is required.")
 
-        entry_mode = (form.get("EntryMode") or "manual").strip().lower()
+        entry_mode = self._entry_mode(form)
         if entry_mode != "manual" and not self._clean(form.get("FirstPartyName")):
             raise ValueError("First Party is required.")
 
-        if entry_mode == "manual" and not self._clean(form.get("StampDutyPaidBy")):
+        if entry_mode in {"manual", "online"} and not self._clean(form.get("StampDutyPaidBy")):
             raise ValueError("Stamp Duty Paid By is required.")
 
         stamp_duty = self._decimal_or_none(form.get("StampDutyAmount"))
@@ -97,6 +97,17 @@ class StampService:
             raise ValueError("At least one payment mode is required.")
 
         exclude_id = update_stamp_id if update_stamp_id is not None else self._stamp_id_from_form(form)
+        if entry_mode == "online":
+            website_ref = self._website_reference_from_form(form)
+            if not website_ref:
+                raise ValueError("e-Stamp order reference is required.")
+            self._require_online_order(website_ref)
+            existing_ref = self.stamp_repo.find_existing_by_website_reference(
+                website_ref,
+                exclude_id=exclude_id,
+            )
+            if existing_ref:
+                raise StampDuplicateError(existing_ref)
         existing = self.stamp_repo.find_existing(
             certificate_number,
             exclude_id=exclude_id,
@@ -425,6 +436,9 @@ class StampService:
         )
         ocr_image_id = form.get("OcrImageID")
         machine_name, ip_address = self._audit_context()
+        entry_mode = self._entry_mode(form)
+        entry_source = {"online": "online", "ocr": "integration"}.get(entry_mode, "manual")
+        website_ref = self._website_reference_from_form(form) if entry_source == "online" else None
 
         stamp_data = {
             "CertificateNumber": certificate_number,
@@ -446,9 +460,15 @@ class StampService:
             "MachineName": machine_name,
             "IPAddress": ip_address,
             "MobileNumber": saved_mobile,
+            "EntrySource": entry_source,
+            "WebsiteReference": website_ref,
         }
 
-        reference_no = (form.get("ReferenceNo") or certificate_number).strip()
+        reference_no = (
+            website_ref
+            if entry_source == "online" and website_ref
+            else (form.get("ReferenceNo") or certificate_number).strip()
+        )
         narration = (form.get("Narration") or "Stamp Sale").strip()
         remarks = (form.get("Remarks") or "").strip() or None
 
@@ -518,7 +538,15 @@ class StampService:
             return result
         except IntegrityError as exc:
             db.session.rollback()
-            if "CertificateNumber" in str(exc.orig):
+            orig = str(exc.orig)
+            if "WebsiteReference" in orig or "UX_StampMaster_WebsiteReference" in orig:
+                existing = self.stamp_repo.find_existing_by_website_reference(
+                    website_ref or ""
+                )
+                if existing:
+                    raise StampDuplicateError(existing) from exc
+                raise ValueError("e-Stamp reference is already entered.") from exc
+            if "CertificateNumber" in orig:
                 existing = self.stamp_repo.find_existing(certificate_number)
                 if existing:
                     raise StampDuplicateError(existing) from exc
@@ -630,11 +658,19 @@ class StampService:
         if daily:
             payments = self._load_payment_lines(daily)
 
+        is_ocr = self.ocr_repo.has_linked_stamp(stamp.StampID)
+        mode = self.stamp_repo.mode_payload(stamp, is_ocr=is_ocr, daily=daily)
+        reference_no = mode["website_reference"] if mode["entry_source"] == "online" else (
+            daily.ReferenceNo if daily else ""
+        )
         return {
             "stamp_id": stamp.StampID,
             "transaction_id": daily.TransactionID if daily else None,
             "bank_transaction_id": daily.BankTransactionID if daily else None,
-            "is_ocr_entry": self.ocr_repo.has_linked_stamp(stamp.StampID),
+            "is_ocr_entry": is_ocr,
+            "entry_source": mode["entry_source"],
+            "entry_mode": mode["entry_mode"],
+            "WebsiteReference": mode["website_reference"],
             "CertificateNumber": stamp.CertificateNumber,
             "CertificateIssuedDate": stamp.CertificateIssuedDate.isoformat()
             if stamp.CertificateIssuedDate
@@ -654,7 +690,7 @@ class StampService:
             if daily and daily.TransactionDate
             else "",
             "CustomerID": "",
-            "ReferenceNo": daily.ReferenceNo if daily else "",
+            "ReferenceNo": reference_no or (daily.ReferenceNo if daily else ""),
             "Narration": daily.Description if daily else "Stamp Sale",
             "Remarks": stamp.Remarks or daily.Remarks if daily else "",
             "BankAccountID": payments[0]["bank_account_id"] if payments else "",
@@ -693,6 +729,34 @@ class StampService:
             forwarded = request.headers.get("X-Forwarded-For", "")
             ip = forwarded.split(",")[0].strip() if forwarded else request.remote_addr
         return machine[:100] if machine else None, (ip or "")[:45] or None
+
+    @staticmethod
+    def _entry_mode(form: dict) -> str:
+        raw = (form.get("EntryMode") or "manual").strip().lower()
+        if raw in {"ocr", "integration"}:
+            return "ocr"
+        if raw == "online":
+            return "online"
+        return "manual"
+
+    @classmethod
+    def _website_reference_from_form(cls, form: dict) -> str:
+        ref = (
+            cls._clean(form.get("WebsiteReference"), 40)
+            or cls._clean(form.get("ReferenceNo"), 40)
+            or ""
+        )
+        return ref.strip().upper()
+
+    @staticmethod
+    def _require_online_order(website_ref: str):
+        from app.services.website_estamp_service import WebsiteEStampService
+
+        order = WebsiteEStampService().get_by_reference(website_ref)
+        if order is None:
+            raise ValueError("e-Stamp order not found for this reference.")
+        if (order.ReviewStatus or "").strip().lower() == "rejected":
+            raise ValueError("This e-Stamp order was rejected.")
 
     @staticmethod
     def _clean(value, max_len: int = 300) -> str | None:

@@ -1,0 +1,41 @@
+{% extends 'layouts/auth_base.html' %}
+
+{% block title %}Other Login{% endblock %}
+{% block subtitle %}Government &amp; Business Services{% endblock %}
+{% block body_extra_class %}jtcs-other-login-page{% endblock %}
+
+{% block extra_css %}
+<link href="{{ url_for('static', filename='css/other_login.css') }}?v=20260911ol3" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ol-toolbar mb-3">
+  <a href="{{ url_for('auth.login') }}" class="small">&larr; Back to JTCS Login</a>
+</div>
+<p class="text-muted small mb-3">
+  Choose a service. Only enabled services can be opened. Others stay Coming Soon until they are switched on.
+</p>
+<div class="ol-grid">
+  {% for item in services %}
+    {% if item.enabled %}
+      <a class="ol-card ol-card-enabled" href="{{ item.login_url }}">
+        <div class="ol-card-icon"><i class="bi {{ item.icon }}"></i></div>
+        <div class="ol-card-body">
+          <h2 class="ol-card-title">{{ item.name }}</h2>
+          <p class="ol-card-sub">{{ item.subtitle }}</p>
+        </div>
+        <span class="ol-card-action btn btn-primary btn-sm">Login</span>
+      </a>
+    {% else %}
+      <div class="ol-card ol-card-disabled" aria-disabled="true">
+        <div class="ol-card-icon"><i class="bi {{ item.icon }}"></i></div>
+        <div class="ol-card-body">
+          <h2 class="ol-card-title">{{ item.name }}</h2>
+          <p class="ol-card-sub">{{ item.subtitle }}</p>
+        </div>
+        <span class="ol-card-action ol-coming-soon"><i class="bi bi-lock-fill"></i> Coming Soon</span>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

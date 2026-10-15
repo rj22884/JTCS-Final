@@ -3,7 +3,8 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20260811reject2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20261006invfit">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261006invact">
 {% endblock %}
 
 {% block content %}
@@ -12,13 +13,104 @@
      data-has-return-type="{{ '1' if module_meta.has_return_type else '0' }}"
      data-has-tds-period-split="{{ '1' if module_meta.get('has_tds_period_split') else '0' }}"
      data-has-gst-fields="{{ '1' if module_meta.get('has_gst_fields') else '0' }}">
-  <div class="jtcs-card mb-2 py-2 px-3">
-    <div class="d-flex flex-wrap align-items-center gap-2">
-      <h5 class="mb-0 me-2">{{ module_meta.title }}</h5>
+  <div class="jtcs-card mb-2 py-2 px-3{% if module_code == 'DSC' %} fu-dsc-toolbar{% endif %}">
+    <div class="d-flex flex-wrap align-items-end gap-2{% if module_code == 'DSC' %} fu-dsc-toolbar-row{% elif module_code == 'GST' %} fu-gst-toolbar-row{% endif %}">
+      <div class="fu-module-title">
+        <h5 class="mb-0">{{ module_meta.title }}</h5>
+        {% if module_code == 'DSC' %}
+        <p class="small text-muted mb-0">{{ module_meta.subtitle }}</p>
+        {% endif %}
+      </div>
       <button type="button" class="btn btn-primary btn-sm" id="fuNewEntryBtn">
         <i class="bi bi-plus-lg"></i> New Entry
       </button>
-      <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+      {% if module_code == 'GST' %}
+      <div class="fu-gst-inline-filters">
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuSearchInput">Search</label>
+          <input type="search" class="form-control form-control-sm" id="fuSearchInput"
+                 placeholder="Name, mobile or PAN">
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuStatusFilter">Workflow Status</label>
+          <select class="form-select form-select-sm" id="fuStatusFilter">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            {% for stage in workflow_stages %}
+            <option value="{{ stage.stage_code }}">{{ stage.stage_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateFromFilter">Date From</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateFromFilter">
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateToFilter">Date To</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateToFilter">
+        </div>
+        <div class="fu-inline-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="fuSearchBtn">Search</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="fuClearFilterBtn" title="Clear filters">Clear</button>
+        </div>
+      </div>
+      {% endif %}
+      {% if module_code == 'DSC' %}
+      <div class="fu-dsc-inline-filters">
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuSearchInput">Filters</label>
+          <input type="search" class="form-control form-control-sm" id="fuSearchInput"
+                 placeholder="Type name, mobile, PAN or email">
+        </div>
+        <div class="fu-dsc-assist" id="fuDscAssist">
+          <div class="fu-dsc-assist-field fu-inline-field" data-assist-key="idsign_business_id">
+            <label class="form-label" for="fuDscBusinessId">Enter your Business Id: (ID-Sign)</label>
+            <div class="fu-dsc-assist-row">
+              <input type="text" class="form-control form-control-sm" id="fuDscBusinessId" maxlength="80" autocomplete="off">
+              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
+              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
+                <i class="bi bi-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="fu-dsc-assist-field fu-inline-field" data-assist-key="customer_video_link">
+            <label class="form-label" for="fuDscVideoLink">Video link for Customer:</label>
+            <div class="fu-dsc-assist-row">
+              <input type="text" class="form-control form-control-sm" id="fuDscVideoLink" maxlength="500" autocomplete="off" placeholder="https://">
+              <button type="button" class="btn btn-primary btn-sm fu-dsc-assist-save">Save</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm fu-dsc-assist-edit d-none">Edit</button>
+              <button type="button" class="btn btn-outline-primary btn-sm fu-dsc-assist-copy d-none" title="Copy">
+                <i class="bi bi-copy"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuStatusFilter">Workflow Status</label>
+          <select class="form-select form-select-sm" id="fuStatusFilter">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            {% for stage in workflow_stages %}
+            <option value="{{ stage.stage_code }}">{{ stage.stage_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateFromFilter">Date From</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateFromFilter">
+        </div>
+        <div class="fu-inline-field">
+          <label class="form-label" for="fuDateToFilter">Date To</label>
+          <input type="date" class="form-control form-control-sm" id="fuDateToFilter">
+        </div>
+        <div class="fu-inline-actions">
+          <button type="button" class="btn btn-primary btn-sm" id="fuSearchBtn">Search</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="fuClearFilterBtn" title="Clear filters">Clear</button>
+        </div>
+      </div>
+      {% endif %}
+      <div class="d-flex flex-wrap align-items-center gap-2{% if module_code != 'DSC' %} ms-auto{% else %} fu-dsc-top-actions{% endif %}">
         {% if module_code == 'DSC' %}
         <a class="btn btn-success btn-sm" href="http://applydsc.idsign.app" target="_blank" rel="noopener noreferrer"
            title="http://applydsc.idsign.app">
@@ -45,7 +137,9 @@
         </button>
       </div>
     </div>
+    {% if module_code != 'DSC' %}
     <p class="small text-muted mb-0 mt-1">{{ module_meta.subtitle }}</p>
+    {% endif %}
   </div>
 
   <div class="fu-stats-row mb-2" id="fuStatsRow">
@@ -53,31 +147,17 @@
       <div class="fu-stat-label">Total Cases</div>
       <div class="fu-stat-value" id="fuStatTotal">0</div>
     </button>
-    {% if module_code == 'ITR' %}
-    {# Excel order: Pending (docs received) → ITR Filed → Bill Generated → Payment Pending → Payment Received #}
-    {% for stage in workflow_stages if stage.stage_code in ['documents_received', 'itr_filed', 'tally_bill_generated'] %}
-    <button type="button" class="fu-stat-card {% if stage.stage_code == 'documents_received' %}border-warning fu-stat-pending is-active{% else %}border-success{% endif %}"
+    {% if module_code in ['ITR', 'GST', 'TDS'] %}
+    {% for stage in workflow_stages if stage.stage_code in ['documents_received', 'return_filed', 'invoice'] %}
+    <button type="button" class="fu-stat-card {% if stage.stage_code == 'documents_received' %}border-warning fu-stat-pending{% if module_code == 'ITR' %} is-active{% endif %}{% else %}border-success{% endif %}"
             data-stage-code="{{ stage.stage_code }}"
             data-status-filter="{{ stage.stage_code }}"
-            title="{% if stage.stage_code == 'documents_received' %}Pending — documents received, no later stage ticked{% else %}Cases currently at {{ stage.stage_name }} (no later stage ticked){% endif %}">
-      <div class="fu-stat-label">{% if stage.stage_code == 'documents_received' %}Pending{% else %}{{ stage.stage_name }}{% endif %}</div>
-      <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
-    </button>
-    {% endfor %}
-    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending"
-            title="Bill generated, payment not received">
-      <div class="fu-stat-label">Payment Pending</div>
-      <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
-    </button>
-    {% for stage in workflow_stages if stage.stage_code == 'payment_received' %}
-    <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
-            data-status-filter="{{ stage.stage_code }}"
-            title="All progress ticks complete (Payment Received)">
+            title="Cases currently at {{ stage.stage_name }} (no later stage ticked)">
       <div class="fu-stat-label">{{ stage.stage_name }}</div>
       <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
     </button>
     {% endfor %}
-    {% for stage in workflow_stages if stage.stage_code not in ['documents_received', 'itr_filed', 'tally_bill_generated', 'payment_received'] %}
+    {% for stage in workflow_stages if stage.stage_code not in ['documents_received', 'return_filed', 'invoice'] %}
     <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
             data-status-filter="{{ stage.stage_code }}"
             title="Filter {{ stage.stage_name }}">
@@ -99,21 +179,17 @@
       <div class="fu-stat-value fu-stat-stage" data-stage-name="{{ stage.stage_name }}">0</div>
     </button>
     {% endfor %}
-    <button type="button" class="fu-stat-card border-info" data-status-filter="payment_pending"
-            title="{% if module_code == 'DSC' %}Bill generated, payment not received{% else %}Filter Payment Pending{% endif %}">
-      <div class="fu-stat-label">Payment Pending</div>
-      <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
-    </button>
     {% endif %}
   </div>
 
   <div class="row g-2 mb-2">
+    {% if module_code != 'DSC' and module_code != 'GST' %}
     <div class="col-lg-3">
       <div class="jtcs-card fu-filter-card p-3">
         <div class="fw-semibold mb-2">Filters</div>
         <label class="form-label" for="fuSearchInput">Search</label>
         <input type="search" class="form-control form-control-sm mb-2" id="fuSearchInput"
-               placeholder="{% if module_code == 'DSC' %}Type name, mobile, PAN or email{% else %}Type name, mobile or PAN{% endif %}">
+               placeholder="Type name, mobile or PAN">
         {% if module_code == 'ITR' %}
         <label class="form-label" for="fuPeriodFilter">Period</label>
         <select class="form-select form-select-sm mb-2" id="fuPeriodFilter">
@@ -138,10 +214,7 @@
         <label class="form-label" for="fuStatusFilter">Workflow Status</label>
         <select class="form-select form-select-sm mb-2" id="fuStatusFilter">
           <option value="">All</option>
-          {% if module_code != 'ITR' %}
           <option value="pending">Pending</option>
-          {% endif %}
-          <option value="payment_pending">Payment Pending</option>
           {% for stage in workflow_stages %}
           <option value="{{ stage.stage_code }}"{% if module_code == 'ITR' and stage.stage_code == 'documents_received' %} selected{% endif %}>{{ stage.stage_name }}</option>
           {% endfor %}
@@ -162,7 +235,8 @@
         </div>
       </div>
     </div>
-    <div class="col-lg-9">
+    {% endif %}
+    <div class="{% if module_code == 'DSC' or module_code == 'GST' %}col-12{% else %}col-lg-9{% endif %}">
       <div class="jtcs-card fu-grid-panel p-2">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
           <div class="small text-muted" id="fuGridMeta">Total: 0 | Pending: 0</div>
@@ -172,8 +246,14 @@
           <table class="table table-sm table-hover table-striped align-middle mb-0" id="fuDataGrid">
             <thead>
               <tr>
+                {% if module_code == 'DSC' %}
+                <th>Actions</th>
+                {% endif %}
                 <th>Date</th>
-                {% if module_code == 'ITR' or module_code == 'GST' or module_meta.get('has_tds_period_split') or module_meta.get('has_gst_fields') %}
+                {% if module_code == 'DSC' %}
+                <th>Type / Class / Year</th>
+                {% endif %}
+                {% if module_code == 'ITR' or module_meta.get('has_tds_period_split') %}
                 <th>Period</th>
                 {% endif %}
                 {% if module_meta.get('has_tds_period_split') %}
@@ -185,15 +265,29 @@
                 <th>Return Type</th>
                 {% endif %}
                 <th>Customer</th>
+                {% if module_code == 'GST' %}
+                <th>Month</th>
+                <th>Tax Year</th>
+                {% endif %}
+                {% if module_code == 'DSC' %}
+                <th>Employee ID</th>
+                <th>Date of Birth</th>
+                {% endif %}
                 <th>Mobile</th>
                 {% if module_code == 'DSC' %}
                 <th>Email</th>
                 {% endif %}
                 <th>PAN</th>
-                <th>{% if module_code == 'DSC' %}Application No.{% else %}Bill No.{% endif %}</th>
+                {% if module_code == 'DSC' %}
+                <th>Aadhaar</th>
+                {% endif %}
+                {% if module_code == 'DSC' %}
+                <th>Application No.</th>
                 <th>Bill Date</th>
+                {% endif %}
                 {% if module_code == 'DSC' %}
                 <th>Check Status</th>
+                <th>Video Link</th>
                 {% else %}
                 <th>Work Type</th>
                 {% endif %}
@@ -204,6 +298,7 @@
                 <th>Return Filing Status</th>
                 <th>Filing Date</th>
                 {% endif %}
+                <th>Invoice</th>
                 <th>Workflow Status</th>
                 {% if module_code == 'ITR' %}
                 <th>Payment Receive Date</th>
@@ -214,7 +309,9 @@
                 <th>Sync</th>
                 {% endif %}
                 <th>Thank You</th>
+                {% if module_code != 'DSC' %}
                 <th class="text-end">Actions</th>
+                {% endif %}
               </tr>
             </thead>
             <tbody id="fuDataGridBody"></tbody>
@@ -249,8 +346,19 @@
               <input type="date" class="form-control" id="fuWorkDate" name="work_date"
                      value="{{ default_date }}" required>
             </div>
+            {% if module_code == 'GST' %}
+            <div class="col-md-4">
+              <label class="form-label fu-required" for="fuGstMonth">Month</label>
+              <select class="form-select" id="fuGstMonth" name="gst_month" required>
+                <option value="">-- Select --</option>
+                {% for month in gst_months %}
+                <option value="{{ month }}" {% if month == default_gst_month %}selected{% endif %}>{{ month }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
             <div class="{% if module_meta.get('has_tds_period_split') %}col-md-2{% else %}col-md-4{% endif %}">
-              <label class="form-label fu-required" for="fuTaxPeriod">Period</label>
+              <label class="form-label fu-required" for="fuTaxPeriod">{% if module_code == 'GST' %}Tax Year{% else %}Period{% endif %}</label>
               <select class="form-select" id="fuTaxPeriod" name="tax_period" required>
                 {% for period in tax_periods %}
                 <option value="{{ period }}" {% if period == default_tax_period %}selected{% endif %}>{{ period }}</option>
@@ -288,6 +396,33 @@
           </div>
 
           {% if module_code == 'DSC' %}
+          <div class="row g-3 mb-2">
+            <div class="col-md-4">
+              <label class="form-label fu-required" for="fuDscType">DSC type</label>
+              <select class="form-select" id="fuDscType" name="dsc_type" required>
+                <option value="">-- Select --</option>
+                <option value="Ind.">Ind.</option>
+                <option value="Org.">Org.</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fu-required" for="fuDscClass">DSC class</label>
+              <select class="form-select" id="fuDscClass" name="dsc_class" required>
+                <option value="">-- Select --</option>
+                <option value="Class-II">Class-II</option>
+                <option value="Class-III">Class-III</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fu-required" for="fuDscYear">Year</label>
+              <select class="form-select" id="fuDscYear" name="dsc_year" required>
+                <option value="">-- Select --</option>
+                <option value="1-Year">1-Year</option>
+                <option value="2-Years">2-Years</option>
+                <option value="3-Years">3-Years</option>
+              </select>
+            </div>
+          </div>
           <div class="row g-3 mb-2">
             <div class="col-md-6">
               <label class="form-label fu-required" for="fuLocation">Location</label>
@@ -368,60 +503,120 @@
             <label class="form-label">Workflow</label>
             <div class="fu-workflow-checks" id="fuWorkflowChecks">
               {% for stage in workflow_stages %}
-              <div class="form-check form-check-inline fu-stage-item" data-stage-code="{{ stage.stage_code }}">
+              <div class="form-check form-check-inline fu-stage-item{% if stage.stage_code == 'invoice' or (module_code == 'DSC' and stage.stage_code == 'tally_bill_generated') %} d-none{% endif %}" data-stage-code="{{ stage.stage_code }}">
                 <input class="form-check-input fu-stage-check" type="checkbox"
                        name="stage_ids" value="{{ stage.stage_id }}" id="fuStage{{ stage.stage_id }}"
                        data-stage-code="{{ stage.stage_code }}">
                 <label class="form-check-label" for="fuStage{{ stage.stage_id }}">{{ stage.stage_name }}</label>
-                {% if stage.stage_code == 'tally_bill_generated' %}
-                <button type="button" class="btn btn-outline-primary btn-sm ms-1 fu-auto-bill-btn d-none" id="fuAutoBillBtn">
-                  Generate Automated Bill
-                </button>
-                {% endif %}
               </div>
+              {% if module_code in ['ITR', 'GST', 'TDS'] and stage.stage_code == 'documents_received' %}
+              <div id="fuInvoiceSummary" class="fu-invoice-summary d-none" aria-live="polite">
+                <div class="fu-invoice-pair">
+                  <div class="fu-invoice-info">
+                    <div class="fu-invoice-card-title">Invoice Information</div>
+                    <div><span>Invoice No.:</span> <strong id="fuInvoiceNo"></strong></div>
+                    <div><span>Invoice Date:</span> <strong id="fuInvoiceDate"></strong></div>
+                    <div><span>Invoice Amount:</span> <strong id="fuInvoiceAmount"></strong></div>
+                  </div>
+                  <div class="fu-pay-adjust" id="fuPaymentAdjust">
+                    <div class="fu-invoice-card-title">Payment Adjustment</div>
+                    <div id="fuPaymentAdjustBody"></div>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
               {% endfor %}
+              {% if module_code == 'DSC' %}
+              <div id="fuInvoiceSummary" class="fu-invoice-summary d-none" aria-live="polite">
+                <div class="fu-invoice-pair">
+                  <div class="fu-invoice-info">
+                    <div class="fu-invoice-card-title">Invoice Information</div>
+                    <div><span>Invoice No.:</span> <strong id="fuInvoiceNo"></strong></div>
+                    <div><span>Invoice Date:</span> <strong id="fuInvoiceDate"></strong></div>
+                    <div><span>Invoice Amount:</span> <strong id="fuInvoiceAmount"></strong></div>
+                  </div>
+                  <div class="fu-pay-adjust" id="fuPaymentAdjust">
+                    <div class="fu-invoice-card-title">Payment Adjustment</div>
+                    <div id="fuPaymentAdjustBody"></div>
+                  </div>
+                </div>
+              </div>
+              {% endif %}
             </div>
           </div>
 
-          <div class="fu-workflow-panel d-none mb-3" id="fuItrFiledWrap" data-stage-panel="itr_filed">
-            <label class="form-label" for="fuItrFiledDate">ITR Filed Date</label>
+          {% if module_code == 'DSC' %}
+          <div class="fu-invoice-actions d-flex flex-wrap gap-1 mb-3" id="fuInvoiceActions">
+            <button type="button" class="btn btn-primary btn-sm" id="fuCreateInvoiceBtn">Create Invoice</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="edit" title="Edit Invoice"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="preview" title="Preview Invoice"><i class="bi bi-eye"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="print" title="Print Invoice"><i class="bi bi-printer"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="pdf" title="Download Invoice PDF"><i class="bi bi-file-earmark-pdf"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="png" title="Download Invoice PNG"><i class="bi bi-image"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="whatsapp" title="Send Invoice on WhatsApp"><i class="bi bi-whatsapp"></i></button>
+            <button type="button" class="btn btn-outline-danger btn-sm d-none fu-inv-act" id="fuDeleteInvoiceBtn" data-inv-act="delete" title="Delete Invoice"><i class="bi bi-trash"></i></button>
+          </div>
+          {% endif %}
+
+          {% if module_code in ['ITR', 'GST', 'TDS'] %}
+          <div class="fu-invoice-actions d-flex flex-wrap gap-1 mb-3" id="fuInvoiceActions">
+            <button type="button" class="btn btn-primary btn-sm" id="fuCreateInvoiceBtn">Create Invoice</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="edit" title="Edit Invoice"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="preview" title="Preview Invoice"><i class="bi bi-eye"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="print" title="Print Invoice"><i class="bi bi-printer"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="pdf" title="Download Invoice PDF"><i class="bi bi-file-earmark-pdf"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="png" title="Download Invoice PNG"><i class="bi bi-image"></i></button>
+            <button type="button" class="btn btn-outline-secondary btn-sm d-none fu-inv-act" data-inv-act="whatsapp" title="Send Invoice on WhatsApp"><i class="bi bi-whatsapp"></i></button>
+            <button type="button" class="btn btn-outline-danger btn-sm d-none fu-inv-act" id="fuDeleteInvoiceBtn" data-inv-act="delete" title="Delete Invoice"><i class="bi bi-trash"></i></button>
+          </div>
+          {% endif %}
+
+          <div class="fu-workflow-panel d-none mb-3" id="fuBillingCustomerWrap">
+            <div class="mb-2">
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="billing_type" id="fuBillingSame"
+                       value="SAME_CUSTOMER">
+                <label class="form-check-label" for="fuBillingSame">Same Customer</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="radio" name="billing_type" id="fuBillingOther"
+                       value="OTHER_CUSTOMER">
+                <label class="form-check-label" for="fuBillingOther">Other Customer</label>
+              </div>
+            </div>
+            <div id="fuBillingCustomerPick" class="position-relative d-none">
+              <label class="form-label fu-required" for="fuBillingCustomerSearch">Billing Customer</label>
+              <input type="hidden" id="fuBillingCustomerId" value="">
+              <input type="text" class="form-control" id="fuBillingCustomerSearch"
+                     placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+              <div id="fuBillingCustomerResults" class="list-group fu-customer-results d-none"></div>
+            </div>
+          </div>
+
+          {% if module_code in ['ITR', 'GST', 'TDS'] %}
+          <div class="fu-workflow-panel d-none mb-3" id="fuItrFiledWrap" data-stage-panel="return_filed">
+            <label class="form-label" for="fuItrFiledDate">Return Filed Date</label>
             <input type="date" class="form-control" id="fuItrFiledDate" name="itr_filed_date"
                    value="{{ default_date }}">
           </div>
+          {% endif %}
 
-          <div class="fu-workflow-panel d-none mb-3" id="fuTallyBillWrap" data-stage-panel="tally_bill_generated">
+          {% if module_code == 'DSC' %}
+          <div class="fu-workflow-panel mb-3" id="fuTallyBillWrap" data-stage-panel="tally_bill_generated">
             <div class="row g-3">
-              <div class="col-md-4">
-                <label class="form-label" for="fuBillNo">Tally Bill Number</label>
-                <input type="text" class="form-control" id="fuBillNo" name="bill_no" maxlength="50"
-                       placeholder="Bill / invoice number">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label" for="fuBillDate">Bill Date</label>
-                <input type="date" class="form-control" id="fuBillDate" name="bill_date" value="{{ default_date }}">
-              </div>
-              <div class="col-md-4">
-                <label class="form-label" for="fuBillAmount">Bill Amount (₹)</label>
-                <input type="number" class="form-control" id="fuBillAmount" name="bill_amount"
-                       min="0" step="0.01" placeholder="0.00">
+              <div class="col-md-6">
+                <label class="form-label" for="fuBillNo">Bill Number</label>
+                <div class="input-group">
+                  <input type="text" class="form-control" id="fuBillNo" name="bill_no" maxlength="50"
+                         placeholder="Bill number" readonly disabled>
+                  <button type="button" class="btn btn-outline-secondary fu-bill-no-copy" id="fuBillNoCopy" title="Copy">
+                    <i class="bi bi-copy"></i>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-
-          <div class="fu-workflow-panel d-none mb-3" id="fuPaymentWrap" data-stage-panel="payment_received">
-            <div class="fu-panel-title mb-2">Payment Received — Bank / QR Details</div>
-            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <label class="form-label mb-0">Payment Modes</label>
-              <button type="button" class="btn btn-sm btn-outline-primary" id="fuAddPaymentBtn">
-                <i class="bi bi-plus-lg"></i> Add Payment Mode
-              </button>
-              <span class="small text-muted ms-auto" id="fuPaymentSummary"></span>
-            </div>
-            <div id="fuPaymentLines" class="fu-payment-lines"></div>
-            {% if not payment_modes %}
-            <div class="small text-danger mt-1">No active bank accounts found in Bank Master.</div>
-            {% endif %}
-          </div>
+          {% endif %}
 
           <div class="mb-3 d-none" id="fuUnverifiedWrap">
             <label class="form-label" for="fuReasonUnverified">Reason for Unverified</label>
@@ -433,10 +628,19 @@
             <textarea class="form-control" id="fuRemarks" name="remarks" rows="3"></textarea>
           </div>
         </form>
+        <div id="fuInvoiceEditor" class="fu-invoice-editor">
+          <div class="fu-invoice-editor-bar">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="fuInvoiceEditorBack">← Back to Follow-up</button>
+            <span class="fw-semibold">Edit Invoice</span>
+          </div>
+          <iframe id="fuInvoiceEditorFrame" title="Edit Invoice"></iframe>
+        </div>
       </div>
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-primary" id="fuSaveBtn">Save</button>
         <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-outline-primary d-none" id="fuEditBtn">Edit</button>
+        <button type="button" class="btn btn-outline-danger d-none" id="fuDeleteBtn">Delete</button>
       </div>
     </div>
   </div>
@@ -533,6 +737,7 @@
   window.FU_CSRF = {{ csrf_token()|tojson }};
   window.FU_ALLOW_CUSTOMER_ADD = {{ allow_customer_add|tojson }};
   window.FU_DEFAULT_TAX_PERIOD = {{ default_tax_period|tojson }};
+  window.FU_DEFAULT_GST_MONTH = {{ default_gst_month|tojson }};
   window.FU_DEFAULT_DATE = {{ default_date|tojson }};
   window.FU_BANK_ACCOUNTS = {{ payment_modes|tojson }};
   window.FU_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
@@ -542,6 +747,9 @@
   window.FU_API = window.FU_API || {};
   if (!window.FU_API.sync_status) {
     window.FU_API.sync_status = "/dsc/followup/records/0/sync-idsign-status";
+  }
+  if (!window.FU_API.public_resume) {
+    window.FU_API.public_resume = "/resume";
   }
   window.FU_DSC_STATUS_BASE = "https://dsc.idsignca.com/ekycadmin/signup/webstatus?ReferenceNo=";
   {% endif %}
@@ -558,5 +766,7 @@
 {% if allow_customer_add %}
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20260823dmy1"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261006invedit"></script>
+<script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261007receiptclose"></script>
 {% endblock %}

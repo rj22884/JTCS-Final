@@ -43,6 +43,13 @@ DSC_DOC_KINDS = {
         "app_path": "AadhaarDocPath",
         "app_name": "AadhaarDocName",
     },
+    "aadhaar_back": {
+        "label": "Aadhaar Back",
+        "path_col": "DscAadhaarBackDocPath",
+        "name_col": "DscAadhaarBackDocName",
+        "app_path": "AadhaarBackDocPath",
+        "app_name": "AadhaarBackDocName",
+    },
     "org_id": {
         "label": "Organization ID",
         "path_col": "DscOrgIdDocPath",
@@ -64,6 +71,8 @@ _SCHEMA_STMTS = (
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscPanDocName') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscPanDocName NVARCHAR(180) NULL",
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscAadhaarDocPath') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscAadhaarDocPath NVARCHAR(400) NULL",
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscAadhaarDocName') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscAadhaarDocName NVARCHAR(180) NULL",
+    "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscAadhaarBackDocPath') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscAadhaarBackDocPath NVARCHAR(400) NULL",
+    "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscAadhaarBackDocName') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscAadhaarBackDocName NVARCHAR(180) NULL",
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscOrgIdDocPath') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscOrgIdDocPath NVARCHAR(400) NULL",
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscOrgIdDocName') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscOrgIdDocName NVARCHAR(180) NULL",
     "IF COL_LENGTH(N'dbo.CustomerMaster', N'DscAuthLetterPath') IS NULL ALTER TABLE dbo.CustomerMaster ADD DscAuthLetterPath NVARCHAR(400) NULL",
@@ -73,8 +82,15 @@ _SCHEMA_STMTS = (
     "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'PanDocName') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD PanDocName NVARCHAR(180) NULL",
     "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'AadhaarDocPath') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD AadhaarDocPath NVARCHAR(400) NULL",
     "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'AadhaarDocName') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD AadhaarDocName NVARCHAR(180) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'AadhaarBackDocPath') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD AadhaarBackDocPath NVARCHAR(400) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'AadhaarBackDocName') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD AadhaarBackDocName NVARCHAR(180) NULL",
     "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OrgIdDocPath') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OrgIdDocPath NVARCHAR(400) NULL",
     "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OrgIdDocName') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OrgIdDocName NVARCHAR(180) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OcrVerified') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OcrVerified BIT NOT NULL CONSTRAINT DF_WebsiteDscApplication_OcrVerified DEFAULT 0",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OcrName') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OcrName NVARCHAR(160) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OcrPan') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OcrPan NVARCHAR(10) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OcrAadhaarLast4') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OcrAadhaarLast4 NVARCHAR(4) NULL",
+    "IF COL_LENGTH(N'dbo.WebsiteDscApplication', N'OcrAddress') IS NULL ALTER TABLE dbo.WebsiteDscApplication ADD OcrAddress NVARCHAR(400) NULL",
 )
 
 
@@ -222,6 +238,21 @@ def docs_for_pan(pan: str) -> list[dict]:
     except Exception:
         logger.warning("DSC document status for PAN skipped", exc_info=True)
         return []
+
+
+def docs_for_aadhaar(aadhaar: str) -> list[dict]:
+    found = CustomerRepository().find_by_aadhaar(aadhaar)
+    if not found:
+        return []
+    try:
+        return customer_doc_status(int(found["CustomerID"]))
+    except Exception:
+        logger.warning("DSC document status for Aadhaar skipped", exc_info=True)
+        return []
+
+
+def aadhaar_exists(aadhaar: str) -> bool:
+    return bool(CustomerRepository().find_by_aadhaar(aadhaar))
 
 
 def _resolve_stored_path(stored: str) -> Path:
