@@ -316,7 +316,11 @@
     if (!previewKind || !previewId) return;
     const url = exportUrl(previewKind, previewId, fmt);
     if (!url) return;
-    window.location.href = url + previewDateQuery();
+    const full = url + previewDateQuery();
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
   }
 
   function normalizeHeader(h) {

@@ -447,7 +447,11 @@
       alert("Export URL is not configured.");
       return;
     }
-    window.location.href = url + dateQuery();
+    const full = url + dateQuery();
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
   }
 
   function onSortHeader(event) {

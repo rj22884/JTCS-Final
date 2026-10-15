@@ -2269,6 +2269,199 @@ class LedgerReportService:
             return ""
         return f"{Decimal(str(value or 0)):.2f}"
 
+    _EXPORT_GROUP_MODES = ("week", "month", "quarter", "year", "debit", "credit")
+    _EXPORT_PERIOD_MODES = ("week", "month", "quarter", "year")
+    _EXPORT_GROUP_LABELS = {
+        "week": "Week",
+        "month": "Month",
+        "quarter": "Quarter",
+        "year": "Year",
+        "debit": "Debit",
+        "credit": "Credit",
+    }
+    _EXPORT_MONTH_NAMES = (
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    )
+
+    @staticmethod
+    def _indian_money(value: Any) -> str:
+        amount = Decimal(str(value or 0)).quantize(Decimal("0.01"))
+        sign = "-" if amount < 0 else ""
+        whole, frac = f"{abs(amount):.2f}".split(".")
+        if len(whole) > 3:
+            head, tail = whole[:-3], whole[-3:]
+            chunks: list[str] = []
+            while head:
+                chunks.append(head[-2:])
+                head = head[:-2]
+            whole = ",".join(reversed(chunks)) + "," + tail
+        return f"{sign}{whole}.{frac}"
+
+    @staticmethod
+    def _parse_export_date(raw: Any) -> date | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return datetime.strptime(text[:10], fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    def _line_search_text(self, line: dict[str, Any]) -> str:
+        bits = [str(line.get("date") or ""), str(line.get("description") or "")]
+        for key in ("debit", "credit", "balance"):
+            value = line.get(key)
+            if value is None:
+                bits.append("—")
+                continue
+            amount = self._money(value)
+            bits.append(f"{amount:.2f}")
+            bits.append(self._indian_money(amount))
+        return " ".join(bits).lower()
+
+    def _export_sort_value(self, line: dict[str, Any], sort_key: str):
+        if sort_key == "description":
+            return str(line.get("description") or "").lower()
+        if sort_key in ("debit", "credit", "balance"):
+            value = line.get(sort_key)
+            return float(self._money(value)) if value is not None else 0.0
+        parsed = self._parse_export_date(line.get("sort_date")) or self._parse_export_date(
+            line.get("date")
+        )
+        return parsed.isoformat() if parsed else ""
+
+    def _period_export_group(self, line: dict[str, Any], mode: str) -> tuple[str, str]:
+        parsed = self._parse_export_date(line.get("sort_date")) or self._parse_export_date(
+            line.get("date")
+        )
+        if parsed is None:
+            return "9999-99-99", "—"
+        if mode == "week":
+            start = parsed - timedelta(days=parsed.weekday())
+            end = start + timedelta(days=6)
+            return (
+                start.isoformat(),
+                f"Week: {start.strftime('%d/%m/%Y')} – {end.strftime('%d/%m/%Y')}",
+            )
+        if mode == "month":
+            return (
+                f"{parsed.year}-{parsed.month:02d}",
+                f"Month: {self._EXPORT_MONTH_NAMES[parsed.month - 1]} {parsed.year}",
+            )
+        if parsed.month >= 4:
+            quarter = (parsed.month - 4) // 3 + 1
+            fy_year = parsed.year
+        else:
+            quarter = 4
+            fy_year = parsed.year - 1
+        fy_label = f"FY {fy_year}-{str(fy_year + 1)[-2:]}"
+        if mode == "quarter":
+            return f"{fy_year}-Q{quarter}", f"Quarter: Q{quarter} {fy_label}"
+        return str(fy_year), f"Year: {fy_label}"
+
+    def _export_group_key_label(self, line: dict[str, Any], mode: str) -> tuple[str, str]:
+        if mode in self._EXPORT_PERIOD_MODES:
+            return self._period_export_group(line, mode)
+        column = "debit" if mode == "debit" else "credit"
+        amount = self._money(line.get(column))
+        label = self._EXPORT_GROUP_LABELS[mode]
+        return f"{amount:.2f}", f"{label}: {self._indian_money(amount)}"
+
+    def _export_view_lines(
+        self,
+        lines: list[dict[str, Any]],
+        *,
+        group_by: str | None,
+        grid_q: str | None,
+        sort_key: str | None,
+        sort_dir: str | None,
+    ) -> list[dict[str, Any]]:
+        """Match the on-screen grid: filter, sort, then week/month/quarter/year totals."""
+        mode = (group_by or "").strip().lower()
+        if mode not in self._EXPORT_GROUP_MODES:
+            mode = ""
+        needle = (grid_q or "").strip().lower()
+        key = (sort_key or "").strip().lower()
+        if key not in ("date", "description", "debit", "credit", "balance"):
+            key = ""
+        if not mode and not needle and not key:
+            return lines
+
+        opening = [line for line in lines if (line.get("kind") or "") == "opening"]
+        rest = [line for line in lines if (line.get("kind") or "") != "opening"]
+        if needle:
+            rest = [line for line in rest if needle in self._line_search_text(line)]
+        if key:
+            reverse = (sort_dir or "").strip().lower() == "desc"
+            rest = sorted(rest, key=lambda line: self._export_sort_value(line, key), reverse=reverse)
+        if not mode:
+            return opening + rest
+
+        groups: list[dict[str, Any]] = []
+        index: dict[str, int] = {}
+        for line in rest:
+            group_key, label = self._export_group_key_label(line, mode)
+            slot = index.get(group_key)
+            if slot is None:
+                index[group_key] = len(groups)
+                groups.append({"key": group_key, "label": label, "rows": []})
+            groups[index[group_key]]["rows"].append(line)
+        if mode in self._EXPORT_PERIOD_MODES:
+            groups.sort(key=lambda group: group["key"])
+
+        total_word = (
+            f"{self._EXPORT_GROUP_LABELS[mode]} Total"
+            if mode in self._EXPORT_PERIOD_MODES
+            else "Total Debit / Credit"
+        )
+        out = list(opening)
+        for group in groups:
+            rows = group["rows"]
+            debit = Decimal("0.00")
+            credit = Decimal("0.00")
+            for line in rows:
+                debit += self._money(line.get("debit"))
+                credit += self._money(line.get("credit"))
+            debit = self._money(debit)
+            credit = self._money(credit)
+            count = len(rows)
+            count_label = f"{count} record" if count == 1 else f"{count} records"
+            out.append(
+                {
+                    "kind": "group_header",
+                    "date": "",
+                    "description": f"{group['label']} ({count_label})",
+                    "debit": debit,
+                    "credit": credit,
+                    "balance": None,
+                }
+            )
+            out.extend(rows)
+            out.append(
+                {
+                    "kind": "group_total",
+                    "date": "",
+                    "description": total_word,
+                    "debit": debit,
+                    "credit": credit,
+                    "balance": None,
+                }
+            )
+        return out
+
     def export_ledger(
         self,
         kind: str,
@@ -2277,12 +2470,23 @@ class LedgerReportService:
         fmt: str,
         date_from: date | None = None,
         date_to: date | None = None,
+        group_by: str | None = None,
+        grid_q: str | None = None,
+        sort_key: str | None = None,
+        sort_dir: str | None = None,
     ) -> tuple[bytes, str, str]:
         fmt_key = (fmt or "").strip().lower()
         if fmt_key not in self.EXPORT_FORMATS:
             raise ValueError("Unsupported export format. Use pdf, xlsx, csv, or xml.")
         ledger = self.preview_ledger(
             kind, entity_id, date_from=date_from, date_to=date_to
+        )
+        ledger["lines"] = self._export_view_lines(
+            list(ledger.get("lines") or []),
+            group_by=group_by,
+            grid_q=grid_q,
+            sort_key=sort_key,
+            sort_dir=sort_dir,
         )
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         base = (
@@ -2322,6 +2526,8 @@ class LedgerReportService:
         title_font = Font(name="Calibri", bold=True, size=14, color="154375")
         meta_font = Font(name="Calibri", size=10, color="1C2833")
         open_fill = PatternFill("solid", fgColor="EAF2F8")
+        group_header_fill = PatternFill("solid", fgColor="154375")
+        group_total_fill = PatternFill("solid", fgColor="E8EEF5")
 
         ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
         ws["A1"] = "Joshi Tax Consultancy & Services"
@@ -2360,6 +2566,7 @@ class LedgerReportService:
                 float(line["credit"]) if line.get("credit") is not None else None,
                 float(line["balance"]) if line.get("balance") is not None else None,
             ]
+            kind = (line.get("kind") or "")
             for col, value in enumerate(values, start=1):
                 cell = ws.cell(row=row_idx, column=col, value=value)
                 cell.border = thin
@@ -2367,8 +2574,14 @@ class LedgerReportService:
                 if col >= 3 and value is not None:
                     cell.number_format = "#,##0.00"
                     cell.alignment = Alignment(horizontal="right")
-                if (line.get("kind") or "") == "opening":
+                if kind == "opening":
                     cell.fill = open_fill
+                    cell.font = Font(name="Calibri", bold=True, size=10)
+                elif kind == "group_header":
+                    cell.fill = group_header_fill
+                    cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=10)
+                elif kind == "group_total":
+                    cell.fill = group_total_fill
                     cell.font = Font(name="Calibri", bold=True, size=10)
             row_idx += 1
 
@@ -2501,6 +2714,17 @@ class LedgerReportService:
             leading=10,
             textColor=colors.HexColor("#1C2833"),
         )
+        cell_bold = ParagraphStyle(
+            "LrCellBold",
+            parent=cell_style,
+            fontName="Helvetica-Bold",
+        )
+        cell_head = ParagraphStyle(
+            "LrCellHead",
+            parent=cell_style,
+            fontName="Helvetica-Bold",
+            textColor=colors.white,
+        )
 
         story: list[Any] = [
             Paragraph("Joshi Tax Consultancy &amp; Services", brand),
@@ -2526,6 +2750,14 @@ class LedgerReportService:
             ["Date", "Description", "Debit", "Credit", "Closing Balance"]
         ]
         for line in ledger.get("lines") or []:
+            kind = (line.get("kind") or "")
+            desc_style = (
+                cell_head
+                if kind == "group_header"
+                else cell_bold
+                if kind == "group_total"
+                else cell_style
+            )
             table_data.append(
                 [
                     str(line.get("date") or ""),
@@ -2534,7 +2766,7 @@ class LedgerReportService:
                         .replace("&", "&amp;")
                         .replace("<", "&lt;")
                         .replace(">", "&gt;"),
-                        cell_style,
+                        desc_style,
                     ),
                     self._fmt_export_money(line.get("debit")),
                     self._fmt_export_money(line.get("credit")),
@@ -2559,9 +2791,21 @@ class LedgerReportService:
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ]
         for i, line in enumerate(ledger.get("lines") or [], start=1):
-            if (line.get("kind") or "") == "opening":
+            kind = (line.get("kind") or "")
+            if kind == "opening":
                 style_cmds.append(
                     ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#EAF2F8"))
+                )
+                style_cmds.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
+            elif kind == "group_header":
+                style_cmds.append(
+                    ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#154375"))
+                )
+                style_cmds.append(("TEXTCOLOR", (0, i), (-1, i), colors.white))
+                style_cmds.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
+            elif kind == "group_total":
+                style_cmds.append(
+                    ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#E8EEF5"))
                 )
                 style_cmds.append(("FONTNAME", (0, i), (-1, i), "Helvetica-Bold"))
         table.setStyle(TableStyle(style_cmds))

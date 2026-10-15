@@ -640,6 +640,26 @@
 
   window.JTCSLedgerPreview = {
     dateQuery: dateQuery,
+    viewQuery: function () {
+      const params = new URLSearchParams();
+      if (groupBy) params.set("group_by", groupBy);
+      const box = document.getElementById("ledgerPreviewFilter");
+      const q = box ? String(box.value || "").trim() : "";
+      if (q) params.set("grid_q", q);
+      if (groupBy || q) {
+        params.set("sort_key", sortKey || "date");
+        params.set("sort_dir", sortDir < 0 ? "desc" : "asc");
+      }
+      return params.toString();
+    },
+    appendView: function (url) {
+      const extra =
+        window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.viewQuery === "function"
+          ? window.JTCSLedgerPreview.viewQuery()
+          : "";
+      if (!extra) return url;
+      return url + (String(url).indexOf("?") >= 0 ? "&" : "?") + extra;
+    },
     setReloader: function (fn) {
       reloadPreview = fn;
     },

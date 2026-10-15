@@ -199,7 +199,11 @@
       alert("Export URL is not configured.");
       return;
     }
-    window.location.href = url + dateQuery(currentAllDates);
+    const full = url + dateQuery(currentAllDates);
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
   }
 
   function onExportClick(event) {

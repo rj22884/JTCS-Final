@@ -272,6 +272,10 @@ def export(kind: str, entity_id: int, fmt: str):
             fmt=fmt,
             date_from=date_from,
             date_to=date_to,
+            group_by=request.args.get("group_by"),
+            grid_q=request.args.get("grid_q"),
+            sort_key=request.args.get("sort_key"),
+            sort_dir=request.args.get("sort_dir"),
         )
         return send_file(
             io.BytesIO(content),
