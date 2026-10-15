@@ -2035,3 +2035,71 @@ def website_intake():
         return jsonify({"ok": True, "lead_id": lead_id, "duplicate": bool((result or {}).get("duplicate"))}), 201
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+def _print_job_api_authorized() -> bool:
+    import hmac
+
+    expected = (current_app.config.get("PRINT_JOB_API_KEY") or "").strip()
+    provided = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("X-Print-Api-Key")
+        or (request.get_json(silent=True) or {}).get("api_key")
+        or ""
+    ).strip()
+    return bool(expected and provided and hmac.compare_digest(provided, expected))
+
+
+@public_intake_bp.route("/print-job-billing", methods=["POST"])
+def print_job_billing():
+    """Token-gated: Document Print completion → Misc Activity (Daily Customer) + invoice.
+
+    Invoice is created with Bill Approved = No (manual approve only).
+    """
+    if not _print_job_api_authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        from app.services.print_job_billing_service import PrintJobBillingService
+
+        result = PrintJobBillingService().create_from_print_job(payload)
+        status = 200 if not result.get("created") else 201
+        return jsonify(result), status
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        current_app.logger.exception("print_job_billing failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@public_intake_bp.route("/print-job-billing/<public_id>", methods=["GET"])
+def print_job_billing_status(public_id: str):
+    """Token-gated: approval status for a print-origin Misc/invoice."""
+    if not _print_job_api_authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    try:
+        from app.services.print_job_billing_service import PrintJobBillingService
+
+        return jsonify(PrintJobBillingService().status(public_id))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        current_app.logger.exception("print_job_billing_status failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@public_intake_bp.route("/print-job-billing/<public_id>", methods=["DELETE"])
+def print_job_billing_delete(public_id: str):
+    """Token-gated: delete Misc+invoice only when Bill Approved is still No."""
+    if not _print_job_api_authorized():
+        return jsonify({"ok": False, "error": "Unauthorized"}), 401
+    try:
+        from app.services.print_job_billing_service import PrintJobBillingService
+
+        return jsonify(PrintJobBillingService().delete_if_unapproved(public_id))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 403
+    except Exception as exc:
+        current_app.logger.exception("print_job_billing_delete failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500

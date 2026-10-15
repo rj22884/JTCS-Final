@@ -1853,6 +1853,166 @@ class LedgerExportService:
             }
         return out
 
+    def _oie_txn_date(self, pay_date, work_date) -> date | None:
+        value = pay_date or work_date
+        if isinstance(value, datetime):
+            return value.date()
+        return value
+
+    def _customer_oie_rows(self, *, customer_id: int | None = None, customer_ids: list[int] | None = None):
+        """Income / Expense bills for a selected customer. Money In/Out is not read here."""
+        if customer_id:
+            pred = "m.CustomerID = :customer_id"
+            params: dict[str, Any] = {"customer_id": int(customer_id)}
+        else:
+            ids = [int(n) for n in (customer_ids or []) if int(n) > 0]
+            if not ids:
+                return []
+            pred = "m.CustomerID IN (" + ", ".join(str(n) for n in ids) + ")"
+            params = {}
+        return db.session.execute(
+            text(
+                f"""
+                SELECT
+                    m.CustomerID,
+                    m.EntryID,
+                    m.BillNo,
+                    m.Amount,
+                    m.WorkDate,
+                    m.Remarks,
+                    ISNULL(w.WorkName, N'') AS WorkName,
+                    ISNULL(w.LedgerKind, N'') AS LedgerKind,
+                    pay.TransactionID,
+                    pay.PayDate,
+                    pay.BankName,
+                    pay.MaskedAccountNumber
+                FROM dbo.OthersIncomeExpenseMaster m
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = m.WorkID
+                OUTER APPLY (
+                    SELECT TOP 1
+                        d.TransactionID,
+                        bt.TransactionDate AS PayDate,
+                        bt.BankName,
+                        bt.MaskedAccountNumber
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction bt
+                        ON bt.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.Status = N'Posted'
+                      AND d.WorkType = N'Others'
+                      AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                          = UPPER(LTRIM(RTRIM(ISNULL(m.BillNo, N''))))
+                    ORDER BY d.TransactionID DESC
+                ) pay
+                WHERE {pred}
+                  AND ISNULL(m.IsActive, 1) = 1
+                  AND ISNULL(m.Amount, 0) <> 0
+                  AND LOWER(LTRIM(RTRIM(ISNULL(w.LedgerKind, N'')))) IN (N'income', N'expense')
+                """
+            ),
+            params,
+        ).mappings().all()
+
+    def _customer_oie_ledger_parts(
+        self,
+        customer_id: int,
+        *,
+        date_from: date,
+        date_to: date,
+        ob_date: date | None,
+    ) -> tuple[Decimal, Decimal, list[dict[str, Any]]]:
+        """Expense debits the customer. Income credits the customer."""
+        prior_debit = Decimal("0.00")
+        prior_credit = Decimal("0.00")
+        period: list[dict[str, Any]] = []
+        for row in self._customer_oie_rows(customer_id=customer_id):
+            txn_date = self._oie_txn_date(row.get("PayDate"), row.get("WorkDate"))
+            if txn_date is None or txn_date > date_to:
+                continue
+            amount = self._money(row.get("Amount"))
+            if amount == 0:
+                continue
+            is_expense = (row.get("LedgerKind") or "").strip().lower().startswith("expense")
+            if txn_date < date_from:
+                if ob_date is not None and txn_date <= ob_date:
+                    continue
+                if is_expense:
+                    prior_debit += amount
+                else:
+                    prior_credit += amount
+                continue
+            work_name = (row.get("WorkName") or "").strip()
+            side = "Expense" if is_expense else "Income"
+            bank_name = (row.get("BankName") or "").strip()
+            bank_ref = (row.get("MaskedAccountNumber") or "").strip()
+            bank_label = f"{bank_name} {bank_ref}".strip()
+            desc = f"Income / Expense — {work_name} ({side})" if work_name else f"Income / Expense ({side})"
+            if bank_label:
+                desc = f"{desc} · {bank_label}"
+            period.append(
+                {
+                    "TransactionID": int(row["TransactionID"]) if row.get("TransactionID") else None,
+                    "TransactionDate": txn_date,
+                    "WorkType": "Others",
+                    "SubWorkType": f"Income / Expense - {work_name}" if work_name else "Income / Expense",
+                    "StampID": None,
+                    "ReferenceNo": (row.get("BillNo") or "").strip(),
+                    "Description": desc,
+                    "Remarks": (row.get("Remarks") or "").strip(),
+                    "SaleAmount": amount if is_expense else Decimal("0.00"),
+                    "IncomeAmount": Decimal("0.00"),
+                    "BankDebit": Decimal("0.00"),
+                    "PaymentTotal": Decimal("0.00"),
+                    "ReceiptAmount": Decimal("0.00") if is_expense else amount,
+                }
+            )
+        return self._money(prior_debit), self._money(prior_credit), period
+
+    def customer_oie_as_of_totals(
+        self,
+        customer_ids: list[int],
+        as_of: date,
+        *,
+        has_opening_cols: bool,
+    ) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+        """Debit (expense) and credit (income) already posted to each customer."""
+        debits: dict[int, Decimal] = {}
+        credits: dict[int, Decimal] = {}
+        if not customer_ids:
+            return debits, credits
+        openings: dict[int, date | None] = {}
+        if has_opening_cols:
+            id_sql = ", ".join(str(int(n)) for n in customer_ids)
+            for row in db.session.execute(
+                text(
+                    f"""
+                    SELECT CustomerID, OpeningBalanceDate
+                    FROM dbo.CustomerMaster
+                    WHERE CustomerID IN ({id_sql})
+                    """
+                )
+            ).mappings().all():
+                ob_date = row.get("OpeningBalanceDate")
+                if isinstance(ob_date, datetime):
+                    ob_date = ob_date.date()
+                openings[int(row["CustomerID"])] = ob_date
+        for row in self._customer_oie_rows(customer_ids=customer_ids):
+            cid = int(row["CustomerID"])
+            txn_date = self._oie_txn_date(row.get("PayDate"), row.get("WorkDate"))
+            if txn_date is None or txn_date > as_of:
+                continue
+            ob_date = openings.get(cid) if has_opening_cols else None
+            if ob_date is not None and txn_date < ob_date:
+                continue
+            amount = self._money(row.get("Amount"))
+            if (row.get("LedgerKind") or "").strip().lower().startswith("expense"):
+                debits[cid] = debits.get(cid, Decimal("0.00")) + amount
+            else:
+                credits[cid] = credits.get(cid, Decimal("0.00")) + amount
+        return (
+            {cid: self._money(amt) for cid, amt in debits.items()},
+            {cid: self._money(amt) for cid, amt in credits.items()},
+        )
+
     def _customer_ledger_data(
         self,
         customer_id: int,
@@ -2125,6 +2285,29 @@ class LedgerExportService:
                         int(r.get("TransactionID") or 0),
                     )
                 )
+
+        # Income / Expense for the selected customer. Money In/Out rows stay as they are.
+        try:
+            prior_oie_debit, prior_oie_credit, oie_rows = self._customer_oie_ledger_parts(
+                customer_id,
+                date_from=date_from,
+                date_to=date_to,
+                ob_date=ob_date,
+            )
+        except Exception:
+            db.session.rollback()
+            prior_oie_debit = Decimal("0.00")
+            prior_oie_credit = Decimal("0.00")
+            oie_rows = []
+        opening = self._money(opening + prior_oie_debit - prior_oie_credit)
+        if oie_rows:
+            rows.extend(oie_rows)
+            rows.sort(
+                key=lambda r: (
+                    r.get("TransactionDate") or date.min,
+                    int(r.get("TransactionID") or 0),
+                )
+            )
 
         name = (customer["CustomerName"] or f"Customer {customer_id}").strip()
         chart_group_name = ""

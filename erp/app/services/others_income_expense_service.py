@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -1009,6 +1009,128 @@ class OthersIncomeExpenseService:
             bill_no = self.entry_repo.next_bill_no_after(bill_no, ledger_kind=ledger_kind)
         return bill_no
 
+    def duplicate_customer_warning(
+        self,
+        *,
+        customer_id: int,
+        amount: Decimal,
+        dates: list[date],
+        exclude_entry_id: int | None = None,
+    ) -> dict:
+        """Same customer, same date and same amount already on Income/Expense or Money In/Out."""
+        if customer_id <= 0 or amount <= 0 or not dates:
+            return {"duplicate": False, "message": "", "matches": []}
+        unique_dates = sorted(set(dates))
+        date_params = {f"d{i}": value for i, value in enumerate(unique_dates)}
+        date_sql = ", ".join(f":d{i}" for i in range(len(unique_dates)))
+        params: dict = {"customer_id": customer_id, "amount": amount, **date_params}
+        exclude_sql = ""
+        if exclude_entry_id:
+            exclude_sql = "AND m.EntryID <> :exclude_entry_id"
+            params["exclude_entry_id"] = int(exclude_entry_id)
+        matches: list[dict] = []
+        oie_rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    m.EntryID,
+                    m.BillNo,
+                    m.WorkDate,
+                    m.Amount,
+                    ISNULL(w.LedgerKind, N'') AS LedgerKind,
+                    pay.PayDate
+                FROM dbo.OthersIncomeExpenseMaster m
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = m.WorkID
+                OUTER APPLY (
+                    SELECT TOP 1 bt.TransactionDate AS PayDate
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction bt
+                        ON bt.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.Status = N'Posted'
+                      AND d.WorkType = N'Others'
+                      AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                          = UPPER(LTRIM(RTRIM(ISNULL(m.BillNo, N''))))
+                    ORDER BY d.TransactionID DESC
+                ) pay
+                WHERE m.CustomerID = :customer_id
+                  AND ISNULL(m.IsActive, 1) = 1
+                  AND ABS(ISNULL(m.Amount, 0) - :amount) < 0.01
+                  AND LOWER(LTRIM(RTRIM(ISNULL(w.LedgerKind, N'')))) IN (N'income', N'expense')
+                  AND (
+                        m.WorkDate IN ({date_sql})
+                     OR pay.PayDate IN ({date_sql})
+                  )
+                  {exclude_sql}
+                """
+            ),
+            params,
+        ).mappings().all()
+        for row in oie_rows:
+            shown = row.get("PayDate") or row.get("WorkDate")
+            if isinstance(shown, datetime):
+                shown = shown.date()
+            kind = (row.get("LedgerKind") or "").strip() or "Income / Expense"
+            matches.append(
+                {
+                    "source": "Income / Expense",
+                    "ref": (row.get("BillNo") or "").strip(),
+                    "date": shown.strftime("%d/%m/%Y") if shown else "",
+                    "amount": f"{self._money_plain(row.get('Amount')):,.2f}",
+                    "kind": kind,
+                }
+            )
+        obc_rows = db.session.execute(
+            text(
+                f"""
+                SELECT DISTINCT e.EntryID, e.VoucherNo, e.WorkDate, e.Amount, e.Purpose
+                FROM dbo.OthersBankCashTransaction e
+                INNER JOIN dbo.ChartOfAccountMaster a
+                    ON a.CustomerID = :customer_id
+                   AND ISNULL(a.IsActive, 1) = 1
+                WHERE ISNULL(e.IsActive, 1) = 1
+                  AND ABS(ISNULL(e.Amount, 0) - :amount) < 0.01
+                  AND e.WorkDate IN ({date_sql})
+                  AND (
+                        e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                     OR e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                  )
+                """
+            ),
+            params,
+        ).mappings().all()
+        for row in obc_rows:
+            shown = row.get("WorkDate")
+            if isinstance(shown, datetime):
+                shown = shown.date()
+            ref = (row.get("VoucherNo") or "").strip() or (row.get("Purpose") or "").strip()
+            matches.append(
+                {
+                    "source": "Money In / Out",
+                    "ref": ref,
+                    "date": shown.strftime("%d/%m/%Y") if shown else "",
+                    "amount": f"{self._money_plain(row.get('Amount')):,.2f}",
+                    "kind": "Money In / Out",
+                }
+            )
+        if not matches:
+            return {"duplicate": False, "message": "", "matches": []}
+        detail = "; ".join(
+            f"{item['date']} ₹{item['amount']} {item['ref']} ({item['source']})".strip()
+            for item in matches[:5]
+        )
+        return {
+            "duplicate": True,
+            "message": f"Pehle ye entry ho chuki hai: {detail}. Please confirm.",
+            "matches": matches[:5],
+        }
+
+    @staticmethod
+    def _money_plain(value) -> Decimal:
+        try:
+            return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return Decimal("0.00")
+
     def save_entry(self, form: dict, *, created_by: str) -> OthersIncomeExpenseSaveResult:
         self.entry_repo.ensure_schema()
         entry_id = self._entry_id_from_form(form)
@@ -1103,6 +1225,10 @@ class OthersIncomeExpenseService:
         customer_name = (form.get("CustomerName") or form.get("customer_name") or "").strip() or None
         mobile_number = (form.get("MobileNumber") or form.get("mobile_number") or "").strip() or None
         customer_id = self._int_from_form(form, "CustomerID", "customer_id")
+        if ledger_kind in (self.LEDGER_INCOME, self.LEDGER_EXPENSE) and not customer_id:
+            raise ValueError(
+                "Customer select karna zaroori hai. Naam pata na ho to Daily Customer chunen."
+            )
         remarks = (form.get("Remarks") or form.get("remarks") or "").strip() or None
         if tally_bill and not customer_name:
             raise ValueError("Customer name is required when Tally Bill Generated is checked.")
@@ -1256,20 +1382,28 @@ class OthersIncomeExpenseService:
                 raise ValueError(f"Bill number {bill_no} already exists.") from exc
             raise
 
-    def delete_entry(self, entry_id: int) -> str:
+    def delete_entry(self, entry_id: int, *, allow_print_source: bool = False) -> str:
         self.entry_repo.ensure_schema()
         row = self.entry_repo.get_by_id(entry_id)
         if row is None:
             raise ValueError("Income / expense record not found.")
+
+        if not allow_print_source:
+            from app.services.print_job_billing_service import PrintJobBillingService
+
+            PrintJobBillingService().assert_ui_delete_allowed(
+                getattr(row, "Remarks", None),
+                getattr(row, "TallyBillNo", None),
+            )
 
         bill_no = row.BillNo
         tally_no = (getattr(row, "TallyBillNo", None) or "").strip()
         from app.services.gst_invoice_service import GstInvoiceService
 
         invoices = GstInvoiceService()
-        invoices.delete_invoices_for_bill_if_any(bill_no)
+        invoices.delete_invoices_for_bill_if_any(bill_no, allow_print_source=allow_print_source)
         if tally_no and tally_no != (bill_no or "").strip():
-            invoices.delete_invoices_for_bill_if_any(tally_no)
+            invoices.delete_invoices_for_bill_if_any(tally_no, allow_print_source=allow_print_source)
         from app.models.gst_billing import GstInvoice
 
         linked_ids = [
@@ -1279,7 +1413,11 @@ class OthersIncomeExpenseService:
             ).all()
         ]
         for invoice_id in linked_ids:
-            invoices.delete_record(invoice_id, enforce_owner=False)
+            invoices.delete_record(
+                invoice_id,
+                enforce_owner=False,
+                allow_print_source=allow_print_source,
+            )
         row = self.entry_repo.get_by_id(entry_id)
         if row is None:
             raise ValueError("Income / expense record not found.")

@@ -441,6 +441,7 @@ class DashboardService:
                     CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
         """
         group_join = ""
+        cash_group_sql = ""
         if self._has_bank_chart_group():
             group_select = """
                     g.UnderType,
@@ -454,6 +455,9 @@ class DashboardService:
                     ) AS GroupNature
             """
             group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
+            cash_group_sql = (
+                "AND LOWER(LTRIM(RTRIM(ISNULL(g.GroupName, N'')))) <> N'cash-in-hand'"
+            )
         rows = db.session.execute(
             text(
                 f"""
@@ -484,7 +488,9 @@ class DashboardService:
                     {group_select}
                 FROM JtcsBankAccountMaster a
                 {group_join}
-                WHERE a.BankName <> N'Cash'
+                WHERE LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) <> N'cash'
+                  AND LOWER(LTRIM(RTRIM(ISNULL(a.AccountNumber, N'')))) <> N'cash'
+                  {cash_group_sql}
                   AND {self._active_account_sql("a")}
                 ORDER BY
                     ISNULL(a.DisplayOrder, 2147483647),

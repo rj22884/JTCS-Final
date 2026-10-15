@@ -1560,13 +1560,20 @@ class OthersBankCashService:
 
         return persist(_write)
 
-    def delete_entry(self, entry_id: int) -> str:
+    def delete_entry(self, entry_id: int, *, allow_print_source: bool = False) -> str:
         self.entry_repo.ensure_schema()
 
         def _write() -> str:
             entry = self.entry_repo.get_by_id(entry_id)
             if entry is None or not entry.IsActive:
                 raise ValueError("Transaction not found.")
+            if not allow_print_source:
+                from app.services.print_job_billing_service import PrintJobBillingService
+
+                PrintJobBillingService().assert_ui_delete_allowed(
+                    getattr(entry, "Remarks", None),
+                    getattr(entry, "VoucherNo", None),
+                )
 
             daily = self._find_daily(entry.VoucherNo)
             self._remove_bank_legs(entry, daily)

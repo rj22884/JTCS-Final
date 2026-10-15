@@ -294,6 +294,22 @@
   .oie-category-line {
     grid-template-columns: 1fr;
   }
+
+  .oie-customer-hint {
+    font-size: 0.8125rem;
+  }
+}
+
+.oie-customer-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: #1e3a5f;
+}
+
+.oie-customer-hint strong {
+  font-weight: 700;
+  color: #111827;
 }
 
 .oie-customer-results {

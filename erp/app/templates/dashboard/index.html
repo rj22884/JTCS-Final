@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261014postcards1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261015tight2">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20261014chrome2">
 {% endblock %}
 
@@ -123,6 +123,34 @@
             </div>
           </div>
 
+          <div class="dash-today-follow">
+            <div class="dash-today-close-cluster">
+              <button type="button" class="dash-today-metric dash-metric-btn dash-today-closing"
+                      data-metric="cash_closing_balance" data-label="Cash Closing Balance"
+                      title="View Cash Closing Balance">
+                <div class="small text-muted">Cash Closing Balance</div>
+                <div class="dash-today-amt-row">
+                  <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
+                          data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
+                  <span class="dash-notes-match-emoji" id="dashCashCloseEmoji" aria-hidden="true"></span>
+                </div>
+              </button>
+              <div class="dash-today-close-pair">
+                <button type="button" class="dash-today-metric dash-today-metric-btn"
+                        data-today-metric="cash" data-label="Cash" title="View Cash details">
+                  <div class="small text-muted">Cash</div>
+                  <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
+                </button>
+                <button type="button" class="dash-today-metric dash-notes-sub" id="dashCurrencyNotesBtn"
+                        title="Enter currency notes closing">
+                  <div class="small text-muted">Currency Notes Closing</div>
+                  <div class="dash-today-amt-row">
+                    <strong id="dashCurrencyNotesTotal">₹ {{ '%.2f'|format(currency_notes.total_amount or 0) }}</strong>
+                    <span class="dash-notes-match-emoji" id="dashNotesCloseEmoji" aria-hidden="true"></span>
+                  </div>
+                </button>
+              </div>
+            </div>
           <table class="dash-receipts-table" aria-label="Receipts bifurcation">
             <thead>
               <tr>
@@ -151,32 +179,6 @@
             </tbody>
           </table>
 
-          <div class="dash-today-metrics">
-            <button type="button" class="dash-today-metric dash-today-metric-btn"
-                    data-today-metric="cash" data-label="Cash" title="View Cash details">
-              <div class="small text-muted">Cash</div>
-              <strong class="{% if today_activity.cash_amount < 0 %}is-negative{% endif %}">₹ {{ '%.2f'|format(today_activity.cash_amount) }}</strong>
-            </button>
-            <div class="dash-today-metric-stack">
-            <button type="button" class="dash-today-metric dash-metric-btn dash-today-closing"
-                    data-metric="cash_closing_balance" data-label="Cash Closing Balance"
-                    title="View Cash Closing Balance">
-              <div class="small text-muted">Cash Closing Balance</div>
-              <div class="dash-today-amt-row">
-                <strong class="dash-today-closing-amt{% if metrics.cash_closing_balance < 0 %} is-negative{% endif %}"
-                        data-metric-value="cash_closing_balance">₹ {{ '%.2f'|format(metrics.cash_closing_balance) }}</strong>
-                <span class="dash-notes-match-emoji" id="dashCashCloseEmoji" aria-hidden="true"></span>
-              </div>
-            </button>
-            <button type="button" class="dash-today-metric dash-notes-sub" id="dashCurrencyNotesBtn"
-                    title="Enter currency notes closing">
-              <div class="small text-muted">Currency Notes Closing</div>
-              <div class="dash-today-amt-row">
-                <strong id="dashCurrencyNotesTotal">₹ {{ '%.2f'|format(currency_notes.total_amount or 0) }}</strong>
-                <span class="dash-notes-match-emoji" id="dashNotesCloseEmoji" aria-hidden="true"></span>
-              </div>
-            </button>
-            </div>
             <div class="dash-today-metric dash-pending-sale-card"
                  title="Stamp, e-Court and Invoice sales (converted invoices only when Approved) — Cumulative is current FY (01/04–31/03)">
               <div class="small text-muted">Sale / Pending</div>

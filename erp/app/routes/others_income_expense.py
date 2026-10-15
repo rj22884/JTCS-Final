@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 
@@ -52,6 +53,45 @@ def index():
         load_entry_id=request.args.get("load_entry", type=int),
         hide_misc=True,
     )
+
+
+@bp.route("/duplicate-check", methods=["GET"], strict_slashes=False)
+@login_required
+def duplicate_check():
+    service = OthersIncomeExpenseService()
+    try:
+        customer_id = int(request.args.get("customer_id") or 0)
+    except (TypeError, ValueError):
+        customer_id = 0
+    try:
+        amount = Decimal(str(request.args.get("amount") or "0"))
+    except Exception:
+        amount = Decimal("0")
+    dates: list[date] = []
+    raw_dates = request.args.getlist("dates") or []
+    work_date = (request.args.get("work_date") or "").strip()
+    if work_date:
+        raw_dates.append(work_date)
+    for raw in raw_dates:
+        try:
+            dates.append(date.fromisoformat(str(raw)[:10]))
+        except ValueError:
+            continue
+    try:
+        exclude_raw = (request.args.get("exclude_entry_id") or "").strip()
+        exclude_entry_id = int(exclude_raw) if exclude_raw else None
+    except (TypeError, ValueError):
+        exclude_entry_id = None
+    try:
+        result = service.duplicate_customer_warning(
+            customer_id=customer_id,
+            amount=amount,
+            dates=dates,
+            exclude_entry_id=exclude_entry_id,
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "duplicate": False, "error": str(exc)}), 500
+    return jsonify({"ok": True, **result})
 
 
 @bp.route("/save", methods=["POST"], strict_slashes=False)

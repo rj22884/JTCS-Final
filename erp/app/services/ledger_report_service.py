@@ -991,6 +991,18 @@ class LedgerReportService:
                 obc_received[cid] = Decimal("0.00")
                 txn_counts[cid] = int(info.get("txn_count") or 0)
 
+        oie_debit: dict[int, Decimal] = {}
+        oie_credit: dict[int, Decimal] = {}
+        try:
+            oie_debit, oie_credit = LedgerExportService().customer_oie_as_of_totals(
+                ids,
+                as_of,
+                has_opening_cols=has_ob,
+            )
+        except Exception:
+            db.session.rollback()
+            _log.exception("Ledger search customer income/expense failed")
+
         result: dict[tuple[str, int], dict[str, Any]] = {}
         for raw_id in ids:
             try:
@@ -1002,8 +1014,10 @@ class LedgerReportService:
                 + billed.get(cid, Decimal("0.00"))
                 + followup.get(cid, Decimal("0.00"))
                 + obc_billed.get(cid, Decimal("0.00"))
+                + oie_debit.get(cid, Decimal("0.00"))
                 - received.get(cid, Decimal("0.00"))
                 - obc_received.get(cid, Decimal("0.00"))
+                - oie_credit.get(cid, Decimal("0.00"))
             )
             payload: dict[str, Any] = {
                 "amount": closing,

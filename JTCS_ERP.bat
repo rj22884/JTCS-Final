@@ -49,7 +49,7 @@ echo  VPS    : %VPS_USER%@%VPS_HOST%:%VPS_PATH%
 echo  %C_CYAN%========================================%C_RESET%
 echo.
 echo   1. Run at local
-echo   2. Push and deploy
+echo   2. Push and deploy ^(VPS password^)
 echo   0. Exit
 echo.
 set "choice="
@@ -301,7 +301,7 @@ call :init_branch
 echo.
 echo %C_BOLD%[2] Push and deploy%C_RESET%
 echo  Repo : %GIT_REPO_URL%
-echo  Mode : normal deploy ^(deployment/deploy.sh^)
+echo  Mode : VPS password ^(deployment/deploy.sh, SSH key off^)
 echo.
 
 call :git_commit_push
@@ -311,11 +311,17 @@ if errorlevel 1 (
 )
 
 echo %C_CYAN%Deploy%C_RESET% on VPS ^(deployment/deploy.sh^)
+echo Public-key login is off. Type the VPS password when asked.
 set "DEPLOY_LOG=%LOG_DIR%\deploy_%RANDOM%.log"
-echo Enter VPS password when asked.
-ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && git remote set-url origin %GIT_REPO_URL% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/deploy.sh && echo ===DEPLOY_RESULT:SUCCESS===" > "%DEPLOY_LOG%" 2>&1
+REM No IdentityFile / SSH key. Output stays on this window so the password prompt is visible.
+ssh -p %VPS_PORT% -o StrictHostKeyChecking=accept-new -o PubkeyAuthentication=no -o PreferredAuthentications=keyboard-interactive,password -o NumberOfPasswordPrompts=3 %VPS_USER%@%VPS_HOST% "cd %VPS_PATH% && git remote set-url origin %GIT_REPO_URL% && export BRANCH=%LOCAL_BRANCH% && export VPS_APP_DIR=%VPS_PATH% && export GIT_BRANCH=%LOCAL_BRANCH% && bash deployment/deploy.sh && echo ===DEPLOY_RESULT:SUCCESS==="
 set "SSH_RC=!ERRORLEVEL!"
-type "%DEPLOY_LOG%"
+if "!SSH_RC!"=="0" (
+    echo ===DEPLOY_RESULT:SUCCESS=== > "%DEPLOY_LOG%"
+) else (
+    echo ===DEPLOY_RESULT:FAILED=== > "%DEPLOY_LOG%"
+    echo SSH exit !SSH_RC!>> "%DEPLOY_LOG%"
+)
 echo.
 call :judge_remote_deploy "%DEPLOY_LOG%" "!SSH_RC!"
 if errorlevel 1 (

@@ -2426,8 +2426,70 @@
     return null;
   }
 
+  function selectedLedgerKind() {
+    if (els.ledgerExpense && els.ledgerExpense.checked) return "Expense";
+    if (els.ledgerIncome && els.ledgerIncome.checked) return "Income";
+    return "";
+  }
+
+  function confirmDuplicateCustomerEntry() {
+    const kind = selectedLedgerKind();
+    if (kind !== "Income" && kind !== "Expense") return Promise.resolve(true);
+    const customerId = parseInt((els.customerId && els.customerId.value) || "0", 10);
+    const amount = getCategoryTotal();
+    const workDate = (els.workDate && els.workDate.value) || "";
+    if (!customerId || !amount || !workDate) return Promise.resolve(true);
+    const params = new URLSearchParams();
+    params.set("customer_id", String(customerId));
+    params.set("amount", amount.toFixed(2));
+    params.set("work_date", workDate);
+    const seen = {};
+    seen[workDate] = true;
+    params.append("dates", workDate);
+    els.paymentLines?.querySelectorAll(".oie-payment-date").forEach(function (input) {
+      const value = (input.value || "").trim();
+      if (!value || seen[value]) return;
+      seen[value] = true;
+      params.append("dates", value);
+    });
+    if (els.entryId && els.entryId.value) params.set("exclude_entry_id", els.entryId.value);
+    const url = (window.OIE_DUPLICATE_URL || "/others/income-expense/duplicate-check") + "?" + params.toString();
+    return fetch(url, { headers: { Accept: "application/json" }, credentials: "same-origin" })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.duplicate) return true;
+        const message = data.message || "Pehle ye entry ho chuki hai. Please confirm.";
+        if (window.JTCSDialog && window.JTCSDialog.confirm) {
+          return window.JTCSDialog.confirm(message, {
+            title: "Please confirm",
+            okLabel: "OK",
+            cancelLabel: "Cancel",
+            type: "warning",
+          });
+        }
+        return window.confirm(message);
+      })
+      .catch(function () {
+        return true;
+      });
+  }
+
+  function validateIncomeExpenseCustomer() {
+    const kind = currentLedgerKind();
+    if (kind !== "Income" && kind !== "Expense") return null;
+    const customerId = parseInt((els.customerId && els.customerId.value) || "0", 10);
+    if (customerId > 0) return null;
+    if (els.customerName) els.customerName.focus();
+    return "Customer select karna zaroori hai. Naam pata na ho to Daily Customer chunen.";
+  }
+
   function saveEntry() {
     if (entryFieldsLocked) return Promise.resolve();
+    const customerError = validateIncomeExpenseCustomer();
+    if (customerError) {
+      alert(customerError);
+      return Promise.resolve();
+    }
     const categoryError = validateCategoryLines();
     if (categoryError) {
       alert(categoryError);
@@ -2446,6 +2508,13 @@
     syncPaymentDatesBeforeSave();
     syncCategoryLinesToForm();
     syncPaymentLinesToForm();
+    return confirmDuplicateCustomerEntry().then(function (ok) {
+      if (!ok) return;
+      return postIncomeExpenseSave();
+    });
+  }
+
+  function postIncomeExpenseSave() {
     const saveBtn = document.getElementById("oieSaveBtn");
     if (saveBtn) saveBtn.disabled = true;
     const saveUrl = window.OIE_SAVE_URL || "/others/income-expense/save";

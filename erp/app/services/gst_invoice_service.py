@@ -3291,11 +3291,17 @@ class GstInvoiceService:
             "has_next": pos < len(ids),
         }
 
-    def delete_invoices_for_bill_if_any(self, bill_no: str) -> int:
+    def delete_invoices_for_bill_if_any(
+        self, bill_no: str, *, allow_print_source: bool = False
+    ) -> int:
         """Delete linked sale invoices. Returns 0 when this bill has none."""
         ids = self.repo.list_ids_for_bill_no(bill_no)
         for invoice_id in ids:
-            self.delete_record(invoice_id, enforce_owner=False)
+            self.delete_record(
+                invoice_id,
+                enforce_owner=False,
+                allow_print_source=allow_print_source,
+            )
         return len(ids)
 
     def delete_invoices_for_bill(self, bill_no: str) -> int:
@@ -3311,6 +3317,7 @@ class GstInvoiceService:
         *,
         payload: dict | None = None,
         enforce_owner: bool = True,
+        allow_print_source: bool = False,
     ) -> str:
         try:
             invoice_id = int(invoice_id)
@@ -3323,6 +3330,25 @@ class GstInvoiceService:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
+        if not allow_print_source:
+            from app.services.print_job_billing_service import PrintJobBillingService
+
+            misc_remarks = None
+            misc_id_check = self._positive_id(getattr(inv, "MiscEntryID", None))
+            if misc_id_check:
+                from app.services.others_income_expense_service import (
+                    OthersIncomeExpenseService,
+                )
+
+                misc_row = OthersIncomeExpenseService().entry_repo.get_by_id(
+                    misc_id_check
+                )
+                if misc_row is not None:
+                    misc_remarks = getattr(misc_row, "Remarks", None)
+            PrintJobBillingService().assert_ui_delete_allowed(
+                getattr(inv, "Notes", None),
+                misc_remarks,
+            )
         if enforce_owner:
             self.assert_source_mutation(inv, payload)
         from app.repositories.bank_cash_repository import OthersBankCashRepository

@@ -8,7 +8,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20261006miscbill">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20261015custreq">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261006owner">
 {% endblock %}
 
@@ -209,7 +209,7 @@
 
           <div class="row g-3 mb-2">
             <div class="col-md-6">
-              <label class="form-label" for="CustomerName">Name</label>
+              <label class="form-label{% if force_kind != 'Misc.' %} oie-required{% endif %}" for="CustomerName">Name</label>
               <div class="position-relative">
                 <div class="input-group">
                   <input type="text" class="form-control" id="CustomerName" name="CustomerName" maxlength="255"
@@ -221,6 +221,12 @@
                 <div id="oieCustomerResults" class="list-group oie-customer-results d-none"></div>
                 <div id="oieCustomerSelected" class="small text-muted mt-1 d-none"></div>
               </div>
+              {% if force_kind != 'Misc.' %}
+              <p class="oie-customer-hint" id="oieCustomerHint">
+                अगर ग्राहक का नाम पता न हो, तो यहाँ से <strong>Daily Customer</strong> चुनें।<br>
+                If you don’t know the customer’s name, select <strong>Daily Customer</strong> here.
+              </p>
+              {% endif %}
             </div>
             <div class="col-md-6">
               <label class="form-label" for="MobileNumber">Mobile</label>
@@ -471,6 +477,7 @@
   window.OIE_BANK_ACCOUNTS = {{ payment_modes | tojson }};
   window.OIE_GRID_URL = {{ url_for(api_bp ~ '.grid') | tojson }};
   window.OIE_SAVE_URL = {{ url_for(api_bp ~ '.save_record') | tojson }};
+  window.OIE_DUPLICATE_URL = {{ url_for('others_income_expense.duplicate_check') | tojson }};
   window.OIE_NEXT_BILL_URL = {{ url_for(api_bp ~ '.next_bill_no') | tojson }};
   window.OIE_SUB_WORKS_URL = {{ url_for(api_bp ~ '.sub_works') | tojson }};
   window.OIE_RECORD_URL = {{ url_for(api_bp ~ '.record', entry_id=0) | tojson }};
@@ -497,5 +504,5 @@
 </script>
 <script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261006invedit"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261009orphanunlock"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261015custreq"></script>
 {% endblock %}
