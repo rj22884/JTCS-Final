@@ -166,8 +166,9 @@
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
   ];
-  const PERIOD_MODES = { week: 1, month: 1, quarter: 1, year: 1 };
+  const PERIOD_MODES = { day: 1, week: 1, month: 1, quarter: 1, year: 1 };
   const GROUP_LABELS = {
+    day: "Day",
     week: "Week",
     month: "Month",
     quarter: "Quarter",
@@ -217,6 +218,9 @@
   function periodGroup(tr, mode) {
     const d = rowDate(tr);
     if (!d) return { key: "9999-99-99", label: "—" };
+    if (mode === "day") {
+      return { key: isoDay(d), label: "Date: " + formatDmY(d) };
+    }
     if (mode === "week") {
       const weekday = d.getDay();
       const mondayOffset = weekday === 0 ? -6 : 1 - weekday;

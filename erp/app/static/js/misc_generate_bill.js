@@ -153,10 +153,35 @@
     return String((it && it.description) || "").trim();
   }
 
+  function itemGroupForSource(source) {
+    const key = String(source || "").trim().toUpperCase();
+    if (key === "MISC" || key === "MISCELLANEOUS") return "MISC";
+    return ["GST", "TDS", "ITR", "DSC"].includes(key) ? key : "";
+  }
+
+  function defaultItemForSource(source) {
+    const group = itemGroupForSource(source);
+    if (!group) return null;
+    const aliases = group === "MISC" ? ["MISC", "MISCELLANEOUS"] : [group];
+    const codeOf = function (it) {
+      return String((it && it.item_code) || "").trim().toUpperCase();
+    };
+    return (
+      items.find(function (it) { return aliases.includes(codeOf(it)); }) ||
+      items.find(function (it) {
+        const first = codeOf(it).split(/[^A-Z0-9]+/).filter(Boolean)[0] || "";
+        return aliases.includes(first);
+      }) ||
+      null
+    );
+  }
+
   function optionList(kind, selectedId) {
     let html = '<option value="">— Select —</option>';
     items.forEach(function (it) {
-      const label = kind === "desc" ? itemDesc(it) || it.item_name : it.item_name;
+      const label = kind === "desc"
+        ? itemDesc(it) || it.item_name
+        : it.item_name;
       html +=
         '<option value="' +
         escapeHtml(it.item_id) +
@@ -427,7 +452,7 @@
     if (els.customerId) els.customerId.value = String(row.customer_id || "");
     if (els.customerName) els.customerName.value = row.customer_name || "";
     customerPickName = (els.customerName?.value || "").trim();
-    if (els.mobile && row.mobile) els.mobile.value = row.mobile;
+    if (els.mobile) els.mobile.value = row.mobile || row.mobile_number || "";
     const partyName = document.getElementById("mgbPartyName");
     if (partyName) partyName.value = row.customer_name || "";
     const partyContact = document.getElementById("mgbPartyContact");
@@ -437,7 +462,7 @@
         : (row.customer_name || "");
     }
     const partyMobile = document.getElementById("mgbPartyMobile");
-    if (partyMobile && row.mobile) partyMobile.value = row.mobile;
+    if (partyMobile) partyMobile.value = row.mobile || row.mobile_number || "";
     hideCustomerList();
     if (row.customer_id) loadCustomerAddress(row.customer_id);
   }
@@ -961,7 +986,8 @@
       rememberEntryCustomer();
       if (!seed.open_edit) {
         if (els.lineBody) els.lineBody.innerHTML = "";
-        addDscLine();
+        const firstItem = defaultItemForSource(seed.source);
+        addDscLine(firstItem ? { item_id: firstItem.item_id } : {});
       }
       computeTaxes();
       ensureCustomerFromMaster()
@@ -1221,6 +1247,10 @@
       showError("Save or Edit the bill before delete.");
       return;
     }
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ invoice_id: invoiceId }))
+    ) return;
     if (!window.confirm("Delete this generated bill?")) return;
     const userId = window.prompt("User ID");
     if (!userId) return;
@@ -1357,6 +1387,17 @@
   els.deleteBtn?.addEventListener("click", function () {
     deleteInvoice().catch(function (err) {
       showError(err.message || "Unable to delete bill.");
+    });
+  });
+
+  window.addEventListener("jtcs:scoped-customer-created", function (event) {
+    const detail = event.detail || {};
+    const customer = detail.customer || {};
+    if (detail.target !== "primary") return;
+    selectCustomer({
+      customer_id: customer.customer_id || customer.CustomerID,
+      customer_name: customer.customer_name || customer.CustomerName,
+      mobile: customer.mobile_number || customer.MobileNumber,
     });
   });
 

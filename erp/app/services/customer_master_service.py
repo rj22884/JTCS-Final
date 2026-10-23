@@ -19,12 +19,6 @@ from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import MasterInUseError
-from app.utils.master_ledger_delete import (
-    is_ledger_clear,
-    ledger_payload,
-    purge_clear_ledger_refs,
-    raise_if_ledger_in_use,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +53,8 @@ _IN_USE_MESSAGE = (
     "Only Edit is allowed."
 )
 _IN_USE_PERMANENT_MESSAGE = (
-    "Stop: this customer has linked records and cannot be permanently deleted."
+    "Stop: this customer has linked records, or all relations could not be verified. "
+    "Remove linked records first; only Edit is allowed."
 )
 
 
@@ -455,51 +450,26 @@ class CustomerMasterService:
         return saved
 
     def delete_record(self, customer_id: int) -> str:
-        usage = self.repository.get_usage(customer_id)
         row = self.repository.get_detail(customer_id)
         if not row:
             raise ValueError("Customer not found.")
-        inactive = (row.get("CustomerStatus") or "").strip().lower() == "inactive"
-        name = (row.get("CustomerName") or "Customer").strip() or "Customer"
-        ledger = ledger_payload("customer", customer_id)
-
-        # Opening 0 + no transactions → permanently purge even if soft links remain.
-        if is_ledger_clear("customer", customer_id):
-            def _hard() -> str:
-                purge_clear_ledger_refs("customer", customer_id)
-                self.repository.purge(customer_id)
-                return "Customer permanently deleted. This cannot be recovered."
-
-            try:
-                return persist(_hard)
-            except IntegrityError as exc:
-                raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE, ledger=ledger) from exc
-
+        usage = self.repository.get_usage(customer_id)
         if not usage.get("can_delete"):
-            try:
-                raise_if_ledger_in_use("customer", customer_id, name)
-            except MasterInUseError as exc:
-                raise CustomerInUseError(usage, str(exc), ledger=ledger) from exc
-            raise CustomerInUseError(
-                usage,
-                _IN_USE_PERMANENT_MESSAGE if inactive else _IN_USE_MESSAGE,
-                ledger=ledger,
-            )
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE)
 
         def _write() -> str:
-            if inactive:
-                self.repository.purge(customer_id)
-                return "Customer permanently deleted. This cannot be recovered."
-            self.repository.deactivate(customer_id)
-            return (
-                "Customer marked inactive. Delete again to permanently remove "
-                "(cannot be recovered)."
-            )
+            # Repeat the relation check in the write transaction so a stale grid
+            # cannot bypass the no-links rule between rendering and deletion.
+            current_usage = self.repository.get_usage(customer_id)
+            if not current_usage.get("can_delete"):
+                raise CustomerInUseError(current_usage, _IN_USE_PERMANENT_MESSAGE)
+            self.repository.purge(customer_id)
+            return "Customer permanently deleted. This cannot be recovered."
 
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE, ledger=ledger) from exc
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE) from exc
 
     def restore_record(self, customer_id: int) -> str:
         def _write() -> str:

@@ -159,14 +159,21 @@
           </div>
 
           <div class="obc-subsection mb-3">
-            <div class="obc-subsection-title">Invoice receipt (optional)</div>
+            <div class="obc-subsection-title">Customer / Invoice</div>
             <div class="row g-3">
               <div class="col-md-6 position-relative">
-                <label class="form-label" for="obcCustomerSearch">Customer / Party</label>
-                <input type="search" class="form-control" id="obcCustomerSearch" autocomplete="off"
-                       placeholder="Search customer for Money In">
+                <label class="form-label" id="obcCustomerLabel" for="obcCustomerSearch">Customer / Party</label>
+                <div class="input-group">
+                  <input type="search" class="form-control" id="obcCustomerSearch" autocomplete="off"
+                         placeholder="Select customer for Money In"
+                         aria-describedby="obcCustomerHint">
+                  <button type="button" class="btn btn-outline-success" data-scoped-customer-add
+                          title="Add Customer" aria-label="Add Customer">
+                    <i class="bi bi-person-plus"></i>
+                  </button>
+                </div>
                 <input type="hidden" id="obcCustomerId" name="CustomerID" value="">
-                <div class="form-text">Filled automatically when Credit Account is a customer ledger.</div>
+                <div class="form-text" id="obcCustomerHint">Required: select a customer from the suggestions. Invoice linking is optional. Auto-filled when Credit Account is a customer ledger.</div>
                 <div id="obcCustomerSuggest" class="list-group position-absolute shadow-sm d-none"
                      style="z-index: 20; max-height: 180px; overflow: auto;"></div>
               </div>
@@ -221,6 +228,7 @@
     </div>
   </div>
 </div>
+{% include 'shared/_scoped_customer_modal.html' %}
 {% endblock %}
 
 {% block extra_js %}
@@ -238,7 +246,12 @@
     purposes: {{ (purposes if purposes is defined else []) | tojson }}
   };
   window.OBC_AUTO_LOAD_ENTRY_ID = {{ (load_entry_id if load_entry_id is defined else none) | tojson }};
+  window.SCOPED_CUSTOMER_CREATE_URL = {{ url_for('others_bank_cash.customer_create') | tojson }};
+  window.SCOPED_CUSTOMER_PINCODE_LOOKUP = {{ url_for('masters_customer.lookup_pincode') | tojson }};
+  window.SCOPED_CUSTOMER_CSRF = {{ csrf_token() | tojson }};
 </script>
+<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20261018scopeaddrlock"></script>
+<script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/bank_cash_transactions.js') }}?v=20261018scopedcustomer"></script>
 {% endblock %}

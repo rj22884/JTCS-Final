@@ -17,7 +17,6 @@ from app.utils.master_delete_guard import (
     find_master_usage,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import purge_clear_ledger_refs
 
 MAX_GROUPS = 5
 
@@ -612,13 +611,17 @@ class ChartAccountService:
                 links=usage["links"],
                 usage=usage,
             )
-        chart = self.repo.get_by_customer_id(int(customer_id))
 
         def _write() -> str:
-            if chart is not None:
-                self._drop_account(chart.AccountID)
-            purge_clear_ledger_refs("customer", int(customer_id))
-            CustomerRepository().purge(int(customer_id))
+            repository = CustomerRepository()
+            current_usage = repository.get_usage(int(customer_id))
+            if not current_usage.get("can_delete"):
+                raise MasterInUseError(
+                    f"Stop: '{name}' has linked records and cannot be deleted.",
+                    links=current_usage.get("links") or [],
+                    usage=current_usage,
+                )
+            repository.purge(int(customer_id))
             return f"'{name}' permanently deleted. This cannot be recovered."
 
         try:
@@ -680,37 +683,20 @@ class ChartAccountService:
         if current is not None:
             self.repo.delete(current)
 
-    _SKIP_CUSTOMER_TABLES = {
-        "ChartOfAccountMaster",
-        "ChartOfAccountGroupLink",
-        "CustomerDynFieldValue",
-        "CustomerPortalLoginLog",
-        "CustomerIncomeExpenseWorkLink",
-    }
-
     def _customer_ids_with_entries(self) -> set[int]:
+        repository = CustomerRepository()
+        linked_ids = repository.list_linked_customer_ids()
+        if linked_ids is not None:
+            return linked_ids
+        # If the relation scan fails, keep every customer account non-deletable.
         try:
-            tables = [
-                table
-                for table in CustomerRepository()._linked_customer_tables()
-                if table not in self._SKIP_CUSTOMER_TABLES
-            ]
-        except Exception:
+            rows = db.session.execute(
+                text("SELECT CustomerID FROM dbo.CustomerMaster")
+            ).fetchall()
+        except SQLAlchemyError:
             db.session.rollback()
-            tables = []
-        parts = [
-            f"SELECT CustomerID AS id FROM dbo.[{table}] WHERE CustomerID IS NOT NULL"
-            for table in tables
-        ]
-        parts.append(
-            "SELECT CustomerID AS id FROM dbo.CustomerMaster "
-            "WHERE ABS(ISNULL(OpeningBalance, 0)) > 0.0001"
-        )
-        parts.append(
-            "SELECT CustomerID AS id FROM dbo.ChartOfAccountMaster "
-            "WHERE CustomerID IS NOT NULL AND ABS(ISNULL(OpeningBalance, 0)) > 0.0001"
-        )
-        return self._id_union(parts)
+            raise
+        return {int(row[0]) for row in rows if row[0] is not None}
 
     def _work_ids_with_entries(self) -> set[int]:
         parts = [
@@ -808,19 +794,14 @@ class ChartAccountService:
 
     def _customer_usage(self, customer_id: int, account_id: int | None) -> dict:
         usage = CustomerRepository().get_usage(int(customer_id))
-        links = [
-            item
-            for item in (usage.get("links") or [])
-            if item.get("table") not in self._SKIP_CUSTOMER_TABLES
-        ]
+        links = list(usage.get("links") or [])
         transactions = list(usage.get("transactions") or [])
         opening = self._customer_opening_line(int(customer_id), account_id)
         if opening:
             transactions.append(opening)
-            links.append({"table": "opening", "label": "Opening Balance", "count": 1})
         transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
         return {
-            "can_delete": not links,
+            "can_delete": bool(usage.get("can_delete")),
             "links": links,
             "transactions": transactions[:200],
         }

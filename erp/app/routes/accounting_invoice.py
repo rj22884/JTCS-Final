@@ -1,3 +1,4 @@
+import base64
 from datetime import date
 
 from flask import (
@@ -612,6 +613,49 @@ def api_delete_invoice(invoice_id: int):
         return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
 
 
+@bp.route("/api/invoices/delete-check", methods=["GET"], strict_slashes=False)
+@login_required
+def api_check_invoice_delete():
+    """Read-only check so users see linked-payment guidance before password confirmation."""
+    svc = GstInvoiceService()
+    invoice_ids = set()
+
+    invoice_id = svc._positive_id(request.args.get("invoice_id"))
+    if invoice_id:
+        invoice_ids.add(invoice_id)
+
+    for bill_no in (request.args.get("bill_no"), request.args.get("tally_bill_no")):
+        bill_no = (bill_no or "").strip()
+        if bill_no:
+            invoice_ids.update(svc.repo.list_ids_for_bill_no(bill_no))
+
+    followup_id = svc._positive_id(request.args.get("followup_entry_id"))
+    if followup_id:
+        invoice_ids.update(svc.repo.list_ids_for_followup_entry(followup_id))
+
+    misc_id = svc._positive_id(request.args.get("misc_entry_id"))
+    if misc_id:
+        from sqlalchemy import select
+
+        from app.extensions import db
+        from app.models.gst_billing import GstInvoice
+
+        svc.repo.ensure_schema()
+        invoice_ids.update(
+            int(value)
+            for value in db.session.scalars(
+                select(GstInvoice.InvoiceID).where(GstInvoice.MiscEntryID == misc_id)
+            ).all()
+            if value
+        )
+
+    try:
+        svc.assert_invoices_deletable(invoice_ids)
+        return jsonify({"ok": True, "can_delete": True})
+    except ValueError as exc:
+        return jsonify({"ok": True, "can_delete": False, "error": str(exc)})
+
+
 @bp.route("/invoice/<int:invoice_id>/preview-html", methods=["GET"], strict_slashes=False)
 @login_required
 def preview_html(invoice_id: int):
@@ -623,6 +667,7 @@ def preview_html(invoice_id: int):
         company = svc.company_profile()
         qr_data_uri = pdf_svc.upi_qr_data_uri(invoice)
         upi_pay_url = pdf_svc.upi_intent_url(invoice)
+        paid_stamp = pdf_svc.paid_stamp_details(invoice)
         logo_url = url_for("static", filename="img/jtcs_invoice_logo.png")
         stamp_url = url_for("static", filename="img/jtcs_invoice_stamp.png")
         sign_url = url_for("static", filename="img/jtcs_invoice_sign.png")
@@ -632,6 +677,7 @@ def preview_html(invoice_id: int):
             company=company,
             qr_data_uri=qr_data_uri,
             upi_pay_url=upi_pay_url,
+            paid_stamp=paid_stamp,
             logo_url=logo_url,
             stamp_url=stamp_url,
             sign_url=sign_url,
@@ -701,6 +747,25 @@ def api_preview_pdf():
                 "Content-Disposition": f'inline; filename="{filename}"',
             },
         )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": map_db_exception(exc)}), 500
+
+
+@bp.route("/api/invoices/preview-pdf-pages", methods=["POST"], strict_slashes=False)
+@login_required
+def api_preview_pdf_pages():
+    """Return a PDF plus rendered pages for zoomable draft invoice preview."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        pdf_bytes, pages, filename = GstInvoicePdfService().build_preview_pages_from_payload(payload)
+        return jsonify({
+            "ok": True,
+            "filename": filename,
+            "pdf_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+            "pages": [base64.b64encode(page).decode("ascii") for page in pages],
+        })
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:

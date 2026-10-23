@@ -39,12 +39,14 @@ class LedgerRef:
     under_type: str
     snapshot: BankAccountSnapshot
     customer_id: int | None = None
+    is_bank_cash: bool = False
 
 
 class OthersBankCashService:
     WORK_TYPE = "Others"
     SUB_WORK_TYPE = "Other Bank/Cash Transactions"
     SOURCE_TYPE = "OTHERS_BANK_CASH"
+    BANK_CASH_GROUPS = {"bank accounts", "cash-in-hand"}
 
     def __init__(
         self,
@@ -100,6 +102,51 @@ class OthersBankCashService:
         parts.append(f"[{account_type}]")
         return " · ".join(parts)
 
+    @classmethod
+    def _is_bank_cash_row(cls, row: dict) -> bool:
+        source = (row.get("source") or "").strip().lower()
+        if row.get("customer_id"):
+            return False
+        if source == "bank":
+            return (row.get("account_type") or "").strip().upper() != "RD"
+        return (
+            source == "coa"
+            and (row.get("group_name") or "").strip().casefold() in cls.BANK_CASH_GROUPS
+        )
+
+    def _ledger_key_is_bank_cash(self, ledger_key: str) -> bool:
+        key = (ledger_key or "").strip()
+        if key.startswith("bank-"):
+            try:
+                account = self.master_repo.get_bank_account(int(key.split("-", 1)[1]))
+            except (TypeError, ValueError):
+                return False
+            if account is None:
+                return True
+            return (getattr(account, "AccountType", None) or "").strip().upper() != "RD"
+        if key.startswith("coa-"):
+            try:
+                account_id = int(key.split("-", 1)[1])
+            except (TypeError, ValueError):
+                return False
+            row = db.session.execute(
+                text(
+                    """
+                    SELECT a.CustomerID, g.GroupName
+                    FROM dbo.ChartOfAccountMaster a
+                    INNER JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                    WHERE a.AccountID = :aid
+                    """
+                ),
+                {"aid": account_id},
+            ).mappings().first()
+            return bool(
+                row
+                and not row.get("CustomerID")
+                and (row.get("GroupName") or "").strip().casefold() in self.BANK_CASH_GROUPS
+            )
+        return False
+
     def list_accounts(self) -> dict:
         """Flat list + grouped by Chart of Group for Credit/Debit dropdowns."""
         flat: list[dict] = []
@@ -122,6 +169,7 @@ class OthersBankCashService:
                 "customer_id": int(row["customer_id"]) if row.get("customer_id") else None,
                 "customer_name": (row.get("customer_name") or "").strip(),
             }
+            item["is_bank_cash"] = self._is_bank_cash_row(item)
             flat.append(item)
             gkey = (
                 int(row["group_id"]) if row.get("group_id") is not None else 0,
@@ -174,6 +222,7 @@ class OthersBankCashService:
                     "group_name": row.get("group_name") or "",
                     "customer_id": customer_id,
                     "customer_name": (row.get("customer_name") or "").strip(),
+                    "is_bank_cash": self._is_bank_cash_row(row),
                 }
             )
         return items
@@ -320,6 +369,10 @@ class OthersBankCashService:
                 group_name=group_name,
                 under_type=under_type,
                 snapshot=snapshot,
+                is_bank_cash=(
+                    not account
+                    or (getattr(account, "AccountType", None) or "").strip().upper() != "RD"
+                ),
             )
 
         if ledger_key.startswith("coa-"):
@@ -351,6 +404,7 @@ class OthersBankCashService:
                 bank_name=name[:150],
                 masked_account_number=(group_name or "COA")[:50],
             )
+            customer_id = self._coa_customer_id(coa_id)
             return LedgerRef(
                 ledger_key=f"coa-{coa_id}",
                 source="coa",
@@ -360,7 +414,11 @@ class OthersBankCashService:
                 group_name=group_name,
                 under_type=under,
                 snapshot=snapshot,
-                customer_id=self._coa_customer_id(coa_id),
+                customer_id=customer_id,
+                is_bank_cash=(
+                    not customer_id
+                    and group_name.casefold() in self.BANK_CASH_GROUPS
+                ),
             )
 
         if ledger_key.startswith("customer-"):
@@ -491,6 +549,8 @@ class OthersBankCashService:
             raise ValueError("Transaction not found.")
         credit_key = self._ledger_key_for_row(row, side="credit")
         debit_key = self._ledger_key_for_row(row, side="debit")
+        credit_is_bank_cash = self._ledger_key_is_bank_cash(credit_key)
+        debit_is_bank_cash = self._ledger_key_is_bank_cash(debit_key)
         allocations = self._entry_allocations(row)
         link_mode = (getattr(row, "InvoiceLinkMode", None) or "").strip().lower()
         if link_mode not in {"none", "all", "selected"}:
@@ -512,12 +572,14 @@ class OthersBankCashService:
             "purpose": row.Purpose or "",
             "credit_account_id": row.CreditBankAccountID,
             "credit_ledger_key": credit_key,
+            "credit_is_bank_cash": credit_is_bank_cash,
             "credit_account": self._label_for_ledger_key(credit_key)
             or self._account_label(row.CreditBankAccountID),
             "credit_customer_id": credit_customer_id,
             "credit_customer_name": self._customer_display_name(credit_customer_id) or "",
             "debit_account_id": row.DebitBankAccountID,
             "debit_ledger_key": debit_key,
+            "debit_is_bank_cash": debit_is_bank_cash,
             "debit_account": self._label_for_ledger_key(debit_key)
             or self._account_label(row.DebitBankAccountID),
             "amount": float(row.Amount or 0),
@@ -1295,6 +1357,7 @@ class OthersBankCashService:
         entry_id: int | None,
         *,
         credit_customer_id: int | None = None,
+        require_customer: bool = True,
     ):
         """FIFO allocation across selected outstanding invoices. Does not post ledgers.
 
@@ -1303,14 +1366,31 @@ class OthersBankCashService:
         mode = (form.get("InvoiceMode") or form.get("invoice_mode") or "none").strip().lower()
         if mode not in {"none", "all", "selected"}:
             mode = "none"
-        if mode == "none":
-            return "none", None, None, []
-
-        customer_id = credit_customer_id or self._optional_int(
-            form.get("CustomerID") or form.get("customer_id")
-        )
+        raw_customer_id = form.get("CustomerID") or form.get("customer_id")
+        try:
+            selected_customer_id = (
+                int(raw_customer_id) if raw_customer_id not in (None, "") else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Select a valid customer.") from exc
+        if selected_customer_id is not None and selected_customer_id <= 0:
+            raise ValueError("Select a valid customer.")
+        if (
+            credit_customer_id
+            and selected_customer_id
+            and int(credit_customer_id) != selected_customer_id
+        ):
+            raise ValueError("Selected customer must match the Credit Account customer.")
+        customer_id = credit_customer_id or selected_customer_id
         if not customer_id:
-            raise ValueError("Select a customer before linking invoices.")
+            if require_customer or mode != "none":
+                raise ValueError("Select a customer before saving.")
+            return "none", None, None, []
+        customer_ref = self._customer_ledger_ref(f"customer-{int(customer_id)}")
+        customer_name = customer_ref.label or self._customer_display_name(customer_id)
+        if mode == "none":
+            return "none", int(customer_id), customer_name, []
+
         eligible = self._customer_sale_invoices(customer_id, entry_id=entry_id)
         if mode == "all":
             targets = eligible
@@ -1327,7 +1407,7 @@ class OthersBankCashService:
             targets = [row for row in eligible if row["invoice_id"] in wanted]
         if not targets:
             if mode == "all":
-                return mode, customer_id, self._customer_display_name(customer_id), []
+                return mode, customer_id, customer_name, []
             raise ValueError("Select at least one outstanding invoice.")
         targets.sort(key=lambda row: ((row.get("invoice_date") or ""), int(row.get("invoice_id") or 0)))
 
@@ -1346,7 +1426,7 @@ class OthersBankCashService:
         customer_name = next(
             (row["customer_name"] for row in targets if row.get("customer_name")),
             None,
-        ) or self._customer_display_name(customer_id)
+        ) or customer_name or self._customer_display_name(customer_id)
         return mode, customer_id, customer_name, pairs
 
     def customer_open_invoices(self, customer_id: int, entry_id: int | None = None) -> dict:
@@ -1426,6 +1506,9 @@ class OthersBankCashService:
                 credit_customer_id=(
                     credit_ref.customer_id
                     or self._coa_customer_id(credit_ref.coa_account_id)
+                ),
+                require_customer=not (
+                    credit_ref.is_bank_cash and debit_ref.is_bank_cash
                 ),
             )
         )
@@ -1530,7 +1613,7 @@ class OthersBankCashService:
                 "InBankTransactionID": in_row.JtcsBankTransactionID,
                 "InvoiceID": primary_invoice_id,
                 "InvoiceLinkMode": link_mode,
-                "CustomerID": linked_customer_id if link_mode != "none" else None,
+                "CustomerID": linked_customer_id,
                 "WorkID": work_id,
                 "WorkTypeID": work_type_id,
             }

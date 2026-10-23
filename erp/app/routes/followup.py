@@ -7,10 +7,12 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request, send_file, session, url_for
 
-from app.customer_master.constants import COUNTRIES
+from app.customer_master.constants import COUNTRIES, CUSTOMER_TYPES, GENDERS
 from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
 from app.services.customer_service import CustomerService
+from app.services.chart_group_service import ChartGroupService
+from app.services.customer_group_service import CustomerGroupService
 from app.services.followup_billing_service import FollowupBillingService
 from app.services.followup_payment_service import FollowupPaymentService
 from app.services.followup_service import (
@@ -26,6 +28,7 @@ from app.services.followup_service import (
 )
 from app.services.menu_service import MenuService
 from app.services.payment_reminder_service import PaymentReminderService
+from app.services.scoped_customer_service import ScopedCustomerService
 from app.services.thank_you_letter_service import ThankYouLetterService
 
 
@@ -183,6 +186,14 @@ def _make_activity_blueprint(
         service = FollowupService(module_code)
         menu_service = MenuService()
         master_repo = MasterRepository()
+        try:
+            chart_of_groups = ChartGroupService().list_active_for_dropdown()
+        except Exception:
+            chart_of_groups = []
+        try:
+            customer_groups = CustomerGroupService().list_active_groups()
+        except Exception:
+            customer_groups = []
         return render_template(
             "followup/activity.html",
             page_title=f"{meta['title']} Followup",
@@ -200,6 +211,10 @@ def _make_activity_blueprint(
             workflow_stages=service.list_stages(),
             allow_customer_add=allow_customer_create,
             countries=COUNTRIES,
+            chart_of_groups=chart_of_groups,
+            customer_groups=customer_groups,
+            customer_types=CUSTOMER_TYPES,
+            genders=GENDERS,
             payment_modes=master_repo.list_stamp_bank_payment_modes(),
             api_urls=_followup_api_urls(blueprint_name, module_code, allow_customer_create),
             pincode_lookup_url=url_for("masters_customer.lookup_pincode"),
@@ -612,7 +627,7 @@ def _make_activity_blueprint(
         def customer_create():
             payload = request.get_json(silent=True) or request.form.to_dict()
             try:
-                customer = CustomerService().create(payload)
+                customer = ScopedCustomerService().create(payload)
                 return jsonify({"ok": True, "customer": customer, "message": "Customer added successfully."})
             except ValueError as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 400
@@ -622,7 +637,7 @@ def _make_activity_blueprint(
 
 itr_followup_bp = _make_activity_blueprint("ITR", "/itr/followup", "itr_followup", allow_customer_create=True)
 dsc_followup_bp = _make_activity_blueprint("DSC", "/dsc/followup", "dsc_followup", allow_customer_create=True)
-tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup", allow_customer_create=False)
+tds_followup_bp = _make_activity_blueprint("TDS", "/tds/followup", "tds_followup", allow_customer_create=True)
 gst_followup_bp = _make_activity_blueprint("GST", "/gst/followup", "gst_followup", allow_customer_create=True)
 
 # Spec alias: POST /api/itr/sync-status (same handler as ITR Followup Sync)

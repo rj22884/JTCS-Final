@@ -26,7 +26,7 @@
       <div class="dash-kpi-source">{{ item.source }}</div>
       <div class="dash-kpi-meta">
         <span class="dash-kpi-chip">{{ item.paid }} paid</span>
-        <span>{{ item.billed }} tally</span>
+        <span>{{ item.billed }} {{ 'invoice' if item.code == 'DSC' else 'tally' }}</span>
       </div>
       <div class="dash-kpi-bar-row">
         <span>{{ item.bar_label }}</span>
@@ -881,7 +881,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=20261014today1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20261001dash1"></script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261015group2"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261023day1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20261015group2"></script>
 <script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20261001dash1"></script>
 {% endblock %}

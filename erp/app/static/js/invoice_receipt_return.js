@@ -11,6 +11,7 @@
     TDS: ["/tds/followup"],
     ITR: ["/itr/followup"],
     DSC: ["/dsc/followup"],
+    INVOICE: ["/accounting/invoice/sale"],
   };
   var PENDING_KEY = "jtcs.invoiceReceiptReturn";
 

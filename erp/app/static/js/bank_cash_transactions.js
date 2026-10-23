@@ -26,6 +26,8 @@
     saveBtn: document.getElementById("obcSaveBtn"),
     customerSearch: document.getElementById("obcCustomerSearch"),
     customerId: document.getElementById("obcCustomerId"),
+    customerLabel: document.getElementById("obcCustomerLabel"),
+    customerHint: document.getElementById("obcCustomerHint"),
     customerSuggest: document.getElementById("obcCustomerSuggest"),
     invoiceMode: document.getElementById("obcInvoiceMode"),
     invoicePickerBtn: document.getElementById("obcInvoicePickerBtn"),
@@ -362,6 +364,7 @@
         searchEl.value = "";
         searchEl.setAttribute("data-selected-title", "");
       }
+      syncCustomerRequirement();
       return;
     }
     const opt = document.createElement("option");
@@ -372,12 +375,39 @@
       opt.setAttribute("data-customer-id", String(selection.customer_id));
       opt.setAttribute("data-customer-name", selection.customer_name || "");
     }
+    opt.setAttribute("data-bank-cash", selection.is_bank_cash ? "true" : "false");
     selectEl.appendChild(opt);
     if (searchEl) {
       const title = selection.title || label || "";
       searchEl.value = title;
       searchEl.setAttribute("data-selected-title", title);
     }
+    syncCustomerRequirement();
+  }
+
+  function isBankCashLedger(selectEl) {
+    const option = selectEl && selectEl.selectedOptions ? selectEl.selectedOptions[0] : null;
+    return !!(option && option.value && option.getAttribute("data-bank-cash") === "true");
+  }
+
+  function syncCustomerRequirement() {
+    if (!els.customerSearch) return false;
+    const bothSelected = !!(els.creditAccount?.value && els.debitAccount?.value);
+    const bothBankCash = bothSelected && isBankCashLedger(els.creditAccount) && isBankCashLedger(els.debitAccount);
+    const invoiceLinked = !!(
+      (els.invoiceModeValue && els.invoiceModeValue.value !== "none") ||
+      (els.invoiceMode && els.invoiceMode.value !== "none")
+    );
+    const required = invoiceLinked || (bothSelected && !bothBankCash);
+    els.customerSearch.required = required;
+    els.customerSearch.setAttribute("aria-required", required ? "true" : "false");
+    els.customerLabel?.classList.toggle("obc-required", required);
+    if (els.customerHint) {
+      els.customerHint.textContent = required
+        ? "Required: select a customer from the suggestions. Invoice linking is optional. Auto-filled when Credit Account is a customer ledger."
+        : "Optional for Bank/Cash-to-Bank/Cash transfers. Select a customer if this transaction belongs to one.";
+    }
+    return required;
   }
 
   function renderAccountSuggestions(menu, rows, onPick) {
@@ -421,7 +451,7 @@
       const selectedTitle = (input.getAttribute("data-selected-title") || "").trim();
       if (selectEl.value && typed !== selectedTitle) {
         selectEl.value = "";
-        if (isCredit) selectEl.dispatchEvent(new Event("change"));
+        selectEl.dispatchEvent(new Event("change"));
       }
       clearTimeout(timer);
       token += 1;
@@ -445,7 +475,7 @@
             renderAccountSuggestions(menu, data.rows || [], function (row) {
               setLedgerSelection(selectEl, input, row);
               input.setCustomValidity("");
-              if (isCredit) selectEl.dispatchEvent(new Event("change"));
+              selectEl.dispatchEvent(new Event("change"));
             });
           })
           .catch(function () { /* search stays optional until a result is chosen */ });
@@ -615,6 +645,7 @@
       ledger_key: row.credit_ledger_key,
       label: row.credit_account,
       title: row.credit_account,
+      is_bank_cash: row.credit_is_bank_cash,
       customer_id: row.credit_customer_id,
       customer_name: row.credit_customer_name,
     });
@@ -622,6 +653,7 @@
       ledger_key: row.debit_ledger_key,
       label: row.debit_account,
       title: row.debit_account,
+      is_bank_cash: row.debit_is_bank_cash,
     });
     await fillPurposes(row.purpose);
     await restoreInvoiceLink(row);
@@ -872,6 +904,7 @@
 
   function paintAllocation() {
     const mode = syncInvoiceModeField();
+    syncCustomerRequirement();
     paintInvoicePicker();
     syncCategoryFromInvoices();
     if (els.invoiceHint) {
@@ -1000,6 +1033,13 @@
   }
 
   async function saveEntry() {
+    const linkMode = syncInvoiceModeField();
+    const customerRequired = syncCustomerRequirement();
+    if (customerRequired && !String(els.customerId?.value || "").trim()) {
+      alert("Select a customer / party before saving.");
+      els.customerSearch?.focus();
+      return;
+    }
     if (!els.form.checkValidity()) {
       els.form.reportValidity();
       return;
@@ -1007,11 +1047,6 @@
     if (isOtherPurpose() && String(els.remarks?.value || "").trim().length < 10) {
       alert("If you select Other, the Remarks field is required.");
       els.remarks?.focus();
-      return;
-    }
-    const linkMode = syncInvoiceModeField();
-    if (linkMode !== "none" && !String(els.customerId?.value || "").trim()) {
-      alert("Select a customer before linking invoices.");
       return;
     }
     if (linkMode === "selected" && !checkedInvoiceIds().length) {
@@ -1067,6 +1102,7 @@
 
   let customerTimer = null;
   els.creditAccount?.addEventListener("change", function () {
+    syncCustomerRequirement();
     const party = creditParty();
     if (party) {
       applyCreditParty(party).catch(function (err) {
@@ -1083,6 +1119,7 @@
     reservedAdvances = [];
     renderInvoiceChoices("none", []);
   });
+  els.debitAccount?.addEventListener("change", syncCustomerRequirement);
   els.customerSearch?.addEventListener("input", function () {
     const party = creditParty();
     if (party) {
@@ -1129,8 +1166,22 @@
           });
           els.customerSuggest.classList.toggle("d-none", !(data.rows || []).length);
         })
-        .catch(function () { /* search stays optional */ });
+        .catch(function () { /* customer search can be retried */ });
     }, 250);
+  });
+  window.addEventListener("jtcs:scoped-customer-created", function (event) {
+    const detail = event.detail || {};
+    const customer = detail.customer || {};
+    const customerId = customer.customer_id || customer.CustomerID;
+    if (detail.target !== "primary" || !customerId) return;
+    if (els.customerId) els.customerId.value = String(customerId);
+    if (els.customerSearch) {
+      els.customerSearch.value = customer.customer_name || customer.CustomerName || "";
+    }
+    if (els.customerSuggest) els.customerSuggest.classList.add("d-none");
+    loadCustomerInvoices(customerId).catch(function (err) {
+      alert(err.message || "Unable to load invoices.");
+    });
   });
   els.invoicePickerBtn?.addEventListener("click", function () {
     if (!els.invoicePickerMenu) return;
@@ -1162,6 +1213,7 @@
   bindAccountSearch(els.creditSearch, els.creditSuggest, els.creditAccount, true);
   bindAccountSearch(els.debitSearch, els.debitSuggest, els.debitAccount, false);
   els.invoiceMode?.addEventListener("change", function () {
+    syncCustomerRequirement();
     const value = els.invoiceMode.value;
     const boxes = els.invoiceList
       ? els.invoiceList.querySelectorAll('input[name="InvoiceIDs"]')
@@ -1354,6 +1406,7 @@
     }
   }
 
+  syncCustomerRequirement();
   loadGrid()
     .then(function () {
       const api = window.JtcsInvoiceReceiptReturn;

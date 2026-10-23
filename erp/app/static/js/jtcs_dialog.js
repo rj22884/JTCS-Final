@@ -463,6 +463,106 @@
     inferType: inferType,
   };
 
+  function getErrorText(el) {
+    return String(el && (el.innerText || el.textContent) || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isVisible(el) {
+    if (!el || !document.documentElement.contains(el)) return false;
+    if (el.hidden || el.closest("[hidden], .d-none")) return false;
+    var style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0;
+  }
+
+  function installErrorPopupRouting() {
+    if (!document.body || window.__JTCS_ERROR_POPUP_ROUTING__) return;
+    window.__JTCS_ERROR_POPUP_ROUTING__ = true;
+
+    var seenMessages = new WeakMap();
+    var recentPopups = new Map();
+    var selector = ".alert-danger, .invalid-feedback, [role=\"alert\"].text-danger, [id*=\"error\" i], .text-danger";
+    var explicitErrorSelector = ".alert-danger, .invalid-feedback, [role=\"alert\"].text-danger, [id*=\"error\" i]";
+    var errorMessagePattern = /\b(error|failed|unable|cannot|can't|could not|not found|invalid|required|missing|denied|blocked|unavailable|expired|please select|please enter)\b/i;
+
+    function showErrorPopup(message) {
+      var now = Date.now();
+      var lastShown = recentPopups.get(message) || 0;
+      if (now - lastShown < 700) return;
+      recentPopups.forEach(function (shownAt, shownMessage) {
+        if (now - shownAt >= 700) recentPopups.delete(shownMessage);
+      });
+      recentPopups.set(message, now);
+      alertMessage(message, "error");
+    }
+
+    function showErrorSurface(el) {
+      if (!el || !el.matches || !el.matches(selector)) return;
+      if (el.parentElement && el.parentElement.closest(selector)) return;
+      var message = getErrorText(el);
+      if (!el.matches(explicitErrorSelector) && !errorMessagePattern.test(message)) return;
+      if (!message || !isVisible(el)) {
+        seenMessages.delete(el);
+        return;
+      }
+      if (seenMessages.get(el) === message) return;
+      seenMessages.set(el, message);
+      showErrorPopup(message);
+    }
+
+    function inspect(node) {
+      if (!node) return;
+      if (node.nodeType === 3) node = node.parentElement;
+      if (!node || node.nodeType !== 1) return;
+      showErrorSurface(node);
+      var parent = node.closest(selector);
+      if (parent && parent !== node) showErrorSurface(parent);
+      if (node.querySelectorAll) node.querySelectorAll(selector).forEach(showErrorSurface);
+    }
+
+    document.querySelectorAll(selector).forEach(showErrorSurface);
+    new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        inspect(record.target);
+        record.addedNodes && record.addedNodes.forEach(inspect);
+      });
+    }).observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "hidden", "style", "aria-hidden"],
+    });
+
+    var validationPopupPending = false;
+    document.addEventListener("invalid", function (event) {
+      var field = event.target;
+      if (!field || !field.validationMessage) return;
+      event.preventDefault();
+      if (validationPopupPending) return;
+      validationPopupPending = true;
+      showErrorPopup(field.validationMessage);
+      Promise.resolve().then(function () {
+        validationPopupPending = false;
+      });
+    }, true);
+
+    window.addEventListener("error", function (event) {
+      var message = event.error && event.error.message || event.message;
+      if (!message || message === "Script error.") return;
+      showErrorPopup(message);
+    });
+
+    window.addEventListener("unhandledrejection", function (event) {
+      var reason = event.reason;
+      var message = reason && reason.message ? reason.message : String(reason || "Unexpected application error.");
+      showErrorPopup(message);
+    });
+  }
+
+  installErrorPopupRouting();
+
   window.alert = function (message) {
     try {
       alertMessage(message);

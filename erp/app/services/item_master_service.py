@@ -212,6 +212,13 @@ class ItemMasterService:
         ]
 
     def list_active_for_dropdown(self) -> list[dict]:
+        rows = self.repo.list_all(active_only=True)
+        rows.sort(
+            key=lambda row: (
+                (row.ItemCode or "").strip().casefold(),
+                (row.ItemName or "").strip().casefold(),
+            )
+        )
         return [
             {
                 "item_id": row.ItemID,
@@ -225,7 +232,7 @@ class ItemMasterService:
                 "gst_rate_percent": float(row.GstRatePercent or 0),
                 "label": f"{row.ItemCode} — {row.ItemName}",
             }
-            for row in self.repo.list_all(active_only=True)
+            for row in rows
         ]
 
     def get_record(self, item_id: int) -> dict:
@@ -366,8 +373,8 @@ class ItemMasterService:
 
     def create_record(self, payload: dict) -> dict:
         data = self._parse(payload)
-        if self.repo.find_by_code(data["ItemCode"]):
-            raise ValueError(f"Item Code '{data['ItemCode']}' already exists.")
+        if self.repo.find_by_name(data["ItemName"]):
+            raise ValueError(f"Item Name '{data['ItemName']}' already exists.")
 
         def _write() -> dict:
             row = self.repo.create({**data, "CreatedAt": datetime.utcnow()})
@@ -377,7 +384,9 @@ class ItemMasterService:
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise ValueError(f"Item Code '{data['ItemCode']}' already exists.") from exc
+            if "UX_ItemMaster_Name" in str(exc) or "ItemNameNormalized" in str(exc):
+                raise ValueError(f"Item Name '{data['ItemName']}' already exists.") from exc
+            raise
 
     def update_record(self, item_id: int, payload: dict) -> dict:
         row = self.repo.get_by_id(item_id)
@@ -389,9 +398,9 @@ class ItemMasterService:
         linked = sub_map.get(int(item_id))
         if linked and linked.get("sub_work_type"):
             data["ItemName"] = linked["sub_work_type"][:200]
-        other = self.repo.find_by_code(data["ItemCode"])
-        if other and other.ItemID != row.ItemID:
-            raise ValueError(f"Item Code '{data['ItemCode']}' already exists.")
+        other = self.repo.find_by_name(data["ItemName"], exclude_id=int(row.ItemID))
+        if other:
+            raise ValueError(f"Item Name '{data['ItemName']}' already exists.")
 
         def _write() -> dict:
             updated = self.repo.update(row, {**data, "UpdatedAt": datetime.utcnow()})
@@ -401,7 +410,9 @@ class ItemMasterService:
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise ValueError(f"Item Code '{data['ItemCode']}' already exists.") from exc
+            if "UX_ItemMaster_Name" in str(exc) or "ItemNameNormalized" in str(exc):
+                raise ValueError(f"Item Name '{data['ItemName']}' already exists.") from exc
+            raise
 
     def delete_record(self, item_id: int) -> str:
         row = self.repo.get_by_id(item_id)

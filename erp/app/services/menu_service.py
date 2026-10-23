@@ -263,6 +263,14 @@ class MenuService:
 
     def get_navigation(self, role: str | None, user_id: int | None = None) -> list[MenuNode]:
         try:
+            from app.routes.reports import ensure_summary_menu
+
+            ensure_summary_menu()
+        except Exception:
+            from app.extensions import db
+
+            db.session.rollback()
+        try:
             from app.routes.admin_import_export import ensure_import_export_menus
 
             ensure_import_export_menus()

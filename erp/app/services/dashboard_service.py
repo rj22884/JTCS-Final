@@ -668,8 +668,7 @@ class DashboardService:
     def get_watch_cards(self) -> dict:
         """Cards above Today's Activity Summary.
 
-        Follow-up rows for ITR, GST and TDS are cases with Invoice ticked and
-        Payment Received still open. DSC still uses Tally Bill Generated.
+        Follow-up rows are active cases with an invoice and an open payment.
         Message cards are unread / inbound total.
         Court fee is imported e-Court receipts that have not been sold.
         """
@@ -690,8 +689,12 @@ class DashboardService:
                     text(
                         """
                         SELECT f.ModuleCode,
-                               SUM(CASE WHEN t.EntryID IS NOT NULL THEN 1 ELSE 0 END) AS Billed,
-                               SUM(CASE WHEN t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL THEN 1 ELSE 0 END) AS Paid
+                               SUM(CASE WHEN t.EntryID IS NOT NULL
+                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.InvoiceCount, 0) > 0)
+                                        THEN 1 ELSE 0 END) AS Billed,
+                               SUM(CASE WHEN (t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL)
+                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.IsPaid, 0) = 1)
+                                        THEN 1 ELSE 0 END) AS Paid
                         FROM dbo.FollowupEntryMaster f
                         LEFT JOIN (
                             SELECT DISTINCT es.EntryID
@@ -705,7 +708,10 @@ class DashboardService:
                                 )
                             ) OR (
                                 fe.ModuleCode = N'DSC'
-                                AND es.StageCode IN (N'tally_bill_generated', N'Tally Bill Generated')
+                                AND es.StageCode IN (
+                                    N'invoice', N'Invoice',
+                                    N'tally_bill_generated', N'Tally Bill Generated'
+                                )
                             )
                         ) t ON t.EntryID = f.EntryID
                         LEFT JOIN (
@@ -713,6 +719,18 @@ class DashboardService:
                             FROM dbo.FollowupEntryStage
                             WHERE StageCode IN (N'payment_received', N'Payment Received')
                         ) p ON p.EntryID = f.EntryID
+                        LEFT JOIN (
+                            SELECT FollowupEntryID,
+                                   COUNT(1) AS InvoiceCount,
+                                   MAX(CASE WHEN ISNULL(InvoicePaymentReceived, 0) = 1
+                                                  OR (ISNULL(InvoiceValue, 0) > 0
+                                                      AND ISNULL(AmountPaid, 0) >= InvoiceValue)
+                                            THEN 1 ELSE 0 END) AS IsPaid
+                            FROM dbo.GstInvoice
+                            WHERE FollowupEntryID IS NOT NULL
+                              AND VoucherType = N'SALE'
+                            GROUP BY FollowupEntryID
+                        ) gi ON gi.FollowupEntryID = f.EntryID
                         WHERE ISNULL(f.IsActive, 1) = 1
                         GROUP BY f.ModuleCode
                         """

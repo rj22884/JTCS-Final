@@ -16,15 +16,9 @@ from app.models.transactions import CustomerMaster
 _CUSTOMER_SCHEMA_READY = False
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# Customer-master's own setup / auth rows — not business usage.
-_USAGE_SKIP_TABLES = frozenset(
-    {
-        "CustomerMaster",
-        "CustomerIncomeExpenseWorkLink",
-        "ChartOfAccountMaster",
-        "CustomerPortalLoginLog",
-    }
-)
+# Relation checks include all customer-linked rows, including setup and auth tables.
+_CUSTOMER_MASTER_SCHEMA = "dbo"
+_CUSTOMER_MASTER_TABLE = "CustomerMaster"
 
 _USAGE_TABLE_LABELS = {
     "JTCSDailyTransaction": "Daily Transaction",
@@ -146,6 +140,18 @@ class CustomerRepository:
             """
             IF COL_LENGTH(N'dbo.CustomerMaster', N'District') IS NULL
                 ALTER TABLE dbo.CustomerMaster ADD District NVARCHAR(100) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'PostOffice') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD PostOffice NVARCHAR(100) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'CustomerIntroducedBy') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD CustomerIntroducedBy NVARCHAR(200) NULL;
+            """,
+            """
+            IF COL_LENGTH(N'dbo.CustomerMaster', N'CustomerSinceDate') IS NULL
+                ALTER TABLE dbo.CustomerMaster ADD CustomerSinceDate DATE NULL;
             """,
             """
             IF COL_LENGTH(N'dbo.CustomerMaster', N'StateGstCode') IS NULL
@@ -556,7 +562,11 @@ class CustomerRepository:
         ]
         linked_ids = self.list_linked_customer_ids()
         for item in items:
-            item["has_links"] = item["customer_id"] in linked_ids
+            # Hide delete when relation discovery/querying is unavailable as well:
+            # the UI must fail closed instead of implying that deletion is safe.
+            item["has_links"] = (
+                True if linked_ids is None else item["customer_id"] in linked_ids
+            )
         return items
 
     def get_by_id(self, customer_id: int) -> CustomerMaster | None:
@@ -683,6 +693,7 @@ class CustomerRepository:
             if form_key in {
                 "date_of_birth",
                 "date_of_incorporation",
+                "customer_since_date",
                 "opening_balance_date",
                 "purchase_date",
             }:
@@ -839,36 +850,16 @@ class CustomerRepository:
         self.session.flush()
 
     def purge(self, customer_id: int) -> None:
-        """Hard-delete a customer row. Call only after usage checks. Not recoverable."""
+        """Hard-delete a customer row after verifying no related rows exist."""
         cid = int(customer_id)
-        for table in (
-            "CustomerIncomeExpenseWorkLink",
-            "CustomerPortalLoginLog",
-            "CustomerDynFieldValue",
-        ):
-            safe = self._safe_table_name(table)
-            if not safe:
-                continue
-            self.session.execute(
-                text(
-                    f"IF OBJECT_ID(N'dbo.[{safe}]', N'U') IS NOT NULL "
-                    f"DELETE FROM dbo.[{safe}] WHERE CustomerID = :id"
-                ),
-                {"id": cid},
+        usage = self.get_usage(cid)
+        if not usage.get("can_delete"):
+            raise ValueError(
+                "This customer has related records, or all relations could not be verified. "
+                "Remove linked records first."
             )
         self.session.execute(
-            text(
-                """
-                IF COL_LENGTH(N'dbo.ChartOfAccountMaster', N'CustomerID') IS NOT NULL
-                    UPDATE dbo.ChartOfAccountMaster
-                    SET CustomerID = NULL
-                    WHERE CustomerID = :id
-                """
-            ),
-            {"id": cid},
-        )
-        self.session.execute(
-            text("DELETE FROM dbo.CustomerMaster WHERE CustomerID = :id"),
+            text("DELETE FROM dbo.[CustomerMaster] WHERE CustomerID = :id"),
             {"id": cid},
         )
         self.session.flush()
@@ -880,70 +871,195 @@ class CustomerRepository:
             return None
         return token
 
-    def _linked_customer_tables(self) -> list[str]:
-        names: list[str] = []
+    def _linked_customer_relations(self) -> list[dict] | None:
+        """Find declared FKs and conventional CustomerID references to CustomerMaster.
+
+        A None result means SQL Server could not verify the full relation list. Callers
+        must treat that as non-deletable rather than assuming the customer is unused.
+        """
         try:
             rows = self.session.execute(
                 text(
                     """
-                    SELECT t.name
-                    FROM sys.columns c
-                    INNER JOIN sys.tables t ON t.object_id = c.object_id
-                    INNER JOIN sys.schemas s ON s.schema_id = t.schema_id
-                    WHERE s.name = N'dbo'
-                      AND c.name = N'CustomerID'
+                    SELECT DISTINCT
+                        child_schema.name AS schema_name,
+                        child_table.name AS table_name,
+                        child_column.name AS column_name,
+                        parent_column.name AS referenced_column_name
+                    FROM sys.foreign_key_columns fk
+                    INNER JOIN sys.tables child_table
+                        ON child_table.object_id = fk.parent_object_id
+                    INNER JOIN sys.schemas child_schema
+                        ON child_schema.schema_id = child_table.schema_id
+                    INNER JOIN sys.columns child_column
+                        ON child_column.object_id = child_table.object_id
+                       AND child_column.column_id = fk.parent_column_id
+                    INNER JOIN sys.tables parent_table
+                        ON parent_table.object_id = fk.referenced_object_id
+                    INNER JOIN sys.schemas parent_schema
+                        ON parent_schema.schema_id = parent_table.schema_id
+                    INNER JOIN sys.columns parent_column
+                        ON parent_column.object_id = parent_table.object_id
+                       AND parent_column.column_id = fk.referenced_column_id
+                    WHERE parent_schema.name = :parent_schema
+                      AND parent_table.name = :parent_table
+
+                    UNION
+
+                    SELECT DISTINCT
+                        child_schema.name AS schema_name,
+                        child_table.name AS table_name,
+                        child_column.name AS column_name,
+                        N'CustomerID' AS referenced_column_name
+                    FROM sys.columns child_column
+                    INNER JOIN sys.tables child_table
+                        ON child_table.object_id = child_column.object_id
+                    INNER JOIN sys.schemas child_schema
+                        ON child_schema.schema_id = child_table.schema_id
+                    WHERE child_column.name = N'CustomerID'
+                      AND NOT (
+                          child_schema.name = :parent_schema
+                          AND child_table.name = :parent_table
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM sys.foreign_key_columns fk
+                          WHERE fk.parent_object_id = child_table.object_id
+                            AND fk.parent_column_id = child_column.column_id
+                            AND fk.referenced_object_id = OBJECT_ID(N'dbo.CustomerMaster')
+                      )
                     """
-                )
+                ),
+                {
+                    "parent_schema": _CUSTOMER_MASTER_SCHEMA,
+                    "parent_table": _CUSTOMER_MASTER_TABLE,
+                },
             ).fetchall()
-            names = [str(row[0]) for row in rows]
         except SQLAlchemyError:
             self.session.rollback()
-            names = list(_USAGE_DETAIL_SQL.keys())
-        tables: list[str] = []
-        seen: set[str] = set()
-        for raw in names:
-            table = self._safe_table_name(raw)
-            if not table or table in _USAGE_SKIP_TABLES or table in seen:
-                continue
-            seen.add(table)
-            tables.append(table)
-        return tables
+            return None
 
-    def list_linked_customer_ids(self) -> set[int]:
-        tables = self._linked_customer_tables()
-        if not tables:
+        relations: list[dict] = []
+        seen: set[tuple[str, str, str, str]] = set()
+        for row in rows:
+            schema = self._safe_table_name(row[0])
+            table = self._safe_table_name(row[1])
+            column = self._safe_table_name(row[2])
+            referenced_column = self._safe_table_name(row[3])
+            if not schema or not table or not column or not referenced_column:
+                # Metadata was found but cannot be safely queried: fail closed.
+                return None
+            if schema == _CUSTOMER_MASTER_SCHEMA and table == _CUSTOMER_MASTER_TABLE:
+                continue
+            key = (schema, table, column, referenced_column)
+            if key in seen:
+                continue
+            seen.add(key)
+            relations.append(
+                {
+                    "schema": schema,
+                    "table": table,
+                    "column": column,
+                    "referenced_column": referenced_column,
+                }
+            )
+        return relations
+
+    def list_linked_customer_ids(self) -> set[int] | None:
+        relations = self._linked_customer_relations()
+        if relations is None:
+            return None
+        if not relations:
             return set()
-        parts = [f"SELECT CustomerID FROM dbo.[{table}] WHERE CustomerID IS NOT NULL" for table in tables]
+        parts = []
+        for relation in relations:
+            schema = relation["schema"]
+            table = relation["table"]
+            column = relation["column"]
+            referenced_column = relation["referenced_column"]
+            parts.append(
+                "SELECT customer.CustomerID "
+                f"FROM [{schema}].[{table}] AS linked "
+                "INNER JOIN [dbo].[CustomerMaster] AS customer "
+                f"ON linked.[{column}] = customer.[{referenced_column}] "
+                f"WHERE linked.[{column}] IS NOT NULL"
+            )
         try:
             rows = self.session.execute(text(" UNION ".join(parts))).fetchall()
         except SQLAlchemyError:
             self.session.rollback()
-            return set()
+            return None
         return {int(row[0]) for row in rows if row[0] is not None}
 
     def get_usage(self, customer_id: int) -> dict:
         cid = int(customer_id)
         links: list[dict] = []
-        for table in self._linked_customer_tables():
+        relations = self._linked_customer_relations()
+        if relations is None:
+            return {
+                "can_delete": False,
+                "scan_complete": False,
+                "links": [
+                    {
+                        "table": "relation-check",
+                        "label": "Unable to verify all customer relations",
+                        "count": 0,
+                    }
+                ],
+                "transactions": [],
+            }
+
+        scan_complete = True
+        for relation in relations:
+            schema = relation["schema"]
+            table = relation["table"]
+            column = relation["column"]
+            referenced_column = relation["referenced_column"]
             try:
                 count = self.session.execute(
-                    text(f"SELECT COUNT(1) FROM dbo.[{table}] WHERE CustomerID = :id"),
+                    text(
+                        "SELECT COUNT(1) "
+                        f"FROM [{schema}].[{table}] AS linked "
+                        "INNER JOIN [dbo].[CustomerMaster] AS customer "
+                        f"ON linked.[{column}] = customer.[{referenced_column}] "
+                        "WHERE customer.CustomerID = :id"
+                    ),
                     {"id": cid},
                 ).scalar()
             except SQLAlchemyError:
                 self.session.rollback()
+                scan_complete = False
                 continue
             total = int(count or 0)
             if total:
+                label = _USAGE_TABLE_LABELS.get(table, table)
                 links.append(
                     {
-                        "table": table,
-                        "label": _USAGE_TABLE_LABELS.get(table, table),
+                        "table": f"{schema}.{table}",
+                        "label": label,
                         "count": total,
                     }
                 )
+        if not scan_complete:
+            links.append(
+                {
+                    "table": "relation-check",
+                    "label": "Unable to verify all customer relations",
+                    "count": 0,
+                }
+            )
         transactions: list[dict] = []
-        existing = {item["table"] for item in links}
+        existing = {
+            relation["table"]
+            for relation in relations
+            if relation["schema"] == _CUSTOMER_MASTER_SCHEMA
+            and relation["column"] == "CustomerID"
+            and any(
+                link["count"] > 0
+                and link["table"] == f"{relation['schema']}.{relation['table']}"
+                for link in links
+            )
+        }
         for table, sql in _USAGE_DETAIL_SQL.items():
             if table not in existing:
                 continue
@@ -965,7 +1081,8 @@ class CustomerRepository:
                 )
         transactions.sort(key=lambda item: item.get("txn_date") or "", reverse=True)
         return {
-            "can_delete": not links,
+            "can_delete": scan_complete and not links,
+            "scan_complete": scan_complete,
             "links": links,
             "transactions": transactions[:80],
         }

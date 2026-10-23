@@ -79,8 +79,7 @@ FIXED_WORKFLOW_STAGES = {
         ("application_received", "Application Received", 2),
         ("kyc", "KYC", 3),
         ("download_status", "Download Status", 4),
-        ("tally_bill_generated", "Tally Bill Generated", 5),
-        ("invoice", "Invoice", 6),
+        ("invoice", "Invoice", 5),
     ),
 }
 
@@ -462,6 +461,26 @@ class FollowupService:
             date_to=date_to,
         )
         for row in rows:
+            if self.module_code == "DSC":
+                # Preserve historical Tally ticks as invoice progress, without
+                # exposing the retired field in the DSC workflow.
+                for stage in row.get("completed_stages") or []:
+                    if canonical_stage_code(stage.get("StageCode") or stage.get("stage_code")) == "tally_bill_generated":
+                        stage.update(
+                            {
+                                "StageID": "invoice",
+                                "StageCode": "invoice",
+                                "StageName": "Invoice",
+                                "DisplayOrder": 5,
+                            }
+                        )
+                row["completed_stages"] = sorted(
+                    row.get("completed_stages") or [],
+                    key=lambda stage: stage.get("DisplayOrder") or 0,
+                )
+                row["workflow_status"] = FollowupRepository._workflow_status(
+                    row["completed_stages"], []
+                )
             if row.get("WorkDate"):
                 row["work_date"] = row["WorkDate"].isoformat() if hasattr(row["WorkDate"], "isoformat") else str(row["WorkDate"])
             if row.get("BillDate"):
@@ -499,7 +518,7 @@ class FollowupService:
                 completed_codes = {
                     (s.get("StageCode") or "").lower() for s in row.get("completed_stages", [])
                 }
-                if "tally_bill_generated" not in completed_codes and "payment_received" not in completed_codes:
+                if "invoice" not in completed_codes and "payment_received" not in completed_codes:
                     row["application_number"] = row.get("BillNo")
             row["bill_no"] = row.get("BillNo")
             row["bill_date"] = row.get("BillDate")
@@ -537,8 +556,6 @@ class FollowupService:
         if self.module_code == "ITR":
             self._heal_itr_payment_status_rows(rows)
             self._attach_itr_payment_receive_dates(rows)
-        if status_filter and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
-            rows = self._filter_entries_by_status(rows, status_filter, module_code=self.module_code)
         from app.services.gst_invoice_service import GstInvoiceService
 
         status_map = GstInvoiceService().sale_status_by_bill_nos(
@@ -548,6 +565,8 @@ class FollowupService:
             key = (row.get("bill_no") or row.get("BillNo") or "").strip().upper()
             row["sale_invoice"] = status_map.get(key)
         self._attach_linked_invoices(rows)
+        if status_filter and (self.module_code in TAX_FOLLOWUP_MODULES or self.module_code == "DSC"):
+            rows = self._filter_entries_by_status(rows, status_filter, module_code=self.module_code)
         return rows
 
     @staticmethod
@@ -634,6 +653,7 @@ class FollowupService:
         if not rows:
             return
         from app.repositories.gst_invoice_repository import GstInvoiceRepository
+        from app.services.gst_invoice_service import GstInvoiceService
 
         repo = GstInvoiceRepository()
         ids = []
@@ -643,6 +663,11 @@ class FollowupService:
             except (TypeError, ValueError):
                 continue
         by_entry = repo.find_by_followup_entries(ids)
+        invoice_rows = list({int(inv.InvoiceID): inv for inv in by_entry.values()}.values())
+        payment_by_invoice = {
+            int(item["invoice_id"]): item
+            for item in GstInvoiceService()._grid_rows(invoice_rows)
+        } if invoice_rows else {}
         for row in rows:
             try:
                 entry_id = int(row.get("entry_id") or 0)
@@ -661,7 +686,43 @@ class FollowupService:
                 self._strip_unlinked_invoice_stage(row)
                 self._fill_billing_customer_name(row)
                 continue
-            row["linked_invoice"] = self._invoice_link_dict(inv)
+            payment = payment_by_invoice.get(int(inv.InvoiceID), {})
+            if not payment:
+                fallback_rows = GstInvoiceService()._grid_rows([inv])
+                payment = fallback_rows[0] if fallback_rows else {}
+            row["linked_invoice"] = {
+                **self._invoice_link_dict(inv),
+                "payment_status": payment.get("payment_status") or "Unpaid",
+                "outstanding_amount": payment.get("outstanding_amount", float(inv.InvoiceValue or 0)),
+                "payment_received": bool(payment.get("payment_received")),
+            }
+            if self.module_code == "DSC":
+                stages = list(row.get("completed_stages") or [])
+                codes = {canonical_stage_code(stage.get("StageCode")) for stage in stages}
+                if float(row["linked_invoice"].get("outstanding_amount") or 0) <= 0.005:
+                    if "payment_received" not in codes:
+                        stages.append(
+                            {
+                                "StageID": "payment_received",
+                                "StageCode": "payment_received",
+                                "StageName": "Payment Received",
+                                "DisplayOrder": 6,
+                            }
+                        )
+                    row["payment_received"] = True
+                    row["workflow_status"] = "Payment Received"
+                elif "invoice" not in codes:
+                    stages.append(
+                        {
+                            "StageID": "invoice",
+                            "StageCode": "invoice",
+                            "StageName": "Invoice",
+                            "DisplayOrder": 5,
+                        }
+                    )
+                    row["workflow_status"] = "Invoice"
+                row["completed_stages"] = stages
+                row["stage_ids"] = [stage.get("StageCode") for stage in stages]
             followup_customer = int(row.get("customer_id") or 0)
             invoice_customer = int(getattr(inv, "CustomerID", None) or 0)
             if invoice_customer and followup_customer and invoice_customer != followup_customer:
@@ -738,22 +799,29 @@ class FollowupService:
         DOCUMENTS RECEIVED → docs ticked, later not
         APPLICATION → application ticked, later not
         KYC / DOWNLOAD STATUS → same exclusive rule
-        TALLY BILL GENERATED → bill ticked. Older Payment Received ticks stay on that bucket.
+        INVOICE → an invoice exists (including historical Tally Bill Generated rows).
         """
         codes = cls._completed_stage_codes(row)
         status = (row.get("workflow_status") or "").strip()
         status_l = status.lower()
+        linked_invoice = row.get("linked_invoice") or {}
+        if linked_invoice:
+            try:
+                if float(linked_invoice.get("outstanding_amount") or 0) > 0.005:
+                    return "invoice"
+                return "payment_received"
+            except (TypeError, ValueError):
+                pass
         if status == "Unverified" or "unverified" in codes:
             return "unverified"
-        if "invoice" in codes or status == "Invoice":
-            return "invoice"
         if (
-            "tally_bill_generated" in codes
-            or "payment_received" in codes
+            "payment_received" in codes
             or row.get("payment_received")
-            or status in {"Tally Bill Generated", "Payment Received"}
+            or status == "Payment Received"
         ):
-            return "tally_bill_generated"
+            return "payment_received"
+        if "invoice" in codes or "tally_bill_generated" in codes or status in {"Invoice", "Tally Bill Generated"}:
+            return "invoice"
         if "download_status" in codes or status == "Download Status":
             return "download_status"
         if "kyc" in codes or status_l == "kyc":
@@ -788,10 +856,9 @@ class FollowupService:
             sf = sf.split(":", 1)[1].strip()
             if not sf:
                 return rows
-        # Payment pending = Invoice stage without Payment Received.
-        # DSC still uses Tally Bill Generated for that bucket.
+        # Payment pending = an invoice with an outstanding amount.
         if sf == "payment_pending":
-            pending_code = "tally_bill_generated" if module_code == "DSC" else "invoice"
+            pending_code = "invoice"
             return [
                 r
                 for r in rows
@@ -799,7 +866,7 @@ class FollowupService:
             ]
         if module_code != "DSC" and sf == "itr_filed":
             sf = "return_filed"
-        if module_code != "DSC" and sf == "tally_bill_generated":
+        if sf == "tally_bill_generated":
             sf = "invoice"
         itr_codes = {
             "pending",
@@ -814,7 +881,6 @@ class FollowupService:
             "application_no",
             "kyc",
             "download_status",
-            "tally_bill_generated",
             "invoice",
             "unverified",
         }
@@ -965,7 +1031,7 @@ class FollowupService:
                 buckets[key] = buckets.get(key, 0) + 1
             pending = buckets.get("pending", 0)
             payment_received = buckets.get("payment_received", 0)
-            pending_code = "tally_bill_generated" if self.module_code == "DSC" else "invoice"
+            pending_code = "invoice"
             payment_pending = buckets.get(pending_code, 0)
             by_status: dict[str, int] = {}
             for stage in self.list_stages():
@@ -989,7 +1055,7 @@ class FollowupService:
 
         pending = sum(1 for r in rows if (r.get("workflow_status") or "Pending") == "Pending")
         payment_received = sum(1 for r in rows if r.get("payment_received"))
-        pending_code = "tally_bill_generated" if self.module_code == "DSC" else "invoice"
+        pending_code = "invoice"
         payment_pending = sum(
             1
             for r in rows
@@ -1160,6 +1226,8 @@ class FollowupService:
             code = canonical_stage_code(es.StageCode)
             if not code:
                 continue
+            if self.module_code == "DSC" and code == "tally_bill_generated":
+                code = "invoice"
             name, order = stage_meta.get(code, (code.replace("_", " ").title(), 0))
             completed.append(
                 {
@@ -1744,7 +1812,7 @@ class FollowupService:
                     "Please uncheck Invoice first before unchecking Return Filed."
                 )
         needs_billing = (
-            (not tax_followup and "tally_bill_generated" in stage_codes)
+            (not tax_followup and ("tally_bill_generated" in stage_codes or (self.module_code == "DSC" and "invoice" in stage_codes)))
             or "payment_received" in stage_codes
             or "return_filed" in stage_codes
             or "itr_filed" in stage_codes
@@ -1831,7 +1899,7 @@ class FollowupService:
 
         saved_bill_no = bill_no or existing_bill_no
         saved_bill_date = bill_date or existing_bill_date
-        keeps_bill = (not tax_followup and "tally_bill_generated" in stage_codes) or (
+        keeps_bill = (not tax_followup and ("tally_bill_generated" in stage_codes or (self.module_code == "DSC" and "invoice" in stage_codes))) or (
             "payment_received" in stage_codes
         )
         if keeps_bill:
@@ -1841,7 +1909,7 @@ class FollowupService:
                 data["BillAmount"] = bill_amount
             if saved_bill_date:
                 data["BillDate"] = saved_bill_date
-            elif not tax_followup and "tally_bill_generated" in stage_codes:
+            elif not tax_followup and ("tally_bill_generated" in stage_codes or (self.module_code == "DSC" and "invoice" in stage_codes)):
                 data["BillDate"] = date.today()
 
         persist_stage_ids = list(stage_ids)
@@ -1870,7 +1938,7 @@ class FollowupService:
                 self.followup_repo.replace_entry_stages(row.EntryID, persist_stage_ids)
                 saved_id = row.EntryID
 
-            billing_stage = (not tax_followup and "tally_bill_generated" in stage_codes) or (
+            billing_stage = (not tax_followup and ("tally_bill_generated" in stage_codes or (self.module_code == "DSC" and "invoice" in stage_codes))) or (
                 "payment_received" in stage_codes
             )
             final_bill_no = data.get("BillNo") if billing_stage else existing_bill_no
@@ -1940,11 +2008,22 @@ class FollowupService:
         for link in list(row.stages or []):
             code = canonical_stage_code(link.StageCode)
             if code == "payment_received":
-                raise ValueError("Remove Payment Received in Edit before deleting this entry.")
+                module_name = {
+                    "GST": "GST Follow-up",
+                    "TDS": "TDS Follow-up",
+                    "ITR": "ITR Follow-up",
+                    "DSC": "DSC Follow-up",
+                }.get(self.module_code, "Follow-up")
+                raise ValueError(
+                    "Payment Received is marked for this invoice. Remove it from "
+                    f"Activities → {module_name} → edit the related entry before deleting."
+                )
         from app.services.gst_invoice_service import GstInvoiceService
 
         invoices = GstInvoiceService()
-        for invoice_id in invoices.repo.list_ids_for_followup_entry(entry_id):
+        invoice_ids = invoices.repo.list_ids_for_followup_entry(entry_id)
+        invoices.assert_invoices_deletable(invoice_ids)
+        for invoice_id in invoice_ids:
             invoices.delete_record(
                 invoice_id,
                 payload={"from_source": True, "followup_entry_id": int(entry_id)},

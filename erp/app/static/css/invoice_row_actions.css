@@ -4,6 +4,23 @@
   white-space: normal;
 }
 
+.jtcs-inv-meta.is-paid {
+  color: #198754;
+}
+
+.jtcs-inv-meta.is-overdue {
+  color: #dc3545;
+}
+
+.jtcs-inv-meta .jtcs-inv-overdue {
+  font-weight: 700;
+  color: #dc3545;
+}
+
+.jtcs-inv-meta .jtcs-inv-overdue.is-zero {
+  color: #0d6efd;
+}
+
 .jtcs-inv-actions {
   display: inline-flex;
   flex-wrap: wrap;

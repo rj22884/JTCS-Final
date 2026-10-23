@@ -8,12 +8,14 @@ import urllib.parse
 from pathlib import Path
 
 from flask import current_app, has_request_context, request, url_for
+from reportlab.graphics import renderPDF, renderSVG
+from reportlab.graphics.barcode.qr import QrCodeWidget
+from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, C6
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
     Flowable,
     Image,
@@ -45,6 +47,37 @@ class _LinkedImage(Image):
             self.canv.linkURL(
                 self._link_url,
                 (0, 0, self.drawWidth, self.drawHeight),
+                relative=1,
+                thickness=0,
+            )
+
+
+class _LinkedQr(Flowable):
+    """Vector QR fallback for PDF environments without the optional qrcode package."""
+
+    def __init__(self, drawing: Drawing, size: float, link_url: str | None = None):
+        super().__init__()
+        self.drawing = drawing
+        self.width = size
+        self.height = size
+        self._link_url = link_url
+
+    def wrap(self, availWidth, availHeight):
+        return self.width, self.height
+
+    def draw(self):
+        self.canv.saveState()
+        scale = min(self.width / self.drawing.width, self.height / self.drawing.height)
+        draw_width = self.drawing.width * scale
+        draw_height = self.drawing.height * scale
+        self.canv.translate((self.width - draw_width) / 2, (self.height - draw_height) / 2)
+        self.canv.scale(scale, scale)
+        renderPDF.draw(self.drawing, self.canv, 0, 0)
+        self.canv.restoreState()
+        if self._link_url:
+            self.canv.linkURL(
+                self._link_url,
+                (0, 0, self.width, self.height),
                 relative=1,
                 thickness=0,
             )
@@ -148,6 +181,10 @@ class GstInvoicePdfService:
             "amount_in_words": header.get("AmountInWords") or "",
             "notes": header.get("Notes") or "",
             "payment_bank_account_id": header.get("PaymentBankAccountID"),
+            "payment_received": self.invoice_service._form_flag(
+                payload, "payment_received", "PaymentReceived"
+            ),
+            "payment_date": str(payload.get("payment_date") or ""),
             "pay_bank_name": header.get("PayBankName") or "",
             "pay_account_number": header.get("PayAccountNumber") or "",
             "pay_ifsc": header.get("PayIFSC") or "",
@@ -160,7 +197,9 @@ class GstInvoicePdfService:
                 self._pdf_line_from_build(ln) for ln in lines
             ],
         }
-        return self._render_pdf(data), f"Invoice-Preview.pdf"
+        if str(payload.get("preview_page_size") or "").strip().upper() == "C6":
+            return self._render_c6_pdf(data), "Invoice-Preview-C6.pdf"
+        return self._render_pdf(data), "Invoice-Preview.pdf"
 
     def _pdf_line_from_build(self, ln: dict) -> dict:
         item_id = ln.get("ItemID")
@@ -208,11 +247,28 @@ class GstInvoicePdfService:
         return Paragraph(html, cell)
 
     def upi_intent_url(self, data: dict) -> str | None:
+        bank = {}
         upi = (data.get("pay_upi_id") or "").strip()
+        if not upi:
+            bank = next(
+                (
+                    row
+                    for row in (data.get("pay_banks") or [])
+                    if isinstance(row, dict) and (row.get("upi_id") or "").strip()
+                ),
+                {},
+            )
+            upi = (bank.get("upi_id") or "").strip()
         if not upi:
             return None
         amount = self._fmt(data.get("invoice_value")).replace(",", "")
-        pn = (data.get("pay_account_holder") or data.get("pay_bank_name") or "JTCS").strip() or "JTCS"
+        pn = (
+            data.get("pay_account_holder")
+            or data.get("pay_bank_name")
+            or bank.get("account_holder_name")
+            or bank.get("bank_name")
+            or "JTCS"
+        ).strip() or "JTCS"
         tn = (data.get("invoice_no") or "Invoice").strip() or "Invoice"
         params = {
             "pa": upi,
@@ -222,6 +278,28 @@ class GstInvoicePdfService:
             "tn": tn,
         }
         return "upi://pay?" + urllib.parse.urlencode(params)
+
+    def _qr_payload(self, data: dict) -> str:
+        """Use a UPI payment intent when possible, otherwise encode invoice details."""
+        payment_url = self.upi_intent_url(data)
+        if payment_url:
+            return payment_url
+
+        banks = self._banks_for_pdf(data)
+        bank = banks[0] if banks else {}
+        account_number = (bank.get("account_number") or data.get("pay_account_number") or "").strip()
+        ifsc = (bank.get("ifsc_code") or data.get("pay_ifsc") or "").strip()
+        return "\n".join(
+            [
+                "JTCS INVOICE DETAILS",
+                f"Invoice: {(data.get('invoice_no') or 'Invoice').strip()}",
+                f"Date: {self._display_date(data.get('invoice_date') or '')}",
+                f"Amount: INR {self._fmt(data.get('invoice_value')).replace(',', '')}",
+                f"Bank: {(bank.get('bank_name') or data.get('pay_bank_name') or '').strip() or '—'}",
+                f"Account: {account_number or '—'}",
+                f"IFSC: {ifsc or '—'}",
+            ]
+        )
 
     def pay_token(self, data: dict) -> str:
         secret = current_app.secret_key
@@ -254,10 +332,10 @@ class GstInvoicePdfService:
         return (base + path) if base else path
 
     def _upi_qr_png_bytes(self, data: dict) -> bytes | None:
-        payload = self.upi_intent_url(data)
-        if not payload or qrcode is None:
+        payload = self._qr_payload(data)
+        if qrcode is None:
             return None
-        qr = qrcode.QRCode(version=None, box_size=4, border=1)
+        qr = qrcode.QRCode(version=None, box_size=4, border=4)
         qr.add_data(payload)
         qr.make(fit=True)
         img = qr.make_image(fill_color="black", back_color="white")
@@ -267,9 +345,19 @@ class GstInvoicePdfService:
 
     def upi_qr_data_uri(self, data: dict) -> str | None:
         png = self._upi_qr_png_bytes(data)
-        if not png:
-            return None
-        return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        if png:
+            return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        drawing = self._qr_drawing(self._qr_payload(data))
+        svg = renderSVG.drawToString(drawing).encode("utf-8")
+        return "data:image/svg+xml;base64," + base64.b64encode(svg).decode("ascii")
+
+    @staticmethod
+    def _qr_drawing(payload: str) -> Drawing:
+        widget = QrCodeWidget(payload, barLevel="M", barBorder=4)
+        x1, y1, x2, y2 = widget.getBounds()
+        drawing = Drawing(x2 - x1, y2 - y1)
+        drawing.add(widget)
+        return drawing
 
     def _banks_for_pdf(self, data: dict) -> list[dict]:
         banks = data.get("pay_banks") or []
@@ -319,17 +407,96 @@ class GstInvoicePdfService:
             }
         ]
 
-    def _upi_qr_image(self, data: dict, size: float | None = None) -> Image | None:
+    def _upi_qr_image(self, data: dict, size: float | None = None) -> Flowable | None:
         png = self._upi_qr_png_bytes(data)
-        if not png:
-            return None
         side = size if size and size > 0 else 32 * mm
-        return _LinkedImage(
-            io.BytesIO(png),
-            width=side,
-            height=side,
-            link_url=self.upi_intent_url(data),
-        )
+        link_url = self.upi_intent_url(data)
+        if png:
+            return _LinkedImage(
+                io.BytesIO(png),
+                width=side,
+                height=side,
+                link_url=link_url,
+            )
+        return _LinkedQr(self._qr_drawing(self._qr_payload(data)), side, link_url=link_url)
+
+    def paid_stamp_details(self, data: dict) -> dict[str, str]:
+        """Return the payment date and receiving account for the PAID mark."""
+        if not self._invoice_is_paid(data):
+            return {"date": "", "account": "—"}
+        payment_date = (data.get("payment_date") or "").strip()
+        accounts: list[str] = []
+        invoice_id = data.get("invoice_id")
+        try:
+            invoice_key = int(invoice_id or 0)
+        except (TypeError, ValueError):
+            invoice_key = 0
+
+        if invoice_key > 0:
+            try:
+                from app.extensions import db
+                from app.models.bank_cash import OthersBankCashTransaction
+                from app.models.transactions import JtcsBankAccountMaster
+                from app.services.others_bank_cash_service import OthersBankCashService
+
+                receipt_summary = OthersBankCashService().invoice_payment_adjustment(invoice_key)
+                receipt_entries = [
+                    row
+                    for row in (receipt_summary.get("entries") or [])
+                    if float(row.get("allocated_amount") or 0) > 0
+                ]
+                if receipt_entries:
+                    latest = max(
+                        receipt_entries,
+                        key=lambda row: (row.get("work_date") or "", int(row.get("money_inout_entry_id") or 0)),
+                    )
+                    payment_date = payment_date or (latest.get("work_date") or "")
+                    for row in receipt_entries:
+                        txn = db.session.get(
+                            OthersBankCashTransaction,
+                            int(row.get("money_inout_entry_id") or 0),
+                        )
+                        if txn is None:
+                            continue
+                        bank_id = getattr(txn, "DebitBankAccountID", None)
+                        ledger_key = (getattr(txn, "DebitLedgerKey", None) or "").strip()
+                        if not bank_id and ledger_key.lower().startswith("bank-"):
+                            try:
+                                bank_id = int(ledger_key.split("-", 1)[1])
+                            except (TypeError, ValueError):
+                                bank_id = None
+                        if bank_id:
+                            account = db.session.get(JtcsBankAccountMaster, int(bank_id))
+                            raw_number = (
+                                getattr(account, "AccountNumber", None)
+                                or getattr(account, "MaskedAccountNumber", None)
+                                or ""
+                            ) if account else ""
+                            digits = "".join(char for char in str(raw_number) if char.isdigit())
+                            suffix = digits[-4:] if digits else ""
+                            if suffix and suffix not in accounts:
+                                accounts.append(suffix)
+                        elif ledger_key:
+                            label = OthersBankCashService()._label_for_ledger_key(ledger_key)
+                            if "cash" in f"{ledger_key} {label}".lower() and "Cash" not in accounts:
+                                accounts.append("Cash")
+            except Exception:
+                # Keep the invoice printable if optional receipt/account details cannot be resolved.
+                pass
+
+        if not accounts:
+            banks = self._banks_for_pdf(data)
+            bank = banks[0] if banks else {}
+            raw_number = bank.get("account_number") or data.get("pay_account_number") or ""
+            digits = "".join(char for char in str(raw_number) if char.isdigit())
+            suffix = digits[-4:] if digits else ""
+            if suffix:
+                accounts.append(suffix)
+
+        return {
+            "date": payment_date,
+            "account": ", ".join(accounts) if accounts else "—",
+        }
 
     def build_pdf(self, invoice_id: int) -> tuple[bytes, str]:
         data = self.invoice_service.get_record(invoice_id)
@@ -375,10 +542,372 @@ class GstInvoicePdfService:
             "Unable to create PNG from invoice. " + " | ".join(errors)
         )
 
+    def build_preview_pages_from_payload(self, payload: dict) -> tuple[bytes, list[bytes], str]:
+        """Return the unsaved preview PDF and raster pages for the interactive viewer."""
+        pdf_bytes, filename = self.build_pdf_from_payload(payload)
+        return pdf_bytes, self._pdf_to_png_pages(pdf_bytes, dpi=180), filename
+
+    @staticmethod
+    def _pdf_to_png_pages(pdf_bytes: bytes, *, dpi: int = 180) -> list[bytes]:
+        errors: list[str] = []
+        try:
+            import pypdfium2 as pdfium
+
+            pdf = pdfium.PdfDocument(pdf_bytes)
+            pages: list[bytes] = []
+            for index in range(len(pdf)):
+                bitmap = pdf[index].render(scale=dpi / 72)
+                image = bitmap.to_pil()
+                buf = io.BytesIO()
+                image.save(buf, format="PNG")
+                pages.append(buf.getvalue())
+            if pages:
+                return pages
+            raise RuntimeError("no pages")
+        except Exception as exc:
+            errors.append(f"pypdfium2: {exc}")
+        try:
+            import fitz
+
+            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            pages = [
+                page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False).tobytes("png")
+                for page in pdf_doc
+            ]
+            if pages:
+                return pages
+            raise RuntimeError("no pages")
+        except Exception as exc:
+            errors.append(f"pymupdf: {exc}")
+        try:
+            from pdf2image import convert_from_bytes
+
+            images = convert_from_bytes(pdf_bytes, dpi=dpi)
+            pages = []
+            for image in images:
+                buf = io.BytesIO()
+                image.save(buf, format="PNG")
+                pages.append(buf.getvalue())
+            if pages:
+                return pages
+            raise RuntimeError("no pages")
+        except Exception as exc:
+            errors.append(f"pdf2image: {exc}")
+        raise RuntimeError("Unable to render invoice preview pages. " + " | ".join(errors))
+
     def build_png(self, invoice_id: int) -> tuple[bytes, str]:
         pdf_bytes, pdf_name = self.build_pdf(invoice_id)
         png_bytes = self._pdf_to_png(pdf_bytes)
         return png_bytes, pdf_name.replace(".pdf", ".png")
+
+    def _render_c6_pdf(self, data: dict) -> bytes:
+        """Render a compact portrait invoice preview on C6 envelope paper."""
+        company = self.invoice_service.company_profile()
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=C6,
+            leftMargin=4 * mm,
+            rightMargin=4 * mm,
+            topMargin=4 * mm,
+            bottomMargin=4 * mm,
+        )
+        content_w = float(doc.width)
+        styles = getSampleStyleSheet()
+        tiny = ParagraphStyle(
+            "C6Tiny", parent=styles["Normal"], fontName="Helvetica",
+            fontSize=5.2, leading=6.1, textColor=colors.HexColor("#1C2833"),
+        )
+        tiny_b = ParagraphStyle("C6TinyB", parent=tiny, fontName="Helvetica-Bold")
+        tiny_r = ParagraphStyle("C6TinyR", parent=tiny, alignment=TA_RIGHT)
+        brand = ParagraphStyle(
+            "C6Brand", parent=tiny_b, fontSize=7.2, leading=8.2,
+            textColor=colors.HexColor("#0B2545"),
+        )
+        title = ParagraphStyle(
+            "C6Title", parent=tiny_b, fontSize=9, leading=10,
+            alignment=TA_CENTER, textColor=colors.HexColor("#0B2545"),
+            spaceBefore=2, spaceAfter=3,
+        )
+        table_head = ParagraphStyle(
+            "C6Head", parent=tiny_b, fontSize=5.1, leading=5.8,
+            textColor=colors.white,
+        )
+        table_cell = ParagraphStyle("C6Cell", parent=tiny, fontSize=5.1, leading=5.8)
+        table_cell_r = ParagraphStyle("C6CellR", parent=table_cell, alignment=TA_RIGHT)
+
+        def text(value) -> str:
+            return self._pdf_escape(str(value or "—"))
+
+        banks = self._banks_for_pdf(data)
+        qr_bank = next((row for row in banks if (row.get("upi_id") or "").strip()), None)
+        if qr_bank:
+            data = {
+                **data,
+                "pay_upi_id": qr_bank.get("upi_id") or "",
+                "pay_bank_name": qr_bank.get("bank_name") or "",
+                "pay_account_holder": qr_bank.get("account_holder_name") or "",
+            }
+
+        story: list = [Paragraph("Original for Recipient", tiny)]
+        logo_path = self._logo_path()
+        company_bits: list = []
+        if logo_path:
+            company_bits.append(Image(str(logo_path), width=17 * mm, height=10 * mm))
+            company_bits.append(Spacer(1, 1))
+        company_bits.extend(
+            [
+                Paragraph(text(company.get("name")), brand),
+                Paragraph(f"GSTIN: <b>{text(company.get('gstin'))}</b>", tiny),
+                Paragraph(f"PAN: {text(company.get('pan'))}", tiny),
+                Paragraph(text(company.get("address")), tiny),
+            ]
+        )
+        invoice_bits = [
+            Paragraph(f"<b>Value:</b> Rs. {self._fmt(data.get('invoice_value'))}", tiny_r),
+            Paragraph(f"<b>No:</b> {text(data.get('invoice_no'))}", tiny_r),
+            Paragraph(f"<b>Date:</b> {text(self._display_date(data.get('invoice_date') or ''))}", tiny_r),
+        ]
+        qr_img = self._upi_qr_image(data, 13 * mm)
+        if qr_img is not None:
+            qr_img.hAlign = "RIGHT"
+            invoice_bits.extend([Spacer(1, 1), qr_img])
+            invoice_bits.append(Paragraph(
+                "Scan to pay" if self.upi_intent_url(data) else "Invoice QR",
+                ParagraphStyle("C6QrCaption", parent=tiny_r, fontSize=4.8, leading=5.2),
+            ))
+        header = Table(
+            [[company_bits, invoice_bits]],
+            colWidths=[content_w * 0.62, content_w * 0.38],
+        )
+        header.hAlign = "LEFT"
+        header.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.extend([header, Paragraph("Tax Invoice", title)])
+
+        place = data.get("place_of_supply") or "—"
+        if data.get("place_of_supply_code"):
+            place = f"{place} ({data['place_of_supply_code']})"
+        party_heading = (
+            "Supplier" if str(data.get("voucher_type") or "").upper() == "PURCHASE"
+            else "Customer / Bill To"
+        )
+        party_lines = [
+            f"<b>{party_heading}:</b> {text(data.get('customer_name'))}",
+            f"<b>Address:</b> {text(data.get('billing_address'))}",
+            f"<b>Mobile:</b> {text(data.get('contact_mobile'))}"
+            f" &nbsp; <b>Email:</b> {text(data.get('contact_email'))}",
+            f"<b>GSTIN:</b> {text(data.get('customer_gstin'))}"
+            f" &nbsp; <b>Place of Supply:</b> {text(place)}",
+            f"<b>Contact:</b> {text(data.get('contact_person'))}"
+            f" &nbsp; <b>Reverse Charge:</b> {'Yes' if data.get('reverse_charge') else 'No'}",
+        ]
+        party_box = Table([[Paragraph("<br/>".join(party_lines), tiny)]], colWidths=[content_w])
+        party_box.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#FFF4EB")),
+            ("BOX", (0, 0), (-1, -1), 0.35, colors.HexColor("#D7E0EA")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        story.extend([party_box, Spacer(1, 3)])
+
+        item_widths = [5 * mm, 34 * mm, 15 * mm, 11 * mm, 13 * mm, content_w - 78 * mm]
+        item_rows = [[
+            Paragraph("#", table_head), Paragraph("Item / Particulars", table_head),
+            Paragraph("HSN / GST", table_head), Paragraph("Qty", table_head),
+            Paragraph("Rate", table_head), Paragraph("Taxable / Disc", table_head),
+        ]]
+        for line in data.get("lines") or []:
+            hsn_html = (
+                f"<b>HSN</b> {text(line.get('hsn_sac'))}<br/>"
+                f"<b>GST</b> {self._fmt(line.get('gst_rate_percent'))}%"
+            )
+            amount_html = (
+                f"<b>{self._fmt(line.get('taxable_value'))}</b><br/>"
+                f"Disc: {self._fmt(line.get('discount_amount'))}"
+            )
+            item_rows.append([
+                Paragraph(text(line.get("sr_no")), table_cell),
+                self._particulars_paragraph(
+                    line, table_cell, bill_source=data.get("bill_source") or ""
+                ),
+                Paragraph(hsn_html, table_cell),
+                Paragraph(
+                    f"{self._fmt(line.get('qty'))}<br/>{text(line.get('unit'))}", table_cell
+                ),
+                Paragraph(self._fmt(line.get("rate")), table_cell_r),
+                Paragraph(amount_html, table_cell_r),
+            ])
+        item_table = Table(item_rows, colWidths=item_widths, repeatRows=1)
+        item_table.hAlign = "LEFT"
+        item_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2545")),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#7B8794")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (3, 1), (-1, -1), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        story.extend([item_table, Spacer(1, 3)])
+
+        round_off = float(data.get("round_off") or 0)
+        if abs(round_off) < 0.005:
+            round_off = 0.0
+        single_item = len(data.get("lines") or []) == 1
+        show_round_off = abs(round_off) >= 0.005
+        totals_rows = []
+        if not single_item:
+            totals_rows.append(["List Price", self._fmt(data.get("list_price"))])
+        totals_rows.extend([
+            ["Discount", self._fmt(data.get("discount_amount"))],
+            ["Taxable Value", self._fmt(data.get("taxable_value"))],
+        ])
+        if data.get("tax_type") == "CGST_SGST":
+            totals_rows.extend([
+                [f"CGST @ {self._fmt(data.get('cgst_rate'))}%", self._fmt(data.get("cgst_amount"))],
+                [f"SGST @ {self._fmt(data.get('sgst_rate'))}%", self._fmt(data.get("sgst_amount"))],
+            ])
+        else:
+            totals_rows.append([
+                f"IGST @ {self._fmt(data.get('igst_rate'))}%", self._fmt(data.get("igst_amount"))
+            ])
+        if show_round_off:
+            totals_rows.append([
+                "Round off", f"{'+' if round_off >= 0 else '-'}{self._fmt(abs(round_off))}"
+            ])
+        totals_rows.append(["Invoice Value", self._fmt(data.get("invoice_value"))])
+        if single_item:
+            one_row_style = ParagraphStyle(
+                "C6OneItemTotals", parent=tiny, fontSize=4.5, leading=5.2,
+                alignment=TA_CENTER,
+            )
+            one_row = [[
+                Paragraph(
+                    f"<b>{text(label)}</b><br/>{'<b>' + text(value) + '</b>' if label == 'Invoice Value' else text(value)}",
+                    one_row_style,
+                )
+                for label, value in totals_rows
+            ]]
+            totals = Table(one_row, colWidths=[content_w / len(totals_rows)] * len(totals_rows))
+            totals.hAlign = "LEFT"
+            totals.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#AAB7C4")),
+                ("BACKGROUND", (-1, 0), (-1, 0), colors.HexColor("#FFF0E5")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 1.2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 1.2),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+            ]))
+        else:
+            totals_data = [
+                [Paragraph(text(label), tiny_b), Paragraph(text(value), tiny_r)]
+                for label, value in totals_rows
+            ]
+            totals = Table(totals_data, colWidths=[content_w * 0.64, content_w * 0.36])
+            totals.hAlign = "RIGHT"
+            totals.setStyle(TableStyle([
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#AAB7C4")),
+                ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#FFF0E5")),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+            ]))
+        story.append(totals)
+        story.append(Paragraph(
+            f"<b>In Words:</b> {text(data.get('amount_in_words'))}",
+            ParagraphStyle("C6Words", parent=tiny, fontSize=5.4, leading=6.2, spaceBefore=2),
+        ))
+
+        if banks:
+            bank_columns = []
+            for bank in banks[:2]:
+                bank_columns.append(Paragraph(
+                    "<b>Bank:</b> " + text(bank.get("bank_name")) + "<br/>"
+                    "<b>A/c:</b> " + text(bank.get("account_number")) + "<br/>"
+                    "<b>IFSC:</b> " + text(bank.get("ifsc_code")) + "<br/>"
+                    "<b>Branch:</b> " + text(bank.get("branch_name")) + "<br/>"
+                    "<b>UPI:</b> " + text(bank.get("upi_id")),
+                    tiny,
+                ))
+            while len(bank_columns) < 2:
+                bank_columns.append(Paragraph("", tiny))
+            bank_box = Table([[bank_columns[0], bank_columns[1]]], colWidths=[content_w / 2] * 2)
+            bank_box.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#E8F3FC")),
+                ("BOX", (0, 0), (-1, -1), 0.3, colors.HexColor("#D7E0EA")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]))
+            story.extend([Spacer(1, 3), bank_box])
+
+        stamp_path = self._static_img_path("jtcs_invoice_stamp.png")
+        sign_path = self._static_img_path("jtcs_invoice_sign.png")
+        sign_flow: Flowable | str = ""
+        if stamp_path:
+            sign_flow = _StampWithSignature(
+                str(stamp_path), str(sign_path) if sign_path else None, 12 * mm
+            )
+        elif sign_path:
+            sign_flow = Image(str(sign_path), width=16 * mm, height=7 * mm, mask="auto")
+        signature = Table(
+            [[Paragraph(f"for {text(company.get('name'))}", tiny_r), sign_flow]],
+            colWidths=[content_w - 19 * mm, 19 * mm],
+        )
+        signature.setStyle(TableStyle([
+            ("ALIGN", (0, 0), (0, 0), "RIGHT"),
+            ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+            ("VALIGN", (0, 0), (-1, -1), "BOTTOM"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]))
+        story.extend([
+            Spacer(1, 2), signature,
+            Paragraph("<b>Terms:</b> All disputes subject to Haldwani / Nainital jurisdiction.", tiny),
+            Paragraph(
+                text(company.get("website") or "") + " | " + text(company.get("email") or "")
+                + " | " + text(company.get("phone") or ""),
+                ParagraphStyle("C6Foot", parent=tiny, alignment=TA_CENTER, fontSize=4.8, leading=5.2),
+            ),
+        ])
+
+        paid = self._invoice_is_paid(data)
+        paid_details = self.paid_stamp_details(data) if paid else {"date": "", "account": ""}
+
+        def draw_paid_stamp(canvas, _document):
+            if not paid:
+                return
+            page_width, page_height = C6
+            canvas.saveState()
+            canvas.translate(page_width / 2, page_height - 19 * mm)
+            canvas.rotate(25)
+            canvas.setFillColor(colors.HexColor("#b42318"))
+            canvas.setFont("Helvetica-Bold", 12)
+            canvas.drawCentredString(0, 0, "PAID")
+            canvas.setFont("Helvetica-Bold", 5)
+            canvas.drawCentredString(
+                0, -7, f"DOP: {self._display_date(paid_details.get('date') or '') or '—'}"
+            )
+            canvas.drawCentredString(0, -13, f"Account No: {paid_details.get('account') or '—'}")
+            canvas.restoreState()
+
+        doc.build(story, onFirstPage=draw_paid_stamp)
+        return buffer.getvalue()
 
     def _render_pdf(self, data: dict) -> bytes:
         company = self.invoice_service.company_profile()
@@ -469,9 +998,7 @@ class GstInvoicePdfService:
                 "pay_account_holder": qr_bank.get("account_holder_name") or "",
             }
         invoice_no = str(data.get("invoice_no") or "")
-        qr_side = stringWidth("Invoice No: ", "Helvetica", 8) + stringWidth(
-            invoice_no, "Helvetica-Bold", 8
-        )
+        qr_side = 25 * mm
         right_w = content_w * 0.38
         right_rows = [
             [
@@ -493,6 +1020,14 @@ class GstInvoicePdfService:
             qr_img.hAlign = "RIGHT"
             right_rows.append([Spacer(1, 1)])
             right_rows.append([qr_img])
+            right_rows.append(
+                [
+                    Paragraph(
+                        "Scan to pay" if self.upi_intent_url(data) else "Invoice details QR · not a payment QR",
+                        ParagraphStyle("QrCaption", parent=small_r, fontSize=7, leading=9),
+                    )
+                ]
+            )
         right_col = Table(right_rows, colWidths=[right_w])
         right_col.hAlign = "RIGHT"
         right_col.setStyle(
@@ -676,8 +1211,52 @@ class GstInvoicePdfService:
         round_off = float(data.get("round_off") or 0)
         if abs(round_off) < 0.005:
             round_off = 0.0
+        single_item = len(data.get("lines") or []) == 1
+        show_round_off = abs(round_off) >= 0.005
         round_txt = f"{'+' if round_off >= 0 else '-'}{self._fmt(abs(round_off))}"
-        if data.get("tax_type") == "CGST_SGST":
+        if single_item:
+            metric_cells = [
+                ("Discount", self._fmt(data["discount_amount"])),
+                ("Taxable Value", self._fmt(data["taxable_value"])),
+            ]
+            if data.get("tax_type") == "CGST_SGST":
+                metric_cells.extend([
+                    (f"CGST @ {self._fmt(data['cgst_rate'])}%", self._fmt(data["cgst_amount"])),
+                    (f"SGST @ {self._fmt(data['sgst_rate'])}%", self._fmt(data["sgst_amount"])),
+                ])
+            else:
+                metric_cells.append(
+                    (f"IGST @ {self._fmt(data['igst_rate'])}%", self._fmt(data["igst_amount"]))
+                )
+            if show_round_off:
+                metric_cells.append(("Round off", round_txt))
+            metric_cells.append(("Invoice Value", self._fmt(data["invoice_value"])))
+            single_cell = ParagraphStyle(
+                "TotOneRow", parent=cell, fontSize=7, leading=9, alignment=TA_CENTER,
+            )
+            totals = Table(
+                [[
+                    Paragraph(
+                        f"<b>{label}</b><br/>{'<b>' + value + '</b>' if label == 'Invoice Value' else value}",
+                        single_cell,
+                    )
+                    for label, value in metric_cells
+                ]],
+                colWidths=[content_w / len(metric_cells)] * len(metric_cells),
+            )
+            totals.hAlign = "LEFT"
+            last_col = len(metric_cells) - 1
+            totals.setStyle(TableStyle([
+                ("BACKGROUND", (last_col, 0), (last_col, 0), colors.HexColor("#FFF4EB")),
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+            ]))
+        elif data.get("tax_type") == "CGST_SGST":
             tot_headers = [
                 Paragraph("List Price", header_cell),
                 Paragraph("Discount", header_cell),
@@ -705,31 +1284,33 @@ class GstInvoicePdfService:
                 Paragraph(self._fmt(data["taxable_value"]), value_cell),
                 Paragraph(self._fmt(data["igst_amount"]), value_cell),
             ]
-        tot_headers.append(Paragraph("Round off", header_cell))
-        tot_values.append(Paragraph(round_txt, value_cell))
-        tot_headers.append(Paragraph("Invoice Value", header_cell))
-        tot_values.append(Paragraph(self._fmt(data["invoice_value"]), value_cell_b))
-        n_tot = len(tot_headers)
-        tot_widths = [content_w / n_tot] * n_tot
-        totals = Table([tot_headers, tot_values], colWidths=tot_widths)
-        totals.hAlign = "LEFT"
-        last_col = n_tot - 1
-        totals.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2545")),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                    ("BACKGROUND", (last_col, 1), (last_col, 1), colors.HexColor("#FFF4EB")),
-                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 4),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                ]
+        if not single_item:
+            if show_round_off:
+                tot_headers.append(Paragraph("Round off", header_cell))
+                tot_values.append(Paragraph(round_txt, value_cell))
+            tot_headers.append(Paragraph("Invoice Value", header_cell))
+            tot_values.append(Paragraph(self._fmt(data["invoice_value"]), value_cell_b))
+            n_tot = len(tot_headers)
+            tot_widths = [content_w / n_tot] * n_tot
+            totals = Table([tot_headers, tot_values], colWidths=tot_widths)
+            totals.hAlign = "LEFT"
+            last_col = n_tot - 1
+            totals.setStyle(
+                TableStyle(
+                    [
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0B2545")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("BACKGROUND", (last_col, 1), (last_col, 1), colors.HexColor("#FFF4EB")),
+                        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#5D6D7E")),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ]
+                )
             )
-        )
         story.append(totals)
         story.append(Spacer(1, 8))
 
@@ -843,8 +1424,44 @@ class GstInvoicePdfService:
             )
         )
 
-        doc.build(story)
+        paid = self._invoice_is_paid(data)
+        paid_details = self.paid_stamp_details(data) if paid else {"date": "", "account": ""}
+
+        def draw_paid_stamp(canvas, _document):
+            if not paid:
+                return
+            page_width, page_height = A4
+            canvas.saveState()
+            canvas.translate(page_width / 2, page_height - 42 * mm)
+            canvas.rotate(35)
+            canvas.setFillColor(colors.HexColor("#b42318"))
+            canvas.setFont("Helvetica-Bold", 24)
+            canvas.drawCentredString(0, -8, "PAID")
+            canvas.setFont("Helvetica-Bold", 8)
+            canvas.drawCentredString(
+                0,
+                -21,
+                f"DOP: {self._display_date(paid_details.get('date') or '') or '—'}",
+            )
+            canvas.drawCentredString(
+                0,
+                -32,
+                f"Account No: {paid_details.get('account') or '—'}",
+            )
+            canvas.restoreState()
+
+        doc.build(story, onFirstPage=draw_paid_stamp)
         return buffer.getvalue()
+
+    @staticmethod
+    def _invoice_is_paid(data: dict) -> bool:
+        received = data.get("payment_received")
+        if isinstance(received, str):
+            received = received.strip().lower() in {"1", "true", "yes", "on"}
+        return (
+            bool(received)
+            or str(data.get("payment_status") or "").strip().lower() == "paid"
+        )
 
     @staticmethod
     def _display_date(iso_date: str) -> str:

@@ -4,7 +4,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/followup_activity.css') }}?v=20261006invfit">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261006invact">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261023invstatus2">
 {% endblock %}
 
 {% block content %}
@@ -171,6 +171,18 @@
       <div class="fu-stat-label">Pending</div>
       <div class="fu-stat-value" id="fuStatPending">0</div>
     </button>
+    {% if module_code == 'DSC' %}
+    <button type="button" class="fu-stat-card border-warning" data-status-filter="payment_pending"
+            title="Invoice created with an outstanding balance">
+      <div class="fu-stat-label">Payment Pending</div>
+      <div class="fu-stat-value" id="fuStatPaymentPending">0</div>
+    </button>
+    <button type="button" class="fu-stat-card border-success" data-status-filter="payment_received"
+            title="Invoices with no outstanding balance">
+      <div class="fu-stat-label">Payment Received</div>
+      <div class="fu-stat-value" id="fuStatPaymentReceived">0</div>
+    </button>
+    {% endif %}
     {% for stage in workflow_stages %}
     <button type="button" class="fu-stat-card border-success" data-stage-code="{{ stage.stage_code }}"
             data-status-filter="{{ stage.stage_code }}"
@@ -443,7 +455,8 @@
             <div class="input-group">
               <input type="text" class="form-control" id="fuCustomerSearch"
                      placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
-              <button type="button" class="btn btn-outline-success" id="fuAddCustomerBtn" title="Add Customer">
+              <button type="button" class="btn btn-outline-success" id="fuAddCustomerBtn"
+                      data-scoped-customer-add="primary" title="Add Customer">
                 <i class="bi bi-person-plus"></i>
               </button>
             </div>
@@ -587,8 +600,16 @@
             <div id="fuBillingCustomerPick" class="position-relative d-none">
               <label class="form-label fu-required" for="fuBillingCustomerSearch">Billing Customer</label>
               <input type="hidden" id="fuBillingCustomerId" value="">
-              <input type="text" class="form-control" id="fuBillingCustomerSearch"
-                     placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+              <div class="input-group">
+                <input type="text" class="form-control" id="fuBillingCustomerSearch"
+                       placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+                {% if allow_customer_add %}
+                <button type="button" class="btn btn-outline-success" data-scoped-customer-add="billing"
+                        title="Add Billing Customer" aria-label="Add Billing Customer">
+                  <i class="bi bi-person-plus"></i>
+                </button>
+                {% endif %}
+              </div>
               <div id="fuBillingCustomerResults" class="list-group fu-customer-results d-none"></div>
             </div>
           </div>
@@ -598,23 +619,6 @@
             <label class="form-label" for="fuItrFiledDate">Return Filed Date</label>
             <input type="date" class="form-control" id="fuItrFiledDate" name="itr_filed_date"
                    value="{{ default_date }}">
-          </div>
-          {% endif %}
-
-          {% if module_code == 'DSC' %}
-          <div class="fu-workflow-panel mb-3" id="fuTallyBillWrap" data-stage-panel="tally_bill_generated">
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label" for="fuBillNo">Bill Number</label>
-                <div class="input-group">
-                  <input type="text" class="form-control" id="fuBillNo" name="bill_no" maxlength="50"
-                         placeholder="Bill number" readonly disabled>
-                  <button type="button" class="btn btn-outline-secondary fu-bill-no-copy" id="fuBillNoCopy" title="Copy">
-                    <i class="bi bi-copy"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
           </div>
           {% endif %}
 
@@ -764,9 +768,16 @@
   {% endif %}
 </script>
 {% if allow_customer_add %}
-<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20260802b"></script>
+<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20261018scopeaddrlock"></script>
+<script>
+  window.SCOPED_CUSTOMER_CREATE_URL = {{ (api_urls.customer_create or '')|tojson }};
+  window.SCOPED_CUSTOMER_PINCODE_LOOKUP = {{ (pincode_lookup_url or '')|tojson }};
+  window.SCOPED_CUSTOMER_CSRF = {{ csrf_token()|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261006invedit"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261023invstatus2"></script>
+<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261018invoiceguard"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261007receiptclose"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261023dscinvoice2"></script>
 {% endblock %}

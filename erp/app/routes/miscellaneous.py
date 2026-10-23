@@ -5,7 +5,7 @@ from datetime import date
 from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.datastructures import MultiDict
 
-from app.customer_master.constants import CUSTOMER_TYPES
+from app.customer_master.constants import CUSTOMER_TYPES, GENDERS
 from app.decorators import login_required, require_delete_reauth
 from app.utils.delete_auth import current_login_id, verify_delete_credentials
 from app.repositories.transaction_repository import MasterRepository
@@ -15,6 +15,8 @@ from app.services.gst_invoice_service import STATE_CODES, GstInvoiceService
 from app.services.item_master_service import ItemMasterService
 from app.services.menu_service import MenuService
 from app.services.others_income_expense_service import OthersIncomeExpenseService
+from app.services.chart_group_service import ChartGroupService
+from app.services.scoped_customer_service import ScopedCustomerService
 
 bp = Blueprint(
     "miscellaneous",
@@ -46,7 +48,9 @@ def _index_response():
         misc_work_types=service.list_work_types(ledger_kind=FORCE_KIND),
         payment_modes=master_repo.list_stamp_bank_payment_modes(),
         customer_groups=service.list_customer_groups(),
+        chart_of_groups=ChartGroupService().list_active_for_dropdown(),
         customer_types=CUSTOMER_TYPES,
+        genders=GENDERS,
         load_entry_id=request.args.get("load_entry", type=int),
         hide_misc=False,
         force_ledger_kind=FORCE_KIND,
@@ -171,7 +175,14 @@ def _generate_bill_items() -> list[dict]:
     except Exception:
         sub_map = {}
     items = []
-    for row in svc.repo.list_all(active_only=True):
+    rows = svc.repo.list_all(active_only=True)
+    rows.sort(
+        key=lambda row: (
+            (row.ItemCode or "").strip().casefold(),
+            (row.ItemName or "").strip().casefold(),
+        )
+    )
+    for row in rows:
         linked = sub_map.get(int(row.ItemID)) or {}
         description = (getattr(row, "Description", None) or "").strip()
         sub_work = (linked.get("sub_work_type") or "").strip()
@@ -180,6 +191,7 @@ def _generate_bill_items() -> list[dict]:
         items.append(
             {
                 "item_id": int(row.ItemID),
+                "item_code": row.ItemCode or "",
                 "item_name": row.ItemName or "",
                 "description": description or sub_work,
                 "hsn_sac": row.HsnSac or "",
@@ -283,6 +295,7 @@ def generate_bill_confirm_user():
 def generate_bill_page():
     """Compact Misc sales-invoice bill popup (9in × 4in window)."""
     company = GstInvoiceService.company_profile()
+    customer_service = OthersIncomeExpenseService()
     states = [
         {
             "name": " ".join(part.capitalize() for part in name.split()),
@@ -309,6 +322,10 @@ def generate_bill_page():
         current_login_id=current_login_id(),
         bill_items=_generate_bill_items(),
         upi_banks=upi_bank_choices(),
+        chart_of_groups=ChartGroupService().list_active_for_dropdown(),
+        customer_groups=customer_service.list_customer_groups(),
+        customer_types=CUSTOMER_TYPES,
+        genders=GENDERS,
     )
 
 
@@ -340,7 +357,7 @@ def customer_search():
 def customer_create():
     payload = request.get_json(silent=True) or request.form.to_dict()
     try:
-        customer = OthersIncomeExpenseService().create_customer(payload)
+        customer = ScopedCustomerService().create(payload)
         return jsonify({"ok": True, "customer": customer, "message": "Customer added successfully."})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

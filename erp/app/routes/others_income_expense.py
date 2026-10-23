@@ -3,11 +3,13 @@ from decimal import Decimal
 
 from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 
-from app.customer_master.constants import CUSTOMER_TYPES
+from app.customer_master.constants import CUSTOMER_TYPES, GENDERS
 from app.decorators import login_required, require_delete_reauth
 from app.repositories.transaction_repository import MasterRepository
 from app.services.menu_service import MenuService
 from app.services.others_income_expense_service import OthersIncomeExpenseService
+from app.services.chart_group_service import ChartGroupService
+from app.services.scoped_customer_service import ScopedCustomerService
 
 bp = Blueprint("others_income_expense", __name__, url_prefix="/others/income-expense")
 
@@ -49,7 +51,9 @@ def index():
         misc_work_types=[],
         payment_modes=master_repo.list_stamp_bank_payment_modes(),
         customer_groups=service.list_customer_groups(),
+        chart_of_groups=ChartGroupService().list_active_for_dropdown(),
         customer_types=CUSTOMER_TYPES,
+        genders=GENDERS,
         load_entry_id=request.args.get("load_entry", type=int),
         hide_misc=True,
     )
@@ -192,7 +196,7 @@ def customer_search():
 def customer_create():
     payload = request.get_json(silent=True) or request.form.to_dict()
     try:
-        customer = OthersIncomeExpenseService().create_customer(payload)
+        customer = ScopedCustomerService().create(payload)
         return jsonify({"ok": True, "customer": customer, "message": "Customer added successfully."})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

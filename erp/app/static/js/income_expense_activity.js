@@ -46,11 +46,6 @@
     remarks: document.getElementById("Remarks"),
     customerResults: document.getElementById("oieCustomerResults"),
     customerSelected: document.getElementById("oieCustomerSelected"),
-    addCustomerBtn: document.getElementById("oieAddCustomerBtn"),
-    customerModalEl: document.getElementById("oieCustomerModal"),
-    customerForm: document.getElementById("oieCustomerForm"),
-    customerSaveBtn: document.getElementById("oieCustomerSaveBtn"),
-    customerFormError: document.getElementById("oieCustomerFormError"),
     ledgerIncome: document.getElementById("LedgerKindIncome"),
     ledgerExpense: document.getElementById("LedgerKindExpense"),
     ledgerMisc: document.getElementById("LedgerKindMisc"),
@@ -81,7 +76,6 @@
   };
 
   const entryModal = els.entryModalEl ? new bootstrap.Modal(els.entryModalEl) : null;
-  const customerModal = els.customerModalEl ? new bootstrap.Modal(els.customerModalEl) : null;
   let editingEntryId = null;
   let billNoTouched = false;
   let customerSearchSeq = 0;
@@ -497,13 +491,17 @@
     const record = await lookupGeneratedInvoice(billNo);
     if (!record) return;
     keepGenerateBillYes();
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ bill_no: billNo }))
+    ) return;
     const sure = window.JTCSDialog?.confirm
       ? await window.JTCSDialog.confirm(
-          "All payment received bills and invoices related to this bill will be deleted. Are you sure?",
+          "The related invoice will be deleted. Any received payment must be cleared first. Continue?",
           { title: "Delete related bills", okLabel: "Yes", cancelLabel: "No", type: "warning" }
         )
       : window.confirm(
-          "All payment received bills and invoices related to this bill will be deleted. Are you sure?"
+          "The related invoice will be deleted. Any received payment must be cleared first. Continue?"
         );
     if (!sure) return;
     let creds = null;
@@ -1671,156 +1669,6 @@
       });
   }
 
-  const OTHER_CUSTOMER_TYPE = "Other";
-  const PLACEHOLDER_PAN = "PANNOTAVBL";
-  const OTHER_OPTIONAL_FIELDS = [
-    "pan_number",
-    "aadhaar_number",
-    "date_of_birth",
-    "email_id",
-    "mobile_number",
-  ];
-
-  function isOtherCustomerType() {
-    const typeField = els.customerForm?.elements?.namedItem("customer_type");
-    return String(typeField && typeField.value ? typeField.value : "").trim().toLowerCase() ===
-      OTHER_CUSTOMER_TYPE.toLowerCase();
-  }
-
-  function syncCustomerOtherRequired() {
-    if (!els.customerForm) return;
-    const otherMode = isOtherCustomerType();
-    OTHER_OPTIONAL_FIELDS.forEach(function (name) {
-      const field = els.customerForm.elements.namedItem(name);
-      if (!field || !field.id) return;
-      const label = els.customerForm.querySelector('label[for="' + field.id + '"]');
-      if (label) label.classList.toggle("oie-required", !otherMode);
-      if (otherMode) field.removeAttribute("required");
-      else field.setAttribute("required", "required");
-    });
-  }
-
-  function openCustomerModal() {
-    if (els.customerForm) els.customerForm.reset();
-    if (els.customerFormError) {
-      els.customerFormError.classList.add("d-none");
-      els.customerFormError.textContent = "";
-    }
-    syncCustomerOtherRequired();
-    customerModal?.show();
-  }
-
-  function saveCustomer() {
-    if (!els.customerForm) return;
-    const otherMode = isOtherCustomerType();
-    const required = [
-      ["customer_group", "Customer group"],
-      ["customer_type", "Customer type"],
-      ["customer_name", "Customer name"],
-    ];
-    if (!otherMode) {
-      required.push(
-        ["pan_number", "PAN"],
-        ["aadhaar_number", "Aadhaar"],
-        ["date_of_birth", "Date of birth"],
-        ["email_id", "Email ID"],
-        ["mobile_number", "Mobile number"]
-      );
-    }
-    for (let i = 0; i < required.length; i++) {
-      const field = els.customerForm.elements.namedItem(required[i][0]);
-      const value = (field && field.value ? String(field.value) : "").trim();
-      if (!value) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = required[i][1] + " is required.";
-          els.customerFormError.classList.remove("d-none");
-        } else {
-          alert(required[i][1] + " is required.");
-        }
-        return;
-      }
-    }
-
-    const formData = new FormData(els.customerForm);
-    const payload = Object.fromEntries(formData.entries());
-    if (otherMode && !(String(payload.pan_number || "").trim())) {
-      payload.pan_number = PLACEHOLDER_PAN;
-      const panField = els.customerForm.elements.namedItem("pan_number");
-      if (panField && !String(panField.value || "").trim()) panField.value = PLACEHOLDER_PAN;
-    }
-    if (otherMode) {
-      const pan = String(payload.pan_number || "").trim().toUpperCase();
-      if (pan && pan.length !== 10) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = "Valid 10-character PAN is required.";
-          els.customerFormError.classList.remove("d-none");
-        }
-        return;
-      }
-      const mobile = String(payload.mobile_number || "").replace(/\D/g, "");
-      if (mobile && mobile.length !== 10) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = "Valid 10-digit mobile number is required.";
-          els.customerFormError.classList.remove("d-none");
-        }
-        return;
-      }
-      const aadhaar = String(payload.aadhaar_number || "").replace(/\D/g, "");
-      if (aadhaar && aadhaar.length !== 12) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = "Valid 12-digit Aadhaar is required.";
-          els.customerFormError.classList.remove("d-none");
-        }
-        return;
-      }
-    }
-    if (els.customerSaveBtn) els.customerSaveBtn.disabled = true;
-    if (els.customerFormError) {
-      els.customerFormError.classList.add("d-none");
-      els.customerFormError.textContent = "";
-    }
-    const createUrl = window.OIE_CUSTOMER_CREATE_URL || "/others/income-expense/customers";
-    fetch(createUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-CSRFToken": csrfToken(),
-      },
-      body: JSON.stringify(payload),
-    })
-      .then(function (res) {
-        return res.json().then(function (data) {
-          if (!res.ok || !data.ok) {
-            throw new Error(data.error || "Unable to add customer.");
-          }
-          return data;
-        });
-      })
-      .then(function (data) {
-        const c = data.customer || {};
-        selectCustomer({
-          customer_id: c.customer_id || c.CustomerID,
-          customer_name: c.customer_name || c.CustomerName,
-          mobile_number: c.mobile_number || c.MobileNumber,
-          pan_number: c.pan_number || c.PANNumber,
-        });
-        customerModal?.hide();
-        els.customerForm.reset();
-      })
-      .catch(function (err) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = err.message || "Unable to add customer.";
-          els.customerFormError.classList.remove("d-none");
-        } else {
-          alert(err.message || "Unable to add customer.");
-        }
-      })
-      .finally(function () {
-        if (els.customerSaveBtn) els.customerSaveBtn.disabled = false;
-      });
-  }
-
   function resetForm() {
     setEditMode(null);
     billNoTouched = false;
@@ -2181,7 +2029,9 @@
             : "") +
           "</td>" +
           '<td class="oie-account-cell">' +
-          escapeHtml(row.account_label || "—") +
+          (row.overdue_days !== undefined && row.overdue_days !== null
+            ? '<span class="oie-overdue-days">' + escapeHtml(row.account_label || "") + "</span>"
+            : escapeHtml(row.account_label || "—")) +
           "</td>" +
           '<td class="text-end">' +
           escapeHtml(formatAmount(row.amount)) +
@@ -2357,6 +2207,15 @@
   }
 
   async function deleteEntry(entryId) {
+    const sourceRow = allGridRows.find(function (item) {
+      return String(item.entry_id) === String(entryId);
+    }) || {};
+    if (window.JtcsInvoiceDeleteGuard?.check) {
+      const criteria = { misc_entry_id: entryId };
+      if (sourceRow.bill_no) criteria.bill_no = sourceRow.bill_no;
+      if (sourceRow.tally_bill_no) criteria.tally_bill_no = sourceRow.tally_bill_no;
+      if (!(await window.JtcsInvoiceDeleteGuard.check(criteria))) return;
+    }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm("Delete this income / expense record?"))) return;
@@ -2714,15 +2573,22 @@
     });
   }
 
-  if (els.addCustomerBtn) {
-    els.addCustomerBtn.addEventListener("click", openCustomerModal);
-  }
-  const custTypeField = document.getElementById("oieCustType");
-  custTypeField?.addEventListener("change", syncCustomerOtherRequired);
-
-  if (els.customerSaveBtn) {
-    els.customerSaveBtn.addEventListener("click", saveCustomer);
-  }
+  window.addEventListener("jtcs:scoped-customer-created", function (event) {
+    const detail = event.detail || {};
+    const customer = detail.customer || {};
+    if (detail.target === "billing") {
+      const customerId = customer.customer_id || customer.CustomerID || "";
+      const customerName = customer.customer_name || customer.CustomerName || "";
+      const id = document.getElementById("oieBillingCustomerId");
+      const search = document.getElementById("oieBillingSearch");
+      if (id) id.value = String(customerId);
+      if (search) search.value = customerName;
+      document.getElementById("oieBillingResults")?.classList.add("d-none");
+      if (miscLinkedInvoice && customerId) reassignMiscBilling(customerId);
+      return;
+    }
+    if (detail.target === "primary") selectCustomer(customer);
+  });
 
   document.addEventListener("click", function (event) {
     if (
@@ -3035,6 +2901,7 @@
     }
     const params = new URLSearchParams();
     params.set("open_form", "1");
+    params.set("item_group", "Miscellaneous");
     params.set("customer_id", customerId);
     const contactId = (els.customerId?.value || "").trim();
     if (contactId) params.set("contact_customer_id", contactId);

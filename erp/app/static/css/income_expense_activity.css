@@ -184,6 +184,11 @@
   white-space: nowrap;
 }
 
+.oie-overdue-days {
+  color: #7f1d1d;
+  font-weight: 700;
+}
+
 .oie-ledger-badge-income {
   background: #d1fae5;
   color: #065f46;

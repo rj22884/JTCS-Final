@@ -2,10 +2,15 @@ from datetime import date
 
 from flask import Blueprint, jsonify, render_template, request, session
 
+from app.customer_master.constants import CUSTOMER_TYPES, GENDERS
 from app.decorators import login_required, require_delete_reauth
+from app.services.chart_group_service import ChartGroupService
+from app.services.customer_group_service import CustomerGroupService
 from app.services.menu_service import MenuService
 from app.services.others_bank_cash_service import OthersBankCashService
 from app.services.purpose_master_service import PurposeMasterService
+from app.services.scoped_customer_service import ScopedCustomerService
+from app.customer_master.countries import COUNTRIES
 
 bp = Blueprint("others_bank_cash", __name__, url_prefix="/others/bank-cash-transactions")
 
@@ -22,6 +27,14 @@ def index():
         purposes = PurposeMasterService().list_records(active_only=True)
     except Exception:
         purposes = []
+    try:
+        chart_of_groups = ChartGroupService().list_active_for_dropdown()
+    except Exception:
+        chart_of_groups = []
+    try:
+        customer_groups = CustomerGroupService().list_active_groups()
+    except Exception:
+        customer_groups = []
     return render_template(
         "others/bank_cash_transactions.html",
         page_title="Other Bank/Cash Transactions",
@@ -32,7 +45,25 @@ def index():
         purposes=purposes or [],
         next_voucher=service.next_voucher_no(),
         load_entry_id=request.args.get("load_entry", type=int),
+        chart_of_groups=chart_of_groups,
+        customer_groups=customer_groups,
+        customer_types=CUSTOMER_TYPES,
+        genders=GENDERS,
+        countries=COUNTRIES,
     )
+
+
+@bp.route("/customers", methods=["POST"], strict_slashes=False)
+@login_required
+def customer_create():
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    try:
+        customer = ScopedCustomerService().create(payload)
+        return jsonify({"ok": True, "customer": customer, "message": "Customer added successfully."})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to add customer: {exc}"}), 500
 
 
 @bp.route("/save", methods=["POST"], strict_slashes=False)

@@ -73,6 +73,16 @@
   function summaryHtml(invoice) {
     const id = invoiceIdOf(invoice);
     if (!id) return "";
+    const hasOutstanding = invoice.outstanding_amount != null && invoice.outstanding_amount !== "";
+    const outstanding = Number(invoice.outstanding_amount || 0);
+    const fullyPaid = String(invoice.payment_status || "").toLowerCase() === "paid" ||
+      (hasOutstanding && outstanding <= 0.005);
+    const invoiceDay = String(invoice.invoice_date || "").slice(0, 10);
+    const today = new Date();
+    const todayIso = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, "0") + "-" + String(today.getDate()).padStart(2, "0");
+    const pastDue = !!invoiceDay && invoiceDay < todayIso;
+    const overdue = pastDue && !fullyPaid;
+    const statusClass = fullyPaid ? " is-paid" : (overdue ? " is-overdue" : "");
     const packed = escapeHtml(JSON.stringify({
       invoice_id: id,
       invoice_no: invoice.invoice_no || "",
@@ -84,10 +94,11 @@
       pay_url: invoice.pay_url || "",
     }));
     return (
-      '<div class="jtcs-inv-meta" data-invoice-json="' + packed + '">' +
+      '<div class="jtcs-inv-meta' + statusClass + '" data-invoice-json="' + packed + '">' +
       "<div><strong>" + escapeHtml(invoice.invoice_no || "—") + "</strong></div>" +
       "<div>" + escapeHtml(formatDate(invoice.invoice_date)) + "</div>" +
       "<div>" + escapeHtml(money(invoice.invoice_value)) + "</div>" +
+      (pastDue ? '<div class="jtcs-inv-overdue' + (outstanding <= 0.005 ? ' is-zero' : '') + '">Overdue Balance: ' + escapeHtml(money(outstanding)) + "</div>" : "") +
       buttonsHtml(invoice) +
       "</div>"
     );
@@ -261,6 +272,10 @@
       window.alert("Unable to delete invoice: Invoice ID is missing or invalid.");
       return false;
     }
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ invoice_id: id }))
+    ) return false;
     const yes = await confirmDelete();
     if (!yes) return false;
     let creds = null;

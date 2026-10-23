@@ -62,6 +62,7 @@
     statTotal: document.getElementById("fuStatTotal"),
     statPending: document.getElementById("fuStatPending"),
     statPaymentPending: document.getElementById("fuStatPaymentPending"),
+    statPaymentReceived: document.getElementById("fuStatPaymentReceived"),
     entryModalEl: document.getElementById("fuEntryModal"),
     entryModalTitle: document.getElementById("fuEntryModalTitle"),
     entryForm: document.getElementById("fuEntryForm"),
@@ -82,7 +83,6 @@
     billingCustomerResults: document.getElementById("fuBillingCustomerResults"),
     customerResults: document.getElementById("fuCustomerResults"),
     customerSelected: document.getElementById("fuCustomerSelected"),
-    addCustomerBtn: document.getElementById("fuAddCustomerBtn"),
     workflowChecks: document.getElementById("fuWorkflowChecks"),
     itrFiledWrap: document.getElementById("fuItrFiledWrap"),
     itrFiledDate: document.getElementById("fuItrFiledDate"),
@@ -114,18 +114,10 @@
     returnType: document.getElementById("fuReturnType"),
     filingFrequency: document.getElementById("fuFilingFrequency"),
     gstReturnType: document.getElementById("fuGstReturnType"),
-    customerModalEl: document.getElementById("fuCustomerModal"),
-    customerForm: document.getElementById("fuCustomerForm"),
-    customerSaveBtn: document.getElementById("fuCustomerSaveBtn"),
-    customerFormError: document.getElementById("fuCustomerFormError"),
   };
 
   const entryModal = els.entryModalEl ? new bootstrap.Modal(els.entryModalEl) : null;
   const allowCustomerAdd = window.FU_ALLOW_CUSTOMER_ADD === true;
-  const customerModal = allowCustomerAdd && els.customerModalEl
-    ? new bootstrap.Modal(els.customerModalEl)
-    : null;
-  let fuPincodeBinder = null;
   const kdkLoginModal = isItrModule && els.kdkLoginModalEl
     ? new bootstrap.Modal(els.kdkLoginModalEl)
     : null;
@@ -1018,18 +1010,13 @@
   }
 
   function validateTallyPayment() {
-    if (isTaxFollowup) {
+    if (isTaxFollowup || isDscModule) {
       if (!isStageChecked("payment_received")) return null;
       const payTotal = getPaymentTotal();
       if (!payTotal || payTotal <= 0) {
         return "Add at least one payment amount for Payment Received.";
       }
       return null;
-    }
-    if (isStageChecked("tally_bill_generated")) {
-      if (!(els.billNo?.value || "").trim()) {
-        return "Tally bill number is required when Tally Bill Generated is checked.";
-      }
     }
     if (isStageChecked("payment_received")) {
       if (!(els.billNo?.value || "").trim()) {
@@ -1058,11 +1045,6 @@
     }
     if (!(els.introducedBy?.value || "").trim()) {
       return "Introduced by is required.";
-    }
-    if (isStageChecked("tally_bill_generated")) {
-      if (!(els.billNo?.value || "").trim()) {
-        return "Tally bill number is required when Tally Bill Generated is checked.";
-      }
     }
     if (isStageChecked("payment_received")) {
       if (!(els.billNo?.value || "").trim()) {
@@ -1282,13 +1264,17 @@
     const record = await lookupGeneratedInvoice(billNo);
     if (!record) return;
     keepGenerateBillYes();
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ bill_no: billNo }))
+    ) return;
     const sure = window.JTCSDialog?.confirm
       ? await window.JTCSDialog.confirm(
-          "All payment received bills and invoices related to this bill will be deleted. Are you sure?",
+          "The related invoice will be deleted. Any received payment must be cleared first. Continue?",
           { title: "Delete related bills", okLabel: "Yes", cancelLabel: "No", type: "warning" }
         )
       : window.confirm(
-          "All payment received bills and invoices related to this bill will be deleted. Are you sure?"
+          "The related invoice will be deleted. Any received payment must be cleared first. Continue?"
         );
     if (!sure) return;
     let creds = null;
@@ -1496,7 +1482,7 @@
     const tallyChecked = isStageChecked("tally_bill_generated");
     const paymentChecked = isStageChecked("payment_received");
     els.itrFiledWrap?.classList.toggle("d-none", !returnChecked);
-    if (!isTaxFollowup) {
+    if (!isTaxFollowup && !isDscModule) {
       els.tallyBillWrap?.classList.remove("d-none");
       refreshInvoiceStatus();
     }
@@ -1507,17 +1493,17 @@
     if (returnChecked && els.itrFiledDate && !els.itrFiledDate.value) {
       els.itrFiledDate.value = window.FU_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
     }
-    if (!isTaxFollowup && tallyChecked && els.billDate && !els.billDate.value) {
+    if (!isTaxFollowup && !isDscModule && tallyChecked && els.billDate && !els.billDate.value) {
       els.billDate.value = window.FU_DEFAULT_DATE || new Date().toISOString().slice(0, 10);
     }
-    if (!isTaxFollowup && els.billNo && !(els.billNo.value || "").trim()) {
+    if (!isTaxFollowup && !isDscModule && els.billNo && !(els.billNo.value || "").trim()) {
       fetchNextTallyBillNo();
     }
-    if (!isTaxFollowup) syncCustomerBillSummary();
+    if (!isTaxFollowup && !isDscModule) syncCustomerBillSummary();
     syncUnverifiedPanel();
     syncBillingCustomerPanel();
     syncDscApplicationField();
-    if (!isTaxFollowup) syncGenerateBillPrompt();
+    if (!isTaxFollowup && !isDscModule) syncGenerateBillPrompt();
   }
 
   function syncUnverifiedPanel() {
@@ -1662,6 +1648,7 @@
     if (els.statTotal) els.statTotal.textContent = String(stats.total || 0);
     if (els.statPending) els.statPending.textContent = String(stats.pending || 0);
     if (els.statPaymentPending) els.statPaymentPending.textContent = String(stats.payment_pending || 0);
+    if (els.statPaymentReceived) els.statPaymentReceived.textContent = String(stats.payment_received || 0);
     if (els.gridMeta) {
       if (isItrModule) {
         els.gridMeta.textContent =
@@ -1886,9 +1873,16 @@
     if (!invoice || !invoice.invoice_id || !window.JtcsInvoiceActions) {
       return "<td>—</td>";
     }
+    const payment = row.sale_invoice || {};
+    const displayInvoice = Object.assign({}, invoice);
+    if (Number(payment.invoice_id) === Number(invoice.invoice_id)) {
+      displayInvoice.payment_status = payment.payment_status;
+      displayInvoice.outstanding_amount = payment.outstanding_amount;
+      displayInvoice.payment_received = payment.payment_received;
+    }
     return (
       '<td data-followup-entry-id="' + escapeHtml(row.entry_id) + '">' +
-      window.JtcsInvoiceActions.summaryHtml(invoice) +
+      window.JtcsInvoiceActions.summaryHtml(displayInvoice) +
       "</td>"
     );
   }
@@ -2477,6 +2471,7 @@
     const followupCustomerId = (els.customerId?.value || "").trim();
     if (followupCustomerId) params.set("contact_customer_id", followupCustomerId);
     if (entryId) params.set("followup_entry_id", entryId);
+    params.set("item_group", workTypeLabel);
     if (!billingIsOther()) {
       const customerName = (els.customerSearch?.value || "").trim();
       if (customerName) params.set("customer_name", customerName);
@@ -2804,6 +2799,10 @@
   }
 
   async function deleteEntry(entryId) {
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ followup_entry_id: entryId }))
+    ) return;
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm("Delete this followup entry?"))) return;
@@ -2871,60 +2870,6 @@
         if (!els.customerResults) return;
         els.customerResults.innerHTML = '<div class="list-group-item text-muted">Search failed</div>';
         els.customerResults.classList.remove("d-none");
-      });
-  }
-
-  function saveCustomer() {
-    if (!els.customerForm) return;
-    const formData = new FormData(els.customerForm);
-    const payload = Object.fromEntries(formData.entries());
-    els.customerSaveBtn.disabled = true;
-    if (els.customerFormError) {
-      els.customerFormError.classList.add("d-none");
-      els.customerFormError.textContent = "";
-    }
-    fetch(window.FU_API.customer_create, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-CSRFToken": csrfToken(),
-      },
-      body: JSON.stringify(payload),
-    })
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        if (!data.ok) throw new Error(data.error || "Unable to add customer.");
-        const c = data.customer || {};
-        selectCustomer({
-          customer_id: c.CustomerID || c.customer_id,
-          customer_name: c.CustomerName || c.customer_name,
-          mobile_number: c.MobileNumber || c.mobile_number,
-          pan_number: c.PANNumber || c.pan_number,
-          email_id: c.EmailID || c.email_id,
-        });
-        customerModal?.hide();
-        els.customerForm.reset();
-        const countryEl = els.customerForm.querySelector("#fuCustCountry");
-        if (countryEl) {
-          if (window.JtcsPincodeAutofill) {
-            window.JtcsPincodeAutofill.ensureSelectValue(countryEl, "India");
-          } else {
-            countryEl.value = "India";
-          }
-        }
-        if (fuPincodeBinder && fuPincodeBinder.resetCache) fuPincodeBinder.resetCache();
-      })
-      .catch(function (err) {
-        if (els.customerFormError) {
-          els.customerFormError.textContent = err.message || "Unable to add customer.";
-          els.customerFormError.classList.remove("d-none");
-        } else {
-          alert(err.message || "Unable to add customer.");
-        }
-      })
-      .finally(function () {
-        els.customerSaveBtn.disabled = false;
       });
   }
 
@@ -3183,41 +3128,6 @@
     }
   });
 
-  if (allowCustomerAdd) {
-    if (window.JtcsPincodeAutofill && window.FU_PINCODE_LOOKUP) {
-      fuPincodeBinder = window.JtcsPincodeAutofill.bind({
-        pincode: "fuCustPincode",
-        country: "fuCustCountry",
-        state: "fuCustState",
-        district: "fuCustDistrict",
-        city: "fuCustCity",
-        stateGstCode: "fuCustStateGstCode",
-        apiUrl: window.FU_PINCODE_LOOKUP,
-        lookupOnBind: false,
-      });
-    }
-    els.addCustomerBtn?.addEventListener("click", function () {
-      if (els.customerForm) {
-        els.customerForm.reset();
-        const country = document.getElementById("fuCustCountry");
-        if (country) {
-          if (window.JtcsPincodeAutofill) {
-            window.JtcsPincodeAutofill.ensureSelectValue(country, "India");
-          } else {
-            country.value = "India";
-          }
-        }
-        if (fuPincodeBinder && fuPincodeBinder.resetCache) fuPincodeBinder.resetCache();
-      }
-      if (els.customerFormError) {
-        els.customerFormError.classList.add("d-none");
-        els.customerFormError.textContent = "";
-      }
-      customerModal?.show();
-    });
-    els.customerSaveBtn?.addEventListener("click", saveCustomer);
-  }
-
   els.searchInput?.addEventListener("input", function () {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadGrid, 350);
@@ -3328,6 +3238,29 @@
     else if ((els.entryId?.value || "").trim()) saveEntry({ keepOpen: true });
   });
 
+  window.addEventListener("jtcs:scoped-customer-created", function (event) {
+    const detail = event.detail || {};
+    const c = detail.customer || {};
+    const customerId = c.customer_id || c.CustomerID;
+    if (!customerId) return;
+    if (detail.target === "billing") {
+      if (els.billingCustomerId) els.billingCustomerId.value = String(customerId);
+      if (els.billingCustomerSearch) {
+        els.billingCustomerSearch.value = c.customer_name || c.CustomerName || "";
+      }
+      hideBillingResults();
+      if (!linkedInvoice) beginCreateInvoice();
+      else if ((els.entryId?.value || "").trim()) saveEntry({ keepOpen: true });
+      return;
+    }
+    selectCustomer({
+      customer_id: customerId,
+      customer_name: c.customer_name || c.CustomerName,
+      mobile_number: c.mobile_number || c.MobileNumber,
+      email_id: c.email_id || c.EmailID,
+    });
+  });
+
   els.customerResults?.addEventListener("click", function (event) {
     const btn = event.target.closest(".fu-customer-pick");
     if (!btn) return;
@@ -3408,17 +3341,23 @@
         return "edit";
       }
       if (choice !== "delete") return "cancel";
-      if (!window.JTCSDeleteConfirm || !window.JTCSDeleteConfirm.ask) {
-        return postInvoiceDelete(invoiceId, null, entryId).then(function () { return "delete"; });
-      }
-      return window.JTCSDeleteConfirm.ask({
-        message: "Enter your User ID and password to delete this invoice.",
-        title: "Delete invoice",
-        confirmLabel: "Yes / Delete",
-        cancelLabel: "No / Cancel",
-      }).then(function (creds) {
-        if (!creds) return "cancel";
-        return postInvoiceDelete(invoiceId, creds, entryId).then(function () { return "delete"; });
+      const guard = window.JtcsInvoiceDeleteGuard?.check
+        ? window.JtcsInvoiceDeleteGuard.check({ invoice_id: invoiceId })
+        : Promise.resolve(true);
+      return guard.then(function (canDelete) {
+        if (!canDelete) return "cancel";
+        if (!window.JTCSDeleteConfirm || !window.JTCSDeleteConfirm.ask) {
+          return postInvoiceDelete(invoiceId, null, entryId).then(function () { return "delete"; });
+        }
+        return window.JTCSDeleteConfirm.ask({
+          message: "Enter your User ID and password to delete this invoice.",
+          title: "Delete invoice",
+          confirmLabel: "Yes / Delete",
+          cancelLabel: "No / Cancel",
+        }).then(function (creds) {
+          if (!creds) return "cancel";
+          return postInvoiceDelete(invoiceId, creds, entryId).then(function () { return "delete"; });
+        });
       });
     });
   }

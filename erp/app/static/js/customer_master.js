@@ -366,8 +366,7 @@
     if (els.editBtn) els.editBtn.disabled = !has;
     if (els.restoreBtn) els.restoreBtn.disabled = !has || !row || row.customer_status !== "Inactive";
     if (els.deleteBtn) {
-      const blockedActive = row && row.customer_status !== "Inactive" && row.has_links;
-      els.deleteBtn.disabled = !has || !!blockedActive;
+      els.deleteBtn.disabled = !has || !row || !!row.has_links;
     }
     if (els.resetPortalBtn) {
       els.resetPortalBtn.disabled = !has || (row && row.customer_status === "Inactive");
@@ -430,15 +429,14 @@
         extraBtn =
           '<button type="button" class="btn btn-outline-success btn-sm cm-row-restore" data-id="' +
           row.customer_id +
-          '" title="Restore Active"><i class="bi bi-arrow-counterclockwise"></i></button> ' +
-          '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' +
-          row.customer_id +
-          '" title="Permanent delete"><i class="bi bi-trash"></i></button>';
-      } else if (!linked) {
+          '" title="Restore Active"><i class="bi bi-arrow-counterclockwise"></i></button> ';
+      }
+      if (!linked) {
         extraBtn =
+          extraBtn +
           '<button type="button" class="btn btn-outline-danger btn-sm cm-row-delete" data-id="' +
           row.customer_id +
-          '" title="Mark Inactive"><i class="bi bi-trash"></i></button>';
+          '" title="Permanently delete"><i class="bi bi-trash"></i></button>';
       }
       const badge = inactive
         ? '<span class="badge bg-secondary">Inactive</span>'
@@ -1672,44 +1670,40 @@
     if (!customerId) return;
     const row = rows.find(function (r) { return r.customer_id === customerId; });
     const name = row ? row.customer_name : "this customer";
-    const inactive = row && row.customer_status === "Inactive";
-    const message = inactive
-      ? 'Permanently delete "' + name + '"?\n\nThis cannot be recovered.'
-      : 'Mark "' + name + '" Inactive?\n\nCustomer can be restored later. Delete again after Inactive for a permanent delete (cannot be recovered).';
-    let creds = null;
-    if (!window.JTCSDeleteConfirm?.ask) {
-      if (!(await JTCSDialog.confirm(message))) return;
-    } else {
-      creds = await window.JTCSDeleteConfirm.ask({ message: message });
-      if (!creds) return;
+    if (row && row.has_links) {
+      await JTCSDialog.alert(
+        "This customer has related records and cannot be deleted. Only Edit is allowed.",
+        "warning"
+      );
+      return;
     }
+    if (!window.JTCSDeleteConfirm?.ask) {
+      await JTCSDialog.alert("Password confirmation is unavailable. Please refresh the page and try again.", "error");
+      return;
+    }
+    const creds = await window.JTCSDeleteConfirm.ask({
+      message: 'Permanently delete "' + name + '"? This cannot be recovered.',
+    });
+    if (!creds || !creds.user_id || !creds.password) return;
     fetch(apiUrl(window.CM_API.delete, customerId), {
       method: "POST",
-      headers: Object.assign(
-        { Accept: "application/json", "X-CSRFToken": csrfToken() },
-        creds ? { "Content-Type": "application/json" } : {}
-      ),
-      ...(creds
-        ? { body: JSON.stringify({ user_id: creds.user_id, password: creds.password }) }
-        : {}),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken(),
+      },
+      body: JSON.stringify({ user_id: creds.user_id, password: creds.password }),
+      credentials: "same-origin",
     })
       .then(function (res) { return res.json(); })
       .then(async function (data) {
         if (data.in_use) {
           if (row) row.has_links = true;
-          const kind = (data.ledger && data.ledger.kind) || "customer";
-          const lid = (data.ledger && data.ledger.id) || customerId;
-          if (window.JTCSLedgerPreviewHost && typeof JTCSLedgerPreviewHost.offerSeeTransaction === "function") {
-            await JTCSLedgerPreviewHost.offerSeeTransaction(kind, lid, data.error);
-          } else if (window.JTCSDialog?.alert) {
-            JTCSDialog.alert(
-              data.error || "Stop: this customer is in use and cannot be deleted.",
-              "error"
-            );
-          }
-          showStatus(data.error || "Customer is in use and cannot be deleted.", "warning");
-          setSelected(customerId);
-          loadRecord(customerId);
+          await JTCSDialog.alert(
+            data.error || "This customer has related records and cannot be deleted. Only Edit is allowed.",
+            "warning"
+          );
+          loadGrid();
           return;
         }
         if (!data.ok) throw new Error(data.error || "Delete failed.");

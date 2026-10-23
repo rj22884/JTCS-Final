@@ -8,8 +8,8 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20261015custreq">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261006owner">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20261018miscaccount">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/invoice_row_actions.css') }}?v=20261023invstatus2">
 {% endblock %}
 
 {% block content %}
@@ -214,7 +214,8 @@
                 <div class="input-group">
                   <input type="text" class="form-control" id="CustomerName" name="CustomerName" maxlength="255"
                          placeholder="Search name, mobile, or PAN (min 2 chars)" autocomplete="off">
-                  <button type="button" class="btn btn-outline-success" id="oieAddCustomerBtn" title="Add Customer">
+                  <button type="button" class="btn btn-outline-success" id="oieAddCustomerBtn"
+                          data-scoped-customer-add="primary" title="Add Customer">
                     <i class="bi bi-plus-lg"></i>
                   </button>
                 </div>
@@ -293,7 +294,13 @@
               <div id="oieBillingPick" class="position-relative d-none">
                 <label class="form-label oie-required" for="oieBillingSearch">Billing Customer</label>
                 <input type="hidden" id="oieBillingCustomerId" value="">
-                <input type="text" class="form-control" id="oieBillingSearch" placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+                <div class="input-group">
+                  <input type="text" class="form-control" id="oieBillingSearch" placeholder="Type name, mobile, or PAN (min 2 chars)" autocomplete="off">
+                  <button type="button" class="btn btn-outline-success" data-scoped-customer-add="billing"
+                          title="Add Billing Customer" aria-label="Add Billing Customer">
+                    <i class="bi bi-person-plus"></i>
+                  </button>
+                </div>
                 <div id="oieBillingResults" class="list-group oie-customer-results d-none"></div>
               </div>
             </div>
@@ -391,82 +398,7 @@
   </div>
 </div>
 
-<div class="modal fade" id="oieCustomerModal" tabindex="-1" aria-labelledby="oieCustomerModalTitle" aria-hidden="true"
-     data-bs-backdrop="static">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
-    <div class="modal-content">
-      <div class="modal-header py-2">
-        <h5 class="modal-title" id="oieCustomerModalTitle">Add Customer</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body">
-        <form id="oieCustomerForm" novalidate>
-          <div class="row g-2 mb-2">
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustGroup">Customer Group</label>
-              <select class="form-select" id="oieCustGroup" name="customer_group" required>
-                <option value="">-- Select --</option>
-                {% for g in customer_groups %}
-                <option value="{{ g.code }}">{{ g.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustType">Customer Type</label>
-              <select class="form-select" id="oieCustType" name="customer_type" required>
-                <option value="">-- Select --</option>
-                {% for t in customer_types %}
-                <option value="{{ t }}">{{ t }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label oie-required" for="oieCustName">Customer Name</label>
-            <input type="text" class="form-control" id="oieCustName" name="customer_name" maxlength="255" required>
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustPan">PAN</label>
-              <input type="text" class="form-control text-uppercase" id="oieCustPan" name="pan_number"
-                     maxlength="10" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustAadhaar">Aadhaar</label>
-              <input type="text" class="form-control" id="oieCustAadhaar" name="aadhaar_number"
-                     maxlength="12" inputmode="numeric" required>
-            </div>
-          </div>
-          <div class="row g-2 mb-2">
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustDob">Date of Birth</label>
-              <input type="date" class="form-control" id="oieCustDob" name="date_of_birth" required>
-            </div>
-            <div class="col-md-6">
-              <label class="form-label oie-required" for="oieCustMobile">Mobile Number</label>
-              <input type="text" class="form-control" id="oieCustMobile" name="mobile_number"
-                     maxlength="15" inputmode="numeric" required>
-            </div>
-          </div>
-          <div class="mb-2">
-            <label class="form-label oie-required" for="oieCustEmail">Email ID</label>
-            <input type="email" class="form-control" id="oieCustEmail" name="email_id" maxlength="200" required>
-          </div>
-          <div class="mb-2">
-            <label class="form-label" for="oieCustRemarks">Remarks</label>
-            <textarea class="form-control" id="oieCustRemarks" name="remarks" rows="2" maxlength="1000"
-                      placeholder="Optional"></textarea>
-          </div>
-          <div id="oieCustomerFormError" class="alert alert-danger py-2 small d-none"></div>
-        </form>
-      </div>
-      <div class="modal-footer py-2">
-        <button type="button" class="btn btn-primary" id="oieCustomerSaveBtn">Save Customer</button>
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-      </div>
-    </div>
-  </div>
-</div>
+{% include 'shared/_scoped_customer_modal.html' %}
 {% endblock %}
 
 {% block extra_js %}
@@ -497,12 +429,18 @@
   {% endif %}
   window.OIE_COMPANY_STATE_CODE = {{ (company.state_code if company is defined and company else '05') | tojson }};
   window.OIE_CSRF = {{ csrf_token() | tojson }};
+  window.SCOPED_CUSTOMER_CREATE_URL = {{ url_for(api_bp ~ '.customer_create') | tojson }};
+  window.SCOPED_CUSTOMER_PINCODE_LOOKUP = {{ url_for('masters_customer.lookup_pincode') | tojson }};
+  window.SCOPED_CUSTOMER_CSRF = {{ csrf_token() | tojson }};
   window.OIE_DEFAULT_DATE = {{ default_date | tojson }};
   window.OIE_AUTO_LOAD_ENTRY_ID = {{ load_entry_id | tojson }};
   window.OIE_FORCE_LEDGER_KIND = {{ force_kind | tojson }};
   window.OIE_HIDE_MISC = {{ hide_misc | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261006invedit"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261023invstatus2"></script>
+<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261018invoiceguard"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261015custreq"></script>
+<script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20261018scopeaddrlock"></script>
+<script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261018scopedcustomer"></script>
 {% endblock %}

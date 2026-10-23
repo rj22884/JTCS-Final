@@ -20,6 +20,7 @@
     status: document.getElementById("invStatus"),
     modeBadge: document.getElementById("invModeBadge"),
     newBtn: document.getElementById("invNewBtn"),
+    previewDraftBtn: document.getElementById("invPreviewDraftBtn"),
     saveBtn: document.getElementById("invSaveBtn"),
     addLine: document.getElementById("invAddLine"),
     body: document.getElementById("invLinesBody"),
@@ -52,6 +53,8 @@
     payReceivedNo: document.getElementById("invPayReceivedNo"),
     payRemoveReason: document.getElementById("invPayRemoveReason"),
     payBanks: document.getElementById("invPayBanks"),
+    payBankDropdown: document.getElementById("invPayBankDropdown"),
+    payBankSelection: document.getElementById("invPayBankSelection"),
     payDate: document.getElementById("invPayDate"),
     amountPaid: document.getElementById("invAmountPaid"),
     roundOffAmt: document.getElementById("invRoundOffAmt"),
@@ -78,6 +81,13 @@
       : null;
 
   let previewTimer = null;
+  let draftPreviewObjectUrl = null;
+  window.addEventListener("beforeunload", function () {
+    if (draftPreviewObjectUrl) {
+      URL.revokeObjectURL(draftPreviewObjectUrl);
+      draftPreviewObjectUrl = null;
+    }
+  });
   let searchTimer = null;
   let editingId = null;
   let currentBillSource = "Manual";
@@ -185,10 +195,42 @@
         '"' +
         (String(selectedId) === String(it.item_id) ? " selected" : "") +
         ">" +
-        escapeHtml(it.label || it.item_name) +
+        escapeHtml(it.item_name || it.label) +
         "</option>";
     });
     return html;
+  }
+
+  function itemGroupForSource(source) {
+    const key = String(source || "").trim().toUpperCase();
+    if (key === "MISC" || key === "MISCELLANEOUS") return "MISC";
+    return ["GST", "TDS", "ITR", "DSC"].includes(key) ? key : "";
+  }
+
+  function defaultItemForGroup(source) {
+    const group = itemGroupForSource(source);
+    if (!group) return null;
+    const aliases = group === "MISC" ? ["MISC", "MISCELLANEOUS"] : [group];
+    const codeOf = function (it) {
+      return String((it && it.item_code) || "").trim().toUpperCase();
+    };
+    return (
+      items.find(function (it) { return aliases.includes(codeOf(it)); }) ||
+      items.find(function (it) {
+        const first = codeOf(it).split(/[^A-Z0-9]+/).filter(Boolean)[0] || "";
+        return aliases.includes(first);
+      }) ||
+      null
+    );
+  }
+
+  function applyItemGroupDefault(source) {
+    const item = defaultItemForGroup(source);
+    const tr = els.body?.querySelector(".inv-line");
+    const select = tr?.querySelector(".inv-item");
+    if (!item || !select || select.value) return;
+    select.value = String(item.item_id);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   function periodOptionsHtml(selected) {
@@ -421,10 +463,11 @@
   function applyMiscInclusiveSeeds(params) {
     const seeds = miscInclusiveSeeds(params);
     if (!seeds.length || !els.body) return;
+    const groupItem = defaultItemForGroup(params.get("item_group"));
     clearLines();
     seeds.forEach(function (seed) {
       addLine({
-        item_id: seed.item_id || "",
+        item_id: seed.item_id || (groupItem ? groupItem.item_id : ""),
         particulars: seed.particulars || "",
         hsn_sac: seed.hsn_sac || "",
         unit: seed.unit || "NOS",
@@ -854,6 +897,7 @@
   function openInvoiceForm() {
     els.formCard?.classList.remove("d-none");
     els.formCard?.classList.add("is-open");
+    resizeInvoiceBankDropdown();
   }
 
   function closeInvoiceForm() {
@@ -937,6 +981,29 @@
     document.querySelectorAll(".inv-pay-bank").forEach(function (box) {
       box.checked = false;
     });
+    updateBankSelectionLabel();
+  }
+
+  function updateBankSelectionLabel() {
+    if (!els.payBankSelection) return;
+    const labels = Array.from(document.querySelectorAll(".inv-pay-bank:checked"))
+      .map(function (box) {
+        return (box.dataset.label || box.nextElementSibling?.textContent || "").trim();
+      })
+      .filter(Boolean);
+    const summary = labels.length ? labels.join(" · ") : "Select 1–2 accounts";
+    els.payBankSelection.textContent = summary;
+    els.payBankSelection.title = labels.join("\n") || summary;
+  }
+
+  function resizeInvoiceBankDropdown() {
+    const dropdown = els.payBankDropdown;
+    if (!dropdown || !els.payBanks) return;
+    const wasOpen = dropdown.open;
+    dropdown.open = true;
+    const width = Math.ceil(els.payBanks.getBoundingClientRect().width);
+    dropdown.open = wasOpen;
+    if (width > 0) dropdown.style.width = width + "px";
   }
 
   function ensureBankCheckbox(accountId, label) {
@@ -949,6 +1016,7 @@
     input.type = "checkbox";
     input.id = "invPayBank" + id;
     input.value = id;
+    input.dataset.label = label || ("Account " + id);
     const text = document.createElement("label");
     text.className = "form-check-label";
     text.htmlFor = input.id;
@@ -966,6 +1034,8 @@
       const box = document.getElementById("invPayBank" + id);
       if (box) box.checked = true;
     });
+    updateBankSelectionLabel();
+    resizeInvoiceBankDropdown();
   }
 
   function bankAlert(message) {
@@ -981,7 +1051,9 @@
     const host = invoiceHostWindow();
     if (!host) return;
     const entryId = (els.followupEntryId?.value || "").trim();
-    const miscId = (launchParams.get("misc_entry_id") || "").trim();
+    const miscId = (
+      launchParams.get("misc_entry_id") || (record && record.misc_entry_id) || ""
+    ).toString().trim();
     if (!entryId && !miscId && type !== "jtcs-invoice-deleted") return;
     host.postMessage(
       {
@@ -997,10 +1069,10 @@
   }
 
   function askReceivePayment() {
-    const message = "Do you want to receive payment?";
+    const message = "Have you received payment for this invoice?";
     if (window.JTCSDialog && JTCSDialog.confirm) {
       return JTCSDialog.confirm(message, {
-        title: "Receive payment",
+        title: "Invoice payment",
         okLabel: "Yes",
         cancelLabel: "No",
         type: "info",
@@ -1021,11 +1093,29 @@
     if (window.JtcsInvoiceReceiptReturn) {
       window.JtcsInvoiceReceiptReturn.appendModuleReturn(
         params,
-        launchParams.get("receipt_origin") || (record && record.source_module) || "",
-        launchParams.get("return_to") || ""
+        "INVOICE",
+        "/accounting/invoice/sale"
       );
+    } else {
+      params.set("receipt_origin", "INVOICE");
+      params.set("return_to", "/accounting/invoice/sale");
     }
     return "/others/bank-cash-transactions?" + params.toString();
+  }
+
+  function openReceiptWindow(record) {
+    const url = receiptFormUrl(record);
+    try {
+      const host = window.top;
+      if (host && typeof host.jtcsOpenPageWindow === "function") {
+        host.jtcsOpenPageWindow(url, "Money In-Out Receipt");
+        return true;
+      }
+    } catch (_err) {
+      /* fall back to this window when page windows are unavailable */
+    }
+    window.location.assign(url);
+    return true;
   }
 
   function collectPayload() {
@@ -1392,12 +1482,18 @@
     const justCreated = !editingId;
     if (linkedFollowup || linkedMisc) {
       notifyInvoiceOpener("jtcs-invoice-saved", data.record, { created: justCreated });
-      if (justCreated && data.record && data.record.customer_id) {
-        const receive = await askReceivePayment();
-        if (receive) {
-          window.location.assign(receiptFormUrl(data.record));
-          return true;
-        }
+    }
+    if (
+      justCreated &&
+      voucherType !== "PURCHASE" &&
+      data.record &&
+      data.record.customer_id
+    ) {
+      const receive = await askReceivePayment();
+      if (receive) {
+        fillRecord(data.record);
+        openReceiptWindow(data.record);
+        return true;
       }
     }
     if (isFollowupModalEmbed()) return true;
@@ -1405,6 +1501,146 @@
     closeInvoiceForm();
     await loadGrid();
     return true;
+  }
+
+  async function previewDraftInvoice() {
+    if (!previewModal || !els.previewBody || !api.previewPdfPages) {
+      showStatus("Invoice preview is not available.", "danger");
+      return;
+    }
+    applyTotals(computeLocalTotals());
+    const payload = collectPayload();
+    payload.preview_page_size = "C6";
+    if (els.previewTitle) {
+      els.previewTitle.textContent = "Invoice Preview — C6 Portrait";
+    }
+    els.previewBody.innerHTML =
+      '<div class="text-muted small py-4 text-center">Preparing C6 portrait preview…</div>';
+    els.previewBody.classList.remove("is-image-preview");
+    previewModal.show();
+    if (els.previewDraftBtn) els.previewDraftBtn.disabled = true;
+    try {
+      const res = await fetch(api.previewPdfPages, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": api.csrf || "",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Invoice preview could not be generated.");
+      }
+      if (!Array.isArray(data.pages) || !data.pages.length || !data.pdf_base64) {
+        throw new Error("Preview pages could not be prepared.");
+      }
+      const pdfBinary = window.atob(data.pdf_base64);
+      const pdfBytes = new Uint8Array(pdfBinary.length);
+      for (let i = 0; i < pdfBinary.length; i += 1) {
+        pdfBytes[i] = pdfBinary.charCodeAt(i);
+      }
+      const pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
+      if (draftPreviewObjectUrl) URL.revokeObjectURL(draftPreviewObjectUrl);
+      draftPreviewObjectUrl = URL.createObjectURL(pdfBlob);
+      renderDraftPdfPages(data);
+    } catch (err) {
+      const message = err.message || String(err);
+      els.previewBody.classList.remove("is-image-preview");
+      els.previewBody.innerHTML =
+        '<div class="alert alert-danger py-2 small mb-0">' +
+        escapeHtml(message) +
+        "</div>";
+      showStatus(message, "danger");
+    } finally {
+      if (els.previewDraftBtn) els.previewDraftBtn.disabled = false;
+    }
+  }
+
+  function renderDraftPdfPages(data) {
+    const viewer = document.createElement("div");
+    viewer.className = "inv-preview-image-viewer";
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "inv-preview-zoom-toolbar";
+
+    const zoomOut = document.createElement("button");
+    zoomOut.type = "button";
+    zoomOut.className = "btn btn-outline-secondary btn-sm";
+    zoomOut.textContent = "−";
+    zoomOut.title = "Zoom out";
+    zoomOut.setAttribute("aria-label", "Zoom out");
+
+    const zoomValue = document.createElement("span");
+    zoomValue.className = "inv-preview-zoom-value";
+    zoomValue.textContent = "100%";
+    zoomValue.setAttribute("aria-live", "polite");
+
+    const zoomIn = document.createElement("button");
+    zoomIn.type = "button";
+    zoomIn.className = "btn btn-outline-secondary btn-sm";
+    zoomIn.textContent = "+";
+    zoomIn.title = "Zoom in";
+    zoomIn.setAttribute("aria-label", "Zoom in");
+
+    const zoomFit = document.createElement("button");
+    zoomFit.type = "button";
+    zoomFit.className = "btn btn-outline-secondary btn-sm";
+    zoomFit.textContent = "Fit";
+    zoomFit.title = "Fit page to preview width";
+
+    const pdfLink = document.createElement("a");
+    pdfLink.className = "btn btn-outline-primary btn-sm";
+    pdfLink.href = draftPreviewObjectUrl;
+    pdfLink.target = "_blank";
+    pdfLink.rel = "noopener";
+    pdfLink.textContent = "Open / Print PDF";
+    pdfLink.title = "Open original C6 PDF for printing or downloading";
+
+    const wheelHint = document.createElement("span");
+    wheelHint.className = "small text-muted ms-1";
+    wheelHint.textContent = "Mouse wheel to zoom";
+
+    toolbar.append(zoomOut, zoomValue, zoomIn, zoomFit, pdfLink, wheelHint);
+
+    const viewport = document.createElement("div");
+    viewport.className = "inv-preview-pages-viewport";
+    viewport.setAttribute("aria-label", "Invoice pages; use mouse wheel to zoom");
+
+    const pages = document.createElement("div");
+    pages.className = "inv-preview-pages";
+    data.pages.forEach(function (page, index) {
+      const image = document.createElement("img");
+      image.src = "data:image/png;base64," + page;
+      image.alt = "Invoice page " + (index + 1);
+      image.style.width = "100%";
+      image.draggable = false;
+      pages.appendChild(image);
+    });
+    viewport.appendChild(pages);
+    viewer.append(toolbar, viewport);
+
+    let zoom = 100;
+    function setZoom(nextZoom) {
+      zoom = Math.max(50, Math.min(250, nextZoom));
+      zoomValue.textContent = zoom + "%";
+      pages.querySelectorAll("img").forEach(function (image) {
+        image.style.width = zoom + "%";
+      });
+      zoomOut.disabled = zoom <= 50;
+      zoomIn.disabled = zoom >= 250;
+    }
+    zoomOut.addEventListener("click", function () { setZoom(zoom - 10); });
+    zoomIn.addEventListener("click", function () { setZoom(zoom + 10); });
+    zoomFit.addEventListener("click", function () { setZoom(100); });
+    viewport.addEventListener("wheel", function (event) {
+      event.preventDefault();
+      if (event.deltaY) setZoom(zoom + (event.deltaY < 0 ? 10 : -10));
+    }, { passive: false });
+
+    els.previewBody.classList.add("is-image-preview");
+    els.previewBody.replaceChildren(viewer);
   }
 
   function isFollowupModalEmbed() {
@@ -1474,9 +1710,15 @@
     editingSourceModule = String((record && record.source_module) || "ACCOUNTING").toUpperCase();
     editingLockMessage = (record && record.source_lock_message) || "";
     const allowed = !record || !record.invoice_id || ownerLaunchMatches(record);
+    const sourceInvoiceCanBeDeletedHere = ["MISC", "FOLLOWUP", "GST", "TDS", "ITR", "DSC"]
+      .includes(editingSourceModule);
     if (els.saveBtn) els.saveBtn.disabled = !allowed;
-    if (!allowed) {
+    if (allowed || sourceInvoiceCanBeDeletedHere) {
+      els.deleteBtn?.classList.remove("d-none");
+    } else {
       els.deleteBtn?.classList.add("d-none");
+    }
+    if (!allowed) {
       if (editingLockMessage) showStatus(editingLockMessage, "warning");
       return;
     }
@@ -1504,7 +1746,8 @@
     const moduleName = String(record.source_module || "ACCOUNTING").toUpperCase();
     const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
     const miscDeletableFromList = moduleName === "MISC";
-    if (!accountingOwned && !miscDeletableFromList && !ownerLaunchMatches(record)) {
+    const followupDeletableFromList = ["FOLLOWUP", "GST", "TDS", "ITR", "DSC"].includes(moduleName);
+    if (!accountingOwned && !miscDeletableFromList && !followupDeletableFromList && !ownerLaunchMatches(record)) {
       const message = record.source_lock_message || editingLockMessage
         || "Edit and delete are available only from the module that created this invoice.";
       if (window.JTCSDialog && JTCSDialog.alert) JTCSDialog.alert(message, "warning");
@@ -1514,7 +1757,13 @@
     let creds = null;
     const deleteMessage = miscDeletableFromList
       ? "Delete this invoice and its related Miscellaneous work entry?"
-      : "Delete this invoice?";
+      : followupDeletableFromList
+        ? "Delete this invoice and remove its link from the Follow-up entry?"
+        : "Delete this invoice?";
+    if (
+      window.JtcsInvoiceDeleteGuard?.check &&
+      !(await window.JtcsInvoiceDeleteGuard.check({ invoice_id: id }))
+    ) return;
     if (!window.JTCSDeleteConfirm?.ask) {
       if (!(await JTCSDialog.confirm(deleteMessage))) return;
     } else {
@@ -1548,15 +1797,8 @@
     const removed = (gridRows || []).find(function (row) {
       return String(row.invoice_id) === String(id);
     });
-    if (removed && removed.followup_entry_id && window.opener && !window.opener.closed) {
-      window.opener.postMessage(
-        {
-          type: "jtcs-invoice-deleted",
-          followup_entry_id: removed.followup_entry_id,
-          record: null,
-        },
-        window.location.origin
-      );
+    if (removed && (removed.followup_entry_id || removed.misc_entry_id)) {
+      notifyInvoiceOpener("jtcs-invoice-deleted", removed);
     }
     if (editingId && String(editingId) === String(id)) {
       editingId = null;
@@ -1926,6 +2168,7 @@
       const moduleName = String(row.source_module || "ACCOUNTING").toUpperCase();
       const accountingOwned = !moduleName || moduleName === "ACCOUNTING" || moduleName === "MANUAL";
       const miscDeletableFromList = moduleName === "MISC";
+      const followupDeletableFromList = ["FOLLOWUP", "GST", "TDS", "ITR", "DSC"].includes(moduleName);
       const lockMessage = row.source_lock_message || sourceListDeleteMessage(invoiceSourceType(row));
       const tr = document.createElement("tr");
       if (billSource.toLowerCase() === "automatic") {
@@ -1980,15 +2223,17 @@
         escapeHtml(accountingOwned ? "Edit" : lockMessage) +
         '"><i class="bi bi-pencil"></i></button>' +
         '<button type="button" class="btn btn-outline-danger btn-sm me-1 inv-g-del' +
-        (accountingOwned || miscDeletableFromList ? "" : " is-source-locked") +
+        (accountingOwned || miscDeletableFromList || followupDeletableFromList ? "" : " is-source-locked") +
         '" data-id="' +
         row.invoice_id +
         '" title="' +
         escapeHtml(
-          accountingOwned || miscDeletableFromList
+          accountingOwned || miscDeletableFromList || followupDeletableFromList
             ? miscDeletableFromList
               ? "Delete invoice and related Miscellaneous work"
-              : "Delete"
+              : followupDeletableFromList
+                ? "Delete invoice and remove its Follow-up link (payment must be cleared first)"
+                : "Delete"
             : lockMessage
         ) +
         '"><i class="bi bi-trash"></i></button>' +
@@ -2137,6 +2382,9 @@
       hideSuggest();
     }
   });
+  window.addEventListener("resize", function () {
+    window.requestAnimationFrame(resizeInvoiceBankDropdown);
+  });
 
   ["invPlace", "invPlaceCode", "invCustomerName"].forEach(function (id) {
     document.getElementById(id)?.addEventListener("input", schedulePreview);
@@ -2158,10 +2406,27 @@
     const box = ev.target.closest(".inv-pay-bank");
     if (box && box.checked && selectedBankIds().length > 2) {
       box.checked = false;
+      updateBankSelectionLabel();
       bankAlert("Maximum 2 bank accounts can be selected for an invoice.");
       return;
     }
+    updateBankSelectionLabel();
     schedulePreview();
+    if (box && box.checked && els.payBankDropdown) {
+      els.payBankDropdown.open = false;
+      window.requestAnimationFrame(function () {
+        els.body?.querySelector(".inv-line .inv-item")?.focus();
+      });
+    }
+  });
+
+  document.addEventListener("click", function (ev) {
+    if (
+      els.payBankDropdown?.open &&
+      !els.payBankDropdown.contains(ev.target)
+    ) {
+      els.payBankDropdown.open = false;
+    }
   });
 
   els.roundOffAdd?.addEventListener("click", function () {
@@ -2279,6 +2544,9 @@
       .then(function () {
         if (fromFollowup) return applyFollowupLaunch(params);
       })
+      .then(function () {
+        applyItemGroupDefault(params.get("item_group"));
+      })
       .catch(function (err) {
         showStatus(err.message || String(err), "danger");
       });
@@ -2308,6 +2576,12 @@
 
   els.saveBtn?.addEventListener("click", function () {
     saveInvoice().catch(function (err) {
+      showStatus(err.message || String(err), "danger");
+    });
+  });
+
+  els.previewDraftBtn?.addEventListener("click", function () {
+    previewDraftInvoice().catch(function (err) {
       showStatus(err.message || String(err), "danger");
     });
   });
@@ -2483,6 +2757,7 @@
       showStatus("Preview modal is not available.", "danger");
       return;
     }
+    els.previewBody.classList.remove("is-image-preview");
     if (els.previewTitle) {
       els.previewTitle.textContent = invoiceNo
         ? "Invoice Preview — " + invoiceNo
@@ -2631,6 +2906,7 @@
     } else if (openForm) {
       await startNew({ keepFollowup: true });
       await applyFollowupLaunch(params);
+      applyItemGroupDefault(params.get("item_group"));
       applyMiscInclusiveSeeds(params);
     }
   })().catch(function (err) {

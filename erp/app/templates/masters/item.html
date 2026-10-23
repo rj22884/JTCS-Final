@@ -88,11 +88,11 @@
           <input type="hidden" id="itmId" value="">
           <div class="row g-3">
             <div class="col-md-4">
-              <label class="form-label" for="itmCode">Item Code *</label>
+              <label class="form-label" for="itmCode">Item Code <span class="text-danger">*</span></label>
               <input type="text" class="form-control" id="itmCode" maxlength="40" required>
             </div>
             <div class="col-md-8">
-              <label class="form-label" for="itmName">Item Name *</label>
+              <label class="form-label" for="itmName">Item Name <span class="text-danger">*</span></label>
               <input type="text" class="form-control" id="itmName" maxlength="200" required>
             </div>
             <div class="col-12 d-none" id="itmSubWorkWrap">
@@ -101,7 +101,7 @@
               <div class="form-text">Linked from Sub Work Master — not editable here. Change it in Masters → Sub Work Master.</div>
             </div>
             <div class="col-md-4 position-relative">
-              <label class="form-label" for="itmHsn">HSN / SAC *</label>
+              <label class="form-label" for="itmHsn">HSN / SAC <span class="text-danger">*</span></label>
               <input type="text" class="form-control" id="itmHsn" maxlength="20"
                      placeholder="Type code or description (min 2 chars)" required autocomplete="off">
               <div id="itmHsnSuggest" class="list-group itm-hsn-suggest d-none"></div>
@@ -119,7 +119,7 @@
               <input type="text" class="form-control" id="itmUnit" maxlength="30" value="NOS">
             </div>
             <div class="col-md-8">
-              <label class="form-label" for="itmChartGroup">Chart of Account Group *</label>
+              <label class="form-label" for="itmChartGroup">Chart of Account Group <span class="text-danger">*</span></label>
               <select class="form-select" id="itmChartGroup" required>
                 <option value="">— Select Group —</option>
                 {% for g in chart_groups|default([]) %}

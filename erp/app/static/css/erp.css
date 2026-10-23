@@ -28,6 +28,12 @@
     0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 48px rgba(70, 110, 255, 0.18);
 }
 
+.scoped-required::after {
+  content: " *";
+  color: #dc3545;
+  font-weight: 700;
+}
+
 * {
   box-sizing: border-box;
 }

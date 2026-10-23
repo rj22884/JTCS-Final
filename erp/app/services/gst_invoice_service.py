@@ -1014,6 +1014,11 @@ class GstInvoiceService:
         if owner["kind"] == "FOLLOWUP":
             if from_source and followup_id == int(owner["followup_entry_id"]):
                 return
+            # Accounting may delete an unpaid linked invoice. delete_record()
+            # separately blocks any invoice with a Payment Received flag or
+            # linked Money In-Out receipt.
+            if accounting:
+                return
             raise ValueError(owner["message"])
         if owner["kind"] == "MISC":
             # Sale / Service Invoice list may delete (and clean the MISC work row).
@@ -1029,6 +1034,148 @@ class GstInvoiceService:
             return
         if from_source or not accounting:
             raise ValueError(owner["message"])
+
+    @staticmethod
+    def _payment_source_path(module: str) -> str:
+        key = (module or "").strip().upper()
+        if key == "MISC":
+            return "Activities → Miscellaneous → edit the related entry"
+        if key in {"INCOME", "EXPENSE", "INCOME_EXPENSE"}:
+            return "Activities → Income / Expense → edit the related entry"
+        if key == "FOLLOWUP":
+            return "Activities → Follow-up → edit the related entry"
+        labels = {
+            "GST": "GST Follow-up",
+            "TDS": "TDS Follow-up",
+            "ITR": "ITR Follow-up",
+            "DSC": "DSC Follow-up",
+        }
+        if key in labels:
+            return f"Activities → {labels[key]} → edit the related entry"
+        return "Accounting → Invoices → Sale / Service → edit the invoice"
+
+    def _payment_source_module(self, inv: GstInvoice, owner: dict) -> str:
+        """Resolve source module for legacy invoices linked only by bill number."""
+        if owner.get("kind") in {"MISC", "FOLLOWUP"}:
+            return (owner.get("module") or "").strip().upper()
+
+        for entry in self._linked_misc_entries(inv):
+            work = getattr(entry, "work_type", None)
+            ledger = (getattr(work, "LedgerKind", None) or "").strip().casefold()
+            if ledger in {"income", "expense"}:
+                return "INCOME_EXPENSE"
+            if ledger in {"misc", "misc."}:
+                return "MISC"
+
+        from app.models.followup import FollowupEntryMaster
+
+        keys = {
+            (getattr(inv, "TallyBillNo", None) or "").strip().upper(),
+            (getattr(inv, "InvoiceNo", None) or "").strip().upper(),
+        }
+        keys.discard("")
+        if keys:
+            bill_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.BillNo)))
+            app_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.ApplicationNumber)))
+            module = db.session.scalar(
+                select(FollowupEntryMaster.ModuleCode)
+                .where(
+                    FollowupEntryMaster.IsActive == True,  # noqa: E712
+                    bill_key.in_(keys) | app_key.in_(keys),
+                )
+                .limit(1)
+            )
+            if module:
+                return str(module).strip().upper()
+        return (owner.get("module") or "ACCOUNTING").strip().upper()
+
+    def invoice_delete_payment_block(self, inv: GstInvoice) -> str | None:
+        """Explain where to clear payment before an invoice can be deleted."""
+        if self.normalize_voucher_type(getattr(inv, "VoucherType", None)) != self.VOUCHER_SALE:
+            return None
+
+        owner = self.source_owner(inv)
+        status_paid = bool(self._saved_payment_received(inv))
+        if owner.get("kind") == "MISC":
+            # The exact FK is more reliable than matching bill numbers when a
+            # converted Miscellaneous entry has been renamed.
+            from app.models.others import OthersIncomeExpenseMaster
+
+            misc_id = self._positive_id(getattr(inv, "MiscEntryID", None))
+            misc_row = db.session.get(OthersIncomeExpenseMaster, misc_id) if misc_id else None
+            status_paid = status_paid or bool(
+                getattr(misc_row, "PaymentReceived", False) if misc_row else False
+            )
+        elif owner.get("kind") == "FOLLOWUP":
+            from app.models.followup import FollowupEntryStage
+
+            followup_id = self._positive_id(getattr(inv, "FollowupEntryID", None))
+            if followup_id:
+                status_paid = status_paid or bool(
+                    db.session.scalar(
+                        select(FollowupEntryStage.EntryStageID)
+                        .where(
+                            FollowupEntryStage.EntryID == followup_id,
+                            FollowupEntryStage.StageCode.in_(
+                                ("payment_received", "Payment Received")
+                            ),
+                        )
+                        .limit(1)
+                    )
+                )
+
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        adjustment = OthersBankCashService().invoice_payment_adjustment(int(inv.InvoiceID))
+        paid_entries = [
+            item
+            for item in (adjustment.get("entries") or [])
+            if Decimal(str(item.get("allocated_amount") or 0)) > Decimal("0.005")
+        ]
+        if not status_paid and not paid_entries:
+            return None
+
+        invoice_no = (getattr(inv, "InvoiceNo", None) or str(inv.InvoiceID)).strip()
+        details = [f"Invoice {invoice_no} has Payment Received information."]
+        if status_paid:
+            details.append(
+                "Remove Payment Received first from "
+                + self._payment_source_path(self._payment_source_module(inv, owner))
+                + "."
+            )
+        if paid_entries:
+            voucher_numbers = []
+            for item in paid_entries:
+                voucher = (item.get("voucher_no") or "").strip()
+                if voucher and voucher not in voucher_numbers:
+                    voucher_numbers.append(voucher)
+            voucher_text = ", ".join(voucher_numbers) if voucher_numbers else "the linked receipt"
+            details.append(
+                f"Linked Money In-Out receipt ({voucher_text}) must also be removed or unlinked "
+                "from Accounting → Money In-Out before deleting this invoice."
+            )
+        return " ".join(details)
+
+    def assert_invoice_deletable(self, invoice_id: int) -> None:
+        try:
+            key = int(invoice_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Invoice ID is missing or invalid.") from exc
+        inv = self.repo.get_by_id(key)
+        if inv is None:
+            raise ValueError("Invoice not found.")
+        message = self.invoice_delete_payment_block(inv)
+        if message:
+            raise ValueError(message)
+
+    def assert_invoices_deletable(self, invoice_ids) -> None:
+        keys = set()
+        for value in invoice_ids or []:
+            key = self._positive_id(value)
+            if key:
+                keys.add(key)
+        for invoice_id in sorted(keys):
+            self.assert_invoice_deletable(invoice_id)
 
     def sync_payment_received_for_bill(self, bill_no: str, paid: bool) -> None:
         """Keep converted sale invoices ticked from the source payment variable."""
@@ -1410,6 +1557,7 @@ class GstInvoiceService:
                     "tax_type": inv.TaxType or "IGST",
                     "igst_rate": float(inv.IgstRate or 0),
                     "invoice_value": float(value),
+                    "outstanding_amount": float(outstanding),
                     "bill_source": bill_source,
                     "source_type": self.invoice_source_type(inv, modules, alive_misc),
                     "source_module": owner["module"],
@@ -1965,12 +2113,19 @@ class GstInvoiceService:
                 GstInvoice.TallyBillNo.in_(keys) | GstInvoice.InvoiceNo.in_(keys),
             )
         ).all()
+        payment_by_invoice = {
+            int(row["invoice_id"]): row
+            for row in self._grid_rows(rows)
+        }
         by_key: dict[str, dict[int, dict]] = {}
         for inv in rows:
+            payment = payment_by_invoice.get(int(inv.InvoiceID), {})
             payload = {
                 **self.invoice_action_snapshot(inv),
                 "bill_status": "Approved" if bool(getattr(inv, "BillApproved", False)) else "Approve pending",
-                "payment_received": "Yes" if self._saved_payment_received(inv) else "No",
+                "payment_received": "Yes" if payment.get("payment_received") else "No",
+                "payment_status": payment.get("payment_status") or "Unpaid",
+                "outstanding_amount": payment.get("outstanding_amount", float(inv.InvoiceValue or 0)),
             }
             seen = set()
             for key in ((inv.TallyBillNo or "").strip(), (inv.InvoiceNo or "").strip()):
@@ -3296,6 +3451,7 @@ class GstInvoiceService:
     ) -> int:
         """Delete linked sale invoices. Returns 0 when this bill has none."""
         ids = self.repo.list_ids_for_bill_no(bill_no)
+        self.assert_invoices_deletable(ids)
         for invoice_id in ids:
             self.delete_record(
                 invoice_id,
@@ -3330,6 +3486,9 @@ class GstInvoiceService:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
+        payment_block = self.invoice_delete_payment_block(inv)
+        if payment_block:
+            raise ValueError(payment_block)
         if not allow_print_source:
             from app.services.print_job_billing_service import PrintJobBillingService
 
