@@ -36,6 +36,21 @@
 
   if (!els.gridBody || !window.WORK_MASTER_API) return;
 
+  const workDynFields = window.JTCSDynamicMasterFields
+    ? window.JTCSDynamicMasterFields.bind({
+        select: els.underGroup,
+        mount: document.getElementById("workMasterDynFields"),
+        config: window.JTCS_DYN_MASTER_FIELDS,
+        getEntityName: function () {
+          return (els.workName?.value || "").trim();
+        },
+        entityNameEl: els.workName,
+        openingDateEl: els.openingBalanceDate,
+        depRateSyncUrl: "/api/dynamic-master-fields/depreciation-rate-sync",
+        idPrefix: "workDyn",
+      })
+    : null;
+
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
   let rows = [];
   let selectedId = null;
@@ -126,6 +141,7 @@
     if (els.obCr) els.obCr.disabled = isReadonly;
     if (els.statusActive) els.statusActive.disabled = isReadonly;
     if (els.statusInactive) els.statusInactive.disabled = isReadonly;
+    if (workDynFields) workDynFields.setReadonly(isReadonly);
     els.typeEditWrap?.classList.toggle("d-none", isReadonly);
     els.typeViewWrap?.classList.toggle("d-none", !isReadonly);
 
@@ -248,6 +264,7 @@
     setOpeningDrCr("Dr");
     setActiveStatus(true);
     setKind("Income");
+    if (workDynFields) workDynFields.apply({});
   }
 
   function fillForm(record) {
@@ -277,12 +294,13 @@
       applyDefaultDrCrFromUnderGroup();
     }
     setActiveStatus(record.active_status !== false);
+    if (workDynFields) workDynFields.apply(record);
   }
 
   function openAddModal() {
     clearForm();
     setFormMode("add");
-    if (els.modalTitle) els.modalTitle.textContent = "Add Work / Category";
+    if (els.modalTitle) els.modalTitle.textContent = "Add Category";
     modal?.show();
     els.workName?.focus();
   }
@@ -307,7 +325,7 @@
       fillForm(record);
       setSelected(targetId);
       setFormMode("edit");
-      if (els.modalTitle) els.modalTitle.textContent = "Edit Work / Category";
+      if (els.modalTitle) els.modalTitle.textContent = "Edit Category";
       modal?.show();
       els.workName?.focus();
     } catch (err) {
@@ -323,10 +341,10 @@
     }
     let creds = null;
     if (!window.JTCSDeleteConfirm?.ask) {
-      if (!(await JTCSDialog.confirm("Mark selected work type as Inactive?"))) return;
+      if (!(await JTCSDialog.confirm("Delete selected work type? If opening balance and transactions are 0 it will be permanently removed."))) return;
     } else {
       creds = await window.JTCSDeleteConfirm.ask({
-        message: "Mark selected work type as Inactive?",
+        message: "Delete selected work type? If opening balance and transactions are 0 it will be permanently removed.",
       });
       if (!creds) return;
     }
@@ -372,6 +390,11 @@
       els.underGroup?.focus();
       return;
     }
+    const dynErrors = workDynFields ? workDynFields.validate() : [];
+    if (dynErrors.length) {
+      alert(dynErrors[0]);
+      return;
+    }
 
     // Prefer locked edit id so Expense→Misc. never posts as create (duplicate).
     const fieldId = parseInt((els.workId?.value || "").trim(), 10);
@@ -399,6 +422,7 @@
     body.append("OpeningBalanceDrCr", selectedOpeningDrCr());
     body.append("active_status", selectedActiveStatus());
     body.append("ActiveStatus", selectedActiveStatus());
+    if (workDynFields) workDynFields.appendToFormData(body);
 
     const url = workId
       ? apiUrl(window.WORK_MASTER_API.update, workId)
@@ -443,7 +467,7 @@
 
   els.editModeBtn?.addEventListener("click", function () {
     setFormMode("edit");
-    if (els.modalTitle) els.modalTitle.textContent = "Edit Work / Category";
+    if (els.modalTitle) els.modalTitle.textContent = "Edit Category";
     els.workName?.focus();
   });
 

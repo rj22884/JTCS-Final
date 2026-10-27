@@ -9,7 +9,6 @@ from urllib.request import Request, urlopen
 from sqlalchemy.exc import IntegrityError
 
 from app.customer_master.constants import (
-    GROUP_TABS,
     MASTER_MANDATORY_FIELDS,
     OTHER_CUSTOMER_TYPE,
     OTHER_TYPE_MANDATORY_FIELDS,
@@ -20,7 +19,6 @@ from app.repositories.customer_repository import CustomerRepository
 from app.services.customer_group_service import CustomerGroupService
 from app.utils.db_session import persist
 from app.utils.master_delete_guard import MasterInUseError
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +53,8 @@ _IN_USE_MESSAGE = (
     "Only Edit is allowed."
 )
 _IN_USE_PERMANENT_MESSAGE = (
-    "Stop: this customer has linked records and cannot be permanently deleted."
+    "Stop: this customer has linked records, or all relations could not be verified. "
+    "Remove linked records first; only Edit is allowed."
 )
 
 
@@ -80,11 +79,25 @@ class CustomerMasterService:
         status: str | None = None,
     ) -> list[dict]:
         self.repository.ensure_schema()
-        return self.repository.list_master(
+        rows = self.repository.list_master(
             search=search,
             customer_group=customer_group,
             status=status,
         )
+        ids = [int(r["customer_id"]) for r in rows if r.get("customer_id")]
+        mapping: dict[int, dict] = {}
+        if ids:
+            try:
+                from app.services.chart_account_service import ChartAccountService
+
+                mapping = ChartAccountService().repo.map_customer_chart_groups(ids)
+            except Exception:
+                mapping = {}
+        for row in rows:
+            extra = mapping.get(int(row["customer_id"]), {})
+            row["chart_group_ids"] = list(extra.get("chart_group_ids") or [])
+            row["chart_group_names"] = extra.get("chart_group_names") or ""
+        return rows
 
     def get_record(self, customer_id: int) -> dict:
         record = self.repository.get_full(customer_id)
@@ -92,6 +105,14 @@ class CustomerMasterService:
         record.update(self._income_expense_work_fields(customer_id))
         record["usage"] = self.repository.get_usage(customer_id)
         record["has_links"] = not record["usage"].get("can_delete", True)
+        try:
+            from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+            record["dyn_values"] = DynamicMasterFieldService().customer_dyn_values(
+                customer_id
+            )
+        except Exception:
+            record["dyn_values"] = {}
         return record
 
     @staticmethod
@@ -201,6 +222,12 @@ class CustomerMasterService:
                 return True
         return False
 
+    def _apply_asset_class_payload(self, payload: dict, chart_ids: list[int]) -> None:
+        """Keep extra fields only for the selected Chart of Account Group profile."""
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        DynamicMasterFieldService().apply_to_payload(payload, chart_ids)
+
     def _sync_chart_groups(self, customer_id: int, payload: dict) -> None:
         """Persist Chart of Account groups for this customer (CoA table only)."""
         from app.services.chart_account_service import ChartAccountService
@@ -298,10 +325,7 @@ class CustomerMasterService:
             chart_ids = self._parse_id_list([single] if single not in (None, "") else [])
         if not chart_ids:
             raise ValueError("Select Chart of Account Group.")
-        if not self.group_service.is_group_valid_for_chart(group, chart_ids[0]):
-            raise ValueError(
-                "Selected Customer Group is not valid for the selected Chart of Account Group."
-            )
+        self._apply_asset_class_payload(payload, chart_ids)
 
         gst_number = (payload.get("gst_number") or "").strip()
         filing_frequency = (payload.get("filing_frequency") or "").strip()
@@ -400,7 +424,15 @@ class CustomerMasterService:
         ChartAccountService()._parse_groups(payload)
 
         def _write() -> dict:
-            return self.repository.save_full(payload, customer_id=entry_id)
+            saved_row = self.repository.save_full(payload, customer_id=entry_id)
+            cid_saved = saved_row.get("customer_id") or entry_id
+            if cid_saved:
+                from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+                DynamicMasterFieldService().save_customer_dyn_values(
+                    int(cid_saved), payload
+                )
+            return saved_row
 
         # Income/Expense work types are optional — sync when provided, never block save.
         saved = persist(_write)
@@ -418,38 +450,26 @@ class CustomerMasterService:
         return saved
 
     def delete_record(self, customer_id: int) -> str:
-        usage = self.repository.get_usage(customer_id)
         row = self.repository.get_detail(customer_id)
         if not row:
             raise ValueError("Customer not found.")
-        inactive = (row.get("CustomerStatus") or "").strip().lower() == "inactive"
-        name = (row.get("CustomerName") or "Customer").strip() or "Customer"
-        ledger = ledger_payload("customer", customer_id)
+        usage = self.repository.get_usage(customer_id)
         if not usage.get("can_delete"):
-            try:
-                raise_if_ledger_in_use("customer", customer_id, name)
-            except MasterInUseError as exc:
-                raise CustomerInUseError(usage, str(exc), ledger=ledger) from exc
-            raise CustomerInUseError(
-                usage,
-                _IN_USE_PERMANENT_MESSAGE if inactive else _IN_USE_MESSAGE,
-                ledger=ledger,
-            )
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE)
 
         def _write() -> str:
-            if inactive:
-                self.repository.purge(customer_id)
-                return "Customer permanently deleted. This cannot be recovered."
-            self.repository.deactivate(customer_id)
-            return (
-                "Customer marked inactive. Delete again to permanently remove "
-                "(cannot be recovered)."
-            )
+            # Repeat the relation check in the write transaction so a stale grid
+            # cannot bypass the no-links rule between rendering and deletion.
+            current_usage = self.repository.get_usage(customer_id)
+            if not current_usage.get("can_delete"):
+                raise CustomerInUseError(current_usage, _IN_USE_PERMANENT_MESSAGE)
+            self.repository.purge(customer_id)
+            return "Customer permanently deleted. This cannot be recovered."
 
         try:
             return persist(_write)
         except IntegrityError as exc:
-            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE, ledger=ledger) from exc
+            raise CustomerInUseError(usage, _IN_USE_PERMANENT_MESSAGE) from exc
 
     def restore_record(self, customer_id: int) -> str:
         def _write() -> str:
@@ -472,9 +492,18 @@ class CustomerMasterService:
             from app.extensions import db
 
             db.session.rollback()
+        try:
+            from app.repositories.dynamic_master_fields_repository import (
+                DynamicMasterFieldsRepository,
+            )
+
+            DynamicMasterFieldsRepository().ensure_schema()
+        except Exception:
+            from app.extensions import db
+
+            db.session.rollback()
         return {
             "groups": self.group_service.list_active_groups(),
-            "group_tabs": self.group_service.build_group_tabs_map(),
             "tab_labels": TAB_LABELS,
             "mandatory_fields": sorted(MASTER_MANDATORY_FIELDS),
             "other_type_mandatory_fields": sorted(OTHER_TYPE_MANDATORY_FIELDS),

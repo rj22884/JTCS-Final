@@ -155,6 +155,10 @@ class CustomerGroupRepository:
         self.session.flush()
         return row
 
+    def delete(self, row: CustomerGroupMaster) -> None:
+        self.session.delete(row)
+        self.session.flush()
+
     def activate(self, row: CustomerGroupMaster) -> CustomerGroupMaster:
         row.ActiveStatus = True
         self.session.flush()

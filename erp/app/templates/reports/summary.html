@@ -1,0 +1,120 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20261023summary">
+<style>
+  .summary-layout { display:grid; grid-template-columns:minmax(300px, 38%) minmax(0, 1fr); gap:1rem; min-height:72vh; }
+  .summary-results { max-height:68vh; overflow:auto; }
+  .summary-result { width:100%; text-align:left; border:0; border-bottom:1px solid #dce4ed; background:#fff; padding:.65rem; }
+  .summary-result:hover,.summary-result:focus { background:#eef5fc; }
+  .summary-preview { min-width:0; overflow:auto; }
+  .summary-ref-table { font-size:.86rem; }
+  .summary-topline { display:flex; justify-content:space-between; align-items:flex-start; gap:.6rem 1.5rem; }
+  .summary-topline fieldset { flex:1 1 auto; min-width:0; }
+  #summaryDateControls { flex:0 0 auto; }
+  #summaryDateControls input[type="date"] { min-width:9rem; }
+  .summary-layout.is-datewise { display:block; min-height:0; }
+  .summary-layout.is-datewise > section:first-child { display:none; }
+  .summary-layout.is-datewise .summary-preview { max-height:none; }
+  .summary-layout.is-datewise #ledgerPreviewBody { min-height:0; padding:0; font-family:"Segoe UI", Arial, sans-serif; background:#f4f6f8; }
+  .summary-group-card { height:100%; border:1px solid #d5ddea; border-radius:.5rem; background:#fff; }
+  .summary-rank { background:#f3f6fb; border-radius:.3rem; padding:.5rem; font-size:.78rem; }
+  .summary-group-table th { white-space:nowrap; }
+  .summary-group-table td.money { text-align:right; white-space:nowrap; }
+  @media (max-width: 900px) { .summary-layout { grid-template-columns:1fr; } .summary-results { max-height:35vh; } }
+  @media (max-width: 700px) {
+    .summary-topline { flex-direction:column; }
+    #summaryDateControls { width:100%; }
+    #summaryDateControls input[type="date"] { min-width:0; flex:1 1 10rem; }
+    #summaryDateSearchBtn { flex:0 0 auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card mb-3">
+  <div class="mb-2">
+    <h2 class="h5 mb-1">Summary</h2>
+    <div class="small text-muted">Choose a view. Ledger previews include date-wise entries, sorting and grid filtering for cash/bank reconciliation.</div>
+  </div>
+  <div class="summary-topline mb-2">
+    <fieldset class="mb-0">
+      <legend class="form-label small fw-semibold mb-1">Summary view</legend>
+      <div class="d-flex flex-wrap gap-3" id="summaryModes">
+        {% for mode, label in [('ledgerwise', 'Ledger-wise'), ('datewise', 'Date-wise'), ('followupwise', 'Follow-up-wise'), ('miscwise', 'Misc-wise'), ('stamp', 'Stamp'), ('ecourt', 'e-Court')] %}
+        <label class="form-check form-check-inline mb-0"><input class="form-check-input" type="radio" name="summaryMode" value="{{ mode }}" {% if mode == 'ledgerwise' %}checked{% endif %}><span class="form-check-label">{{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <div id="summaryDateControls" class="d-flex flex-wrap align-items-end gap-2 d-none">
+      <div><label class="form-label" for="summaryExactDate">Transaction date</label><input class="form-control form-control-sm" type="date" id="summaryExactDate" value="{{ today }}"></div>
+      <button class="btn btn-primary btn-sm" id="summaryDateSearchBtn" type="button"><i class="bi bi-search"></i> Show transactions</button>
+    </div>
+  </div>
+  <div class="d-flex flex-wrap align-items-end gap-2">
+    <div id="summaryLedgerControls" class="d-flex flex-wrap align-items-end gap-2">
+      <div><label class="form-label" for="ledgerDateFrom">From Date</label><input class="form-control form-control-sm" type="date" id="ledgerDateFrom" value="{{ fy_start }}"></div>
+      <div><label class="form-label" for="ledgerDateTo">To Date</label><input class="form-control form-control-sm" type="date" id="ledgerDateTo" value="{{ today }}"></div>
+      <div><label class="form-label" for="summaryLedgerKind">Search In</label>
+        <select class="form-select form-select-sm" id="summaryLedgerKind">
+          <option value="all">All Ledgers</option><option value="bank">Bank</option><option value="customer">Customer</option><option value="work">Work / Category</option><option value="item">Item</option>
+        </select>
+      </div>
+      <div><label class="form-label" for="summarySearch">Ledger / invoice / item</label>
+        <div class="input-group input-group-sm"><input class="form-control" id="summarySearch" type="search" placeholder="Search ledger / invoice / item"><button class="btn btn-primary" id="summarySearchBtn" type="button"><i class="bi bi-search"></i> Search</button></div>
+      </div>
+    </div>
+    <div id="summaryFollowupControls" class="d-flex flex-wrap align-items-center gap-3 d-none" role="radiogroup" aria-label="Follow-up module">
+      {% for module in ['All', 'DSC', 'GST', 'TDS', 'ITR'] %}
+      <label class="form-check form-check-inline mb-0"><input class="form-check-input" type="radio" name="summaryFollowupModule" value="{{ module|lower }}" {% if module == 'All' %}checked{% endif %}><span class="form-check-label">{{ module }}</span></label>
+      {% endfor %}
+      <span class="small text-muted">Follow-up filters ka behavior aapke agle instruction ke baad set hoga.</span>
+    </div>
+  </div>
+</div>
+
+<div class="summary-layout">
+  <section class="jtcs-card p-0 overflow-hidden">
+    <div class="p-2 border-bottom small text-muted" id="summarySearchMeta">Ledger-wise view: search a ledger or reference.</div>
+    <div class="summary-results" id="summaryResults"></div>
+  </section>
+  <section class="jtcs-card summary-preview" id="ledgerPreviewModal" aria-label="Ledger preview">
+    <div id="ledgerPreviewBody" class="text-muted small text-center py-5">Search and select a ledger or reference to view its related details here.</div>
+  </section>
+</div>
+
+<div class="modal fade" id="dashSourceEntryModal" tabindex="-1" aria-labelledby="dashSourceEntryModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header py-2"><div><h5 class="modal-title mb-0" id="dashSourceEntryModalTitle">Entry</h5><div class="small text-muted" id="dashSourceEntryModalSub"></div></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+    <div class="modal-body p-0" style="min-height:70vh"><iframe id="dashSourceEntryFrame" title="Source entry" style="width:100%;height:70vh;border:0"></iframe></div>
+  </div></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.LEDGER_REPORT = {
+    searchUrl: {{ url_for('ledger_report.search')|tojson }},
+    previewUrl: {{ url_for('ledger_report.preview', kind='bank', entity_id=0)|tojson }},
+    exportUrl: {{ url_for('ledger_report.export', kind='bank', entity_id=0, fmt='pdf')|tojson }},
+    referenceUrl: {{ url_for('reports.summary_reference')|tojson }},
+    dateUrl: {{ url_for('reports.summary_date')|tojson }},
+    fyStart: {{ fy_start|tojson }}, today: {{ today|tojson }}, csrfToken: {{ csrf_token()|tojson }},
+    deleteUrls: {
+      stamp: {{ url_for('stamp.stamp_delete', stamp_id=0)|tojson }},
+      ecourt: {{ url_for('dashboard.ecourt_source_delete', sale_id=0)|tojson }},
+      income_expense: {{ url_for('others_income_expense.delete_record', entry_id=0)|tojson }},
+      bank_cash: {{ url_for('others_bank_cash.delete_record', entry_id=0)|tojson }},
+      printing_income: {{ url_for('printing_scanning.printing_scanning_delete', printing_scan_id=0)|tojson }},
+      printing_expense: {{ url_for('printing_scan_expense.printing_scanning_delete', printing_scan_id=0)|tojson }},
+      itr: {{ url_for('itr_followup.delete_record', entry_id=0)|tojson }},
+      dsc: {{ url_for('dsc_followup.delete_record', entry_id=0)|tojson }},
+      tds: {{ url_for('tds_followup.delete_record', entry_id=0)|tojson }},
+      gst: {{ url_for('gst_followup.delete_record', entry_id=0)|tojson }},
+      invoice: {{ url_for('accounting_invoice.api_delete_invoice', invoice_id=0)|tojson }}
+    }
+  };
+</script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261027deletekeep2"></script>
+<script src="{{ url_for('static', filename='js/report_summary.js') }}?v=20261024compact2"></script>
+{% endblock %}

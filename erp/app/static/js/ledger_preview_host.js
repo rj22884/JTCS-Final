@@ -199,7 +199,11 @@
       alert("Export URL is not configured.");
       return;
     }
-    window.location.href = url + dateQuery(currentAllDates);
+    const full = url + dateQuery(currentAllDates);
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
   }
 
   function onExportClick(event) {
@@ -218,6 +222,7 @@
   els.previewModalEl.addEventListener("hidden.bs.modal", function () {
     setMaximized(false);
     setExportEnabled(false);
+    if (window.JTCSLedgerPreview?.isMutationActive()) return;
     currentKind = "";
     currentId = "";
     currentAllDates = false;
@@ -226,7 +231,7 @@
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
       if (currentKind && currentId) {
-        openPreview(currentKind, currentId, { allDates: currentAllDates });
+        return openPreview(currentKind, currentId, { allDates: currentAllDates });
       }
     });
   }

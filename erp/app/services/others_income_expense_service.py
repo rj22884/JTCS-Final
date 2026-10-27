@@ -5,14 +5,16 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
+from app.models.gst_billing import ItemMaster
 from app.models.transactions import (
     JTCSDailyTransaction,
     JTCSDailyTransactionPayment,
     JtcsBankAccountMaster,
+    JtcsBankTransaction,
 )
 from app.customer_master.constants import OTHER_CUSTOMER_TYPE
 from app.repositories.customer_repository import CustomerRepository
@@ -29,6 +31,7 @@ from app.repositories.transaction_repository import (
 )
 from app.services.customer_group_service import CustomerGroupService
 from app.services.customer_service import CustomerService
+from app.utils.timezone import today_app
 from app.utils.db_session import persist
 
 
@@ -151,6 +154,22 @@ class OthersIncomeExpenseService:
                 return value
         return None
 
+    def _form_has_positive_payment_amount(self, form: dict) -> bool:
+        for raw in self._get_form_list(form, "PaymentAmount[]"):
+            try:
+                if self._decimal(raw) > 0:
+                    return True
+            except ValueError:
+                continue
+        return False
+
+    def _form_payment_line_count(self, form: dict) -> int:
+        count = 0
+        for raw in self._get_form_list(form, "PaymentBankAccountID[]"):
+            if str(raw or "").strip():
+                count += 1
+        return count
+
     def _parse_payment_lines(
         self, form: dict, entry_amount: Decimal, *, required: bool = True
     ) -> list[dict]:
@@ -174,7 +193,6 @@ class OthersIncomeExpenseService:
 
         fallback_date = self._date(form.get("WorkDate")) or date.today()
         lines: list[dict] = []
-        total = Decimal("0")
         for bank_id_raw, amount_raw, payment_date_raw in zip(bank_ids, amounts, payment_dates):
             try:
                 bank_account_id = int(bank_id_raw or 0)
@@ -184,15 +202,18 @@ class OthersIncomeExpenseService:
                 amount = self._decimal(amount_raw)
             except ValueError:
                 amount = Decimal("0")
+            payment_date = self._date(payment_date_raw)
+            if payment_date is None:
+                if required:
+                    raise ValueError("Each payment line must have a date.")
+                payment_date = fallback_date
             if bank_account_id <= 0 or amount <= 0:
                 if required:
                     if bank_account_id <= 0:
                         raise ValueError("Each payment mode must be selected.")
                     raise ValueError("Each payment amount must be greater than zero.")
                 continue
-            payment_date = self._date(payment_date_raw) or fallback_date
             payment_mode_id = self.master_repo.resolve_payment_mode_for_bank_account(bank_account_id)
-            total += amount
             lines.append(
                 {
                     "bank_account_id": bank_account_id,
@@ -253,30 +274,42 @@ class OthersIncomeExpenseService:
         return lines
 
     def _find_daily_for_bill(self, bill_no: str) -> JTCSDailyTransaction | None:
-        normalized = (bill_no or "").strip().upper()
-        stmt = (
-            select(JTCSDailyTransaction)
-            .where(
-                JTCSDailyTransaction.ReferenceNo == normalized,
-                JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
-            )
-            .order_by(JTCSDailyTransaction.TransactionID.desc())
-        )
-        return db.session.scalars(stmt).first()
+        rows = self._list_dailies_for_bill(bill_no)
+        if not rows:
+            return None
+        for row in reversed(rows):
+            sub = (row.SubWorkType or "").strip()
+            if sub.startswith(self.SUB_WORK_TYPE):
+                return row
+        return rows[-1]
 
     def _list_dailies_for_bill(self, bill_no: str) -> list[JTCSDailyTransaction]:
         normalized = (bill_no or "").strip().upper()
+        if not normalized:
+            return []
+        # Match by WorkType + BillNo only. After automatic invoice reconcile, SubWorkType
+        # may be renamed to "OTHERS Followup Receipt" — still the same OIE payment daily.
         stmt = (
             select(JTCSDailyTransaction)
             .where(
-                JTCSDailyTransaction.ReferenceNo == normalized,
                 JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
+                JTCSDailyTransaction.ReferenceNo == normalized,
             )
             .order_by(JTCSDailyTransaction.TransactionID.asc())
         )
-        return list(db.session.scalars(stmt).all())
+        rows = list(db.session.scalars(stmt).all())
+        if rows:
+            return rows
+        # Fallback when collation / stored case differs
+        return [
+            row
+            for row in db.session.scalars(
+                select(JTCSDailyTransaction)
+                .where(JTCSDailyTransaction.WorkType == self.WORK_TYPE)
+                .order_by(JTCSDailyTransaction.TransactionID.asc())
+            ).all()
+            if (row.ReferenceNo or "").strip().upper() == normalized
+        ]
 
     def _remove_daily_transaction(self, daily: JTCSDailyTransaction) -> None:
         payment_rows = self.payment_repo.list_by_transaction(daily.TransactionID)
@@ -291,6 +324,102 @@ class OthersIncomeExpenseService:
     def _remove_linked_transactions(self, bill_no: str) -> None:
         for daily in self._list_dailies_for_bill(bill_no):
             self._remove_daily_transaction(daily)
+        # Leftover bank legs (OIE soft-deleted / daily already gone) still store BillNo in Remarks.
+        self._remove_orphan_bank_legs_for_bill(bill_no)
+
+    def _remove_orphan_bank_legs_for_bill(self, bill_no: str) -> None:
+        normalized = (bill_no or "").strip().upper()
+        if not normalized:
+            return
+        from app.models.transactions import JtcsBankTransaction
+        from sqlalchemy import func
+
+        orphans = list(
+            db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.Description == self.SUB_WORK_TYPE,
+                    func.upper(func.ltrim(func.rtrim(JtcsBankTransaction.Remarks)))
+                    == normalized,
+                )
+            ).all()
+        )
+        for bank_row in orphans:
+            for pay in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.BankTransactionID
+                    == bank_row.JtcsBankTransactionID
+                )
+            ).all():
+                pay.BankTransactionID = None
+            db.session.flush()
+            self.bank_repo.delete(bank_row)
+        db.session.flush()
+
+    def delete_orphan_bank_transaction(self, bank_transaction_id: int) -> str:
+        """Delete an Income/Expense bank leg that has no live dashboard source link."""
+        self.entry_repo.ensure_schema()
+        bank = self.bank_repo.get_by_id(int(bank_transaction_id))
+        if bank is None:
+            raise ValueError("Bank transaction not found.")
+
+        bill_no = (bank.Remarks or "").strip()
+        if not bill_no and bank.SourceRecordID:
+            daily = self.daily_repo.get_by_id(int(bank.SourceRecordID))
+            if daily is not None:
+                bill_no = (daily.ReferenceNo or "").strip()
+
+        def _write() -> str:
+            if bill_no:
+                entry = self.entry_repo.find_by_bill_no(bill_no)
+                if entry is not None:
+                    self._remove_linked_transactions(bill_no)
+                    if entry.IsActive:
+                        self.entry_repo.delete(entry)
+                    return (
+                        f"Deleted Income/Expense bill {bill_no} "
+                        f"and bank BT-{bank_transaction_id}."
+                    )
+
+                self._remove_linked_transactions(bill_no)
+                fresh = self.bank_repo.get_by_id(int(bank_transaction_id))
+                if fresh is not None:
+                    for pay in db.session.scalars(
+                        select(JTCSDailyTransactionPayment).where(
+                            JTCSDailyTransactionPayment.BankTransactionID
+                            == fresh.JtcsBankTransactionID
+                        )
+                    ).all():
+                        pay.BankTransactionID = None
+                    db.session.flush()
+                    if fresh.SourceRecordID:
+                        daily = self.daily_repo.get_by_id(int(fresh.SourceRecordID))
+                        if daily is not None and (daily.ReferenceNo or "").strip().upper() == bill_no.upper():
+                            self._remove_daily_transaction(daily)
+                        else:
+                            self.bank_repo.delete(fresh)
+                    else:
+                        self.bank_repo.delete(fresh)
+                return f"Deleted orphan bank BT-{bank_transaction_id} (bill {bill_no})."
+
+            for pay in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.BankTransactionID
+                    == bank.JtcsBankTransactionID
+                )
+            ).all():
+                pay.BankTransactionID = None
+            db.session.flush()
+            if bank.SourceRecordID:
+                daily = self.daily_repo.get_by_id(int(bank.SourceRecordID))
+                if daily is not None:
+                    self._remove_daily_transaction(daily)
+                else:
+                    self.bank_repo.delete(bank)
+            else:
+                self.bank_repo.delete(bank)
+            return f"Deleted orphan bank BT-{bank_transaction_id}."
+
+        return persist(_write)
 
     def _repost_transactions(
         self,
@@ -305,12 +434,18 @@ class OthersIncomeExpenseService:
         created_by: str,
         existing_daily: JTCSDailyTransaction | None = None,
         ledger_kind: str = LEDGER_INCOME,
+        post_sale_on_daily: bool = True,
     ) -> tuple[JTCSDailyTransaction, list[int]]:
         if ledger_kind == self.LEDGER_MISC:
             description = f"Misc. — {work_name} — {bill_no}"
         else:
             description = f"Income / Expense — {work_name} — {bill_no}"
         is_expense = ledger_kind == self.LEDGER_EXPENSE
+        # When Misc + Tally Bill creates an Automatic GST invoice, that invoice owns
+        # the customer SaleAmount. Post this daily as receipt-only so reconcile does
+        # not rename/strip the OIE payment row (breaks Bank Received → Edit link).
+        sale_amount = Decimal("0") if (is_expense or not post_sale_on_daily) else entry_amount
+        expense_amount = entry_amount if is_expense else Decimal("0")
 
         if existing_daily is not None:
             bank_rows = self._collect_bank_rows_for_daily(existing_daily)
@@ -325,13 +460,17 @@ class OthersIncomeExpenseService:
             existing_daily.ReferenceNo = bill_no
             existing_daily.Description = description
             existing_daily.IncomeAmount = Decimal("0")
-            existing_daily.ExpenseAmount = entry_amount if is_expense else Decimal("0")
-            existing_daily.SaleAmount = Decimal("0") if is_expense else entry_amount
-            existing_daily.TotalAmount = entry_amount
+            existing_daily.ExpenseAmount = expense_amount
+            existing_daily.SaleAmount = sale_amount
+            existing_daily.TotalAmount = entry_amount if post_sale_on_daily or is_expense else sum(
+                (line["amount"] for line in payment_lines), Decimal("0")
+            )
             existing_daily.PaymentModeID = payment_lines[0]["payment_mode_id"]
             existing_daily.PaymentSplitCount = len(payment_lines)
             existing_daily.Remarks = remarks
             existing_daily.SubWorkType = f"{self.SUB_WORK_TYPE} - {work_name}"
+            existing_daily.WorkType = self.WORK_TYPE
+            existing_daily.Status = "Posted"
             existing_daily.ModifiedDate = datetime.utcnow()
             db.session.flush()
             daily = existing_daily
@@ -345,12 +484,16 @@ class OthersIncomeExpenseService:
                     "ReferenceNo": bill_no,
                     "Description": description,
                     "IncomeAmount": Decimal("0"),
-                    "ExpenseAmount": entry_amount if is_expense else Decimal("0"),
-                    "SaleAmount": Decimal("0") if is_expense else entry_amount,
+                    "ExpenseAmount": expense_amount,
+                    "SaleAmount": sale_amount,
                     "PurchaseAmount": Decimal("0"),
                     "GSTAmount": Decimal("0"),
                     "TDSAmount": Decimal("0"),
-                    "TotalAmount": entry_amount,
+                    "TotalAmount": (
+                        entry_amount
+                        if post_sale_on_daily or is_expense
+                        else sum((line["amount"] for line in payment_lines), Decimal("0"))
+                    ),
                     "PaymentModeID": payment_lines[0]["payment_mode_id"],
                     "PaymentSplitCount": len(payment_lines),
                     "Status": "Posted",
@@ -440,14 +583,42 @@ class OthersIncomeExpenseService:
         """Sub works from WorkTypeMaster where WorkTypeName matches WorkMaster.WorkName."""
         self.entry_repo.ensure_schema()
         rows = self.master_repo.list_sub_works_for_parent(work_name)
-        return [
-            {
-                "work_type_id": row.WorkTypeID,
-                "work_type_name": row.WorkTypeName,
-                "sub_work_type": row.SubWorkType,
-            }
-            for row in rows
-        ]
+        out: list[dict] = []
+        for row in rows:
+            item_id = None
+            gst_rate = 18.0
+            hsn_sac = ""
+            unit = "NOS"
+            try:
+                raw_item_id = getattr(row, "ItemID", None)
+                item_id = int(raw_item_id) if raw_item_id not in (None, "") else None
+            except (TypeError, ValueError):
+                item_id = None
+            if item_id:
+                item = self.master_repo.session.get(ItemMaster, item_id)
+                if item is not None:
+                    gst_applicable = bool(getattr(item, "GstApplicable", True))
+                    if not gst_applicable:
+                        gst_rate = 0.0
+                    else:
+                        try:
+                            gst_rate = float(item.GstRatePercent or 0)
+                        except (TypeError, ValueError):
+                            gst_rate = 18.0
+                    hsn_sac = (item.HsnSac or "").strip()
+                    unit = (item.Unit or "NOS").strip() or "NOS"
+            out.append(
+                {
+                    "work_type_id": row.WorkTypeID,
+                    "work_type_name": row.WorkTypeName,
+                    "sub_work_type": row.SubWorkType,
+                    "item_id": item_id,
+                    "gst_rate_percent": gst_rate,
+                    "hsn_sac": hsn_sac,
+                    "unit": unit,
+                }
+            )
+        return out
 
     @staticmethod
     def _account_label(bank_name: str | None, account_number: str | None) -> str:
@@ -463,10 +634,27 @@ class OthersIncomeExpenseService:
             return number[-4:] if len(number) > 4 else number
         return "—"
 
-    def _account_labels_by_bill(self, bill_nos: list[str]) -> dict[str, str]:
+    @staticmethod
+    def _full_account_label(bank_name: str | None, account_number: str | None) -> str:
+        """Show the selected bank account number (or Cash) in the Misc. grid."""
+        name = (bank_name or "").strip()
+        number = (account_number or "").strip()
+        if name.casefold() == "cash" or number.casefold() == "cash":
+            return "Cash"
+        if number and number not in {"-", "—", "–"}:
+            return number
+        return name or "—"
+
+    def _account_labels_by_bill(
+        self,
+        bill_nos: list[str],
+        *,
+        full_account_numbers_for: set[str] | None = None,
+    ) -> dict[str, str]:
         normalized = sorted({(bill or "").strip().upper() for bill in bill_nos if (bill or "").strip()})
         if not normalized:
             return {}
+        full_bill_numbers = full_account_numbers_for or set()
 
         daily_rows = []
         chunk_size = 400
@@ -481,7 +669,6 @@ class OthersIncomeExpenseService:
                     .where(
                         JTCSDailyTransaction.ReferenceNo.in_(chunk),
                         JTCSDailyTransaction.WorkType == self.WORK_TYPE,
-                        JTCSDailyTransaction.SubWorkType.like(f"{self.SUB_WORK_TYPE}%"),
                     )
                     .order_by(JTCSDailyTransaction.TransactionID.asc())
                 ).all()
@@ -530,22 +717,436 @@ class OthersIncomeExpenseService:
                 account = accounts.get(bank_id)
                 if account is None:
                     continue
-                label = self._account_label(
-                    account.BankName,
-                    MasterRepository._stamp_account_number(account),
+                account_number = MasterRepository._stamp_account_number(account)
+                label = (
+                    self._full_account_label(account.BankName, account_number)
+                    if bill_no in full_bill_numbers
+                    else self._account_label(account.BankName, account_number)
                 )
                 if label and label not in seen:
                     seen.append(label)
             labels[bill_no] = ", ".join(seen) if seen else "—"
         return labels
 
-    def list_entries(self, *, ledger_kind: str | None = None) -> list[dict]:
+    def _money_in_account_labels_by_invoice(self, invoice_ids: list[int]) -> dict[int, str]:
+        """Bank / cash accounts used for Money In vouchers allocated to invoices."""
+        from app.models.bank_cash import (
+            OthersBankCashInvoiceAllocation,
+            OthersBankCashTransaction,
+        )
+
+        keys: list[int] = []
+        for value in invoice_ids:
+            try:
+                invoice_id = int(value or 0)
+            except (TypeError, ValueError):
+                continue
+            if invoice_id > 0 and invoice_id not in keys:
+                keys.append(invoice_id)
+        keys.sort()
+        if not keys:
+            return {}
+
+        from app.repositories.bank_cash_repository import OthersBankCashRepository
+
+        OthersBankCashRepository().ensure_schema()
+        allocated_rows = db.session.execute(
+            select(
+                OthersBankCashInvoiceAllocation.InvoiceID,
+                OthersBankCashInvoiceAllocation.EntryID,
+                OthersBankCashTransaction.DebitBankAccountID,
+                OthersBankCashTransaction.DebitLedgerKey,
+            )
+            .join(
+                OthersBankCashTransaction,
+                OthersBankCashTransaction.EntryID == OthersBankCashInvoiceAllocation.EntryID,
+            )
+            .where(
+                OthersBankCashInvoiceAllocation.InvoiceID.in_(keys),
+                OthersBankCashTransaction.IsActive == True,  # noqa: E712
+            )
+        ).all()
+
+        account_ids_by_invoice: dict[int, list[int]] = {}
+        allocated_entry_ids: set[int] = set()
+
+        def add_account(invoice_id, entry_id, account_id, ledger_key) -> None:
+            allocated_entry_ids.add(int(entry_id))
+            resolved_id = int(account_id or 0)
+            if not resolved_id and (ledger_key or "").startswith("bank-"):
+                try:
+                    resolved_id = int(ledger_key.split("-", 1)[1])
+                except (TypeError, ValueError):
+                    resolved_id = 0
+            if resolved_id > 0:
+                account_ids_by_invoice.setdefault(int(invoice_id), []).append(resolved_id)
+
+        for invoice_id, entry_id, account_id, ledger_key in allocated_rows:
+            add_account(invoice_id, entry_id, account_id, ledger_key)
+
+        legacy_rows = db.session.execute(
+            select(
+                OthersBankCashTransaction.InvoiceID,
+                OthersBankCashTransaction.EntryID,
+                OthersBankCashTransaction.DebitBankAccountID,
+                OthersBankCashTransaction.DebitLedgerKey,
+            ).where(
+                OthersBankCashTransaction.InvoiceID.in_(keys),
+                OthersBankCashTransaction.IsActive == True,  # noqa: E712
+            )
+        ).all()
+        for invoice_id, entry_id, account_id, ledger_key in legacy_rows:
+            if int(entry_id) not in allocated_entry_ids:
+                add_account(invoice_id, entry_id, account_id, ledger_key)
+
+        bank_ids = {bank_id for ids in account_ids_by_invoice.values() for bank_id in ids}
+        accounts = {}
+        if bank_ids:
+            accounts = {
+                int(account.JtcsBankAccountID): account
+                for account in db.session.scalars(
+                    select(JtcsBankAccountMaster).where(
+                        JtcsBankAccountMaster.JtcsBankAccountID.in_(bank_ids)
+                    )
+                ).all()
+            }
+
+        labels: dict[int, str] = {}
+        for invoice_id, bank_ids_for_invoice in account_ids_by_invoice.items():
+            seen: list[str] = []
+            for bank_id in bank_ids_for_invoice:
+                account = accounts.get(bank_id)
+                if account is None:
+                    continue
+                label = self._full_account_label(
+                    account.BankName,
+                    MasterRepository._stamp_account_number(account),
+                )
+                if label and label != "—" and label not in seen:
+                    seen.append(label)
+            if seen:
+                labels[invoice_id] = ", ".join(seen)
+        return labels
+
+    def _receipt_account_labels_by_reference(
+        self,
+        receipts_by_reference: dict[str, list[tuple[int, Decimal]]],
+    ) -> dict[str, str]:
+        """Accounts from the already identified receipt dailies, grouped by reference."""
+        daily_ids = {
+            int(daily_id)
+            for receipts in receipts_by_reference.values()
+            for daily_id, amount in receipts
+            if amount > 0
+        }
+        if not daily_ids:
+            return {}
+
+        from app.services.payment_accounting_service import PaymentAccountingService
+
+        pay = PaymentAccountingService()
+        daily_rows = {}
+        payment_rows_by_daily: dict[int, list] = {}
+        bank_rows_by_daily: dict[int, list] = {}
+        seen_bank_ids: set[int] = set()
+        daily_id_list = list(daily_ids)
+
+        for offset in range(0, len(daily_id_list), 400):
+            chunk = daily_id_list[offset : offset + 400]
+            for daily in db.session.scalars(
+                select(JTCSDailyTransaction).where(
+                    JTCSDailyTransaction.TransactionID.in_(chunk)
+                )
+            ).all():
+                daily_rows[int(daily.TransactionID)] = daily
+            for payment in db.session.scalars(
+                select(JTCSDailyTransactionPayment).where(
+                    JTCSDailyTransactionPayment.TransactionID.in_(chunk)
+                )
+            ).all():
+                payment_rows_by_daily.setdefault(int(payment.TransactionID), []).append(payment)
+            for bank in db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.SourceTable == "JTCSDailyTransaction",
+                    (JtcsBankTransaction.SourceRecordID.in_(chunk))
+                    | (JtcsBankTransaction.SourceID.in_(chunk)),
+                )
+            ).all():
+                bank_id = int(bank.JtcsBankTransactionID)
+                if bank_id in seen_bank_ids:
+                    continue
+                target = bank.SourceRecordID if bank.SourceRecordID in daily_ids else bank.SourceID
+                if target in daily_ids:
+                    seen_bank_ids.add(bank_id)
+                    bank_rows_by_daily.setdefault(int(target), []).append(bank)
+
+        extra_bank_ids = {
+            int(daily.BankTransactionID)
+            for daily in daily_rows.values()
+            if daily.BankTransactionID and int(daily.BankTransactionID) not in seen_bank_ids
+        }
+        extra_bank_ids.update(
+            int(payment.BankTransactionID)
+            for rows in payment_rows_by_daily.values()
+            for payment in rows
+            if payment.BankTransactionID and int(payment.BankTransactionID) not in seen_bank_ids
+        )
+        extra_banks = {}
+        extra_bank_id_list = list(extra_bank_ids)
+        for offset in range(0, len(extra_bank_id_list), 400):
+            chunk = extra_bank_id_list[offset : offset + 400]
+            for bank in db.session.scalars(
+                select(JtcsBankTransaction).where(
+                    JtcsBankTransaction.JtcsBankTransactionID.in_(chunk)
+                )
+            ).all():
+                extra_banks[int(bank.JtcsBankTransactionID)] = bank
+        for daily_id, daily in daily_rows.items():
+            present = {int(bank.JtcsBankTransactionID) for bank in bank_rows_by_daily.get(daily_id, [])}
+            linked_bank_ids = [
+                int(payment.BankTransactionID)
+                for payment in payment_rows_by_daily.get(daily_id, [])
+                if payment.BankTransactionID
+            ]
+            if daily.BankTransactionID:
+                linked_bank_ids.append(int(daily.BankTransactionID))
+            for bank_id in linked_bank_ids:
+                bank = extra_banks.get(bank_id)
+                if bank is not None and bank_id not in present:
+                    bank_rows_by_daily.setdefault(daily_id, []).append(bank)
+                    present.add(bank_id)
+
+        account_ids = {
+            int(payment.BankAccountID)
+            for rows in payment_rows_by_daily.values()
+            for payment in rows
+            if payment.BankAccountID
+        }
+        accounts = {}
+        account_id_list = list(account_ids)
+        for offset in range(0, len(account_id_list), 400):
+            chunk = account_id_list[offset : offset + 400]
+            for account in db.session.scalars(
+                select(JtcsBankAccountMaster).where(
+                    JtcsBankAccountMaster.JtcsBankAccountID.in_(chunk)
+                )
+            ).all():
+                accounts[int(account.JtcsBankAccountID)] = account
+
+        labels_by_daily: dict[int, list[str]] = {}
+        for daily_id, daily in daily_rows.items():
+            payments = payment_rows_by_daily.get(daily_id, [])
+            received = sum(
+                (
+                    pay.money(bank.Debit)
+                    for bank in bank_rows_by_daily.get(daily_id, [])
+                    if not pay.is_udhaar_text(bank.BankName)
+                    and not pay.is_udhaar_text(bank.MaskedAccountNumber)
+                ),
+                Decimal("0.00"),
+            )
+            if received <= 0:
+                received = sum(
+                    (
+                        pay.money(payment.Amount)
+                        for payment in payments
+                        if not pay.is_udhaar_account(accounts.get(int(payment.BankAccountID)))
+                    ),
+                    Decimal("0.00"),
+                )
+            if received <= 0 or pay._is_gst_sale_daily(daily):
+                continue
+            sub = (daily.SubWorkType or "").strip()
+            sale = pay.money(daily.SaleAmount) + pay.money(daily.IncomeAmount)
+            is_receipt = sub == pay.receipt_sub_work_type or (
+                sale == 0 and (bool(payments) or received > 0)
+            )
+            is_combined = sale > 0 and (bool(payments) or received > 0)
+            if not is_receipt and not is_combined:
+                continue
+
+            labels = []
+            for payment in payments:
+                account = accounts.get(int(payment.BankAccountID)) if payment.BankAccountID else None
+                if pay.is_udhaar_account(account):
+                    continue
+                if account is None:
+                    continue
+                label = self._full_account_label(
+                    account.BankName,
+                    MasterRepository._stamp_account_number(account),
+                )
+                if label and label != "—" and label not in labels:
+                    labels.append(label)
+            if not labels:
+                for bank in bank_rows_by_daily.get(daily_id, []):
+                    if pay.money(bank.Debit) <= 0:
+                        continue
+                    if pay.is_udhaar_text(bank.BankName) or pay.is_udhaar_text(
+                        bank.MaskedAccountNumber
+                    ):
+                        continue
+                    label = self._full_account_label(bank.BankName, bank.MaskedAccountNumber)
+                    if label and label != "—" and label not in labels:
+                        labels.append(label)
+            if labels:
+                labels_by_daily[daily_id] = labels
+
+        labels_by_reference: dict[str, list[str]] = {}
+        for reference, receipts in receipts_by_reference.items():
+            for daily_id, amount in receipts:
+                if amount <= 0:
+                    continue
+                for label in labels_by_daily.get(int(daily_id), []):
+                    bucket = labels_by_reference.setdefault(reference, [])
+                    if label not in bucket:
+                        bucket.append(label)
+        return {reference: ", ".join(labels) for reference, labels in labels_by_reference.items()}
+
+    @staticmethod
+    def _overdue_days(raw_date: str | date | None) -> int | None:
+        if isinstance(raw_date, datetime):
+            due_from = raw_date.date()
+        elif isinstance(raw_date, date):
+            due_from = raw_date
+        else:
+            try:
+                due_from = date.fromisoformat(str(raw_date or "")[:10])
+            except ValueError:
+                return None
+        return max(0, (today_app() - due_from).days)
+
+    def list_entries(
+        self,
+        *,
+        ledger_kind: str | None = None,
+        ledger_kinds: list[str] | tuple[str, ...] | None = None,
+    ) -> list[dict]:
         self.entry_repo.ensure_schema()
-        rows = self.entry_repo.list_recent(ledger_kind=ledger_kind)
+        rows = self.entry_repo.list_recent(ledger_kind=ledger_kind, ledger_kinds=ledger_kinds)
         entries = [self._entry_dict(row) for row in rows]
-        account_map = self._account_labels_by_bill([item.get("bill_no") or "" for item in entries])
+        account_map = self._account_labels_by_bill(
+            [item.get("bill_no") or "" for item in entries],
+            full_account_numbers_for={
+                (item.get("bill_no") or "").strip().upper()
+                for item in entries
+                if item.get("ledger_kind") == self.LEDGER_MISC
+            },
+        )
         for item in entries:
             item["account_label"] = account_map.get((item.get("bill_no") or "").strip().upper(), "—")
+            if not item.get("payment_received") and item.get("account_label") not in (None, "", "—"):
+                item["payment_received"] = True
+        from app.services.gst_invoice_service import GstInvoiceService
+        from app.repositories.gst_invoice_repository import GstInvoiceRepository
+
+        invoice_svc = GstInvoiceService()
+        status_map = invoice_svc.sale_status_by_bill_nos(
+            [item.get("tally_bill_no") or item.get("bill_no") or "" for item in entries]
+            + [item.get("bill_no") or "" for item in entries]
+        )
+        by_misc = GstInvoiceRepository().find_by_misc_entries(
+            [item.get("entry_id") for item in entries]
+        )
+        linked_invoices = list(by_misc.values())
+        invoice_ids = [int(invoice.InvoiceID) for invoice in linked_invoices]
+        money_in_accounts = self._money_in_account_labels_by_invoice(invoice_ids)
+        allocated_by_invoice = invoice_svc.money_in_totals(invoice_ids)
+        invoice_refs = {
+            (value or "").strip().upper()
+            for invoice in linked_invoices
+            for value in (getattr(invoice, "TallyBillNo", None), invoice.InvoiceNo)
+            if (value or "").strip()
+        }
+        linked_entry_ids = {int(entry_id): invoice for entry_id, invoice in by_misc.items()}
+        source_refs_by_invoice: dict[int, set[str]] = {}
+        for item in entries:
+            invoice = linked_entry_ids.get(int(item.get("entry_id") or 0))
+            source_ref = (item.get("bill_no") or "").strip().upper()
+            if invoice is not None and source_ref:
+                source_refs_by_invoice.setdefault(int(invoice.InvoiceID), set()).add(source_ref)
+        source_bill_refs = {
+            reference
+            for references in source_refs_by_invoice.values()
+            for reference in references
+        }
+        invoice_refs.update(source_bill_refs)
+        receipts_by_ref = invoice_svc._batch_receipt_amounts(invoice_refs)
+        receipt_accounts = self._receipt_account_labels_by_reference(receipts_by_ref)
+        received_by_invoice: dict[int, bool] = {}
+        for invoice in linked_invoices:
+            invoice_id = int(invoice.InvoiceID)
+            received_amount = allocated_by_invoice.get(invoice_id, 0)
+            seen_daily_ids: set[int] = set()
+            seen_refs: set[str] = set()
+            raw_refs = (
+                *source_refs_by_invoice.get(invoice_id, set()),
+                getattr(invoice, "TallyBillNo", None),
+                invoice.InvoiceNo,
+            )
+            for raw_ref in raw_refs:
+                ref = (raw_ref or "").strip().upper()
+                if not ref or ref in seen_refs:
+                    continue
+                seen_refs.add(ref)
+                for daily_id, amount in receipts_by_ref.get(ref, ()):
+                    if daily_id in seen_daily_ids:
+                        continue
+                    seen_daily_ids.add(daily_id)
+                    received_amount += amount
+            received_by_invoice[invoice_id] = float(received_amount or 0) > 0.005
+        for item in entries:
+            key = (item.get("tally_bill_no") or item.get("bill_no") or "").strip().upper()
+            item["sale_invoice"] = status_map.get(key)
+            try:
+                entry_id = int(item.get("entry_id") or 0)
+            except (TypeError, ValueError):
+                entry_id = 0
+            linked = by_misc.get(entry_id) if entry_id else None
+            if linked is None:
+                if item.get("ledger_kind") == self.LEDGER_MISC:
+                    paid = bool(item.get("payment_received")) or item.get("account_label") not in (
+                        None,
+                        "",
+                        "—",
+                    )
+                    if paid:
+                        item["payment_received"] = True
+                        if item.get("account_label") in (None, "", "—"):
+                            item["account_label"] = "Received"
+                    else:
+                        days = self._overdue_days(item.get("work_date"))
+                        if days is not None:
+                            item["overdue_days"] = days
+                            item["account_label"] = f"{days} day{'s' if days != 1 else ''} overdue"
+                continue
+            received = received_by_invoice.get(int(linked.InvoiceID), False)
+            received = received or bool(item.get("payment_received"))
+            item["payment_received"] = received
+            if received:
+                account_labels = []
+                original_label = (item.get("account_label") or "").strip()
+                invoice_label = money_in_accounts.get(int(linked.InvoiceID), "")
+                invoice_receipt_labels = []
+                for raw_ref in (item.get("bill_no"), getattr(linked, "TallyBillNo", None), linked.InvoiceNo):
+                    label = receipt_accounts.get((raw_ref or "").strip().upper(), "")
+                    if label and label not in invoice_receipt_labels:
+                        invoice_receipt_labels.append(label)
+                for label in (original_label, invoice_label, *invoice_receipt_labels):
+                    if label and label != "—" and label not in account_labels:
+                        account_labels.append(label)
+                item["account_label"] = ", ".join(account_labels) if account_labels else "Received"
+            else:
+                overdue_date = getattr(linked, "InvoiceDate", None) or item.get("work_date")
+                days = self._overdue_days(overdue_date)
+                if days is not None:
+                    item["overdue_days"] = days
+                    item["account_label"] = f"{days} day{'s' if days != 1 else ''} overdue"
+            item["sale_invoice"] = {
+                **invoice_svc.invoice_action_snapshot(linked),
+                "bill_status": "Approved" if bool(getattr(linked, "BillApproved", False)) else "Approve pending",
+                "payment_received": "Yes" if invoice_svc._saved_payment_received(linked) else "No",
+            }
         return entries
 
     def get_entry(self, entry_id: int) -> dict:
@@ -556,12 +1157,92 @@ class OthersIncomeExpenseService:
         data = self._entry_dict(row)
         daily = self._find_daily_for_bill(row.BillNo)
         if daily:
+            work_label = (data.get("work_name") or "").strip()
+            expected_sub = (
+                f"{self.SUB_WORK_TYPE} - {work_label}" if work_label else self.SUB_WORK_TYPE
+            )
+            sub = (daily.SubWorkType or "").strip()
+            if daily.WorkType != self.WORK_TYPE or not sub.startswith(self.SUB_WORK_TYPE):
+                daily.WorkType = self.WORK_TYPE
+                daily.SubWorkType = expected_sub
+                daily.ReferenceNo = row.BillNo
+                db.session.flush()
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
             data["daily_transaction_id"] = daily.TransactionID
             data["payments"] = self._load_payment_lines(daily)
         else:
             data["daily_transaction_id"] = None
             data["payments"] = []
+        if not data.get("payment_received") and data.get("payments"):
+            data["payment_received"] = True
+        data["linked_invoice"] = None
+        if data.get("ledger_kind") == self.LEDGER_MISC:
+            from app.repositories.gst_invoice_repository import GstInvoiceRepository
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            linked = GstInvoiceRepository().find_by_misc_entries([row.EntryID]).get(int(row.EntryID))
+            if linked is not None:
+                data["linked_invoice"] = GstInvoiceService().invoice_action_snapshot(linked)
         return data
+
+    def reassign_misc_invoice_customer(self, entry_id: int, billing_customer_id: int) -> dict:
+        """Point this Miscellaneous invoice at Same Customer or the chosen billing customer.
+
+        Contact person stays the entry customer. Follow-up invoices are not touched.
+        Same Customer uses the Misc entry customer id; Other Customer uses the chosen id.
+        """
+        self.entry_repo.ensure_schema()
+        row = self.entry_repo.get_by_id(int(entry_id))
+        if row is None or not row.IsActive:
+            raise ValueError("Income / expense record not found.")
+        work = row.work_type
+        ledger = (getattr(work, "LedgerKind", None) or "").strip() if work is not None else ""
+        if ledger not in {"Misc.", "Misc"}:
+            raise ValueError("Record is not a Miscellaneous entry.")
+        try:
+            billing_id = int(billing_customer_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Please select the Billing Customer.") from exc
+        if billing_id <= 0:
+            raise ValueError("Please select the Billing Customer.")
+        entry_customer_id = int(getattr(row, "CustomerID", 0) or 0)
+        if entry_customer_id <= 0:
+            raise ValueError("Please select a customer first.")
+
+        from app.repositories.gst_invoice_repository import GstInvoiceRepository
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        invoice_svc = GstInvoiceService()
+        linked = GstInvoiceRepository().find_by_misc_entries([int(row.EntryID)]).get(int(row.EntryID))
+        if linked is None:
+            raise ValueError("Create the invoice before changing the billing customer.")
+        cust = invoice_svc._load_customer(billing_id)
+        if not cust.get("customer_id"):
+            raise ValueError("Please select the Billing Customer.")
+
+        def _write() -> dict:
+            contact_name = invoice_svc._customer_name(getattr(row, "CustomerID", None))
+            if contact_name:
+                linked.ContactPerson = contact_name[:150]
+            if int(getattr(linked, "CustomerID", 0) or 0) != billing_id:
+                linked.CustomerID = billing_id
+                linked.CustomerName = (cust.get("customer_name") or "")[:200]
+                linked.BillingAddress = ((cust.get("billing_address") or "")[:500] or None)
+                linked.CustomerGSTIN = ((cust.get("customer_gstin") or "")[:20] or None)
+                linked.ContactMobile = ((cust.get("contact_mobile") or "")[:20] or None)
+                linked.ContactEmail = ((cust.get("contact_email") or "")[:150] or None)
+                linked.PlaceOfSupply = ((cust.get("place_of_supply") or "")[:100] or None)
+                linked.PlaceOfSupplyCode = ((cust.get("place_of_supply_code") or "")[:5] or None)
+                linked.UpdatedAt = datetime.utcnow()
+                if invoice_svc.normalize_voucher_type(getattr(linked, "VoucherType", None)) == invoice_svc.VOUCHER_SALE:
+                    invoice_svc._sync_sale_daily(linked)
+            db.session.flush()
+            return invoice_svc.invoice_action_snapshot(linked)
+
+        return persist(_write)
 
     def _category_lines_from_row(self, row) -> list[dict]:
         details = list(getattr(row, "detail_lines", None) or [])
@@ -609,6 +1290,7 @@ class OthersIncomeExpenseService:
             "customer_id": getattr(row, "CustomerID", None) or None,
             "work_done": bool(getattr(row, "WorkDone", False)),
             "tally_bill_generated": bool(getattr(row, "TallyBillGenerated", False)),
+            "payment_received": bool(getattr(row, "PaymentReceived", False)),
             "tally_bill_no": (getattr(row, "TallyBillNo", None) or "") or "",
             "tally_bill_date": (
                 row.TallyBillDate.isoformat()
@@ -652,7 +1334,7 @@ class OthersIncomeExpenseService:
             work_type_ids.extend([""] * (len(work_ids) - len(work_type_ids)))
 
         lines: list[dict] = []
-        seen: set[int] = set()
+        seen: set[tuple[int, int]] = set()
         for work_id_raw, amount_raw, work_type_raw in zip(work_ids, amounts, work_type_ids):
             try:
                 work_id = int(work_id_raw or 0)
@@ -660,9 +1342,6 @@ class OthersIncomeExpenseService:
                 work_id = 0
             if work_id <= 0:
                 raise ValueError("Each category must be selected.")
-            if work_id in seen:
-                raise ValueError("Duplicate categories are not allowed.")
-            seen.add(work_id)
 
             work = self.work_repo.get_by_id(work_id)
             if work is None or not work.ActiveStatus:
@@ -686,13 +1365,16 @@ class OthersIncomeExpenseService:
                     if work_type_id <= 0:
                         raise ValueError(f"Sub Work is required for {work.WorkName}.")
                     sub = self.master_repo.get_work_type(work_type_id)
-                    if (
-                        sub is None
-                        or not sub.ActiveStatus
-                        or (sub.WorkTypeName or "").strip() != (work.WorkName or "").strip()
-                    ):
+                    parent_name = (work.WorkName or "").strip().casefold()
+                    sub_parent = (sub.WorkTypeName or "").strip().casefold() if sub else ""
+                    if sub is None or not sub.ActiveStatus or sub_parent != parent_name:
                         raise ValueError(f"Selected Sub Work is not valid for {work.WorkName}.")
-                    sub_work_name = sub.SubWorkType or ""
+                    sub_work_name = (sub.SubWorkType or "").strip()
+
+            line_key = (work_id, work_type_id or 0)
+            if line_key in seen:
+                raise ValueError("Duplicate categories are not allowed.")
+            seen.add(line_key)
 
             lines.append(
                 {
@@ -727,6 +1409,128 @@ class OthersIncomeExpenseService:
             bill_no = self.entry_repo.next_bill_no_after(bill_no, ledger_kind=ledger_kind)
         return bill_no
 
+    def duplicate_customer_warning(
+        self,
+        *,
+        customer_id: int,
+        amount: Decimal,
+        dates: list[date],
+        exclude_entry_id: int | None = None,
+    ) -> dict:
+        """Same customer, same date and same amount already on Income/Expense or Money In/Out."""
+        if customer_id <= 0 or amount <= 0 or not dates:
+            return {"duplicate": False, "message": "", "matches": []}
+        unique_dates = sorted(set(dates))
+        date_params = {f"d{i}": value for i, value in enumerate(unique_dates)}
+        date_sql = ", ".join(f":d{i}" for i in range(len(unique_dates)))
+        params: dict = {"customer_id": customer_id, "amount": amount, **date_params}
+        exclude_sql = ""
+        if exclude_entry_id:
+            exclude_sql = "AND m.EntryID <> :exclude_entry_id"
+            params["exclude_entry_id"] = int(exclude_entry_id)
+        matches: list[dict] = []
+        oie_rows = db.session.execute(
+            text(
+                f"""
+                SELECT
+                    m.EntryID,
+                    m.BillNo,
+                    m.WorkDate,
+                    m.Amount,
+                    ISNULL(w.LedgerKind, N'') AS LedgerKind,
+                    pay.PayDate
+                FROM dbo.OthersIncomeExpenseMaster m
+                INNER JOIN dbo.WorkMaster w ON w.WorkID = m.WorkID
+                OUTER APPLY (
+                    SELECT TOP 1 bt.TransactionDate AS PayDate
+                    FROM dbo.JTCSDailyTransaction d
+                    LEFT JOIN dbo.JtcsBankTransaction bt
+                        ON bt.JtcsBankTransactionID = d.BankTransactionID
+                    WHERE d.Status = N'Posted'
+                      AND d.WorkType = N'Others'
+                      AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                          = UPPER(LTRIM(RTRIM(ISNULL(m.BillNo, N''))))
+                    ORDER BY d.TransactionID DESC
+                ) pay
+                WHERE m.CustomerID = :customer_id
+                  AND ISNULL(m.IsActive, 1) = 1
+                  AND ABS(ISNULL(m.Amount, 0) - :amount) < 0.01
+                  AND LOWER(LTRIM(RTRIM(ISNULL(w.LedgerKind, N'')))) IN (N'income', N'expense')
+                  AND (
+                        m.WorkDate IN ({date_sql})
+                     OR pay.PayDate IN ({date_sql})
+                  )
+                  {exclude_sql}
+                """
+            ),
+            params,
+        ).mappings().all()
+        for row in oie_rows:
+            shown = row.get("PayDate") or row.get("WorkDate")
+            if isinstance(shown, datetime):
+                shown = shown.date()
+            kind = (row.get("LedgerKind") or "").strip() or "Income / Expense"
+            matches.append(
+                {
+                    "source": "Income / Expense",
+                    "ref": (row.get("BillNo") or "").strip(),
+                    "date": shown.strftime("%d/%m/%Y") if shown else "",
+                    "amount": f"{self._money_plain(row.get('Amount')):,.2f}",
+                    "kind": kind,
+                }
+            )
+        obc_rows = db.session.execute(
+            text(
+                f"""
+                SELECT DISTINCT e.EntryID, e.VoucherNo, e.WorkDate, e.Amount, e.Purpose
+                FROM dbo.OthersBankCashTransaction e
+                INNER JOIN dbo.ChartOfAccountMaster a
+                    ON a.CustomerID = :customer_id
+                   AND ISNULL(a.IsActive, 1) = 1
+                WHERE ISNULL(e.IsActive, 1) = 1
+                  AND ABS(ISNULL(e.Amount, 0) - :amount) < 0.01
+                  AND e.WorkDate IN ({date_sql})
+                  AND (
+                        e.DebitLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                     OR e.CreditLedgerKey = N'coa-' + CAST(a.AccountID AS NVARCHAR(20))
+                  )
+                """
+            ),
+            params,
+        ).mappings().all()
+        for row in obc_rows:
+            shown = row.get("WorkDate")
+            if isinstance(shown, datetime):
+                shown = shown.date()
+            ref = (row.get("VoucherNo") or "").strip() or (row.get("Purpose") or "").strip()
+            matches.append(
+                {
+                    "source": "Money In / Out",
+                    "ref": ref,
+                    "date": shown.strftime("%d/%m/%Y") if shown else "",
+                    "amount": f"{self._money_plain(row.get('Amount')):,.2f}",
+                    "kind": "Money In / Out",
+                }
+            )
+        if not matches:
+            return {"duplicate": False, "message": "", "matches": []}
+        detail = "; ".join(
+            f"{item['date']} ₹{item['amount']} {item['ref']} ({item['source']})".strip()
+            for item in matches[:5]
+        )
+        return {
+            "duplicate": True,
+            "message": f"Pehle ye entry ho chuki hai: {detail}. Please confirm.",
+            "matches": matches[:5],
+        }
+
+    @staticmethod
+    def _money_plain(value) -> Decimal:
+        try:
+            return Decimal(str(value or 0)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return Decimal("0.00")
+
     def save_entry(self, form: dict, *, created_by: str) -> OthersIncomeExpenseSaveResult:
         self.entry_repo.ensure_schema()
         entry_id = self._entry_id_from_form(form)
@@ -755,11 +1559,19 @@ class OthersIncomeExpenseService:
 
         work_done = self._bool_from_form(form, "WorkDone", "work_done")
         tally_bill = self._bool_from_form(form, "TallyBillGenerated", "tally_bill_generated")
+        payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received")
+        misc_invoice_workflow = ledger_kind == self.LEDGER_MISC and str(
+            form.get("MiscInvoiceWorkflow") or ""
+        ).strip() in {"1", "true", "True", "on"}
         if ledger_kind != self.LEDGER_MISC:
             work_done = False
             tally_bill = False
-        if tally_bill and not work_done:
-            raise ValueError("Work Done must be checked before Tally Bill Generated.")
+            payment_received = False
+        if not misc_invoice_workflow:
+            if tally_bill and not work_done:
+                raise ValueError("Work Done must be checked before Tally Bill Generated.")
+            if payment_received and not tally_bill:
+                raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
         tally_bill_no = (form.get("TallyBillNo") or form.get("tally_bill_no") or "").strip() or None
         tally_bill_date = self._date(form.get("TallyBillDate") or form.get("tally_bill_date"))
@@ -768,35 +1580,55 @@ class OthersIncomeExpenseService:
         if str(tally_bill_amount_raw).strip():
             tally_bill_amount = self._decimal(tally_bill_amount_raw)
 
-        if tally_bill:
+        if (tally_bill):
             if not tally_bill_no:
                 raise ValueError("Tally bill number is required when Tally Bill Generated is checked.")
-            if not tally_bill_amount or tally_bill_amount <= 0:
-                raise ValueError("Bill amount is required when Tally Bill Generated is checked.")
-            if not tally_bill_date:
-                tally_bill_date = work_date
+            # Date / Amount fields removed from UI — keep null (Sales module will own billing).
+            tally_bill_date = None
+            tally_bill_amount = None
         else:
             tally_bill_no = None
             tally_bill_date = None
             tally_bill_amount = None
 
-        if ledger_kind == self.LEDGER_MISC and not tally_bill:
+        # Misc UI unlocks Payment Details after Tally Bill (no separate Payment Received tick).
+        # Persist every Add Payment Mode row (mode, date, amount) whenever payments are active.
+        payments_active = ledger_kind != self.LEDGER_MISC or tally_bill
+        extra_payment_lines = self._form_payment_line_count(form) > 1
+        has_positive_payment = self._form_has_positive_payment_amount(form)
+        require_payments = (
+            ledger_kind != self.LEDGER_MISC
+            or has_positive_payment
+            or extra_payment_lines
+        )
+        if not payments_active:
             payment_lines = []
         else:
             payment_lines = self._parse_payment_lines(
-                form, category_total, required=ledger_kind != self.LEDGER_MISC
+                form,
+                category_total,
+                required=require_payments,
             )
-        if ledger_kind != self.LEDGER_MISC and not payment_lines:
-            raise ValueError("At least one payment mode is required.")
+            if require_payments and not payment_lines:
+                raise ValueError("At least one payment mode is required.")
+        if ledger_kind == self.LEDGER_MISC and not misc_invoice_workflow:
+            payment_received = self._bool_from_form(form, "PaymentReceived", "payment_received") or bool(
+                payment_lines
+            )
+            if payment_received and not tally_bill:
+                raise ValueError("Tally Bill Generated must be checked before Payment received.")
 
         received_total = sum((line["amount"] for line in payment_lines), Decimal("0"))
-        if ledger_kind != self.LEDGER_MISC:
-            if received_total <= 0:
-                raise ValueError("Payment amount must be greater than zero.")
+        if require_payments and received_total <= 0 and not misc_invoice_workflow:
+            raise ValueError("Payment amount must be greater than zero.")
         amount = category_total
         customer_name = (form.get("CustomerName") or form.get("customer_name") or "").strip() or None
         mobile_number = (form.get("MobileNumber") or form.get("mobile_number") or "").strip() or None
         customer_id = self._int_from_form(form, "CustomerID", "customer_id")
+        if ledger_kind in (self.LEDGER_INCOME, self.LEDGER_EXPENSE) and not customer_id:
+            raise ValueError(
+                "Customer select karna zaroori hai. Naam pata na ho to Daily Customer chunen."
+            )
         remarks = (form.get("Remarks") or form.get("remarks") or "").strip() or None
         if tally_bill and not customer_name:
             raise ValueError("Customer name is required when Tally Bill Generated is checked.")
@@ -806,6 +1638,28 @@ class OthersIncomeExpenseService:
             existing_row = self.entry_repo.get_by_id(entry_id)
             if existing_row is None or not existing_row.IsActive:
                 raise ValueError("Income / expense record not found.")
+
+        preserve_misc_payments = False
+        post_misc_receipt_only = False
+        if misc_invoice_workflow:
+            # Receipt is Money In/Out, as on DSC follow-up. This save does not
+            # post a receipt and does not delete payment rows already stored.
+            payment_lines = []
+            received_total = Decimal("0")
+            post_misc_receipt_only = False
+            if is_update and existing_row is not None:
+                tally_bill = bool(getattr(existing_row, "TallyBillGenerated", False))
+                payment_received = bool(getattr(existing_row, "PaymentReceived", False))
+                tally_bill_no = getattr(existing_row, "TallyBillNo", None) or None
+                tally_bill_date = getattr(existing_row, "TallyBillDate", None)
+                tally_bill_amount = getattr(existing_row, "TallyBillAmount", None)
+                preserve_misc_payments = True
+            else:
+                tally_bill = False
+                payment_received = False
+                tally_bill_no = None
+                tally_bill_date = None
+                tally_bill_amount = None
 
         bill_raw = (form.get("BillNo") or form.get("bill_no") or "").strip()
         if is_update and existing_row:
@@ -827,6 +1681,7 @@ class OthersIncomeExpenseService:
                 "CustomerID": customer_id,
                 "WorkDone": work_done,
                 "TallyBillGenerated": tally_bill,
+                "PaymentReceived": payment_received,
                 "TallyBillNo": tally_bill_no,
                 "TallyBillDate": tally_bill_date,
                 "TallyBillAmount": tally_bill_amount,
@@ -862,7 +1717,10 @@ class OthersIncomeExpenseService:
 
             daily = None
             bank_ids: list[int] = []
-            if payment_lines:
+            # Sales Invoice module is separate — do not create Automatic GST invoices from OIE.
+            if preserve_misc_payments:
+                daily = existing_daily
+            elif payment_lines:
                 daily, bank_ids = self._repost_transactions(
                     bill_no=row.BillNo,
                     work_date=work_date,
@@ -874,7 +1732,13 @@ class OthersIncomeExpenseService:
                     created_by=created_by,
                     existing_daily=existing_daily,
                     ledger_kind=ledger_kind,
+                    post_sale_on_daily=not post_misc_receipt_only,
                 )
+                if daily is not None:
+                    daily.WorkType = self.WORK_TYPE
+                    daily.SubWorkType = f"{self.SUB_WORK_TYPE} - {work_label}"
+                    daily.ReferenceNo = row.BillNo
+                    db.session.flush()
             elif existing_daily is not None:
                 self._remove_daily_transaction(existing_daily)
 
@@ -895,6 +1759,14 @@ class OthersIncomeExpenseService:
             else:
                 message = f"{action.capitalize()} bill {row.BillNo} ({ledger_kind}, {amount})."
 
+            if not misc_invoice_workflow:
+                from app.services.gst_invoice_service import GstInvoiceService
+
+                GstInvoiceService().sync_payment_received_for_bill(row.BillNo, payment_received)
+                tally_key = (row.TallyBillNo or "").strip()
+                if tally_key and tally_key != (row.BillNo or "").strip():
+                    GstInvoiceService().sync_payment_received_for_bill(tally_key, payment_received)
+
             return OthersIncomeExpenseSaveResult(
                 entry_id=row.EntryID,
                 bill_no=row.BillNo,
@@ -904,30 +1776,65 @@ class OthersIncomeExpenseService:
             )
 
         try:
-            with db.session.begin_nested():
-                result = _write()
-            db.session.commit()
-            return result
+            return persist(_write)
         except IntegrityError as exc:
-            db.session.rollback()
-            if "BillNo" in str(exc.orig):
+            if "BillNo" in str(getattr(exc, "orig", None) or exc):
                 raise ValueError(f"Bill number {bill_no} already exists.") from exc
             raise
-        except Exception:
-            db.session.rollback()
-            raise
 
-    def delete_entry(self, entry_id: int) -> str:
+    def delete_entry(self, entry_id: int, *, allow_print_source: bool = False) -> str:
         self.entry_repo.ensure_schema()
         row = self.entry_repo.get_by_id(entry_id)
-        if row is None or not row.IsActive:
+        if row is None:
             raise ValueError("Income / expense record not found.")
 
+        if not allow_print_source:
+            from app.services.print_job_billing_service import PrintJobBillingService
+
+            PrintJobBillingService().assert_ui_delete_allowed(
+                getattr(row, "Remarks", None),
+                getattr(row, "TallyBillNo", None),
+            )
+
         bill_no = row.BillNo
+        tally_no = (getattr(row, "TallyBillNo", None) or "").strip()
+        from app.services.gst_invoice_service import GstInvoiceService
+        from app.models.gst_billing import GstInvoice
+
+        invoices = GstInvoiceService()
+        invoice_ids = set(invoices.repo.list_ids_for_bill_no(bill_no))
+        if tally_no and tally_no != (bill_no or "").strip():
+            invoice_ids.update(invoices.repo.list_ids_for_bill_no(tally_no))
+        invoice_ids.update(
+            int(invoice_id)
+            for invoice_id in db.session.scalars(
+                select(GstInvoice.InvoiceID).where(GstInvoice.MiscEntryID == int(entry_id))
+            ).all()
+            if invoice_id
+        )
+        invoices.assert_invoices_deletable(invoice_ids)
+        invoices.delete_invoices_for_bill_if_any(bill_no, allow_print_source=allow_print_source)
+        if tally_no and tally_no != (bill_no or "").strip():
+            invoices.delete_invoices_for_bill_if_any(tally_no, allow_print_source=allow_print_source)
+
+        linked_ids = [
+            int(invoice_id)
+            for invoice_id in db.session.scalars(
+                select(GstInvoice.InvoiceID).where(GstInvoice.MiscEntryID == int(entry_id))
+            ).all()
+        ]
+        for invoice_id in linked_ids:
+            invoices.delete_record(
+                invoice_id,
+                enforce_owner=False,
+                allow_print_source=allow_print_source,
+            )
+        row = self.entry_repo.get_by_id(entry_id)
         try:
             with db.session.begin_nested():
                 self._remove_linked_transactions(bill_no)
-                self.entry_repo.deactivate(row)
+                if row is not None:
+                    self.entry_repo.delete(row)
             db.session.commit()
         except Exception:
             db.session.rollback()

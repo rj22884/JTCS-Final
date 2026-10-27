@@ -35,6 +35,7 @@ TODAY_ACTIVITY_LABELS = {
     "expense": "Expense",
     "sales": "Sales",
     "total": "Total Amount",
+    "pending_sale": "Sale / Pending",
 }
 
 
@@ -78,6 +79,14 @@ class BankAccountClosingLine:
 
 
 @dataclass
+class TodayActivityBucket:
+    """Count + amount pair for Today's Activity summary rows."""
+
+    count: int = 0
+    amount: Decimal = Decimal("0.00")
+
+
+@dataclass
 class TodayActivitySummary:
     """Always based on the permanent system date (independent of Period)."""
 
@@ -90,6 +99,18 @@ class TodayActivitySummary:
     cash_amount: Decimal
     bank_lines: list[TodayActivityBankLine]
     bank_total: Decimal
+    sale_total_today: Decimal = Decimal("0.00")
+    sale_total_cumulative: Decimal = Decimal("0.00")
+    pending_amount_today: Decimal = Decimal("0.00")
+    pending_amount_cumulative: Decimal = Decimal("0.00")
+    invoice: TodayActivityBucket | None = None
+    court_fee: TodayActivityBucket | None = None
+    stamp: TodayActivityBucket | None = None
+    cash_received: TodayActivityBucket | None = None
+    bank_received: TodayActivityBucket | None = None
+    # Receipts bifurcation: mode → category → amount
+    # modes: cash|bank ; categories: court_fee|stamp|misc
+    receipts: dict | None = None
 
 
 class DashboardService:
@@ -420,6 +441,7 @@ class DashboardService:
                     CAST(N'Asset' AS NVARCHAR(20)) AS GroupNature
         """
         group_join = ""
+        cash_group_sql = ""
         if self._has_bank_chart_group():
             group_select = """
                     g.UnderType,
@@ -433,6 +455,9 @@ class DashboardService:
                     ) AS GroupNature
             """
             group_join = "LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.ChartGroupID"
+            cash_group_sql = (
+                "AND LOWER(LTRIM(RTRIM(ISNULL(g.GroupName, N'')))) <> N'cash-in-hand'"
+            )
         rows = db.session.execute(
             text(
                 f"""
@@ -463,7 +488,9 @@ class DashboardService:
                     {group_select}
                 FROM JtcsBankAccountMaster a
                 {group_join}
-                WHERE a.BankName <> N'Cash'
+                WHERE LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) <> N'cash'
+                  AND LOWER(LTRIM(RTRIM(ISNULL(a.AccountNumber, N'')))) <> N'cash'
+                  {cash_group_sql}
                   AND {self._active_account_sql("a")}
                 ORDER BY
                     ISNULL(a.DisplayOrder, 2147483647),
@@ -527,24 +554,6 @@ class DashboardService:
     def _last4_account(masked: str | None, account_number: str | None) -> str:
         return DashboardService._account_suffix(account_number, masked)
 
-    @staticmethod
-    def _is_cash_account(bank_name: str | None, account_number: str | None) -> bool:
-        return (bank_name or "").strip().lower() == "cash" or (
-            account_number or ""
-        ).strip().lower() == "cash"
-
-    @staticmethod
-    def _mask_account_display(
-        account_number: str | None, bank_name: str | None = None
-    ) -> str:
-        """Cash → 'Cash'; numeric accounts → XXXX396; letter codes → XXXXStamp."""
-        if DashboardService._is_cash_account(bank_name, account_number):
-            return "Cash"
-        suffix = DashboardService._account_suffix(account_number)
-        if not suffix:
-            return "—"
-        return "XXXX" + suffix
-
     def _accounts_for_daily_txns(
         self, txn_ids: list[int]
     ) -> dict[int, list[tuple[str, str]]]:
@@ -583,25 +592,41 @@ class DashboardService:
                 """
                 SELECT
                     d.TransactionID AS transaction_id,
-                    bt.BankName AS bank_name,
-                    COALESCE(NULLIF(a.AccountNumber, N''), bt.MaskedAccountNumber, N'') AS account_number
+                    debit.BankName AS debit_bank_name,
+                    debit.AccountNumber AS debit_account_number,
+                    credit.BankName AS credit_bank_name,
+                    credit.AccountNumber AS credit_account_number,
+                    direct.BankName AS direct_bank_name,
+                    direct.AccountNumber AS direct_account_number
                 FROM JTCSDailyTransaction d
                 INNER JOIN JtcsBankTransaction bt
                     ON bt.JtcsBankTransactionID = d.BankTransactionID
-                LEFT JOIN JtcsBankAccountMaster a
-                    ON a.JtcsBankAccountID = bt.JtcsBankAccountID
+                LEFT JOIN JtcsBankAccountMaster direct
+                    ON direct.JtcsBankAccountID = bt.JtcsBankAccountID
+                   AND bt.JtcsBankAccountID > 0
+                LEFT JOIN OthersBankCashTransaction obc
+                    ON obc.OutBankTransactionID = d.BankTransactionID
+                    OR obc.InBankTransactionID = d.BankTransactionID
+                LEFT JOIN JtcsBankAccountMaster debit
+                    ON debit.JtcsBankAccountID = obc.DebitBankAccountID
+                LEFT JOIN JtcsBankAccountMaster credit
+                    ON credit.JtcsBankAccountID = obc.CreditBankAccountID
                 WHERE d.TransactionID IN :ids
                   AND d.BankTransactionID IS NOT NULL
                 """
             ).bindparams(bindparam("ids", expanding=True))
             for row in db.session.execute(fallback, {"ids": missing}).mappings().all():
                 tid = int(row["transaction_id"])
-                by_txn.setdefault(tid, []).append(
-                    (
-                        (row["bank_name"] or "").strip(),
-                        (row["account_number"] or "").strip(),
-                    )
+                pairs = (
+                    (row["debit_bank_name"], row["debit_account_number"]),
+                    (row["credit_bank_name"], row["credit_account_number"]),
+                    (row["direct_bank_name"], row["direct_account_number"]),
                 )
+                for bank_name, account_number in pairs:
+                    number = (account_number or "").strip()
+                    if not number:
+                        continue
+                    by_txn.setdefault(tid, []).append(((bank_name or "").strip(), number))
         return by_txn
 
     def _format_bank_accounts_label(
@@ -611,14 +636,313 @@ class DashboardService:
             return "—"
         labels: list[str] = []
         seen: set[str] = set()
-        for bank_name, account_number in accounts:
-            label = self._mask_account_display(account_number, bank_name)
+        for _bank_name, account_number in accounts:
+            label = (account_number or "").strip()
+            if not label:
+                continue
             key = label.casefold()
             if key in seen:
                 continue
             seen.add(key)
             labels.append(label)
         return " · ".join(labels) if labels else "—"
+
+    def _table_exists(self, table_name: str) -> bool:
+        try:
+            found = db.session.execute(
+                text("SELECT OBJECT_ID(:name, N'U')"),
+                {"name": f"dbo.{table_name}"},
+            ).scalar()
+            return bool(found)
+        except Exception:
+            db.session.rollback()
+            return False
+
+    def _count(self, sql: str, params: dict | None = None) -> int:
+        try:
+            return int(db.session.execute(text(sql), params or {}).scalar() or 0)
+        except Exception:
+            db.session.rollback()
+            return 0
+
+    def get_watch_cards(self) -> dict:
+        """Cards above Today's Activity Summary.
+
+        Follow-up rows are active cases with an invoice and an open payment.
+        Message cards are unread / inbound total.
+        Court fee is imported e-Court receipts that have not been sold.
+        """
+        from flask import url_for
+
+        followup_order = ("ITR", "GST", "TDS", "DSC")
+        followup_links = {
+            "ITR": "itr_followup.index",
+            "GST": "gst_followup.index",
+            "TDS": "tds_followup.index",
+            "DSC": "dsc_followup.index",
+        }
+        billed: dict[str, int] = {code: 0 for code in followup_order}
+        paid: dict[str, int] = {code: 0 for code in followup_order}
+        if self._table_exists("FollowupEntryMaster") and self._table_exists("FollowupEntryStage"):
+            try:
+                rows = db.session.execute(
+                    text(
+                        """
+                        SELECT f.ModuleCode,
+                               SUM(CASE WHEN t.EntryID IS NOT NULL
+                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.InvoiceCount, 0) > 0)
+                                        THEN 1 ELSE 0 END) AS Billed,
+                               SUM(CASE WHEN (t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL)
+                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.IsPaid, 0) = 1)
+                                        THEN 1 ELSE 0 END) AS Paid
+                        FROM dbo.FollowupEntryMaster f
+                        LEFT JOIN (
+                            SELECT DISTINCT es.EntryID
+                            FROM dbo.FollowupEntryStage es
+                            INNER JOIN dbo.FollowupEntryMaster fe ON fe.EntryID = es.EntryID
+                            WHERE (
+                                fe.ModuleCode IN (N'ITR', N'GST', N'TDS')
+                                AND es.StageCode IN (
+                                    N'invoice', N'Invoice',
+                                    N'tally_bill_generated', N'Tally Bill Generated'
+                                )
+                            ) OR (
+                                fe.ModuleCode = N'DSC'
+                                AND es.StageCode IN (
+                                    N'invoice', N'Invoice',
+                                    N'tally_bill_generated', N'Tally Bill Generated'
+                                )
+                            )
+                        ) t ON t.EntryID = f.EntryID
+                        LEFT JOIN (
+                            SELECT DISTINCT EntryID
+                            FROM dbo.FollowupEntryStage
+                            WHERE StageCode IN (N'payment_received', N'Payment Received')
+                        ) p ON p.EntryID = f.EntryID
+                        LEFT JOIN (
+                            SELECT FollowupEntryID,
+                                   COUNT(1) AS InvoiceCount,
+                                   MAX(CASE WHEN ISNULL(InvoicePaymentReceived, 0) = 1
+                                                  OR (ISNULL(InvoiceValue, 0) > 0
+                                                      AND ISNULL(AmountPaid, 0) >= InvoiceValue)
+                                            THEN 1 ELSE 0 END) AS IsPaid
+                            FROM dbo.GstInvoice
+                            WHERE FollowupEntryID IS NOT NULL
+                              AND VoucherType = N'SALE'
+                            GROUP BY FollowupEntryID
+                        ) gi ON gi.FollowupEntryID = f.EntryID
+                        WHERE ISNULL(f.IsActive, 1) = 1
+                        GROUP BY f.ModuleCode
+                        """
+                    )
+                ).all()
+                for module_code, bill_cnt, paid_cnt in rows:
+                    code = (module_code or "").strip().upper()
+                    if code in billed:
+                        billed[code] = int(bill_cnt or 0)
+                        paid[code] = int(paid_cnt or 0)
+                self._apply_itr_screen_payment(billed, paid)
+            except Exception:
+                db.session.rollback()
+
+        misc_billed = 0
+        misc_paid = 0
+        if self._table_exists("OthersIncomeExpenseMaster") and self._table_exists("WorkMaster"):
+            try:
+                misc_row = db.session.execute(
+                    text(
+                        """
+                        SELECT
+                          SUM(CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1 THEN 1 ELSE 0 END) AS Billed,
+                          SUM(CASE WHEN ISNULL(e.TallyBillGenerated, 0) = 1
+                                    AND ISNULL(e.PaymentReceived, 0) = 1 THEN 1 ELSE 0 END) AS Paid
+                        FROM dbo.OthersIncomeExpenseMaster e
+                        INNER JOIN dbo.WorkMaster w ON w.WorkID = e.WorkID
+                        WHERE ISNULL(e.IsActive, 1) = 1
+                          AND w.LedgerKind = N'Misc.'
+                        """
+                    )
+                ).one()
+                misc_billed = int(misc_row[0] or 0)
+                misc_paid = int(misc_row[1] or 0)
+            except Exception:
+                db.session.rollback()
+
+        def _follow_url(endpoint: str) -> str:
+            try:
+                return url_for(endpoint)
+            except Exception:
+                return ""
+
+        follow_meta = {
+            "ITR": ("ITR", "bi-file-earmark-text", "blue", "ITR Followup"),
+            "GST": ("GST", "bi-receipt", "green", "GST Followup"),
+            "TDS": ("TDS", "bi-percent", "orange", "TDS Followup"),
+            "DSC": ("DSC", "bi-patch-check", "pink", "DSC Followup"),
+        }
+        followups = []
+        for code in followup_order:
+            bill_cnt = billed[code]
+            paid_cnt = paid[code]
+            open_cnt = max(bill_cnt - paid_cnt, 0)
+            followups.append(
+                {
+                    "code": code,
+                    "label": follow_meta[code][0],
+                    "icon": follow_meta[code][1],
+                    "tone": follow_meta[code][2],
+                    "source": follow_meta[code][3],
+                    "count": open_cnt,
+                    "billed": bill_cnt,
+                    "paid": paid_cnt,
+                    "percent": self._share_percent(paid_cnt, bill_cnt),
+                    "bar_label": "Payment received",
+                    "url": _follow_url(followup_links[code]),
+                }
+            )
+        misc_open = max(misc_billed - misc_paid, 0)
+        followups.append(
+            {
+                "code": "MISC",
+                "label": "Misc",
+                "icon": "bi-grid",
+                "tone": "violet",
+                "source": "Miscellaneous activity",
+                "count": misc_open,
+                "billed": misc_billed,
+                "paid": misc_paid,
+                "percent": self._share_percent(misc_paid, misc_billed),
+                "bar_label": "Payment received",
+                "url": _follow_url("miscellaneous.index"),
+            }
+        )
+
+        def _channel_counts(channel: str) -> dict:
+            unread = 0
+            total = 0
+            if self._table_exists("CrmConversation"):
+                unread = self._count(
+                    """
+                    SELECT COALESCE(SUM(UnreadCount), 0)
+                    FROM dbo.CrmConversation
+                    WHERE Channel = :channel AND ISNULL(IsActive, 1) = 1
+                    """,
+                    {"channel": channel},
+                )
+            if self._table_exists("CrmMessage") and self._table_exists("CrmConversation"):
+                total = self._count(
+                    """
+                    SELECT COUNT(*)
+                    FROM dbo.CrmMessage m
+                    INNER JOIN dbo.CrmConversation c ON c.ConversationID = m.ConversationID
+                    WHERE c.Channel = :channel
+                      AND m.Direction = N'Inbound'
+                      AND ISNULL(m.IsInternalNote, 0) = 0
+                    """,
+                    {"channel": channel},
+                )
+            return {"unread": unread, "total": total}
+
+        whatsapp = _channel_counts("WhatsApp")
+        email = _channel_counts("Email")
+        inbox_url = _follow_url("crm.inbox_page")
+        whatsapp["url"] = f"{inbox_url}?channel=WhatsApp" if inbox_url else ""
+        email["url"] = f"{inbox_url}?channel=Email" if inbox_url else ""
+
+        unsold = 0
+        receipt_total = 0
+        if self._table_exists("ECourtReceiptLine"):
+            receipt_total = self._count("SELECT COUNT(*) FROM dbo.ECourtReceiptLine")
+            if self._table_exists("ECourtSale"):
+                unsold = self._count(
+                    """
+                    SELECT COUNT(*)
+                    FROM dbo.ECourtReceiptLine l
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.ECourtSale s
+                        WHERE UPPER(LTRIM(RTRIM(s.ReceiptNo))) = UPPER(LTRIM(RTRIM(l.ReceiptNo)))
+                    )
+                    """
+                )
+            else:
+                unsold = receipt_total
+        sold = max(receipt_total - unsold, 0)
+        message_unread = int(whatsapp["unread"] or 0) + int(email["unread"] or 0)
+        message_total = int(whatsapp["total"] or 0) + int(email["total"] or 0)
+        message_read = max(message_total - message_unread, 0)
+
+        return {
+            "followups": followups,
+            "followup_total": sum(item["count"] for item in followups),
+            "whatsapp": whatsapp,
+            "email": email,
+            "messages": {
+                "unread": message_unread,
+                "total": message_total,
+                "read": message_read,
+                "percent": self._share_percent(message_read, message_total),
+                "url": inbox_url or "",
+                "whatsapp_unread": whatsapp["unread"],
+                "whatsapp_total": whatsapp["total"],
+                "email_unread": email["unread"],
+                "email_total": email["total"],
+            },
+            "court_fee_unsold": unsold,
+            "court_fee_total": receipt_total,
+            "court_fee_sold": sold,
+            "court_fee_percent": self._share_percent(sold, receipt_total),
+            "court_fee_url": _follow_url("ecourt.ecourt_activity"),
+        }
+
+    def _apply_itr_screen_payment(self, billed: dict[str, int], paid: dict[str, int]) -> None:
+        """Match the ITR screen: a posted receipt counts as Payment Received.
+
+        The ITR list heals a missing payment tick when cash/bank is already
+        posted. The dashboard uses that same rule so the card equals the
+        ITR Payment Pending total.
+        """
+        open_bills = db.session.execute(
+            text(
+                """
+                SELECT DISTINCT LTRIM(RTRIM(f.BillNo))
+                FROM dbo.FollowupEntryMaster f
+                INNER JOIN (
+                    SELECT DISTINCT EntryID
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode IN (
+                        N'invoice', N'Invoice',
+                        N'tally_bill_generated', N'Tally Bill Generated'
+                    )
+                ) t ON t.EntryID = f.EntryID
+                LEFT JOIN (
+                    SELECT DISTINCT EntryID
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode IN (N'payment_received', N'Payment Received')
+                ) p ON p.EntryID = f.EntryID
+                WHERE f.ModuleCode = N'ITR'
+                  AND ISNULL(f.IsActive, 1) = 1
+                  AND p.EntryID IS NULL
+                  AND LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
+                """
+            )
+        ).all()
+        bill_nos = {(row[0] or "").strip() for row in open_bills if (row[0] or "").strip()}
+        if not bill_nos:
+            return
+        from app.services.followup_payment_service import FollowupPaymentService
+
+        posted = FollowupPaymentService("ITR").bills_with_posted_payment(bill_nos)
+        extra_paid = len(posted)
+        if extra_paid <= 0:
+            return
+        paid["ITR"] = min(billed.get("ITR", 0), paid.get("ITR", 0) + extra_paid)
+
+    @staticmethod
+    def _share_percent(part: int, whole: int) -> str:
+        if not whole:
+            return "0.00"
+        return f"{(100.0 * part / whole):.2f}"
 
     def get_today_activity_summary(self, system_date: date | None = None) -> TodayActivitySummary:
         system_date = system_date or date.today()
@@ -752,6 +1076,11 @@ class DashboardService:
 
         bank_total = sum((line.amount for line in bank_lines), Decimal("0.00"))
 
+        sale_card = self.pending_sale_totals(system_date)
+        module_today = self._today_module_sale_buckets(
+            system_date, rows=sale_card.get("rows")
+        )
+        receipt_card = self._today_receipt_breakdown(system_date)
         return TodayActivitySummary(
             system_date=system_date,
             transaction_count=int(row["txn_count"] or 0),
@@ -762,7 +1091,453 @@ class DashboardService:
             cash_amount=cash_amount.quantize(Decimal("0.01")),
             bank_lines=bank_lines,
             bank_total=Decimal(str(bank_total)).quantize(Decimal("0.01")),
+            sale_total_today=sale_card["sale_today"],
+            sale_total_cumulative=sale_card["sale_cumulative"],
+            pending_amount_today=sale_card["pending_today"],
+            pending_amount_cumulative=sale_card["pending_cumulative"],
+            invoice=module_today["invoice"],
+            court_fee=module_today["court_fee"],
+            stamp=module_today["stamp"],
+            cash_received=receipt_card["cash_received"],
+            bank_received=receipt_card["bank_received"],
+            receipts=receipt_card["receipts"],
         )
+
+    def _empty_receipt_grid(self) -> dict:
+        zero = Decimal("0.00")
+        return {
+            "cash": {"court_fee": zero, "stamp": zero, "misc": zero},
+            "bank": {"court_fee": zero, "stamp": zero, "misc": zero},
+        }
+
+    def _today_module_sale_buckets(
+        self,
+        system_date: date,
+        rows: list[dict] | None = None,
+    ) -> dict[str, TodayActivityBucket]:
+        """Today-only Invoice / Court Fee / Stamp sale counts and amounts."""
+        buckets = {
+            "invoice": TodayActivityBucket(),
+            "court_fee": TodayActivityBucket(),
+            "stamp": TodayActivityBucket(),
+        }
+        key_by_module = {
+            "invoice": "invoice",
+            "ecourt": "court_fee",
+            "stamp": "stamp",
+        }
+        for row in rows if rows is not None else self._pending_sale_rows():
+            if row.get("invoice_date") != system_date:
+                continue
+            key = key_by_module.get(str(row.get("source_module") or ""))
+            if not key:
+                continue
+            amount = Decimal(str(row.get("sale_amount") or 0)).quantize(Decimal("0.01"))
+            if amount == 0:
+                continue
+            buckets[key].count += 1
+            buckets[key].amount = (buckets[key].amount + amount).quantize(Decimal("0.01"))
+        return buckets
+
+    def _today_receipt_breakdown(self, system_date: date) -> dict:
+        """Cash/Bank money-in for system date, bifurcated by Court Fee / Stamp / Misc.
+
+        Classification:
+        - Court Fee / Stamp: posted payment splits on e-Court / Stamp Activity
+          (real cash/bank legs only — BankTransactionID present).
+        - Misc (Money In): OBC vouchers where money enters Cash/Bank from a
+          non-bank credit side (customer / CoA). Bank↔Bank transfers are excluded.
+
+        cash_received / bank_received postcard totals = sum of that mode's
+        Court Fee + Stamp + Misc cells (same figures as the Receipts table).
+        """
+        receipts = self._empty_receipt_grid()
+        cash_count = 0
+        bank_count = 0
+
+        payment_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CASE
+                        WHEN LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) = N'cash'
+                        THEN N'cash' ELSE N'bank'
+                    END AS pay_mode,
+                    CASE
+                        WHEN d.SubWorkType = N'e-Court Activity' THEN N'court_fee'
+                        WHEN d.SubWorkType = N'Stamp Activity' THEN N'stamp'
+                        ELSE N''
+                    END AS category,
+                    ISNULL(p.Amount, 0) AS amount
+                FROM JTCSDailyTransactionPayment p
+                INNER JOIN JTCSDailyTransaction d
+                    ON d.TransactionID = p.TransactionID
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = p.BankAccountID
+                WHERE d.Status = N'Posted'
+                  AND d.TransactionDate = :system_date
+                  AND d.SubWorkType IN (N'e-Court Activity', N'Stamp Activity')
+                  AND ISNULL(p.Amount, 0) > 0
+                  AND ISNULL(d.ExpenseAmount, 0) = 0
+                  AND p.BankTransactionID IS NOT NULL
+                """
+            ),
+            {"system_date": system_date},
+        ).mappings().all()
+
+        for item in payment_rows:
+            category = str(item["category"] or "")
+            if category not in ("court_fee", "stamp"):
+                continue
+            mode = "cash" if item["pay_mode"] == "cash" else "bank"
+            amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
+            if amount <= 0:
+                continue
+            receipts[mode][category] = (receipts[mode][category] + amount).quantize(
+                Decimal("0.01")
+            )
+            if mode == "cash":
+                cash_count += 1
+            else:
+                bank_count += 1
+
+        # Misc (Money In): OBC Debit destination is Cash/Bank; credit side is
+        # not a bank account (excludes Bank Transfer / bank↔bank contra).
+        misc_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    CASE
+                        WHEN LOWER(LTRIM(RTRIM(ISNULL(a.BankName, N'')))) = N'cash'
+                        THEN N'cash' ELSE N'bank'
+                    END AS pay_mode,
+                    ISNULL(e.Amount, 0) AS amount
+                FROM OthersBankCashTransaction e
+                INNER JOIN JtcsBankAccountMaster a
+                    ON a.JtcsBankAccountID = e.DebitBankAccountID
+                WHERE e.IsActive = 1
+                  AND e.WorkDate = :system_date
+                  AND ISNULL(e.Amount, 0) > 0
+                  AND e.DebitBankAccountID IS NOT NULL
+                  AND (
+                        e.CreditBankAccountID IS NULL
+                        OR ISNULL(e.CreditLedgerKey, N'') NOT LIKE N'bank-%'
+                      )
+                """
+            ),
+            {"system_date": system_date},
+        ).mappings().all()
+
+        for item in misc_rows:
+            mode = "cash" if item["pay_mode"] == "cash" else "bank"
+            amount = Decimal(str(item["amount"] or 0)).quantize(Decimal("0.01"))
+            if amount <= 0:
+                continue
+            receipts[mode]["misc"] = (receipts[mode]["misc"] + amount).quantize(
+                Decimal("0.01")
+            )
+            if mode == "cash":
+                cash_count += 1
+            else:
+                bank_count += 1
+
+        cash_amount = (
+            receipts["cash"]["court_fee"]
+            + receipts["cash"]["stamp"]
+            + receipts["cash"]["misc"]
+        ).quantize(Decimal("0.01"))
+        bank_amount = (
+            receipts["bank"]["court_fee"]
+            + receipts["bank"]["stamp"]
+            + receipts["bank"]["misc"]
+        ).quantize(Decimal("0.01"))
+
+        return {
+            "cash_received": TodayActivityBucket(
+                count=cash_count,
+                amount=cash_amount,
+            ),
+            "bank_received": TodayActivityBucket(
+                count=bank_count,
+                amount=bank_amount,
+            ),
+            "receipts": receipts,
+        }
+
+    def pending_sale_totals(self, system_date: date | None = None) -> dict:
+        """Stamp + e-Court + Invoice sale totals.
+
+        Today = system date. Cumulative = current financial year (01/04–31/03).
+        Converted invoices count only when Bill Approved is ticked.
+        """
+        system_date = system_date or date.today()
+        try:
+            from app.services.gst_invoice_service import GstInvoiceService
+
+            GstInvoiceService().rebifurcate_miscellaneous_inclusive()
+        except Exception:
+            db.session.rollback()
+        fy_from, fy_to = self.fiscal_year_bounds(system_date)
+        fy_through = system_date if system_date <= fy_to else fy_to
+        rows = self._pending_sale_rows()
+        sale_today = Decimal("0.00")
+        sale_fy = Decimal("0.00")
+        pending_today = Decimal("0.00")
+        pending_fy = Decimal("0.00")
+        for row in rows:
+            inv_date = row["invoice_date"]
+            if inv_date is None:
+                continue
+            amount = row["sale_amount"]
+            pending = row["pending_amount"]
+            if inv_date == system_date:
+                sale_today += amount
+                pending_today += pending
+            if fy_from <= inv_date <= fy_through:
+                sale_fy += amount
+                pending_fy += pending
+        return {
+            "sale_today": sale_today.quantize(Decimal("0.01")),
+            "sale_cumulative": sale_fy.quantize(Decimal("0.01")),
+            "pending_today": pending_today.quantize(Decimal("0.01")),
+            "pending_cumulative": pending_fy.quantize(Decimal("0.01")),
+            "fy_from": fy_from,
+            "fy_to": fy_to,
+            "rows": rows,
+        }
+
+    def _pending_sale_rows(self) -> list[dict]:
+        """Sale / Pending card rows: Stamp, e-Court, and Invoice (approved converted bills)."""
+        rows = []
+        rows.extend(self._stamp_sale_rows())
+        rows.extend(self._ecourt_sale_rows())
+        rows.extend(self._invoice_sale_rows())
+        rows.sort(
+            key=lambda r: (
+                r.get("invoice_date") or date.min,
+                str(r.get("invoice_no") or ""),
+                int(r.get("invoice_id") or 0),
+            ),
+            reverse=True,
+        )
+        return rows
+
+    def _daily_module_sale_rows(
+        self,
+        *,
+        work_type: str,
+        sub_work_type: str,
+        work_label: str,
+        source_module: str,
+        row_prefix: str,
+    ) -> list[dict]:
+        """Posted daily SaleAmount rows for Stamp / e-Court (paid at sale time)."""
+        from flask import url_for
+
+        daily_rows = db.session.execute(
+            text(
+                """
+                SELECT
+                    TransactionID,
+                    TransactionDate,
+                    ReferenceNo,
+                    CustomerName,
+                    ISNULL(SaleAmount, 0) AS SaleAmount,
+                    StampID
+                FROM JTCSDailyTransaction
+                WHERE Status = N'Posted'
+                  AND WorkType = :work_type
+                  AND SubWorkType = :sub_work_type
+                  AND ISNULL(SaleAmount, 0) <> 0
+                ORDER BY TransactionDate DESC, TransactionID DESC
+                """
+            ),
+            {"work_type": work_type, "sub_work_type": sub_work_type},
+        ).mappings().all()
+        result = []
+        for row in daily_rows:
+            sale_amount = Decimal(str(row["SaleAmount"] or 0)).quantize(Decimal("0.01"))
+            if sale_amount == 0:
+                continue
+            tid = int(row["TransactionID"])
+            stamp_id = row["StampID"]
+            source_url = None
+            source_module_id = tid
+            if source_module == "stamp" and stamp_id:
+                source_module_id = int(stamp_id)
+                source_url = url_for("stamp.stamp_activity", load_stamp=source_module_id)
+            elif source_module == "ecourt":
+                source_url = url_for("ecourt.ecourt_activity")
+            result.append(
+                {
+                    "invoice_id": tid,
+                    "invoice_date": row["TransactionDate"],
+                    "invoice_no": (row["ReferenceNo"] or "").strip(),
+                    "customer": (row["CustomerName"] or "").strip() or "—",
+                    "work": work_label,
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00"),
+                    "received": True,
+                    "entry_id": source_module_id,
+                    "source_url": source_url,
+                    "source_module": source_module,
+                    "bill_no": (row["ReferenceNo"] or "").strip(),
+                    "row_prefix": row_prefix,
+                }
+            )
+        return result
+
+    def _stamp_sale_rows(self) -> list[dict]:
+        return self._daily_module_sale_rows(
+            work_type="SHCIL",
+            sub_work_type="Stamp Activity",
+            work_label="Stamp",
+            source_module="stamp",
+            row_prefix="stamp",
+        )
+
+    def _ecourt_sale_rows(self) -> list[dict]:
+        return self._daily_module_sale_rows(
+            work_type="SHCIL",
+            sub_work_type="e-Court Activity",
+            work_label="e-Court",
+            source_module="ecourt",
+            row_prefix="ecourt",
+        )
+
+    def _invoice_sale_rows(self) -> list[dict]:
+        """Sale invoices for the card.
+
+        Converted (Miscellaneous) bills count only when Bill Approved is ticked.
+        Other sale invoices always count.
+        """
+        from flask import url_for
+
+        from app.models.gst_billing import GstInvoice
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        svc = GstInvoiceService()
+        try:
+            svc.repo.ensure_schema()
+        except Exception:
+            db.session.rollback()
+            return []
+        invoices = list(
+            db.session.scalars(
+                select(GstInvoice)
+                .where(GstInvoice.VoucherType == GstInvoiceService.VOUCHER_SALE)
+                .order_by(GstInvoice.InvoiceDate.desc(), GstInvoice.InvoiceID.desc())
+            ).all()
+        )
+        result = []
+        for inv in invoices:
+            bill_source = svc.normalize_bill_source(getattr(inv, "BillSource", None))
+            is_converted = (
+                bill_source == GstInvoiceService.BILL_SOURCE_MISCELLANEOUS
+                or bool(getattr(inv, "MiscEntryID", None))
+            )
+            approved = bool(getattr(inv, "BillApproved", False))
+            # Converted invoices: only after Approve tick (e.g. JTCS/2027/00330).
+            if is_converted and not approved:
+                continue
+            sale_amount = Decimal(str(inv.InvoiceValue or 0)).quantize(Decimal("0.01"))
+            if sale_amount == 0:
+                continue
+            iid = int(inv.InvoiceID)
+            received = bool(getattr(inv, "InvoicePaymentReceived", False))
+            result.append(
+                {
+                    "invoice_id": iid,
+                    "invoice_date": inv.InvoiceDate,
+                    "invoice_no": inv.InvoiceNo or "",
+                    "customer": (inv.CustomerName or "").strip() or "—",
+                    "work": "Invoice",
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00") if received else sale_amount,
+                    "received": received,
+                    "entry_id": iid,
+                    "source_url": url_for("accounting_invoice.invoice_sale", edit=iid),
+                    "source_module": "invoice",
+                    "bill_no": (getattr(inv, "TallyBillNo", None) or inv.InvoiceNo or "").strip(),
+                    "row_prefix": "invoice",
+                }
+            )
+        return result
+
+    def _miscellaneous_sale_rows(self) -> list[dict]:
+        """Generated Miscellaneous bills. Pending means payment is not received yet."""
+        from flask import url_for
+
+        from app.models.others import OthersIncomeExpenseDetail, OthersIncomeExpenseMaster, WorkMaster
+
+        entries = list(
+            db.session.scalars(
+                select(OthersIncomeExpenseMaster)
+                .where(
+                    OthersIncomeExpenseMaster.IsActive == True,
+                    OthersIncomeExpenseMaster.TallyBillGenerated == True,
+                )
+                .order_by(
+                    OthersIncomeExpenseMaster.WorkDate.desc(),
+                    OthersIncomeExpenseMaster.EntryID.desc(),
+                )
+            ).all()
+        )
+        if not entries:
+            return []
+        work_ids = {entry.WorkID for entry in entries if entry.WorkID}
+        work_names: dict[int, str] = {}
+        if work_ids:
+            for work in db.session.scalars(
+                select(WorkMaster).where(WorkMaster.WorkID.in_(work_ids))
+            ).all():
+                work_names[int(work.WorkID)] = (work.WorkName or "").strip()
+        entry_ids = [int(entry.EntryID) for entry in entries]
+        detail_by_entry: dict[int, str] = {}
+        if entry_ids:
+            details = db.session.scalars(
+                select(OthersIncomeExpenseDetail)
+                .where(OthersIncomeExpenseDetail.EntryID.in_(entry_ids))
+                .order_by(OthersIncomeExpenseDetail.LineSequence.asc())
+            ).all()
+            sub_ids = {row.WorkTypeID for row in details if row.WorkTypeID}
+            sub_names: dict[int, str] = {}
+            if sub_ids:
+                from app.models.transactions import WorkTypeMaster
+
+                for sub in db.session.scalars(
+                    select(WorkTypeMaster).where(WorkTypeMaster.WorkTypeID.in_(sub_ids))
+                ).all():
+                    sub_names[int(sub.WorkTypeID)] = (sub.SubWorkType or "").strip()
+            for row in details:
+                if int(row.EntryID) in detail_by_entry:
+                    continue
+                detail_by_entry[int(row.EntryID)] = sub_names.get(int(row.WorkTypeID or 0), "")
+        result = []
+        for entry in entries:
+            sale_amount = Decimal(str(entry.Amount or 0)).quantize(Decimal("0.01"))
+            received = bool(getattr(entry, "PaymentReceived", False))
+            work_name = work_names.get(int(entry.WorkID), "") if entry.WorkID else ""
+            sub_name = detail_by_entry.get(int(entry.EntryID), "")
+            label = " / ".join(part for part in (work_name, sub_name) if part) or "Miscellaneous"
+            result.append(
+                {
+                    "invoice_id": int(entry.EntryID),
+                    "invoice_date": entry.WorkDate,
+                    "invoice_no": entry.BillNo or "",
+                    "customer": entry.CustomerName or "—",
+                    "work": label,
+                    "sale_amount": sale_amount,
+                    "pending_amount": Decimal("0.00") if received else sale_amount,
+                    "received": received,
+                    "entry_id": int(entry.EntryID),
+                    "source_url": url_for("miscellaneous.index", load_entry=int(entry.EntryID)),
+                    "source_module": "miscellaneous",
+                    "bill_no": entry.BillNo or "",
+                    "row_prefix": "misc",
+                }
+            )
+        return result
 
     def _validate_today_activity_metric(self, metric_key: str) -> str:
         key = (metric_key or "").strip().lower()
@@ -844,31 +1619,97 @@ class DashboardService:
                     )
                 return base
 
-            if wt_u == "OTHERS" and sw.lower().startswith("income / expense") and ref:
-                row = db.session.execute(
-                    text(
-                        """
-                        SELECT TOP 1 EntryID
-                        FROM OthersIncomeExpenseMaster
-                        WHERE BillNo = :bill_no AND IsActive = 1
-                        ORDER BY EntryID DESC
-                        """
-                    ),
-                    {"bill_no": ref},
-                ).first()
-                if row:
-                    eid = int(row[0])
+            is_oie_sub = "income" in sw_l and "expense" in sw_l
+            looks_like_oie_bill = bool(
+                ref
+                and re.match(r"^[SEM][\s\-]?\d{8}/\d+", (ref or "").strip().upper())
+            )
+            if wt_u == "OTHERS" and (is_oie_sub or looks_like_oie_bill or not sw_l):
+                eid = None
+                ledger_kind = ""
+                is_active = True
+                bill_key = (ref or "").strip()
+                if bill_key:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM OthersIncomeExpenseMaster e
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(:bill_no)))
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"bill_no": bill_key},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is None and transaction_id:
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM JTCSDailyTransaction d
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(d.ReferenceNo)))
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE d.TransactionID = :tid
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is None and transaction_id:
+                    # Bank Remarks often stores BillNo for OIE payment legs.
+                    row = db.session.execute(
+                        text(
+                            """
+                            SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                            FROM JtcsBankTransaction b
+                            INNER JOIN OthersIncomeExpenseMaster e
+                                ON UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                            LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                            WHERE b.SourceRecordID = :tid
+                               OR b.SourceID = :tid
+                            ORDER BY e.IsActive DESC, e.EntryID DESC
+                            """
+                        ),
+                        {"tid": int(transaction_id)},
+                    ).mappings().first()
+                    if row:
+                        eid = int(row["EntryID"])
+                        ledger_kind = (row["LedgerKind"] or "").strip()
+                        is_active = bool(row["IsActive"])
+                if eid is not None:
+                    is_misc = ledger_kind in {"Misc.", "Misc"}
+                    module = "miscellaneous" if is_misc else "income_expense"
+                    open_url = (
+                        url_for("miscellaneous.index", load_entry=eid)
+                        if is_misc
+                        else url_for("others_income_expense.index", load_entry=eid)
+                    )
+                    if not is_active:
+                        # Soft-deleted: do not deep-link (get_entry fails). Fall through
+                        # so bank-leg resolve can attach bank_orphan delete.
+                        return base
                     base.update(
                         {
-                            "source_module": "income_expense",
+                            "source_module": module,
                             "source_module_id": eid,
-                            "source_url": url_for(
-                                "others_income_expense.index", load_entry=eid
-                            ),
+                            "source_url": open_url,
                             "can_open": True,
                         }
                     )
-                return base
+                    return base
+                # Known OIE shape but master row missing — stop here.
+                if is_oie_sub or looks_like_oie_bill:
+                    return base
 
             if wt_u == "OTHERS" and sw.lower().startswith("other bank/cash") and ref:
                 row = db.session.execute(
@@ -927,29 +1768,16 @@ class DashboardService:
                 return base
 
             if wt_u == "ACCOUNTING" and "sale" in sw_l and ref:
-                row = db.session.execute(
-                    text(
-                        """
-                        SELECT TOP 1 InvoiceID
-                        FROM dbo.GstInvoice
-                        WHERE InvoiceNo = :invoice_no
-                        ORDER BY InvoiceID DESC
-                        """
-                    ),
-                    {"invoice_no": ref},
-                ).first()
-                if row:
-                    iid = int(row[0])
-                    base.update(
-                        {
-                            "source_module": "gst_invoice",
-                            "source_module_id": iid,
-                            "source_url": url_for(
-                                "accounting_invoice.invoice_sale", edit=iid
-                            ),
-                            "can_open": True,
-                        }
-                    )
+                base.update(
+                    {
+                        "source_module": "gst_invoice",
+                        "source_url": None,
+                        "can_open": False,
+                        "source_lock_message": (
+                            "This invoice can be edited or deleted only from the module that created it."
+                        ),
+                    }
+                )
                 return base
 
             if wt_u in {"ITR", "DSC", "TDS", "GST"} and "followup" in sw_l:
@@ -1082,8 +1910,29 @@ class DashboardService:
         bank_transaction_id: int | None = None,
     ) -> dict:
         table = (source_table or "").strip().lower()
+        # SourceType values (e.g. "Others") are not real table names — treat as daily.
+        if table in {
+            "others",
+            "other",
+            "income",
+            "expense",
+            "misc",
+            "misc.",
+            "itr",
+            "dsc",
+            "tds",
+            "gst",
+            "accounting",
+            "shcil",
+        }:
+            table = "jtcsdailytransaction"
+
         if not source_record_id and not bank_transaction_id:
             return self._no_source_link()
+
+        # Purchase Invoice Amount Paid → bank Credit/Out (SourceTable=GstInvoice).
+        if table in {"gstinvoice", "gst_invoice"}:
+            return self._source_link_for_gst_invoice(int(source_record_id))
 
         # Other Bank/Cash contra legs (Cash Deposit Credit/Out, Debit/In, etc.)
         if table in {"othersbankcashtransaction", "others_bank_cash_transaction"} or (
@@ -1099,6 +1948,10 @@ class DashboardService:
                 return self._no_source_link()
 
         if not source_record_id:
+            if bank_transaction_id:
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("source_module"):
+                    return oie
             return self._no_source_link()
         if table and table != "jtcsdailytransaction":
             # Still try OBC resolve when SourceType/table naming varies.
@@ -1108,7 +1961,13 @@ class DashboardService:
             )
             if entry_id:
                 return self._source_link_for_bank_cash_entry(entry_id)
-            return self._no_source_link()
+            # Purchase payment bank legs may have SourceType=PURCHASE with SourceTable blank.
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+            # Fall through: SourceRecordID may still be JTCSDailyTransaction.TransactionID
+            # even when SourceTable/SourceType was stored with an unexpected label.
 
         daily = db.session.execute(
             text(
@@ -1122,6 +1981,26 @@ class DashboardService:
             {"tid": int(source_record_id)},
         ).mappings().first()
         if not daily:
+            if bank_transaction_id:
+                purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+                if purchase_link.get("can_open"):
+                    return purchase_link
+                oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+                if oie.get("source_module"):
+                    return oie
+                desc_row = db.session.execute(
+                    text(
+                        """
+                        SELECT TOP 1 Description
+                        FROM JtcsBankTransaction
+                        WHERE JtcsBankTransactionID = :btid
+                        """
+                    ),
+                    {"btid": int(bank_transaction_id)},
+                ).first()
+                desc = ((desc_row[0] if desc_row else "") or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    return self._bank_orphan_source_link(int(bank_transaction_id))
             return self._no_source_link()
         link = self._source_link_for_daily(
             transaction_id=daily["TransactionID"],
@@ -1139,7 +2018,150 @@ class DashboardService:
         )
         if entry_id:
             return self._source_link_for_bank_cash_entry(entry_id)
+        if bank_transaction_id:
+            purchase_link = self._source_link_for_purchase_bank_txn(int(bank_transaction_id))
+            if purchase_link.get("can_open"):
+                return purchase_link
+            oie = self._source_link_for_oie_bank_txn(int(bank_transaction_id))
+            # Prefer orphan/bank delete link over a dead (inactive) daily OIE deep-link.
+            if oie.get("source_module"):
+                return oie
+            if link.get("source_module") and not link.get("can_open"):
+                return self._bank_orphan_source_link(int(bank_transaction_id))
+        elif link.get("source_module") and not link.get("can_open"):
+            # No bank id — strip open URL so UI does not offer a broken "more" link.
+            link = {**link, "source_url": None, "can_open": False}
         return link
+
+    def _source_link_for_gst_invoice(self, invoice_id: int) -> dict:
+        """Deep-link bank legs posted from Purchase (or Sale) GstInvoice."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 InvoiceID, VoucherType, InvoiceNo
+                FROM dbo.GstInvoice
+                WHERE InvoiceID = :iid
+                """
+            ),
+            {"iid": int(invoice_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        voucher = (row["VoucherType"] or "SALE").strip().upper()
+        iid = int(row["InvoiceID"])
+        from app.services.gst_invoice_service import GstInvoiceService
+
+        owner = GstInvoiceService().source_owner_for_id(iid)
+        base.update(
+            {
+                "source_module": "invoice",
+                "source_module_id": iid,
+                "source_url": None,
+                "can_open": False,
+                "source_lock_message": owner["message"],
+                "work_type": "Accounting",
+                "sub_work_type": "Purchase Invoice Payment" if voucher == "PURCHASE" else "Sale / Service Invoice",
+            }
+        )
+        return base
+
+    def _source_link_for_purchase_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Purchase Invoice from bank leg SourceTable/SourceType=PURCHASE."""
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 SourceRecordID, SourceTable, SourceType
+                FROM JtcsBankTransaction
+                WHERE JtcsBankTransactionID = :btid
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return self._no_source_link()
+        table = (row["SourceTable"] or "").strip().lower()
+        stype = (row["SourceType"] or "").strip().upper()
+        sid = row["SourceRecordID"]
+        if not sid:
+            return self._no_source_link()
+        if table in {"gstinvoice", "gst_invoice"} or stype == "PURCHASE":
+            return self._source_link_for_gst_invoice(int(sid))
+        return self._no_source_link()
+
+    def _source_link_for_oie_bank_txn(self, bank_transaction_id: int) -> dict:
+        """Resolve Income/Expense/Misc entry from bank leg Remarks / SourceRecordID."""
+        from flask import url_for
+
+        base = self._no_source_link()
+        row = db.session.execute(
+            text(
+                """
+                SELECT TOP 1 e.EntryID, e.IsActive, ISNULL(w.LedgerKind, N'') AS LedgerKind
+                FROM JtcsBankTransaction b
+                INNER JOIN OthersIncomeExpenseMaster e
+                    ON (
+                        UPPER(LTRIM(RTRIM(e.BillNo))) = UPPER(LTRIM(RTRIM(ISNULL(b.Remarks, N''))))
+                     OR (
+                            b.SourceRecordID IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1
+                            FROM JTCSDailyTransaction d
+                            WHERE d.TransactionID = b.SourceRecordID
+                              AND UPPER(LTRIM(RTRIM(e.BillNo))) =
+                                  UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                        )
+                     )
+                   )
+                LEFT JOIN WorkMaster w ON w.WorkID = e.WorkID
+                WHERE b.JtcsBankTransactionID = :btid
+                ORDER BY e.IsActive DESC, e.EntryID DESC
+                """
+            ),
+            {"btid": int(bank_transaction_id)},
+        ).mappings().first()
+        if not row:
+            return base
+        if not row["IsActive"]:
+            # Soft-deleted OIE — open/delete via entry APIs fail; treat as orphan bank leg.
+            return self._bank_orphan_source_link(int(bank_transaction_id))
+        eid = int(row["EntryID"])
+        ledger = (row["LedgerKind"] or "").strip()
+        is_misc = ledger in {"Misc.", "Misc"}
+        module = "miscellaneous" if is_misc else "income_expense"
+        open_url = (
+            url_for("miscellaneous.index", load_entry=eid)
+            if is_misc
+            else url_for("others_income_expense.index", load_entry=eid)
+        )
+        base.update(
+            {
+                "source_module": module,
+                "source_module_id": eid,
+                "source_url": open_url,
+                "can_open": True,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
+
+    def _bank_orphan_source_link(self, bank_transaction_id: int) -> dict:
+        """Allow Bank Received Delete when Income/Expense master link is missing."""
+        base = self._no_source_link()
+        base.update(
+            {
+                "source_module": "bank_orphan",
+                "source_module_id": int(bank_transaction_id),
+                "source_url": None,
+                "can_open": False,
+                "work_type": "Others",
+                "sub_work_type": "Income / Expense",
+            }
+        )
+        return base
 
     def _today_payment_detail_rows(
         self,
@@ -1332,12 +2354,92 @@ class DashboardService:
         )
         return result
 
+    def pending_sale_details(
+        self,
+        *,
+        part: str | None,
+        scope: str | None,
+        system_date: date | None = None,
+    ) -> dict:
+        """Summary grid behind the Sale / Pending card (Stamp, e-Court, Invoice)."""
+        system_date = system_date or date.today()
+        part_key = (part or "sale").strip().lower()
+        if part_key not in {"sale", "pending"}:
+            part_key = "sale"
+        scope_key = (scope or "today").strip().lower()
+        if scope_key not in {"today", "cumulative"}:
+            scope_key = "today"
+        fy_from, fy_to = self.fiscal_year_bounds(system_date)
+        fy_through = system_date if system_date <= fy_to else fy_to
+        rows_src = self._pending_sale_rows()
+        if scope_key == "today":
+            rows_src = [row for row in rows_src if row["invoice_date"] == system_date]
+        else:
+            rows_src = [
+                row
+                for row in rows_src
+                if row["invoice_date"] is not None
+                and fy_from <= row["invoice_date"] <= fy_through
+            ]
+        if part_key == "pending":
+            rows_src = [row for row in rows_src if row["pending_amount"] > 0]
+        grid = []
+        total = Decimal("0.00")
+        for row in rows_src:
+            amount = row["sale_amount"] if part_key == "sale" else row["pending_amount"]
+            total += amount
+            entry_date = row["invoice_date"].isoformat() if row["invoice_date"] else ""
+            status = "Received" if row["received"] else "Pending"
+            prefix = row.get("row_prefix") or "psale"
+            module = row.get("source_module") or "miscellaneous"
+            grid.append(
+                {
+                    "row_key": f"{prefix}-{row['invoice_id']}",
+                    "source": "system",
+                    "can_edit": False,
+                    "can_delete": False,
+                    "entry_date": entry_date,
+                    "description": status,
+                    "reference": row["bill_no"] or row["invoice_no"],
+                    "work": row["work"],
+                    "customer": row["customer"],
+                    "amount": str(amount),
+                    "source_module": module,
+                    "source_module_id": row["entry_id"],
+                    "source_url": row["source_url"],
+                    "can_open": bool(row["source_url"]),
+                }
+            )
+        part_label = "Total Sale" if part_key == "sale" else "Pending Amount"
+        scope_label = "Today" if scope_key == "today" else "Cumulative"
+        when = (
+            system_date.isoformat()
+            if scope_key == "today"
+            else f"FY {fy_from.isoformat()} – {fy_through.isoformat()}"
+        )
+        return {
+            "metric_key": "pending_sale",
+            "metric_label": f"{part_label} — {scope_label}",
+            "date_from": system_date.isoformat() if scope_key == "today" else fy_from.isoformat(),
+            "date_to": system_date.isoformat() if scope_key == "today" else fy_through.isoformat(),
+            "total": str(total.quantize(Decimal("0.01"))),
+            "opening_balance": None,
+            "rows": grid,
+            "row_count": len(grid),
+            "read_only": True,
+            "scope": "today_activity",
+            "detail_button": "Detail",
+            "subtitle": when,
+        }
+
     def get_today_activity_details(
         self,
         metric_key: str,
         *,
         account_id: int | None = None,
         system_date: date | None = None,
+        part: str | None = None,
+        scope: str | None = None,
     ) -> dict:
         """Drill-down rows for Today's Activity Summary tiles (system date only)."""
         metric_key = self._validate_today_activity_metric(metric_key)
@@ -1371,6 +2473,10 @@ class DashboardService:
         elif metric_key == "sales":
             rows = self._daily_metric_rows("SaleAmount", system_date, system_date)
             total = summary.sale_amount
+        elif metric_key == "pending_sale":
+            return self.pending_sale_details(
+                part=part, scope=scope, system_date=system_date
+            )
         else:  # total
             rows = self._daily_metric_rows("TotalAmount", system_date, system_date)
             total = summary.total_amount
@@ -1702,6 +2808,13 @@ class DashboardService:
                     bank_transaction_id=row["JtcsBankTransactionID"],
                 )
             )
+            # Orphan Income/Expense bank legs: no master link → still allow Delete.
+            if not item.get("source_module"):
+                desc = (row["Description"] or "").strip().lower()
+                if "income" in desc and "expense" in desc:
+                    item.update(
+                        self._bank_orphan_source_link(int(row["JtcsBankTransactionID"]))
+                    )
             result.append(item)
         return result
 
@@ -1918,15 +3031,8 @@ class DashboardService:
             raise ValueError("Manual entry not found.")
 
         db.session.execute(
-            text(
-                """
-                UPDATE DashboardManualEntry
-                SET IsActive = 0,
-                    ModifiedDate = :modified_date
-                WHERE EntryID = :entry_id
-                """
-            ),
-            {"entry_id": entry_id, "modified_date": datetime.utcnow()},
+            text("DELETE FROM DashboardManualEntry WHERE EntryID = :entry_id"),
+            {"entry_id": entry_id},
         )
         db.session.commit()
         return {

@@ -1,0 +1,14 @@
+.rcf-activity-page .oie-customer-results {
+  z-index: 1060;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.rcf-status-badges .badge {
+  font-weight: 500;
+  margin-right: 0.25rem;
+}
+
+.rcf-payment-section-locked {
+  opacity: 0.72;
+}

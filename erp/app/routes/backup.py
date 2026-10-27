@@ -12,9 +12,16 @@ from flask import (
 from sqlalchemy import text
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from app.decorators import admin_required, login_required, require_delete_reauth
+from app.decorators import (
+    admin_required,
+    backup_kind_required,
+    data_backup_required,
+    login_required,
+    require_delete_reauth,
+)
 from app.extensions import csrf, db
 from app.services.backup_service import BackupService
+from app.services.cloud_backup_upload_service import CloudBackupUploadService
 from app.services.menu_service import MenuService
 
 bp = Blueprint("backup", __name__, url_prefix="/admin/backup")
@@ -103,6 +110,7 @@ def _ensure_backup_menus() -> None:
             """
             DECLARE @ParentID INT;
             DECLARE @AdminRoles NVARCHAR(50) = N'Administrator,Admin';
+            DECLARE @DataBackupRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Operator,Viewer';
 
             SELECT TOP 1 @ParentID = MenuID
             FROM dbo.MenuMaster
@@ -124,7 +132,7 @@ def _ensure_backup_menus() -> None:
                     1,
                     N'Administrator tools — backups and system maintenance',
                     1,
-                    @AdminRoles
+                    @DataBackupRoles
                 );
                 SET @ParentID = SCOPE_IDENTITY();
             END
@@ -138,7 +146,7 @@ def _ensure_backup_menus() -> None:
                         N'Administrator tools — backups and system maintenance'
                     ),
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE MenuID = @ParentID;
             END;
 
@@ -204,7 +212,7 @@ def _ensure_backup_menus() -> None:
                     DisplayOrder = 2,
                     Description = N'SQL Server database backup (.bak)',
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE ParentMenuID = @ParentID
                   AND MenuName = N'Data Backup';
             END
@@ -224,7 +232,7 @@ def _ensure_backup_menus() -> None:
                     2,
                     N'SQL Server database backup (.bak)',
                     1,
-                    @AdminRoles
+                    @DataBackupRoles
                 );
             END
             ELSE
@@ -236,7 +244,7 @@ def _ensure_backup_menus() -> None:
                     DisplayOrder = 2,
                     Description = N'SQL Server database backup (.bak)',
                     IsActive = 1,
-                    RoleName = @AdminRoles
+                    RoleName = @DataBackupRoles
                 WHERE MenuURL = N'/admin/backup/data';
             END;
 
@@ -291,7 +299,9 @@ def _ensure_backup_menus() -> None:
 
             UPDATE dbo.MenuMaster
             SET RoleName = @AdminRoles
-            WHERE ParentMenuID = @ParentID;
+            WHERE ParentMenuID = @ParentID
+              AND MenuName <> N'Data Backup'
+              AND (RoleName IS NULL OR LTRIM(RTRIM(RoleName)) = N'');
             """
         )
     )
@@ -303,22 +313,74 @@ def ensure_backup_menus() -> None:
     _ensure_backup_menus()
 
 
+def ensure_data_backup_staff_roles() -> None:
+    """Keep Admin Role + Data Backup visible to Manager / Operator / Viewer.
+
+    Other Admin Role menu-ensure routines may reset the parent RoleName to
+    Administrator,Admin; run this last so those three roles still see the dropdown.
+    """
+    db.session.execute(
+        text(
+            """
+            DECLARE @ParentID INT;
+            DECLARE @DataBackupRoles NVARCHAR(80) = N'Administrator,Admin,Manager,Operator,Viewer';
+
+            SELECT TOP 1 @ParentID = MenuID
+            FROM dbo.MenuMaster
+            WHERE MenuName = N'Admin Role'
+              AND ParentMenuID IS NULL
+            ORDER BY MenuID;
+
+            IF @ParentID IS NOT NULL
+            BEGIN
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1
+                WHERE MenuID = @ParentID;
+
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1,
+                    MenuURL = COALESCE(NULLIF(MenuURL, N''), N'/admin/backup/data')
+                WHERE ParentMenuID = @ParentID
+                  AND MenuName = N'Data Backup';
+
+                UPDATE dbo.MenuMaster
+                SET RoleName = @DataBackupRoles,
+                    IsActive = 1
+                WHERE MenuURL = N'/admin/backup/data';
+            END
+            """
+        )
+    )
+    db.session.commit()
+
+
 def _actor() -> str:
     return (session.get("user_name") or session.get("full_name") or "System").strip() or "System"
 
 
 @bp.route("/data", strict_slashes=False)
 @login_required
-@admin_required
+@data_backup_required
 def data_backup_page():
     service = BackupService()
     menu_service = MenuService()
+    backups = service.list_database_backups()
+    try:
+        uploads = CloudBackupUploadService().latest_upload_map(kind="database", provider="google_drive")
+        for row in backups:
+            row["drive_upload"] = uploads.get(row.get("file_name") or "") or {}
+    except Exception:
+        current_app.logger.exception("Drive upload map skipped on page load")
+        for row in backups:
+            row["drive_upload"] = {}
     return render_template(
         "backup/data.html",
         page_title="Data Backup",
         breadcrumb=menu_service.get_breadcrumb("/admin/backup/data", session.get("role")),
         connection=service.connection_info(),
-        backups=service.list_database_backups(),
+        backups=backups,
     )
 
 
@@ -355,9 +417,19 @@ def restore_backup_page():
 
 @bp.route("/api/database/list")
 @login_required
-@admin_required
+@data_backup_required
 def list_database_backups():
-    rows = BackupService().list_database_backups()
+    service = BackupService()
+    rows = service.list_database_backups()
+    try:
+        uploads = CloudBackupUploadService().latest_upload_map(kind="database", provider="google_drive")
+        for row in rows:
+            meta = uploads.get(row.get("file_name") or "") or {}
+            row["drive_upload"] = meta
+    except Exception:
+        current_app.logger.exception("Drive upload map skipped")
+        for row in rows:
+            row["drive_upload"] = {}
     return jsonify({"ok": True, "rows": rows, "count": len(rows)})
 
 
@@ -371,7 +443,7 @@ def list_full_backups():
 
 @bp.route("/api/database/create", methods=["POST"])
 @login_required
-@admin_required
+@data_backup_required
 def create_database_backup():
     try:
         info = BackupService().create_database_backup(created_by=_actor())
@@ -399,7 +471,7 @@ def create_full_backup():
 
 @bp.route("/api/<kind>/download/<path:file_name>")
 @login_required
-@admin_required
+@backup_kind_required
 def download_backup(kind: str, file_name: str):
     try:
         path = BackupService().resolve_download(kind, file_name)
@@ -415,7 +487,7 @@ def download_backup(kind: str, file_name: str):
 
 @bp.route("/api/<kind>/delete", methods=["POST"])
 @login_required
-@admin_required
+@backup_kind_required
 @require_delete_reauth
 def delete_backup(kind: str):
     payload = request.get_json(silent=True) or {}
@@ -426,6 +498,59 @@ def delete_backup(kind: str):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/database/drive-status", methods=["GET"])
+@login_required
+@data_backup_required
+def database_drive_status():
+    return_to = (request.args.get("return_to") or "").strip() or url_for("backup.data_backup_page")
+    try:
+        info = CloudBackupUploadService().provider_status("google_drive", return_to=return_to)
+        return jsonify(info)
+    except Exception as exc:
+        current_app.logger.exception("Drive status failed")
+        return jsonify({"ok": False, "connected": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/database/upload-drive", methods=["POST"])
+@login_required
+@data_backup_required
+def upload_database_to_drive():
+    payload = request.get_json(silent=True) or {}
+    file_name = (payload.get("file_name") or request.form.get("file_name") or "").strip()
+    provider = (payload.get("provider") or "google_drive").strip().lower() or "google_drive"
+    if not file_name:
+        return jsonify({"ok": False, "error": "file_name is required."}), 400
+    return_to = (payload.get("return_to") or "").strip() or url_for("backup.data_backup_page")
+    try:
+        result = CloudBackupUploadService().start_upload(
+            kind="database",
+            file_name=file_name,
+            provider=provider,
+            uploaded_by=_actor(),
+            return_to=return_to,
+        )
+        status = 400 if result.get("needs_oauth") else 200
+        return jsonify(result), status
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        current_app.logger.exception("Drive upload start failed")
+        return jsonify({"ok": False, "error": "Unable to start Google Drive upload."}), 500
+
+
+@bp.route("/api/database/upload-drive/status/<job_id>", methods=["GET"])
+@login_required
+@data_backup_required
+def upload_database_to_drive_status(job_id: str):
+    try:
+        result = CloudBackupUploadService().job_status(job_id)
+        code = 200 if result.get("ok") else 404
+        return jsonify(result), code
+    except Exception as exc:
+        current_app.logger.exception("Drive upload status failed")
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 

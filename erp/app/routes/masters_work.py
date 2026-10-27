@@ -5,17 +5,18 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 from app.decorators import login_required, require_delete_reauth
 from app.services.ledger_report_service import LedgerReportService
 from app.services.menu_service import MenuService
+from app.services.dynamic_master_fields import DynamicMasterFieldService
 from app.services.work_master_service import WorkMasterService
 from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 bp = Blueprint("masters_work", __name__, url_prefix="/masters/income-expense")
 
 MENU_PATH = "/masters/income-expense"
-MENU_NAME = "Work/Category Master"
+MENU_NAME = "Category Master"
 
 
 def _ensure_menu() -> None:
-    """Ensure one Masters → Work/Category Master row (dedupe legacy duplicates)."""
+    """Ensure one Masters → Category Master row (dedupe legacy duplicates)."""
     from sqlalchemy import text
 
     from app.extensions import db
@@ -38,6 +39,7 @@ def _ensure_menu() -> None:
             WHERE ParentMenuID = @MastersID
               AND (
                     MenuName IN (
+                        N'Category Master',
                         N'Work/Category Master',
                         N'Income/Expense',
                         N'Income Expense',
@@ -46,17 +48,21 @@ def _ensure_menu() -> None:
                     OR MenuURL = N'/masters/income-expense'
                   )
             ORDER BY
-                CASE WHEN MenuName = N'Work/Category Master' THEN 0 ELSE 1 END,
+                CASE
+                    WHEN MenuName = N'Category Master' THEN 0
+                    WHEN MenuName = N'Work/Category Master' THEN 1
+                    ELSE 2
+                END,
                 MenuID;
 
             IF @KeepID IS NOT NULL
             BEGIN
                 UPDATE dbo.MenuMaster
-                SET MenuName = N'Work/Category Master',
+                SET MenuName = N'Category Master',
                     MenuIcon = COALESCE(NULLIF(MenuIcon, N''), N'bi-sliders'),
                     MenuURL = N'/masters/income-expense',
                     DisplayOrder = 2,
-                    Description = N'Work / category master (Income, Expense, Misc.)',
+                    Description = N'Category master (Income, Expense, Misc.)',
                     IsActive = 1,
                     RoleName = NULL
                 WHERE MenuID = @KeepID;
@@ -67,6 +73,7 @@ def _ensure_menu() -> None:
                   AND MenuID <> @KeepID
                   AND (
                         MenuName IN (
+                            N'Category Master',
                             N'Work/Category Master',
                             N'Income/Expense',
                             N'Income Expense',
@@ -82,11 +89,11 @@ def _ensure_menu() -> None:
                 )
                 VALUES (
                     @MastersID,
-                    N'Work/Category Master',
+                    N'Category Master',
                     N'bi-sliders',
                     N'/masters/income-expense',
                     2,
-                    N'Work / category master (Income, Expense, Misc.)',
+                    N'Category master (Income, Expense, Misc.)',
                     1,
                     NULL
                 );
@@ -110,12 +117,17 @@ def index():
     service = WorkMasterService()
     rows = service.list_records(status="active")
     today = date.today()
+    try:
+        dyn_master_fields = DynamicMasterFieldService().client_config()
+    except Exception:
+        dyn_master_fields = {"fields": {}, "profiles": {}, "group_profiles": {}, "always_required": []}
     return render_template(
         "masters/income_expense.html",
         page_title=MENU_NAME,
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
         chart_groups=service.list_chart_groups_for_form(),
+        dyn_master_fields=dyn_master_fields,
         fy_start=LedgerReportService._fy_start(today).isoformat(),
         today=today.isoformat(),
     )

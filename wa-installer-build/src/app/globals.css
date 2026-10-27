@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* Gupshup digital palette (purple + coral) mapped onto existing wa-* tokens. */
+  --color-wa-green: #5956d6;
+  --color-wa-green-dark: #6667af;
+  --color-wa-leaf: #ebe9ff;
+  --color-wa-chat: #f6f9fb;
+  --color-wa-canvas: #e8ecf4;
+  --color-wa-app: #f6f9fb;
+  --color-wa-line: #d9e0ec;
+  --color-wa-ink: #193773;
+  --color-wa-muted: #5a6b8a;
+  --color-wa-icon: #243a76;
+  --color-wa-read: #5956d6;
+  --color-wa-coral: #f04e69;
+  --color-wa-coral-bright: #ff5d78;
+  /* Gupshup-style pair: Sen (display) + Poppins (UI/body). */
+  --font-sans: var(--font-ui-body), "Poppins", "Segoe UI", sans-serif;
+  --font-display: var(--font-ui-display), "Sen", "Poppins", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+body {
+  margin: 0;
+  background: var(--color-wa-canvas);
+  color: var(--color-wa-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  font-feature-settings: "kern" 1, "liga" 1;
+  text-rendering: optimizeLegibility;
+  /* Mobile: stop sideways rubber-band / “shaking” when scrolling. */
+  overscroll-behavior-y: none;
+  touch-action: manipulation;
+}
+
+/* Phone / tablet only — desktop layout unchanged. */
+@media (max-width: 767px) {
+  html,
+  body {
+    position: relative;
+    width: 100%;
+    overflow-x: clip;
+  }
+
+  #app-shell {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+}
+
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  font-size: 1.375rem;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+h2 {
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+h3 {
+  font-size: 1rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -25,6 +25,7 @@ class ReportService:
     """All reports read only from JTCSDailyTransaction and JtcsBankTransaction."""
 
     REPORTS = {
+        "summary": "Summary",
         "daily-collection": "Daily Collection",
         "cash-book": "Cash Book",
         "bank-book": "Bank Book",
@@ -62,6 +63,202 @@ class ReportService:
 
     def list_reports(self) -> dict[str, str]:
         return self.REPORTS
+
+    def summary_reference(self, search: str, date_from: date | None = None, date_to: date | None = None) -> dict[str, Any]:
+        """Find invoice, item, daily transaction, and bank rows for one reference."""
+        needle = (search or "").strip()
+        if not needle:
+            return {"invoices": [], "daily_transactions": [], "bank_transactions": [], "related_ledgers": []}
+        params: dict[str, Any] = {"like": f"%{needle}%"}
+        period = ""
+        if date_from:
+            params["date_from"] = date_from
+            period += " AND inv.InvoiceDate >= :date_from"
+        if date_to:
+            params["date_to"] = date_to
+            period += " AND inv.InvoiceDate <= :date_to"
+        invoice_rows = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (30) inv.InvoiceID, inv.InvoiceNo, inv.TallyBillNo, inv.DailyTransactionID,
+                       inv.InvoiceDate, inv.CustomerID, inv.CustomerName, inv.InvoiceValue
+                FROM dbo.GstInvoice inv
+                WHERE inv.VoucherType = N'SALE'
+                  AND (inv.InvoiceNo LIKE :like OR inv.TallyBillNo LIKE :like
+                    OR inv.CustomerName LIKE :like
+                    OR EXISTS (
+                        SELECT 1 FROM dbo.GstInvoiceLine l
+                        LEFT JOIN dbo.ItemMaster im ON im.ItemID = l.ItemID
+                        WHERE l.InvoiceID = inv.InvoiceID
+                          AND (l.Particulars LIKE :like OR im.ItemName LIKE :like)
+                    ))
+                  {period}
+                ORDER BY inv.InvoiceDate DESC, inv.InvoiceID DESC
+                """
+            ),
+            params,
+        ).mappings().all()
+        invoice_ids = [int(row["InvoiceID"]) for row in invoice_rows]
+        lines_by_invoice: dict[int, list[dict[str, Any]]] = {key: [] for key in invoice_ids}
+        related_ledgers: dict[tuple[str, int], dict[str, Any]] = {}
+        for row in invoice_rows:
+            customer_id = int(row["CustomerID"] or 0)
+            if customer_id:
+                related_ledgers[("customer", customer_id)] = {
+                    "kind": "customer", "id": customer_id, "label": row["CustomerName"] or "Customer"
+                }
+        if invoice_ids:
+            id_sql = ",".join(str(value) for value in invoice_ids)
+            line_rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT l.InvoiceID, l.ItemID, ISNULL(im.ItemName, l.Particulars) AS ItemName,
+                           l.Particulars, l.Qty, l.Unit, l.TaxableValue
+                    FROM dbo.GstInvoiceLine l
+                    LEFT JOIN dbo.ItemMaster im ON im.ItemID = l.ItemID
+                    WHERE l.InvoiceID IN ({id_sql})
+                    ORDER BY l.InvoiceID, l.SrNo
+                    """
+                )
+            ).mappings().all()
+            for row in line_rows:
+                invoice_id = int(row["InvoiceID"])
+                lines_by_invoice.setdefault(invoice_id, []).append(dict(row))
+                item_id = int(row["ItemID"] or 0)
+                if item_id:
+                    related_ledgers[("item", item_id)] = {
+                        "kind": "item", "id": item_id, "label": row["ItemName"] or row["Particulars"] or "Item"
+                    }
+        invoices = []
+        for row in invoice_rows:
+            item = dict(row)
+            item["lines"] = lines_by_invoice.get(int(row["InvoiceID"]), [])
+            invoices.append(item)
+
+        txn_params = {"like": f"%{needle}%"}
+        invoice_daily_ids = sorted({int(row["DailyTransactionID"]) for row in invoice_rows if row["DailyTransactionID"]})
+        invoice_daily_sql = ",".join(str(value) for value in invoice_daily_ids) or "-1"
+        txn_period = ""
+        if date_from:
+            txn_params["date_from"] = date_from
+            txn_period += " AND d.TransactionDate >= :date_from"
+        if date_to:
+            txn_params["date_to"] = date_to
+            txn_period += " AND d.TransactionDate <= :date_to"
+        daily_rows = db.session.execute(
+            text(
+                f"""
+                SELECT TOP (200) d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
+                       d.CustomerID, d.CustomerName, d.ReferenceNo, d.Description,
+                       d.IncomeAmount, d.ExpenseAmount, d.SaleAmount, d.PurchaseAmount,
+                       d.TotalAmount, d.BankTransactionID
+                FROM dbo.JTCSDailyTransaction d
+                WHERE (d.TransactionID IN ({invoice_daily_sql}) OR d.ReferenceNo LIKE :like OR d.Description LIKE :like
+                   OR d.CustomerName LIKE :like OR d.WorkType LIKE :like
+                   OR ISNULL(d.SubWorkType, N'') LIKE :like)
+                  {txn_period}
+                ORDER BY d.TransactionDate DESC, d.TransactionID DESC
+                """
+            ),
+            txn_params,
+        ).mappings().all()
+        txn_ids = [int(row["TransactionID"]) for row in daily_rows]
+        for row in daily_rows:
+            customer_id = int(row["CustomerID"] or 0)
+            if customer_id:
+                related_ledgers[("customer", customer_id)] = {
+                    "kind": "customer", "id": customer_id,
+                    "label": row["CustomerName"] or "Customer",
+                }
+        bank_rows = []
+        txn_sql = ",".join(str(value) for value in txn_ids) or "-1"
+        bank_params = {"like": f"%{needle}%"}
+        bank_period = ""
+        if date_from:
+            bank_params["date_from"] = date_from
+            bank_period += " AND b.TransactionDate >= :date_from"
+        if date_to:
+            bank_params["date_to"] = date_to
+            bank_period += " AND b.TransactionDate <= :date_to"
+        bank_rows = db.session.execute(
+            text(
+                f"""
+                SELECT DISTINCT b.JtcsBankTransactionID, b.JtcsBankAccountID, b.TransactionDate,
+                       b.BankName, b.Description, b.Debit, b.Credit, b.SourceTable,
+                       b.SourceRecordID, d.ReferenceNo, d.TransactionID
+                FROM dbo.JtcsBankTransaction b
+                LEFT JOIN dbo.JTCSDailyTransaction d
+                  ON d.TransactionID IN ({txn_sql})
+                 AND (b.SourceRecordID = d.TransactionID OR d.BankTransactionID = b.JtcsBankTransactionID)
+                WHERE (d.TransactionID IS NOT NULL OR b.Description LIKE :like OR ISNULL(b.Remarks, N'') LIKE :like)
+                  {bank_period}
+                ORDER BY b.TransactionDate DESC, b.JtcsBankTransactionID DESC
+                """
+            ),
+            bank_params,
+        ).mappings().all()
+        for row in bank_rows:
+            account_id = int(row["JtcsBankAccountID"] or 0)
+            if account_id:
+                related_ledgers[("bank", account_id)] = {
+                    "kind": "bank", "id": account_id, "label": row["BankName"] or "Bank account"
+                }
+        return {
+            "invoices": invoices,
+            "daily_transactions": [dict(row) for row in daily_rows],
+            "bank_transactions": [dict(row) for row in bank_rows],
+            "related_ledgers": list(related_ledgers.values()),
+        }
+
+    def summary_datewise(self, txn_date: date) -> dict[str, Any]:
+        """Return all posted daily and bank/cash ledger rows for one exact date."""
+        daily_rows = db.session.execute(
+            text(
+                """
+                SELECT d.TransactionID, d.TransactionDate, d.WorkType, d.SubWorkType,
+                       d.CustomerID, d.CustomerName, d.ReferenceNo, d.Description,
+                       d.IncomeAmount, d.ExpenseAmount, d.SaleAmount, d.PurchaseAmount,
+                       d.TotalAmount, d.BankTransactionID, d.PaymentModeID
+                FROM dbo.JTCSDailyTransaction d
+                WHERE d.TransactionDate = :txn_date
+                  AND ISNULL(d.Status, N'Posted') = N'Posted'
+                ORDER BY d.TransactionDate, d.TransactionID
+                """
+            ),
+            {"txn_date": txn_date},
+        ).mappings().all()
+        bank_rows = db.session.execute(
+            text(
+                """
+                SELECT b.JtcsBankTransactionID, b.JtcsBankAccountID, b.TransactionDate,
+                       b.BankName, b.MaskedAccountNumber, b.Description, b.Remarks,
+                       b.Debit, b.Credit, b.ClosingBalance, b.LedgerKind,
+                       b.SourceTable, b.SourceRecordID, d.TransactionID,
+                       d.WorkType, d.SubWorkType, d.CustomerName, d.ReferenceNo
+                FROM dbo.JtcsBankTransaction b
+                LEFT JOIN dbo.JTCSDailyTransaction d
+                  ON d.BankTransactionID = b.JtcsBankTransactionID
+                WHERE b.TransactionDate = :txn_date
+                ORDER BY b.BankName, b.JtcsBankTransactionID
+                """
+            ),
+            {"txn_date": txn_date},
+        ).mappings().all()
+        daily_debit = sum((Decimal(str(row["ExpenseAmount"] or 0)) for row in daily_rows), Decimal("0.00"))
+        daily_credit = sum((Decimal(str(row["IncomeAmount"] or 0)) for row in daily_rows), Decimal("0.00"))
+        bank_debit = sum((Decimal(str(row["Debit"] or 0)) for row in bank_rows), Decimal("0.00"))
+        bank_credit = sum((Decimal(str(row["Credit"] or 0)) for row in bank_rows), Decimal("0.00"))
+        return {
+            "date": txn_date.isoformat(),
+            "daily_transactions": [dict(row) for row in daily_rows],
+            "bank_transactions": [dict(row) for row in bank_rows],
+            "totals": {
+                "daily_debit": float(daily_debit),
+                "daily_credit": float(daily_credit),
+                "bank_debit": float(bank_debit),
+                "bank_credit": float(bank_credit),
+            },
+        }
 
     def run(self, report_key: str, filters: ReportFilters) -> dict[str, Any]:
         handlers = {
@@ -138,7 +335,7 @@ class ReportService:
                 SELECT TransactionDate, BankName, Description, Debit, Credit, Remarks,
                        JtcsBankTransactionID
                 FROM JtcsBankTransaction
-                WHERE BankName <> N'Cash'
+                WHERE LOWER(LTRIM(RTRIM(ISNULL(BankName, N'')))) <> N'cash'
                   AND TransactionDate BETWEEN :start_date AND :end_date
                   {bank_filter}
                 ORDER BY BankName, TransactionDate, JtcsBankTransactionID

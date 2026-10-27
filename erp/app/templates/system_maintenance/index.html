@@ -1,0 +1,145 @@
+{% extends 'layouts/base.html' %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/system_maintenance.css') }}?v=20260914sm1">
+{% endblock %}
+
+{% block content %}
+<div class="jtcs-card sm-card mb-3">
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+    <div>
+      <h3 class="h5 mb-1">System Maintenance / Storage Cleanup</h3>
+      <p class="text-muted small mb-0">
+        Safe disk scan and selectable cleanup. Never deletes database, backups, uploads,
+        documents, <code>.env</code>, Docker volumes, or application source.
+      </p>
+    </div>
+    <button type="button" class="btn btn-outline-primary btn-sm" id="smRefreshSummaryBtn">
+      <i class="bi bi-arrow-clockwise"></i> Refresh Summary
+    </button>
+  </div>
+
+  <div id="smStatus" class="alert d-none mb-3" role="status"></div>
+
+  <div class="row g-3 mb-3" id="smDiskCards">
+    <div class="col-md-4">
+      <div class="sm-stat">
+        <div class="sm-stat-label">Disk total</div>
+        <div class="sm-stat-value" id="smDiskTotal">{{ disk.total_label if disk.ok else '—' }}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="sm-stat">
+        <div class="sm-stat-label">Used</div>
+        <div class="sm-stat-value" id="smDiskUsed">{{ disk.used_label if disk.ok else '—' }}</div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="sm-stat">
+        <div class="sm-stat-label">Free</div>
+        <div class="sm-stat-value" id="smDiskFree">{{ disk.free_label if disk.ok else '—' }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-responsive mb-3">
+    <table class="table table-sm align-middle mb-0" id="smFolderTable">
+      <thead>
+        <tr>
+          <th>Area</th>
+          <th>Path</th>
+          <th class="text-end">Size</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="smFolderBody">
+        {% for row in folders %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td><code class="small">{{ row.path }}</code></td>
+          <td class="text-end">{{ row.size_label }}</td>
+          <td>
+            {% if row.protected %}
+            <span class="badge text-bg-secondary">Protected</span>
+            {% else %}
+            <span class="badge text-bg-success">Cleanup eligible</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h4 class="h6">Selectable cleanup</h4>
+  <div class="sm-categories mb-3" id="smCategories">
+    {% for item in catalog %}
+    <label class="sm-category">
+      <input type="checkbox" class="form-check-input sm-cat-check" value="{{ item.key }}" checked>
+      <span>
+        <strong>{{ item.label }}</strong>
+        <span class="d-block text-muted small">{{ item.description }}</span>
+      </span>
+    </label>
+    {% endfor %}
+  </div>
+
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <button type="button" class="btn btn-primary" id="smScanBtn">
+      <i class="bi bi-search"></i> Scan (dry run)
+    </button>
+    <button type="button" class="btn btn-danger" id="smCleanupBtn">
+      <i class="bi bi-trash"></i> Run Cleanup
+    </button>
+  </div>
+
+  <div class="sm-results mb-3 d-none" id="smResults">
+    <h4 class="h6">Scan / cleanup result</h4>
+    <div class="small text-muted mb-2" id="smResultSummary"></div>
+    <ul class="small mb-0" id="smResultList"></ul>
+  </div>
+
+  <h4 class="h6">Audit log</h4>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>When (UTC)</th>
+          <th>Action</th>
+          <th>Categories</th>
+          <th class="text-end">Items</th>
+          <th class="text-end">Bytes</th>
+          <th>User</th>
+        </tr>
+      </thead>
+      <tbody id="smAuditBody">
+        {% for row in audit %}
+        <tr>
+          <td>{{ row.created_at }}</td>
+          <td>{{ row.action_type }}{% if row.dry_run %} (dry){% endif %}</td>
+          <td><code class="small">{{ row.categories }}</code></td>
+          <td class="text-end">{{ row.items_removed }}</td>
+          <td class="text-end">{{ row.bytes_freed_label }}</td>
+          <td>{{ row.actor }}</td>
+        </tr>
+        {% else %}
+        <tr class="sm-audit-empty"><td colspan="6" class="text-muted text-center py-3">No cleanup actions yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.SYSTEM_MAINTENANCE = {
+    scanUrl: {{ url_for('system_maintenance.api_scan') | tojson }},
+    cleanupUrl: {{ url_for('system_maintenance.api_cleanup') | tojson }},
+    summaryUrl: {{ url_for('system_maintenance.api_summary') | tojson }},
+    auditUrl: {{ url_for('system_maintenance.api_audit') | tojson }},
+    csrf: {{ csrf_token() | tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/system_maintenance.js') }}?v=20260914sm1"></script>
+{% endblock %}

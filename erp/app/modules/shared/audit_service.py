@@ -27,8 +27,10 @@ class AuditService:
         browser: str | None = None,
         module: str | None = None,
         status: str | None = None,
+        commit: bool = True,
     ) -> int:
-        ensure_crm_schema()
+        if commit:
+            ensure_crm_schema()
         if has_request_context():
             user_id = user_id if user_id is not None else session.get("user_id")
             user_name = user_name or session.get("user_name")
@@ -71,7 +73,10 @@ class AuditService:
                 "status": (status or "SUCCESS")[:30],
             },
         ).first()
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return int(row[0]) if row else 0
 
     def list_logs(

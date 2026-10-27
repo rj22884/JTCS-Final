@@ -1,7 +1,7 @@
 <header class="jtcs-app-header"
-        data-poll-url="/api/notifications/unread"
+        data-poll-url="{% if is_fps_user %}{% else %}/api/notifications/unread{% endif %}"
         data-poll-seconds="{{ notification_poll_seconds|default(15) }}"
-        data-search-url="/api/search"
+        data-search-url="{% if is_fps_user %}{% else %}/api/search{% endif %}"
         data-pending-user-count="{{ pending_user_count|default(0) }}">
   <div class="jtcs-header-brand">
     {% if company_logo %}
@@ -15,15 +15,8 @@
     </div>
   </div>
 
-  <div class="jtcs-market-ticker" id="jtcsMarketTicker" data-quotes-url="{{ url_for('market_quotes.quotes') }}" hidden>
-    <button type="button" class="jtcs-market-live" id="jtcsMarketLive" title="Market feed status" disabled>
-      <span class="jtcs-market-live-dot" aria-hidden="true"></span>
-      LIVE
-    </button>
-    <div class="jtcs-market-items" id="jtcsMarketItems" role="list"></div>
-  </div>
-
   <div class="jtcs-header-meta">
+    {% if not is_fps_user %}
     <div class="jtcs-global-search-wrap hide-sm">
       <div class="jtcs-global-search">
         <i class="bi bi-search jtcs-global-search-icon" aria-hidden="true"></i>
@@ -41,12 +34,14 @@
              aria-label="Search results"></div>
       </div>
     </div>
+    {% endif %}
 
     <span class="jtcs-header-pill jtcs-header-user hide-sm">
       <i class="bi bi-person-circle"></i>
       {{ session.user_name }}
     </span>
 
+    {% if not is_fps_user %}
     {% set notify_badge = (crm_unread_count|default(0)) + (pending_user_count|default(0)) %}
     <div class="dropdown jtcs-header-notify hide-sm">
       <button type="button"
@@ -112,6 +107,45 @@
         </a>
       </div>
     </div>
+    <div class="dropdown jtcs-header-notify hide-sm">
+      <button type="button"
+              class="jtcs-header-pill jtcs-header-notify-btn dropdown-toggle"
+              id="jtcsWhatsNewDropdown"
+              data-bs-toggle="dropdown"
+              aria-expanded="false"
+              title="What's New">
+        <i class="bi bi-stars"></i>
+        <span>What's New</span>
+        {% if whats_new_unread %}
+        <span class="jtcs-notify-badge" id="jtcsWhatsNewBadge">{{ whats_new_unread }}</span>
+        {% else %}
+        <span class="jtcs-notify-badge d-none" id="jtcsWhatsNewBadge">0</span>
+        {% endif %}
+      </button>
+      <div class="dropdown-menu dropdown-menu-end jtcs-notify-menu" aria-labelledby="jtcsWhatsNewDropdown" id="jtcsWhatsNewMenu">
+        <div class="jtcs-notify-head">What's New</div>
+        <div id="jtcsWhatsNewList">
+          {% if whats_new_items %}
+            {% for item in whats_new_items %}
+            <button type="button"
+                    class="dropdown-item jtcs-notify-item jtcs-wn-open{% if item.is_unread %} is-unread{% endif %}"
+                    data-entry-id="{{ item.entry_id }}">
+              <div class="jtcs-notify-title">
+                <i class="bi bi-stars"></i>
+                {{ item.title }}
+                {% if item.badge %}<span class="jtcs-wn-badge">{{ item.badge }}</span>{% endif %}
+              </div>
+              <div class="jtcs-notify-meta">{{ item.date_display }}{% if item.detail %} · {{ item.detail[:110] }}{% if item.detail|length > 110 %}…{% endif %}{% endif %}</div>
+            </button>
+            {% endfor %}
+          {% else %}
+          <div class="jtcs-notify-empty" id="jtcsWhatsNewEmpty">No recent updates.</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <script type="application/json" id="jtcsWhatsNewData">{{ whats_new_items|tojson }}</script>
+    {% endif %}
 
     <span class="jtcs-header-pill hide-sm">
       <i class="bi bi-calendar3"></i>
@@ -121,13 +155,41 @@
       <i class="bi bi-clock"></i>
       <span class="jtcs-live-clock" data-server-iso="{{ server_time_iso }}">{{ server_time }}</span>
     </span>
-    <a href="{{ url_for('dashboard.index') }}" class="jtcs-header-btn" title="Profile">
+    {% if not is_fps_user %}
+    <a href="{{ url_for('auth.company_profile_page') }}" class="jtcs-header-btn" title="Profile">
       <i class="bi bi-person-gear"></i>
       <span class="d-none d-md-inline">Profile</span>
     </a>
+    {% endif %}
     <a href="{{ url_for('auth.logout') }}" class="jtcs-header-btn jtcs-header-btn-danger" title="Logout">
       <i class="bi bi-box-arrow-right"></i>
       <span class="d-none d-md-inline">Logout</span>
     </a>
   </div>
 </header>
+
+<div class="modal fade" id="jtcsWhatsNewModal" tabindex="-1" aria-labelledby="jtcsWnTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title h5" id="jtcsWnTitle">What's New</h2>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-2" id="jtcsWnMeta"></p>
+        <h3 class="h6 mb-2">Read workflow</h3>
+        <ol class="jtcs-wn-steps" id="jtcsWnSteps"></ol>
+        <h3 class="h6 mt-3 mb-2">Screen video</h3>
+        <div class="jtcs-wn-stage">
+          <video id="jtcsWnVideo" class="jtcs-wn-video" controls playsinline></video>
+          <canvas id="jtcsWnCanvas" class="d-none" width="960" height="540"></canvas>
+        </div>
+        <p class="small text-muted mt-2 mb-0">Read the steps, play the screen video, then open the page and do the work.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+        <a class="btn btn-primary" id="jtcsWnOpen" href="#">Open and work</a>
+      </div>
+    </div>
+  </div>
+</div>

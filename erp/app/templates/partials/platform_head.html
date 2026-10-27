@@ -23,6 +23,16 @@
     if (w < 576) form = "phone";
     else if (w < 992) form = "tablet";
     if (os === "android" || os === "ios") form = w < 600 ? "phone" : "tablet";
+    try {
+      var params = new URLSearchParams(window.location.search || "");
+      var ui = String(params.get("ui") || localStorage.getItem("jtcs_ui_version") || "").toLowerCase();
+      if (ui === "android" || ui === "ios") {
+        os = ui;
+        form = "phone";
+      } else if (ui === "desktop") {
+        form = "desktop";
+      }
+    } catch (e2) {}
     var html = document.documentElement;
     html.classList.add("jtcs-os-" + os, "jtcs-form-" + form);
     html.setAttribute("data-jtcs-os", os);

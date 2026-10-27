@@ -1,5 +1,5 @@
 """
-Customer Master — field groups, tabs per customer group, form/DB mapping.
+Customer Master — field mapping, tabs, and form/DB keys.
 """
 
 from app.customer_master.countries import COUNTRIES
@@ -52,6 +52,9 @@ FORM_TO_DB = {
     "photo_path": "PhotoPath",
     "aadhaar_reference_id": "AadhaarReferenceId",
     "occupation": "Occupation",
+    "employer_type": "EmployerType",
+    "employment_status": "EmploymentStatus",
+    "employee_code": "EmployeeCode",
     "mobile_number": "MobileNumber",
     "alternate_mobile": "AlternateMobile",
     "whatsapp_number": "WhatsAppNumber",
@@ -62,6 +65,7 @@ FORM_TO_DB = {
     "village": "Village",
     "area": "Area",
     "city": "City",
+    "post_office": "PostOffice",
     "district": "District",
     "state": "State",
     "state_gst_code": "StateGstCode",
@@ -100,10 +104,15 @@ FORM_TO_DB = {
     "linkedin": "LinkedIn",
     "youtube": "YouTube",
     "customer_status": "CustomerStatus",
+    "customer_introduced_by": "CustomerIntroducedBy",
+    "customer_since_date": "CustomerSinceDate",
     "remarks": "Remarks",
     "opening_balance": "OpeningBalance",
     "opening_balance_date": "OpeningBalanceDate",
     "opening_balance_dr_cr": "OpeningBalanceDrCr",
+    "purchase_date": "PurchaseDate",
+    "depreciation_rate": "DepreciationRate",
+    "appreciation_rate": "AppreciationRate",
 }
 
 DB_TO_FORM = {db: form for form, db in FORM_TO_DB.items()}

@@ -131,7 +131,7 @@ class WhatsAppTestService:
                     access_token=cfg["access_token"],
                 )
             )
-            checks.append(self._check_subscribed_apps(client, cfg.get("waba_id") or ""))
+            checks.append(self._check_subscribed_apps(client, cfg))
             if send_test_message:
                 checks.append(
                     self._check_send_message(
@@ -255,8 +255,26 @@ class WhatsAppTestService:
 
     def _check_phone(self, client: WhatsAppMetaClient, phone_number_id: str) -> dict[str, Any]:
         try:
+            logger.info(
+                "WhatsApp phone validation GET /%s/%s fields=id,display_phone_number,"
+                "verified_name,quality_rating,code_verification_status,platform_type,"
+                "throughput,messaging_limit_tier,name_status,new_name_status,"
+                "is_official_business_account,account_mode",
+                getattr(client, "version", ""),
+                phone_number_id,
+            )
             phone = client.get_phone(phone_number_id)
             display = (phone.get("display_phone_number") or "").strip()
+            returned_id = str(phone.get("id") or "").strip()
+            if returned_id and returned_id != str(phone_number_id or "").strip():
+                return {
+                    "name": "Phone Number validation",
+                    "ok": False,
+                    "detail": (
+                        f"Meta returned Phone Number ID {returned_id}, "
+                        f"not the configured {phone_number_id}."
+                    ),
+                }
             if is_test_phone_display(display):
                 return {
                     "name": "Phone Number validation",
@@ -346,7 +364,8 @@ class WhatsAppTestService:
             "detail": f"Webhook URL + verify token OK ({url})",
         }
 
-    def _check_subscribed_apps(self, client: WhatsAppMetaClient, waba_id: str) -> dict[str, Any]:
+    def _check_subscribed_apps(self, client: WhatsAppMetaClient, cfg: dict[str, str]) -> dict[str, Any]:
+        waba_id = (cfg.get("waba_id") or "").strip()
         if not waba_id:
             return {
                 "name": "Webhook subscription",
@@ -360,25 +379,36 @@ class WhatsAppTestService:
                 getattr(client, "version", ""),
             )
             apps = client.list_subscribed_apps(waba_id)
-            if apps:
-                labels = []
-                for a in apps[:5]:
-                    labels.append(str(a.get("id") or a.get("name") or "app"))
-                self._set_plain(
-                    "webhook_subscribed_fields",
-                    "messages, message_deliveries, message_reads, message_template_status_update",
-                )
+            if not apps:
                 return {
                     "name": "Webhook subscription",
-                    "ok": True,
-                    "detail": f"App subscribed on WABA ({len(apps)}): {', '.join(labels)}",
+                    "ok": False,
+                    "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
                 }
+            from app.modules.settings.whatsapp_health_service import WhatsAppHealthService
+
+            registered = WhatsAppHealthService(self.settings, self.repository).subscribe_webhooks()
+            labels = []
+            for a in apps[:5]:
+                labels.append(str(a.get("id") or a.get("name") or "app"))
+            callback = registered.get("webhook_url") or cfg.get("webhook_url") or ""
             return {
                 "name": "Webhook subscription",
-                "ok": False,
-                "detail": "No subscribed apps on WABA. Use Resubscribe Webhooks in ERP.",
+                "ok": True,
+                "detail": (
+                    f"messages webhook registered ({callback}). "
+                    f"App subscribed on WABA ({len(apps)}): {', '.join(labels)}. "
+                    "Send a new WhatsApp message; older chats are not copied."
+                ),
             }
+        except ValueError as exc:
+            return {"name": "Webhook subscription", "ok": False, "detail": str(exc)}
         except MetaGraphError as exc:
+            logger.warning(
+                "WhatsApp subscribed_apps check failed waba_id=%s err=%s",
+                waba_id,
+                exc,
+            )
             return {
                 "name": "Webhook subscription",
                 "ok": False,

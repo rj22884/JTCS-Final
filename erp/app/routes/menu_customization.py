@@ -106,6 +106,23 @@ def ensure_menu_customization_menu() -> None:
     _ensure_menu_customization_menu()
 
 
+def _parse_allow_users(payload: dict) -> tuple[bool, list[int]]:
+    raw_all = payload.get("allow_all_users")
+    allow_all = str(raw_all).strip().lower() in {"1", "true", "on", "yes"}
+    raw_ids = payload.get("allowed_user_ids") or []
+    if not isinstance(raw_ids, (list, tuple, set)):
+        raw_ids = []
+    user_ids: list[int] = []
+    for item in raw_ids:
+        try:
+            user_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if user_id > 0:
+            user_ids.append(user_id)
+    return allow_all, user_ids
+
+
 def _parse_parent_id(raw) -> int | None | object:
     """Return None for main level, int for parent, or False if invalid."""
     if raw in (None, "", "null", "None"):
@@ -174,12 +191,18 @@ def api_add():
     name = str(payload.get("name") or "")
     url = str(payload.get("url") or "") or None
     icon = str(payload.get("icon") or "") or None
+    allow_all_users, allowed_user_ids = _parse_allow_users(payload)
     parent_id = _parse_parent_id(payload.get("parent_id"))
     if parent_id is False:
         return jsonify({"ok": False, "error": "Invalid parent id."}), 400
     svc = MenuService()
     menu, error = svc.add_customization_menu(
-        name, parent_id=parent_id, url=url, icon=icon
+        name,
+        parent_id=parent_id,
+        url=url,
+        icon=icon,
+        allow_all_users=allow_all_users,
+        allowed_user_ids=allowed_user_ids,
     )
     if error or menu is None:
         return jsonify({"ok": False, "error": error or "Could not add menu."}), 400
@@ -222,9 +245,15 @@ def api_edit():
     name = str(payload.get("name") or "")
     url = str(payload.get("url") or "") or None
     icon = str(payload.get("icon") or "") or None
+    allow_all_users, allowed_user_ids = _parse_allow_users(payload)
     svc = MenuService()
     menu, error = svc.update_customization_menu(
-        menu_id, name=name, url=url, icon=icon
+        menu_id,
+        name=name,
+        url=url,
+        icon=icon,
+        allow_all_users=allow_all_users,
+        allowed_user_ids=allowed_user_ids,
     )
     if error or menu is None:
         return jsonify({"ok": False, "error": error or "Could not update menu."}), 400

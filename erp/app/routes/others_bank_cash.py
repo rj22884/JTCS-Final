@@ -2,10 +2,15 @@ from datetime import date
 
 from flask import Blueprint, jsonify, render_template, request, session
 
+from app.customer_master.constants import CUSTOMER_TYPES, GENDERS
 from app.decorators import login_required, require_delete_reauth
+from app.services.chart_group_service import ChartGroupService
+from app.services.customer_group_service import CustomerGroupService
 from app.services.menu_service import MenuService
 from app.services.others_bank_cash_service import OthersBankCashService
 from app.services.purpose_master_service import PurposeMasterService
+from app.services.scoped_customer_service import ScopedCustomerService
+from app.customer_master.countries import COUNTRIES
 
 bp = Blueprint("others_bank_cash", __name__, url_prefix="/others/bank-cash-transactions")
 
@@ -22,18 +27,43 @@ def index():
         purposes = PurposeMasterService().list_records(active_only=True)
     except Exception:
         purposes = []
-    account_payload = service.list_accounts()
+    try:
+        chart_of_groups = ChartGroupService().list_active_for_dropdown()
+    except Exception:
+        chart_of_groups = []
+    try:
+        customer_groups = CustomerGroupService().list_active_groups()
+    except Exception:
+        customer_groups = []
     return render_template(
         "others/bank_cash_transactions.html",
         page_title="Other Bank/Cash Transactions",
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         default_date=date.today().isoformat(),
-        accounts=account_payload.get("rows") or [],
-        account_groups=account_payload.get("groups") or [],
+        accounts=[],
+        account_groups=[],
         purposes=purposes or [],
         next_voucher=service.next_voucher_no(),
         load_entry_id=request.args.get("load_entry", type=int),
+        chart_of_groups=chart_of_groups,
+        customer_groups=customer_groups,
+        customer_types=CUSTOMER_TYPES,
+        genders=GENDERS,
+        countries=COUNTRIES,
     )
+
+
+@bp.route("/customers", methods=["POST"], strict_slashes=False)
+@login_required
+def customer_create():
+    payload = request.get_json(silent=True) or request.form.to_dict()
+    try:
+        customer = ScopedCustomerService().create(payload)
+        return jsonify({"ok": True, "customer": customer, "message": "Customer added successfully."})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Unable to add customer: {exc}"}), 500
 
 
 @bp.route("/save", methods=["POST"], strict_slashes=False)
@@ -66,7 +96,38 @@ def save_record():
 @bp.route("/grid", methods=["GET"], strict_slashes=False)
 @login_required
 def grid():
-    return jsonify({"ok": True, "rows": OthersBankCashService().list_entries()})
+    filter_keys = (
+        "voucher_no", "work_date", "purpose", "credit_account",
+        "debit_account", "amount", "remarks", "entered_by",
+    )
+    filters = {key: request.args.get(key, "") for key in filter_keys}
+    rows, total_count = OthersBankCashService().list_entries(filters)
+    return jsonify({
+        "ok": True,
+        "rows": rows,
+        "total_count": total_count,
+        "filtered_count": len(rows),
+    })
+
+
+@bp.route("/accounts/search", methods=["GET"], strict_slashes=False)
+@login_required
+def search_accounts():
+    term = request.args.get("q") or ""
+    limit = request.args.get("limit", type=int) or 30
+    # Credit Account is the only Money In-Out field that should also match
+    # Customer Master. Debit keeps the bank/chart ledger search.
+    include_customers = (request.args.get("side") or "").strip().lower() == "credit"
+    return jsonify(
+        {
+            "ok": True,
+            "rows": OthersBankCashService().search_accounts(
+                term,
+                limit=limit,
+                include_customers=include_customers,
+            ),
+        }
+    )
 
 
 @bp.route("/accounts", methods=["GET"], strict_slashes=False)
@@ -80,6 +141,21 @@ def accounts():
             "groups": payload.get("groups") or [],
         }
     )
+
+
+@bp.route("/customer-invoices", methods=["GET"], strict_slashes=False)
+@login_required
+def customer_invoices():
+    raw = (request.args.get("customer_id") or "").strip()
+    entry_raw = (request.args.get("entry_id") or "").strip()
+    entry_id = int(entry_raw) if entry_raw.isdigit() else None
+    try:
+        payload = OthersBankCashService().customer_open_invoices(int(raw), entry_id=entry_id)
+        return jsonify({"ok": True, **payload})
+    except (TypeError, ValueError) as exc:
+        return jsonify({"ok": False, "error": str(exc) or "Customer is required."}), 400
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @bp.route("/next-voucher", methods=["GET"], strict_slashes=False)

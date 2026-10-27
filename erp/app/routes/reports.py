@@ -1,13 +1,71 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from flask import Blueprint, flash, jsonify, redirect, render_template, request, session, url_for
 
 from app.decorators import login_required
 from app.services.menu_service import MenuService
 from app.services.report_service import ReportFilters, ReportService
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
+_SUMMARY_MENU_ENSURED = False
+
+
+def ensure_summary_menu() -> None:
+    """Ensure Summary is shown in the same Reports submenu as Daily Collection."""
+    global _SUMMARY_MENU_ENSURED
+    if _SUMMARY_MENU_ENSURED:
+        return
+
+    from sqlalchemy import text
+
+    from app.extensions import db
+
+    reports_id = db.session.execute(
+        text(
+            """
+            SELECT TOP 1 r.MenuID
+            FROM dbo.MenuMaster r
+            WHERE r.MenuName IN (N'Reports', N'Reports and Analysis', N'Reports & Analysis')
+              AND ISNULL(r.IsActive, 1) = 1
+            ORDER BY CASE WHEN EXISTS (
+                         SELECT 1 FROM dbo.MenuMaster c
+                         WHERE c.ParentMenuID = r.MenuID
+                           AND c.MenuName = N'Daily Collection'
+                           AND ISNULL(c.IsActive, 1) = 1
+                     ) THEN 0
+                     WHEN r.ParentMenuID IS NOT NULL THEN 1
+                     WHEN r.MenuURL = N'/accounting/reports' THEN 2
+                     ELSE 3 END,
+                     r.MenuID
+            """
+        )
+    ).scalar()
+    if reports_id:
+        db.session.execute(
+            text(
+                """
+                IF EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuURL = N'/reports/summary')
+                    UPDATE dbo.MenuMaster
+                    SET ParentMenuID = :parent_id,
+                        MenuName = N'Summary', MenuIcon = N'bi-search',
+                        DisplayOrder = 0,
+                        Description = N'Search ledgers and view date-wise linked details',
+                        IsActive = 1
+                    WHERE MenuURL = N'/reports/summary';
+                ELSE
+                    INSERT INTO dbo.MenuMaster
+                        (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
+                         Description, IsActive, RoleName)
+                    VALUES
+                        (:parent_id, N'Summary', N'bi-search', N'/reports/summary', 0,
+                         N'Search ledgers and view date-wise linked details', 1, NULL);
+                """
+            ),
+            {"parent_id": int(reports_id)},
+        )
+        db.session.commit()
+    _SUMMARY_MENU_ENSURED = True
 
 
 def _parse_filters() -> ReportFilters:
@@ -45,6 +103,18 @@ def index():
 def show(report_key: str):
     menu_service = MenuService()
     report_service = ReportService()
+
+    if report_key == "summary":
+        from app.services.ledger_report_service import LedgerReportService
+
+        today = date.today()
+        return render_template(
+            "reports/summary.html",
+            page_title="Summary",
+            breadcrumb=menu_service.get_breadcrumb("/reports/summary", session.get("role")),
+            today=today.isoformat(),
+            fy_start=LedgerReportService._fy_start(today).isoformat(),
+        )
 
     if report_key not in report_service.REPORTS:
         flash("Report not found.", "danger")
@@ -103,3 +173,40 @@ def show(report_key: str):
         result=result,
         filters=filters,
     )
+
+
+@bp.route("/api/summary-reference", methods=["GET"], strict_slashes=False)
+@login_required
+def summary_reference():
+    search = (request.args.get("search") or "").strip()
+    if not search:
+        return jsonify({"ok": False, "error": "Enter an invoice, bill, customer, or item reference."}), 400
+    try:
+        date_from = date.fromisoformat(request.args["date_from"][:10]) if request.args.get("date_from") else None
+        date_to = date.fromisoformat(request.args["date_to"][:10]) if request.args.get("date_to") else None
+        return jsonify({"ok": True, **ReportService().summary_reference(search, date_from, date_to)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        from app.extensions import db
+
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/summary-date", methods=["GET"], strict_slashes=False)
+@login_required
+def summary_date():
+    raw_date = (request.args.get("date") or "").strip()
+    if not raw_date:
+        return jsonify({"ok": False, "error": "Choose a date first."}), 400
+    try:
+        txn_date = date.fromisoformat(raw_date[:10])
+        return jsonify({"ok": True, **ReportService().summary_datewise(txn_date)})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:
+        from app.extensions import db
+
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 500
