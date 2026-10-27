@@ -401,6 +401,28 @@ def run_tests() -> int:
             else:
                 ok("Invoice category/sub-work resolved from Misc Activity")
 
+            # --- authenticated delete handlers must physically remove source rows ---
+            for eid in list(obc_entry_ids):
+                obc.delete_entry(eid)
+                if db.session.get(OthersBankCashTransaction, eid) is not None:
+                    fail("Money In/Out permanent delete", f"entry {eid} still exists")
+                else:
+                    ok("Money In/Out delete removes the source row")
+            obc_entry_ids.clear()
+
+            from app.services.others_income_expense_service import OthersIncomeExpenseService
+
+            deleted_entry_id = int(entry.EntryID)
+            OthersIncomeExpenseService().delete_entry(deleted_entry_id)
+            if db.session.get(OthersIncomeExpenseMaster, deleted_entry_id) is not None:
+                fail("Misc permanent delete", f"entry {deleted_entry_id} still exists")
+            else:
+                ok("Misc delete removes its source row and linked invoice")
+            if db.session.get(GstInvoice, invoice_id) is not None:
+                fail("Misc delete invoice cleanup", f"invoice {invoice_id} still exists")
+            entry = None
+            invoice_id = None
+
             db.session.commit()
         except Exception as exc:
             db.session.rollback()

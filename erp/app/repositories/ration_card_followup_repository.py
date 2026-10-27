@@ -163,6 +163,10 @@ class RationCardFollowupRepository:
         self.session.flush()
         return row
 
+    def delete(self, row: RationCardFollowupMaster) -> None:
+        self.session.delete(row)
+        self.session.flush()
+
     def list_recent(self, *, limit: int | None = None) -> list[RationCardFollowupMaster]:
         self.ensure_schema()
         stmt = (

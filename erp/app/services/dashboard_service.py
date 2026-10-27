@@ -3031,15 +3031,8 @@ class DashboardService:
             raise ValueError("Manual entry not found.")
 
         db.session.execute(
-            text(
-                """
-                UPDATE DashboardManualEntry
-                SET IsActive = 0,
-                    ModifiedDate = :modified_date
-                WHERE EntryID = :entry_id
-                """
-            ),
-            {"entry_id": entry_id, "modified_date": datetime.utcnow()},
+            text("DELETE FROM DashboardManualEntry WHERE EntryID = :entry_id"),
+            {"entry_id": entry_id},
         )
         db.session.commit()
         return {

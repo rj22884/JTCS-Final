@@ -877,9 +877,9 @@ class SubWorkMasterService:
         linked_item_id = getattr(row, "ItemID", None)
 
         def _write() -> str:
-            row.ActiveStatus = False
+            db.session.delete(row)
             db.session.flush()
-            return "Sub work deleted successfully."
+            return "Sub work permanently deleted."
 
         try:
             message = persist(_write)

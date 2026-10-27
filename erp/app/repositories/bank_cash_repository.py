@@ -425,8 +425,8 @@ class OthersBankCashRepository:
         self.session.flush()
         return row
 
-    def soft_delete(self, row: OthersBankCashTransaction) -> None:
-        row.IsActive = False
+    def delete(self, row: OthersBankCashTransaction) -> None:
+        self.session.delete(row)
         self.session.flush()
 
     def next_voucher_no(self, work_date) -> str:

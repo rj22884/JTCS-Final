@@ -2035,7 +2035,7 @@ class FollowupService:
                 raise ValueError("Followup entry not found.")
             if current.BillNo:
                 FollowupPaymentService(self.module_code).remove_followup_accounting(current.BillNo)
-            self.followup_repo.deactivate_entry(current)
+            self.followup_repo.delete_entry(current)
             return "Followup entry deleted successfully."
 
         return persist(_write)
@@ -2136,8 +2136,8 @@ class FollowupService:
                 pk_value=stage_id,
                 display_name=row.StageName or "Workflow stage",
             )
-            self.followup_repo.deactivate_stage(row)
-            return "Workflow stage marked inactive successfully."
+            self.followup_repo.delete_stage(row)
+            return "Workflow stage permanently deleted."
 
         return persist(_write)
 

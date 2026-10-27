@@ -15,6 +15,7 @@
   let sortDir = 1;
   let reloadPreview = null;
   let groupBy = null;
+  let mutationActive = false;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -513,6 +514,7 @@
     const modalEl = document.getElementById("dashSourceEntryModal");
     if (frame && modalEl && window.bootstrap) {
       const sourceModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      mutationActive = true;
       const title = document.getElementById("dashSourceEntryModalTitle");
       if (title) title.textContent = "Edit Entry";
       frame.src = row.source_url;
@@ -536,20 +538,21 @@
     }
     const label = row.description || "this entry";
     let creds = null;
-    if (!window.JTCSDeleteConfirm?.ask) {
-      if (!(await JTCSDialog.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No."))) {
-        return;
-      }
-    } else {
-      creds = await window.JTCSDeleteConfirm.ask({
-        title: "Confirm Delete",
-        message: "This will permanently delete from your database.\n\nEnter your User ID and password.",
-        confirmLabel: "Yes",
-        cancelLabel: "No",
-      });
-      if (!creds) return;
-    }
+    mutationActive = true;
     try {
+      if (!window.JTCSDeleteConfirm?.ask) {
+        if (!(await JTCSDialog.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No."))) {
+          return;
+        }
+      } else {
+        creds = await window.JTCSDeleteConfirm.ask({
+          title: "Confirm Delete",
+          message: "This will permanently delete from your database.\n\nEnter your User ID and password.",
+          confirmLabel: "Yes",
+          cancelLabel: "No",
+        });
+        if (!creds) return;
+      }
       const res = await fetch(url, {
         method: "POST",
         headers: Object.assign(
@@ -566,9 +569,14 @@
       if (!res.ok || data.ok === false) {
         throw new Error(data.error || data.message || "Delete failed.");
       }
-      if (typeof reloadPreview === "function") reloadPreview();
+      if (typeof reloadPreview === "function") await reloadPreview();
     } catch (err) {
       alert(err.message || "Delete failed.");
+    } finally {
+      if (!modal.classList.contains("show") && typeof reloadPreview === "function") {
+        await reloadPreview();
+      }
+      mutationActive = false;
     }
   }
 
@@ -630,14 +638,19 @@
   });
 
   modal.addEventListener("hidden.bs.modal", function () {
-    groupBy = null;
+    if (!mutationActive) groupBy = null;
   });
 
   document.getElementById("dashSourceEntryModal")?.addEventListener(
     "hidden.bs.modal",
     function () {
-      if (modal.classList.contains("show") && typeof reloadPreview === "function") {
-        reloadPreview();
+      if (
+        (modal.classList.contains("show") || mutationActive) &&
+        typeof reloadPreview === "function"
+      ) {
+        Promise.resolve(reloadPreview()).finally(function () {
+          mutationActive = false;
+        });
       }
     }
   );
@@ -666,6 +679,9 @@
     },
     setReloader: function (fn) {
       reloadPreview = fn;
+    },
+    isMutationActive: function () {
+      return mutationActive;
     },
     afterRender: function () {
       ensurePreviewDatesFilled();

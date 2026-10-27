@@ -284,8 +284,8 @@ class CustomerGroupService:
                     },
                 ],
             )
-            self.repository.deactivate(row)
-            return "Group marked inactive successfully."
+            self.repository.delete(row)
+            return "Group permanently deleted."
 
         return persist(_write)
 

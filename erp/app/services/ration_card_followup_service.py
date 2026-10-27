@@ -720,7 +720,7 @@ class RationCardFollowupService:
 
         def _write() -> None:
             self._remove_linked_transactions(bill_no)
-            self.entry_repo.deactivate(row)
+            self.entry_repo.delete(row)
 
         persist(_write)
         return f"Deleted bill {bill_no}."

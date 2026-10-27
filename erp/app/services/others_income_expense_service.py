@@ -374,7 +374,7 @@ class OthersIncomeExpenseService:
                 if entry is not None:
                     self._remove_linked_transactions(bill_no)
                     if entry.IsActive:
-                        self.entry_repo.deactivate(entry)
+                        self.entry_repo.delete(entry)
                     return (
                         f"Deleted Income/Expense bill {bill_no} "
                         f"and bank BT-{bank_transaction_id}."
@@ -1830,13 +1830,11 @@ class OthersIncomeExpenseService:
                 allow_print_source=allow_print_source,
             )
         row = self.entry_repo.get_by_id(entry_id)
-        if row is None:
-            raise ValueError("Income / expense record not found.")
         try:
             with db.session.begin_nested():
                 self._remove_linked_transactions(bill_no)
-                if row.IsActive:
-                    self.entry_repo.deactivate(row)
+                if row is not None:
+                    self.entry_repo.delete(row)
             db.session.commit()
         except Exception:
             db.session.rollback()

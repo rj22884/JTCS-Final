@@ -868,6 +868,10 @@ class FollowupRepository:
         self.session.flush()
         return row
 
+    def delete_stage(self, row: FollowupWorkflowStage) -> None:
+        self.session.delete(row)
+        self.session.flush()
+
     def create_entry(self, data: dict) -> FollowupEntryMaster:
         row = FollowupEntryMaster(**self._filter_entry_data(data))
         self.session.add(row)
@@ -1016,6 +1020,10 @@ class FollowupRepository:
         row.IsActive = False
         self.session.flush()
         return row
+
+    def delete_entry(self, row: FollowupEntryMaster) -> None:
+        self.session.delete(row)
+        self.session.flush()
 
     def replace_entry_stages(self, entry_id: int, stage_codes: list[str]) -> None:
         """Replace completed stages for an entry.

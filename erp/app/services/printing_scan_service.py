@@ -551,7 +551,7 @@ class PrintingScanService:
         try:
             with db.session.begin_nested():
                 self._remove_linked_transactions(bill_no)
-                self.printing_repo.deactivate(row)
+                self.printing_repo.delete(row)
             db.session.commit()
         except Exception:
             db.session.rollback()

@@ -1691,7 +1691,7 @@ class OthersBankCashService:
                 self.daily_repo.delete(daily)
 
             self._clear_allocations(entry.EntryID)
-            self.entry_repo.soft_delete(entry)
+            self.entry_repo.delete(entry)
             return "Transaction deleted successfully."
 
         return persist(_write)

@@ -234,6 +234,10 @@ class PrintingScanRepository:
         self.session.flush()
         return row
 
+    def delete(self, row: PrintingScanMaster) -> None:
+        self.session.delete(row)
+        self.session.flush()
+
     @staticmethod
     def _month_bounds(work_date):
         month_start = work_date.replace(day=1)
@@ -614,6 +618,10 @@ class OthersIncomeExpenseRepository:
         row.IsActive = False
         self.session.flush()
         return row
+
+    def delete(self, row: OthersIncomeExpenseMaster) -> None:
+        self.session.delete(row)
+        self.session.flush()
 
     def replace_detail_lines(self, entry_id: int, lines: list[dict]) -> list[OthersIncomeExpenseDetail]:
         self.ensure_schema()

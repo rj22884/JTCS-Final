@@ -560,6 +560,7 @@
   els.previewModalEl?.addEventListener("hidden.bs.modal", function () {
     setMaximized(false);
     setExportEnabled(false);
+    if (window.JTCSLedgerPreview?.isMutationActive()) return;
     currentKind = "";
     currentId = "";
   });

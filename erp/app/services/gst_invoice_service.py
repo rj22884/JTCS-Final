@@ -3527,15 +3527,15 @@ class GstInvoiceService:
             OthersBankCashService().release_invoice_allocations(inv.InvoiceID)
             self.repo.delete(inv)
             if misc_id or bill_source == self.BILL_SOURCE_MISCELLANEOUS:
-                self._deactivate_misc_source_after_invoice_delete(misc_id, inv)
+                self._hard_delete_misc_source_after_invoice_delete(misc_id, inv)
             return "Invoice deleted successfully."
 
         return persist(_write)
 
-    def _deactivate_misc_source_after_invoice_delete(
+    def _hard_delete_misc_source_after_invoice_delete(
         self, misc_id: int, inv: GstInvoice
     ) -> None:
-        """Remove the Miscellaneous work row that created this sale invoice."""
+        """Permanently remove the Miscellaneous source when no invoices remain."""
         from app.models.others import OthersIncomeExpenseMaster
         from app.services.others_income_expense_service import OthersIncomeExpenseService
 
@@ -3557,10 +3557,12 @@ class GstInvoiceService:
                 row = None
         if row is None or not getattr(row, "IsActive", False):
             return
+        if db.session.scalar(
+            select(func.count()).select_from(GstInvoice).where(
+                GstInvoice.MiscEntryID == int(row.EntryID)
+            )
+        ):
+            return
         bill_no = (row.BillNo or "").strip()
-        try:
-            svc._remove_linked_transactions(bill_no)
-        except Exception:
-            pass
-        if row.IsActive:
-            svc.entry_repo.deactivate(row)
+        svc._remove_linked_transactions(bill_no)
+        svc.entry_repo.delete(row)
