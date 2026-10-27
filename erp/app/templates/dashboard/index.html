@@ -3,7 +3,7 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261015tight2">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}?v=20261027salegrid1">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20261014chrome2">
 {% endblock %}
 
@@ -800,6 +800,9 @@
       </div>
       <div class="modal-footer py-2">
         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-outline-primary btn-sm d-none" id="dashNotesEditBtn">
+          <i class="bi bi-pencil"></i> Edit
+        </button>
         <button type="button" class="btn btn-primary btn-sm" id="dashNotesSaveBtn">
           <i class="bi bi-check2"></i> Save
         </button>
@@ -883,5 +886,5 @@
 <script src="{{ url_for('static', filename='js/dashboard_charts.js') }}?v=20261001dash1"></script>
 <script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261023day1"></script>
 <script src="{{ url_for('static', filename='js/dashboard_ledger_search.js') }}?v=20261015group2"></script>
-<script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20261001dash1"></script>
+<script src="{{ url_for('static', filename='js/currency_notes.js') }}?v=20261027notesedit1"></script>
 {% endblock %}

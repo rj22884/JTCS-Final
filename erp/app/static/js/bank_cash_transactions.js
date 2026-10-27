@@ -50,6 +50,9 @@
 
   const modal = els.modalEl && window.bootstrap ? new bootstrap.Modal(els.modalEl) : null;
   let allRows = [];
+  let gridTotalCount = 0;
+  let gridRequestId = 0;
+  let gridSearchTimer = null;
   let gridSortKey = "work_date";
   let gridSortDir = "desc";
   const gridFilters = {};
@@ -208,25 +211,28 @@
     els.gridBody.innerHTML = "";
     if (!visible.length) {
       if (els.empty) {
-        els.empty.textContent = allRows.length
+        els.empty.textContent = hasActiveGridFilters()
           ? "No records match the current filters."
           : "No bank/cash transfer records yet.";
         els.empty.classList.remove("d-none");
       }
       if (els.count) {
-        els.count.textContent = allRows.length
-          ? "0 of " + allRows.length + " records"
-          : "0 records";
+        els.count.textContent = hasActiveGridFilters()
+          ? "0 matching of " + gridTotalCount + " records"
+          : gridTotalCount + " records";
       }
       updateGridSortHeaders();
       return;
     }
     if (els.empty) els.empty.classList.add("d-none");
     if (els.count) {
-      els.count.textContent =
-        visible.length === allRows.length
+      if (hasActiveGridFilters()) {
+        els.count.textContent = visible.length + " matching of " + gridTotalCount + " records";
+      } else {
+        els.count.textContent = visible.length === gridTotalCount
           ? visible.length + " record" + (visible.length === 1 ? "" : "s")
-          : visible.length + " of " + allRows.length + " records";
+          : visible.length + " of " + gridTotalCount + " records";
+      }
     }
 
     visible.forEach(function (row) {
@@ -281,9 +287,20 @@
   }
 
   async function loadGrid() {
-    const res = await fetch(window.OBC_API.grid, { headers: { Accept: "application/json" } });
+    readGridFiltersFromDom();
+    const requestId = ++gridRequestId;
+    const url = new URL(window.OBC_API.grid, window.location.origin);
+    Object.keys(gridFilters).forEach(function (key) {
+      if (gridFilters[key]) url.searchParams.set(key, gridFilters[key]);
+    });
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin",
+    });
     const data = await parseJsonResponse(res);
+    if (requestId !== gridRequestId) return;
     allRows = data.rows || [];
+    gridTotalCount = Number(data.total_count || 0);
     refreshGridView();
   }
 
@@ -1306,7 +1323,11 @@
     });
     gridTable.addEventListener("input", function (ev) {
       if (ev.target.classList.contains("obc-col-filter")) {
-        refreshGridView();
+        readGridFiltersFromDom();
+        if (gridSearchTimer) window.clearTimeout(gridSearchTimer);
+        gridSearchTimer = window.setTimeout(function () {
+          loadGrid().catch(function () {});
+        }, 250);
       }
     });
   }

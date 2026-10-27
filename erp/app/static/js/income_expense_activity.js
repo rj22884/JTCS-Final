@@ -2406,6 +2406,7 @@
       })
       .catch(function (err) {
         alert(err.message || "Unable to save entry.");
+        return { ok: false, error: err.message || "Unable to save entry." };
       })
       .finally(function () {
         if (saveBtn) saveBtn.disabled = false;
@@ -2724,9 +2725,9 @@
     const box = document.getElementById("oieInvoiceSummary");
     const createBtn = document.getElementById("oieCreateInvoiceBtn");
     document.querySelectorAll("#oieInvoiceActions .oie-inv-act").forEach(function (btn) {
-      btn.classList.toggle("d-none", !miscLinkedInvoice);
+      btn.classList.toggle("d-none", !miscLinkedInvoice || btn.getAttribute("data-inv-act") === "edit");
     });
-    if (createBtn) createBtn.classList.toggle("d-none", !!miscLinkedInvoice);
+    if (createBtn) createBtn.textContent = miscLinkedInvoice ? "Edit Invoice" : "Create Invoice";
     if (!box) return;
     if (!miscLinkedInvoice) {
       box.classList.add("d-none");
@@ -2923,20 +2924,22 @@
   }
 
   function ensureMiscSaved() {
-    const existing = (els.entryId?.value || "").trim();
-    if (existing) return Promise.resolve(existing);
-    return saveEntry().then(function () {
-      return (els.entryId?.value || "").trim();
+    return saveEntry().then(function (result) {
+      const entryId = (els.entryId?.value || "").trim();
+      return result && result.ok && entryId ? entryId : "";
     });
   }
 
   function beginMiscCreateInvoice() {
+    if (miscLinkedInvoice) {
+      showMiscInvoiceEditor();
+      return;
+    }
     const customerId = (els.customerId?.value || "").trim();
     if (!customerId) {
       alert("Please select a customer before opening the Invoice module.");
       return;
     }
-    miscCreatingInvoice = true;
     syncMiscBillingPanel();
     if (!miscBillingChoice()) {
       alert("Please select Same Customer or Other Customer.");
@@ -2947,11 +2950,21 @@
       document.getElementById("oieBillingSearch")?.focus();
       return;
     }
+    const createBtn = document.getElementById("oieCreateInvoiceBtn");
+    if (createBtn?.disabled) return;
+    if (createBtn) createBtn.disabled = true;
+    miscCreatingInvoice = true;
     ensureMiscSaved().then(function (entryId) {
-      if (!entryId) return;
-      openMiscInvoiceWindow();
+      if (!entryId) {
+        miscCreatingInvoice = false;
+        return;
+      }
+      if (!openMiscInvoiceWindow()) miscCreatingInvoice = false;
     }).catch(function (err) {
+      miscCreatingInvoice = false;
       alert(err.message || "Unable to open the Invoice module.");
+    }).finally(function () {
+      if (createBtn) createBtn.disabled = false;
     });
   }
 
@@ -3085,7 +3098,7 @@
       document.getElementById("oieBillingResults")?.classList.add("d-none");
       if (miscLinkedInvoice) reassignMiscBilling(pick.getAttribute("data-id") || "");
     });
-    window.addEventListener("message", function (event) {
+    function handleMiscInvoiceMessage(event) {
       if (event.origin !== window.location.origin) return;
       const data = event.data || {};
       if (data.type === "jtcs-invoice-receipt-closed") {
@@ -3111,12 +3124,41 @@
         loadGrid();
         if (miscInvoiceEditorOpen) setTimeout(hideMiscInvoiceEditor, 0);
       }
+      if (data.type === "jtcs-invoice-cancelled") {
+        miscCreatingInvoice = false;
+      }
       if (data.type === "jtcs-invoice-deleted") {
         paintMiscInvoice(null);
         clearMiscBilling();
         loadGrid();
       }
+    }
+
+    // The invoice Page Window posts save/cancel messages to its parent (the
+    // Dashboard), while this Misc form lives in a sibling frame. Listen there too.
+    const invoiceMessageTargets = [window];
+    try {
+      invoiceMessageTargets.push(window.parent, window.top);
+    } catch (_err) {
+      /* Keep the local listener if the host is cross-origin. */
+    }
+    const uniqueInvoiceMessageTargets = Array.from(new Set(invoiceMessageTargets));
+    uniqueInvoiceMessageTargets.forEach(function (target) {
+      try {
+        target.addEventListener("message", handleMiscInvoiceMessage);
+      } catch (_err) {
+        /* Ignore inaccessible ancestor frames. */
+      }
     });
+    window.addEventListener("pagehide", function () {
+      uniqueInvoiceMessageTargets.forEach(function (target) {
+        try {
+          target.removeEventListener("message", handleMiscInvoiceMessage);
+        } catch (_err) {
+          /* Ignore inaccessible ancestor frames. */
+        }
+      });
+    }, { once: true });
   }
 
   els.workDone?.addEventListener("change", syncMiscWorkflow);

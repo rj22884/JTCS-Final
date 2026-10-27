@@ -6,6 +6,9 @@
     if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
     var path = String(url || "").split("?")[0].toLowerCase();
     if (!path) return false;
+    // These entry forms refresh their own grid after saving. Reloading this frame
+    // here can interrupt the Misc Create Invoice flow before its invoice window opens.
+    if (/^\/(?:activities\/(?:miscellaneous|misc_new)|others\/income-expense)\/save\/?$/.test(path)) return false;
     if (path.indexOf("/api/notifications") !== -1 || path.indexOf("/api/whats-new") !== -1) return false;
     if (path.indexOf("/api/crm/") !== -1) return false;
     if (path.indexOf("/api/invoices") !== -1) return false;

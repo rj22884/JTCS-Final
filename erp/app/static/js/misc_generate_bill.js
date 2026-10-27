@@ -56,6 +56,7 @@
 
   const items = Array.isArray(cfg.items) ? cfg.items : [];
   let dscMode = false;
+  let miscInvoiceMode = false;
   let customerPickName = "";
   let billAnotherCustomer = false;
   let entryCustomer = { id: "", name: "" };
@@ -786,6 +787,14 @@
     return String(template || "").replace(/\/0(\/|$)/, "/" + id + "$1");
   }
 
+  function syncConvertButtonLabel() {
+    if (!els.convertBtn) return;
+    const isMiscUpdate = miscInvoiceMode && !!(els.invoiceId?.value || "").trim();
+    els.convertBtn.innerHTML = isMiscUpdate
+      ? '<i class="bi bi-check2-circle"></i> Update'
+      : '<i class="bi bi-receipt"></i> Save, Exit and Convert to Invoice';
+  }
+
   async function saveInvoice() {
     const payload = collectPayload(false);
     payload.from_source = true;
@@ -810,6 +819,7 @@
     const record = data.record || {};
     if (els.invoiceId && record.invoice_id) {
       els.invoiceId.value = String(record.invoice_id);
+      syncConvertButtonLabel();
     }
     notifyMiscInvoiceSaved(record);
     return record;
@@ -941,8 +951,10 @@
 
   function applySeed(seed) {
     if (!seed || typeof seed !== "object") return;
+    miscInvoiceMode = String(seed.source || "").toUpperCase() === "MISCELLANEOUS" || !!seed.misc_entry_id;
     if (seed.entry_id && els.miscEntryId) els.miscEntryId.value = String(seed.entry_id);
     if (seed.invoice_id && els.invoiceId) els.invoiceId.value = String(seed.invoice_id);
+    syncConvertButtonLabel();
     if (els.date) els.date.value = (seed.date || "").slice(0, 10);
     if (els.taxYear) {
       const want = seed.tax_year || cfg.defaultTaxPeriod || "";
@@ -1128,6 +1140,7 @@
   function applyLoadedInvoice(rec) {
     if (!rec) return;
     const moduleName = String(rec.source_module || "").toUpperCase();
+    miscInvoiceMode = moduleName === "MISC" || !!rec.misc_entry_id || !!(els.miscEntryId?.value || "").trim();
     if (moduleName && moduleName !== "MISC") {
       if (els.invoiceId) els.invoiceId.value = "";
       showError(rec.source_lock_message || "This invoice can be edited only from the module that created it.");
@@ -1142,6 +1155,7 @@
       if (!els.miscEntryId.value) els.miscEntryId.value = String(rec.misc_entry_id);
     }
     if (els.invoiceId) els.invoiceId.value = rec.invoice_id ? String(rec.invoice_id) : "";
+    syncConvertButtonLabel();
     if (els.invoiceNo && rec.invoice_no) els.invoiceNo.value = rec.invoice_no;
     if (els.date && rec.invoice_date) els.date.value = String(rec.invoice_date).slice(0, 10);
     if (els.customerName && rec.customer_name) els.customerName.value = rec.customer_name;
@@ -1292,11 +1306,13 @@
       showError(err);
       return;
     }
+    const isUpdating = !!(els.invoiceId?.value || "").trim();
     if (els.saveBtn) els.saveBtn.disabled = true;
     try {
       const saved = await saveInvoice();
+      const action = miscInvoiceMode && isUpdating ? "Bill updated" : "Bill saved";
       showOk(
-        "Bill saved" + (saved.invoice_no ? " — " + saved.invoice_no : "") + ". Edit ab isi bill ko kholega."
+        action + (saved.invoice_no ? " — " + saved.invoice_no : "") + ". Edit ab isi bill ko kholega."
       );
     } catch (err) {
       showError(err.message || "Unable to save bill.");
@@ -1348,6 +1364,22 @@
     }
     if (els.convertBtn) els.convertBtn.disabled = true;
     try {
+      const isMiscUpdate = miscInvoiceMode && !!(els.invoiceId?.value || "").trim();
+      if (isMiscUpdate) {
+        const saved = await saveInvoice();
+        const message = "Invoice updated" + (saved.invoice_no ? " — " + saved.invoice_no : "") + ".";
+        if (window.JTCSDialog?.alert) {
+          await window.JTCSDialog.alert(message, "success", {
+            title: "Invoice updated",
+            okLabel: "OK",
+          });
+        } else {
+          window.alert(message);
+        }
+        notifyInvoiceStatus();
+        closeWindow();
+        return;
+      }
       const allowed = await confirmConvertUser();
       if (!allowed) return;
       const saved = await saveInvoice();

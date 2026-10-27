@@ -992,7 +992,9 @@ a.dash-watch-link:hover {
 }
 
 .dash-pending-sale-card {
-  min-width: 16rem;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
   text-align: left;
   padding: 0.35rem 0.5rem;
   border-radius: 0.45rem;
@@ -1002,6 +1004,7 @@ a.dash-watch-link:hover {
 
 .dash-pending-sale-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin-top: 0.15rem;
   font-size: 0.78rem;
@@ -1009,9 +1012,24 @@ a.dash-watch-link:hover {
 
 .dash-pending-sale-table th,
 .dash-pending-sale-table td {
-  padding: 0.12rem 0.35rem;
+  min-width: 0;
+  padding: 0.12rem 0.18rem;
   text-align: right;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dash-pending-sale-table thead th:first-child,
+.dash-pending-sale-table tbody th {
+  width: 36%;
+}
+
+.dash-pending-sale-table thead th:nth-child(2) {
+  width: 27%;
+}
+
+.dash-pending-sale-table thead th:nth-child(3) {
+  width: 37%;
 }
 
 .dash-pending-sale-table thead th {
@@ -1024,10 +1042,14 @@ a.dash-watch-link:hover {
   text-align: left;
   font-weight: 600;
   color: #3d4d66;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .dash-pending-sale-val {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   border: 0;
   background: transparent;
   padding: 0;
@@ -1881,6 +1903,32 @@ body.modal-open .modal-backdrop.dash-source-backdrop {
 }
 
 @media (max-width: 767.98px) {
+  .dash-pending-sale-card {
+    width: 100%;
+    padding-inline: 0.35rem;
+  }
+
+  .dash-pending-sale-table {
+    font-size: 0.7rem;
+  }
+
+  .dash-pending-sale-table thead th {
+    font-size: 0.64rem;
+  }
+
+  .dash-pending-sale-table thead th:first-child,
+  .dash-pending-sale-table tbody th {
+    width: 38%;
+  }
+
+  .dash-pending-sale-table thead th:nth-child(2) {
+    width: 24%;
+  }
+
+  .dash-pending-sale-table thead th:nth-child(3) {
+    width: 38%;
+  }
+
   .dash-today-postcard-grid {
     grid-template-columns: 1fr 1fr;
   }

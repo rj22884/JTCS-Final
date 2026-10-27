@@ -469,11 +469,24 @@ class OthersBankCashService:
             mapping[item["ledger_key"]] = label
         return mapping
 
-    def list_entries(self) -> list[dict]:
+    def list_entries(self, filters: dict[str, str] | None = None) -> tuple[list[dict], int]:
         lookup = self._entered_by_lookup()
         labels = self._ledger_label_map()
+        filters = {
+            key: " ".join(str(value or "").split()).casefold()
+            for key, value in (filters or {}).items()
+            if key in {
+                "voucher_no", "work_date", "purpose", "credit_account",
+                "debit_account", "amount", "remarks", "entered_by",
+            }
+        }
+        filters = {key: value for key, value in filters.items() if value}
+        total_count = self.entry_repo.count_active()
         rows = []
-        for row in self.entry_repo.list_active():
+        # Keep the default grid light, but search the complete active set when a
+        # column filter is supplied so older vouchers are discoverable.
+        source_rows = self.entry_repo.list_active(limit=None if filters else 200)
+        for row in source_rows:
             credit_key = self._ledger_key_for_row(row, side="credit")
             debit_key = self._ledger_key_for_row(row, side="debit")
             rows.append(
@@ -499,7 +512,21 @@ class OthersBankCashService:
                     "created_date": row.CreatedDate.isoformat() if row.CreatedDate else "",
                 }
             )
-        return rows
+        if filters:
+            def matches(row: dict) -> bool:
+                for key, needle in filters.items():
+                    value = row.get(key) or ""
+                    if key == "amount":
+                        try:
+                            value = f"{float(value):,.2f}"
+                        except (TypeError, ValueError):
+                            value = str(value)
+                    if needle not in " ".join(str(value).split()).casefold():
+                        return False
+                return True
+
+            rows = [row for row in rows if matches(row)]
+        return rows, total_count
 
     def next_voucher_no(self, work_date_raw: str | None = None) -> str:
         work_date = self._date(work_date_raw) if work_date_raw else date.today()

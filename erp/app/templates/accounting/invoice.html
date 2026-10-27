@@ -434,6 +434,7 @@
     png: {{ url_for('accounting_invoice.download_png', invoice_id=0) | tojson }},
     previewHtml: {{ url_for('accounting_invoice.preview_html', invoice_id=0) | tojson }},
     items: {{ items | tojson }},
+    itemsRefresh: {{ url_for('masters_item.list_active') | tojson }},
     paymentBanks: {{ payment_banks | tojson }},
     taxPeriods: {{ tax_periods | tojson }},
     serviceQuarters: {{ service_quarters | tojson }},
@@ -449,5 +450,5 @@
 </script>
 <script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261018invoiceguard"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261018c6zoom"></script>
+<script src="{{ url_for('static', filename='js/gst_invoice.js') }}?v=20261027itemrefresh1"></script>
 {% endblock %}

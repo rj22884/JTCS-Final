@@ -98,13 +98,49 @@
     return '<section class="mb-4"><div class="d-flex justify-content-between align-items-center gap-2"><h3 class="h6 mb-1">' + esc(title) + ' <span class="text-muted">(' + rows.length + ')</span></h3><input type="search" class="form-control form-control-sm summary-table-filter" style="max-width:260px" placeholder="Filter this table" data-table-filter="' + esc(tableId) + '"></div><div class="table-responsive"><table class="table table-sm table-striped table-hover summary-ref-table" id="' + esc(tableId) + '"><thead class="table-primary"><tr>' + heads + '</tr></thead><tbody>' + bodyRows + '</tbody></table></div></section>';
   }
 
+  function amount(value) { return Number(value || 0); }
+
+  function groupDailyRows(rows, key) {
+    const groups = new Map();
+    rows.forEach(function (row) {
+      const label = String(row[key] || "Unspecified").trim() || "Unspecified";
+      if (!groups.has(label)) groups.set(label, { label: label, count: 0, income: 0, debit: 0, sale: 0, purchase: 0, total: 0 });
+      const group = groups.get(label);
+      group.count += 1;
+      group.income += amount(row.IncomeAmount);
+      group.debit += amount(row.ExpenseAmount);
+      group.sale += amount(row.SaleAmount);
+      group.purchase += amount(row.PurchaseAmount);
+      group.total += amount(row.TotalAmount);
+    });
+    return Array.from(groups.values()).sort(function (a, b) { return b.total - a.total || a.label.localeCompare(b.label); });
+  }
+
+  function renderGroupedSummary(title, groups) {
+    const rankable = groups.filter(function (group) { return group.total > 0; });
+    const top = rankable[0];
+    const bottom = rankable[rankable.length - 1];
+    const table = '<div class="table-responsive"><table class="table table-sm table-striped summary-ref-table summary-group-table mb-0"><thead class="table-primary"><tr><th>' + esc(title) + '</th><th>Entries</th><th>Income / Credit</th><th>Expense / Debit</th><th>Sale</th><th>Purchase</th><th>Total</th></tr></thead><tbody>' +
+      (groups.length ? groups.map(function (group) {
+        return '<tr><td class="fw-semibold">' + esc(group.label) + '</td><td>' + group.count + '</td><td class="money">' + money(group.income) + '</td><td class="money">' + money(group.debit) + '</td><td class="money">' + money(group.sale) + '</td><td class="money">' + money(group.purchase) + '</td><td class="money fw-semibold">' + money(group.total) + '</td></tr>';
+      }).join("") : '<tr><td colspan="7" class="text-muted">No records for this date.</td></tr>') + '</tbody></table></div>';
+    const rank = '<div class="summary-rank mt-2">' +
+      (top ? '<span class="me-3">Top ' + esc(title.toLowerCase()) + ': <strong>' + esc(top.label) + '</strong> · ' + money(top.total) + '</span>' : '<span class="text-muted">No amount to rank</span>') +
+      (bottom && bottom !== top ? '<span>Lowest: <strong>' + esc(bottom.label) + '</strong> · ' + money(bottom.total) + '</span>' : '') +
+      '<span class="text-muted ms-2">(ranked by Total)</span></div>';
+    return '<section class="mb-3"><div class="d-flex justify-content-between align-items-center mb-1"><h3 class="h6 mb-0">' + esc(title) + ' summary</h3><span class="small text-muted">' + groups.length + ' group(s)</span></div><div class="summary-group-card p-2">' + table + rank + '</div></section>';
+  }
+
   function renderDatewise(data) {
     const daily = data.daily_transactions || [];
     const bank = data.bank_transactions || [];
     const totals = data.totals || {};
+    const workGroups = groupDailyRows(daily, "WorkType");
+    const categoryGroups = groupDailyRows(daily, "SubWorkType");
+    const descriptionGroups = groupDailyRows(daily, "Description");
     const cards = '<div class="row g-2 mb-3">' +
       [['Daily debit', totals.daily_debit], ['Daily credit', totals.daily_credit], ['Bank/cash debit', totals.bank_debit], ['Bank/cash credit', totals.bank_credit]].map(function (item) {
-        return '<div class="col-6 col-xl-3"><div class="border rounded p-2"><div class="small text-muted">' + item[0] + '</div><strong>' + money(item[1]) + '</strong></div></div>';
+        return '<div class="col-6 col-xl-3"><div class="border rounded p-2 bg-white"><div class="small text-muted">' + item[0] + '</div><strong>' + money(item[1]) + '</strong></div></div>';
       }).join("") + '</div>';
     const dailyColumns = [
       { key: "TransactionID", label: "Daily Txn ID" }, { key: "TransactionDate", label: "Date" }, { key: "WorkType", label: "Work" },
@@ -123,7 +159,8 @@
       { key: "Remarks", label: "Remarks" }, { key: "Debit", label: "Debit", money: true },
       { key: "Credit", label: "Credit", money: true }, { key: "ClosingBalance", label: "Closing balance", money: true },
     ];
-    return '<div class="p-3"><h3 class="h6">Cash and bank reconciliation — ' + esc(data.date) + '</h3>' + cards +
+    return '<div class="p-3"><div class="small text-muted mb-1">' + daily.length + ' daily transaction(s) · ' + bank.length + ' bank/cash row(s)</div><h3 class="h6">Cash and bank reconciliation — ' + esc(data.date) + '</h3>' + cards +
+      renderGroupedSummary("Work", workGroups) + renderGroupedSummary("Category", categoryGroups) + renderGroupedSummary("Description", descriptionGroups) +
       tableSection("Daily transactions", daily, dailyColumns, "summaryDailyRows") +
       tableSection("Bank / cash ledger transactions", bank, bankColumns, "summaryBankRows") + '</div>';
   }
@@ -150,6 +187,7 @@
 
   function setMode(mode) {
     currentMode = mode;
+    document.querySelector(".summary-layout")?.classList.remove("is-datewise");
     const isDate = mode === "datewise";
     const isFollowup = mode === "followupwise";
     ledgerControls.classList.toggle("d-none", isDate || isFollowup);
@@ -175,10 +213,12 @@
       return;
     }
     meta.textContent = "Loading transactions for " + dateInput.value + "…";
+    document.querySelector(".summary-layout")?.classList.add("is-datewise");
     body.innerHTML = '<div class="text-muted small text-center py-5">Loading date-wise entries…</div>';
     try {
       const data = await json(cfg.dateUrl + "?date=" + encodeURIComponent(dateInput.value));
-      results.innerHTML = '<div class="p-2 small text-muted">' + (data.daily_transactions || []).length + ' daily transaction(s) · ' + (data.bank_transactions || []).length + ' bank/cash row(s)</div>';
+      results.innerHTML = '';
+      body.classList.remove("text-muted", "small", "text-center", "py-5");
       body.innerHTML = renderDatewise(data);
       meta.textContent = "Showing all posted daily transactions and bank/cash ledger rows for " + dateInput.value + ".";
     } catch (error) {

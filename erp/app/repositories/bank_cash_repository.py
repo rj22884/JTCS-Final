@@ -378,7 +378,7 @@ class OthersBankCashRepository:
             self.session.execute(text(statement))
             self.session.commit()
 
-    def list_active(self, *, limit: int = 200) -> list[OthersBankCashTransaction]:
+    def list_active(self, *, limit: int | None = 200) -> list[OthersBankCashTransaction]:
         self.ensure_schema()
         stmt = (
             select(OthersBankCashTransaction)
@@ -387,9 +387,21 @@ class OthersBankCashRepository:
                 OthersBankCashTransaction.WorkDate.desc(),
                 OthersBankCashTransaction.EntryID.desc(),
             )
-            .limit(limit)
         )
+        if limit is not None:
+            stmt = stmt.limit(max(1, int(limit)))
         return list(self.session.scalars(stmt).all())
+
+    def count_active(self) -> int:
+        self.ensure_schema()
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(OthersBankCashTransaction)
+                .where(OthersBankCashTransaction.IsActive == True)  # noqa: E712
+            )
+            or 0
+        )
 
     def get_by_id(self, entry_id: int) -> OthersBankCashTransaction | None:
         self.ensure_schema()

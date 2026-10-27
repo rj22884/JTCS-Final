@@ -96,7 +96,18 @@ def save_record():
 @bp.route("/grid", methods=["GET"], strict_slashes=False)
 @login_required
 def grid():
-    return jsonify({"ok": True, "rows": OthersBankCashService().list_entries()})
+    filter_keys = (
+        "voucher_no", "work_date", "purpose", "credit_account",
+        "debit_account", "amount", "remarks", "entered_by",
+    )
+    filters = {key: request.args.get(key, "") for key in filter_keys}
+    rows, total_count = OthersBankCashService().list_entries(filters)
+    return jsonify({
+        "ok": True,
+        "rows": rows,
+        "total_count": total_count,
+        "filtered_count": len(rows),
+    })
 
 
 @bp.route("/accounts/search", methods=["GET"], strict_slashes=False)

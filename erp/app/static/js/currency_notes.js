@@ -17,7 +17,12 @@
     totalAmount: document.getElementById("dashNotesTotalAmount"),
     cardTotal: document.getElementById("dashCurrencyNotesTotal"),
     saveBtn: document.getElementById("dashNotesSaveBtn"),
+    editBtn: document.getElementById("dashNotesEditBtn"),
   };
+  let savedEntry = false;
+  let editing = false;
+  let loading = false;
+  let saving = false;
   const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
 
   function parseAmount(el) {
@@ -90,6 +95,22 @@
     return { notes: notes, amount: amount };
   }
 
+  function syncFormMode() {
+    const readOnly = loading || saving || (savedEntry && !editing);
+    if (els.date) els.date.disabled = readOnly;
+    els.body?.querySelectorAll(".dash-note-count").forEach(function (input) {
+      input.disabled = readOnly;
+    });
+    if (els.saveBtn) {
+      els.saveBtn.classList.toggle("d-none", savedEntry && !editing);
+      els.saveBtn.disabled = loading || saving;
+    }
+    if (els.editBtn) {
+      els.editBtn.classList.toggle("d-none", !savedEntry || editing);
+      els.editBtn.disabled = loading || saving;
+    }
+  }
+
   function renderLines(lines) {
     const byDenom = {};
     (lines || []).forEach(function (row) {
@@ -124,6 +145,8 @@
 
   function loadForDate(iso) {
     const url = (cfg.notesUrl || "") + (iso ? "?date=" + encodeURIComponent(iso) : "");
+    loading = true;
+    syncFormMode();
     return fetch(url, {
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
@@ -132,6 +155,8 @@
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load notes.");
           if (els.date && data.entry_date) els.date.value = data.entry_date;
           renderLines(data.lines || []);
+          savedEntry = !!data.entry_id;
+          editing = false;
           return data;
         });
       })
@@ -141,16 +166,23 @@
         } else {
           alert(err.message || "Unable to load currency notes.");
         }
+      })
+      .finally(function () {
+        loading = false;
+        syncFormMode();
       });
   }
 
   function save() {
+    if (savedEntry && !editing) return Promise.resolve();
+    if (loading || saving) return Promise.resolve();
     const iso = (els.date && els.date.value) || cfg.systemDate || "";
     const counts = countsFromGrid();
     const lines = DENOMS.map(function (d) {
       return { denomination: d, notes: Math.max(0, counts[d] || 0) };
     });
-    if (els.saveBtn) els.saveBtn.disabled = true;
+    saving = true;
+    syncFormMode();
     return fetch(cfg.notesSaveUrl || cfg.notesUrl, {
       method: "POST",
       headers: {
@@ -165,14 +197,14 @@
         return res.json().then(function (data) {
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to save notes.");
           renderLines(data.lines || []);
+          savedEntry = !!data.entry_id;
+          editing = false;
           const cardTotal = document.getElementById("dashCurrencyNotesTotal");
           if (cardTotal && iso === (cfg.systemDate || iso)) {
             cardTotal.textContent = formatMoney(data.total_amount);
           }
           syncMatchEmojis();
-          if (window.JTCSDialog && JTCSDialog.alert) {
-            JTCSDialog.alert("Currency notes saved.", "success");
-          }
+          modal.hide();
           return data;
         });
       })
@@ -184,7 +216,8 @@
         }
       })
       .finally(function () {
-        if (els.saveBtn) els.saveBtn.disabled = false;
+        saving = false;
+        syncFormMode();
       });
   }
 
@@ -209,6 +242,12 @@
 
   els.saveBtn?.addEventListener("click", function () {
     save();
+  });
+
+  els.editBtn?.addEventListener("click", function () {
+    if (!savedEntry || loading || saving) return;
+    editing = true;
+    syncFormMode();
   });
 
   syncMatchEmojis();

@@ -4,7 +4,7 @@
   const api = window.INVOICE_API;
   if (!api) return;
 
-  const items = api.items || [];
+  let items = api.items || [];
   const taxPeriods = api.taxPeriods || [];
   const serviceQuarters = api.serviceQuarters || [];
   const quarterMonths = api.quarterMonths || {};
@@ -199,6 +199,51 @@
         "</option>";
     });
     return html;
+  }
+
+  let itemRefreshPromise = null;
+  let itemRefreshAt = 0;
+  function refreshInvoiceItems(force) {
+    if (!api.itemsRefresh) return Promise.resolve();
+    if (itemRefreshPromise) {
+      return force
+        ? itemRefreshPromise.then(function () { return refreshInvoiceItems(true); })
+        : itemRefreshPromise;
+    }
+    if (!force && Date.now() - itemRefreshAt < 1500) return Promise.resolve();
+    itemRefreshPromise = fetch(api.itemsRefresh, {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok || !data.ok || !Array.isArray(data.rows)) return;
+          const selections = Array.from(els.body?.querySelectorAll(".inv-item") || []).map(function (select) {
+            return { select: select, value: select.value, label: select.selectedOptions[0]?.textContent || "" };
+          });
+          items = data.rows;
+          selections.forEach(function (entry) {
+            entry.select.innerHTML = itemOptionsHtml(entry.value);
+            const stillActive = items.some(function (item) {
+              return String(item.item_id) === String(entry.value);
+            });
+            if (entry.value && !stillActive && entry.label) {
+              const retained = document.createElement("option");
+              retained.value = entry.value;
+              retained.textContent = entry.label;
+              retained.selected = true;
+              entry.select.appendChild(retained);
+            }
+            entry.select.value = entry.value;
+          });
+        });
+      })
+      .catch(function () {})
+      .finally(function () {
+        itemRefreshAt = Date.now();
+        itemRefreshPromise = null;
+      });
+    return itemRefreshPromise;
   }
 
   function itemGroupForSource(source) {
@@ -2509,6 +2554,19 @@
 
   els.addLine?.addEventListener("click", function () {
     addLine();
+  });
+
+  window.addEventListener("focus", function () {
+    refreshInvoiceItems(false);
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) refreshInvoiceItems(false);
+  });
+  window.addEventListener("message", function (event) {
+    if (event.origin !== window.location.origin) return;
+    if (event.data && event.data.type === "jtcs-item-master-updated") {
+      refreshInvoiceItems(true);
+    }
   });
 
   async function applyContactCustomer(customerId) {

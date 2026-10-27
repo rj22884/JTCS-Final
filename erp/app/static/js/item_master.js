@@ -80,6 +80,19 @@
       .replace(/"/g, "&quot;");
   }
 
+  function notifyItemMasterChanged() {
+    try {
+      const host = window.top;
+      if (!host || !host.document) return;
+      host.document.querySelectorAll(".jtcs-page-win-frame").forEach(function (frame) {
+        if (frame.contentWindow === window) return;
+        try {
+          frame.contentWindow.postMessage({ type: "jtcs-item-master-updated" }, window.location.origin);
+        } catch (_err) {}
+      });
+    } catch (_err) {}
+  }
+
   function showStatus(message, type) {
     if (!els.status) return;
     if (!message) {
@@ -495,6 +508,7 @@
     })
       .then(parseJsonResponse)
       .then(function (data) {
+        notifyItemMasterChanged();
         modal?.hide();
         showStatus(data.message || "Saved.", "success");
         return loadRows();
