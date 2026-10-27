@@ -544,7 +544,7 @@
 
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
-      if (previewKind && previewId) openLedgerPreview(previewKind, previewId);
+      if (previewKind && previewId) return openLedgerPreview(previewKind, previewId);
     });
   }
 

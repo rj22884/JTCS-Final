@@ -277,7 +277,7 @@
 
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
-      if (currentKind && currentId) openPreview(currentKind, currentId);
+      if (currentKind && currentId) return openPreview(currentKind, currentId);
     });
   }
 })();

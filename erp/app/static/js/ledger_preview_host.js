@@ -231,7 +231,7 @@
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
       if (currentKind && currentId) {
-        openPreview(currentKind, currentId, { allDates: currentAllDates });
+        return openPreview(currentKind, currentId, { allDates: currentAllDates });
       }
     });
   }
