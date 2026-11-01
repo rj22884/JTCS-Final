@@ -749,7 +749,6 @@ class OthersIncomeExpenseService:
 
         from app.repositories.bank_cash_repository import OthersBankCashRepository
 
-        OthersBankCashRepository().ensure_schema()
         allocated_rows = db.session.execute(
             select(
                 OthersBankCashInvoiceAllocation.InvoiceID,
@@ -827,6 +826,74 @@ class OthersIncomeExpenseService:
             if seen:
                 labels[invoice_id] = ", ".join(seen)
         return labels
+
+    def _money_out_in_accounts_by_invoice(self, invoice_ids: list[int]) -> dict[int, str]:
+        """Active Money In-Out account pairs linked to each sale invoice."""
+        from app.models.bank_cash import OthersBankCashInvoiceAllocation, OthersBankCashTransaction
+        from app.repositories.bank_cash_repository import OthersBankCashRepository
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        keys = sorted({int(value) for value in invoice_ids if int(value or 0) > 0})
+        if not keys:
+            return {}
+        OthersBankCashRepository().ensure_schema()
+        allocated_rows = db.session.execute(
+            select(
+                OthersBankCashInvoiceAllocation.InvoiceID,
+                OthersBankCashTransaction,
+            )
+            .join(
+                OthersBankCashTransaction,
+                OthersBankCashTransaction.EntryID == OthersBankCashInvoiceAllocation.EntryID,
+            )
+            .where(
+                OthersBankCashInvoiceAllocation.InvoiceID.in_(keys),
+                OthersBankCashTransaction.IsActive == True,  # noqa: E712
+            )
+            .order_by(OthersBankCashTransaction.WorkDate, OthersBankCashTransaction.EntryID)
+        ).all()
+        rows_by_invoice: dict[int, list] = {}
+        allocated_entry_ids: set[int] = set()
+        for invoice_id, transaction in allocated_rows:
+            invoice_key = int(invoice_id)
+            entry_id = int(transaction.EntryID)
+            allocated_entry_ids.add(entry_id)
+            rows_by_invoice.setdefault(invoice_key, []).append(transaction)
+
+        legacy_rows = db.session.scalars(
+            select(OthersBankCashTransaction)
+            .where(
+                OthersBankCashTransaction.InvoiceID.in_(keys),
+                OthersBankCashTransaction.IsActive == True,  # noqa: E712
+            )
+            .order_by(OthersBankCashTransaction.WorkDate, OthersBankCashTransaction.EntryID)
+        ).all()
+        for transaction in legacy_rows:
+            if int(transaction.EntryID) in allocated_entry_ids:
+                continue
+            invoice_key = int(transaction.InvoiceID or 0)
+            if invoice_key in keys:
+                rows_by_invoice.setdefault(invoice_key, []).append(transaction)
+
+        bank_service = OthersBankCashService()
+        account_labels = bank_service._ledger_label_map()
+        result: dict[int, str] = {}
+        for invoice_id, transactions in rows_by_invoice.items():
+            pairs: list[str] = []
+            seen: set[str] = set()
+            for transaction in transactions:
+                labels = []
+                for side in ("credit", "debit"):
+                    key = bank_service._ledger_key_for_row(transaction, side=side)
+                    label = account_labels.get(key) or key or "—"
+                    labels.append(label)
+                pair = labels[0] + " / " + labels[1]
+                if pair not in seen:
+                    seen.add(pair)
+                    pairs.append(pair)
+            if pairs:
+                result[invoice_id] = "; ".join(pairs)
+        return result
 
     def _receipt_account_labels_by_reference(
         self,
@@ -1051,6 +1118,7 @@ class OthersIncomeExpenseService:
         linked_invoices = list(by_misc.values())
         invoice_ids = [int(invoice.InvoiceID) for invoice in linked_invoices]
         money_in_accounts = self._money_in_account_labels_by_invoice(invoice_ids)
+        money_out_in_accounts = self._money_out_in_accounts_by_invoice(invoice_ids)
         allocated_by_invoice = invoice_svc.money_in_totals(invoice_ids)
         invoice_refs = {
             (value or "").strip().upper()
@@ -1074,6 +1142,7 @@ class OthersIncomeExpenseService:
         receipts_by_ref = invoice_svc._batch_receipt_amounts(invoice_refs)
         receipt_accounts = self._receipt_account_labels_by_reference(receipts_by_ref)
         received_by_invoice: dict[int, bool] = {}
+        received_amount_by_invoice: dict[int, Decimal] = {}
         for invoice in linked_invoices:
             invoice_id = int(invoice.InvoiceID)
             received_amount = allocated_by_invoice.get(invoice_id, 0)
@@ -1094,7 +1163,9 @@ class OthersIncomeExpenseService:
                         continue
                     seen_daily_ids.add(daily_id)
                     received_amount += amount
-            received_by_invoice[invoice_id] = float(received_amount or 0) > 0.005
+            received_amount = Decimal(str(received_amount or 0))
+            received_amount_by_invoice[invoice_id] = received_amount
+            received_by_invoice[invoice_id] = received_amount > Decimal("0.005")
         for item in entries:
             key = (item.get("tally_bill_no") or item.get("bill_no") or "").strip().upper()
             item["sale_invoice"] = status_map.get(key)
@@ -1103,6 +1174,9 @@ class OthersIncomeExpenseService:
             except (TypeError, ValueError):
                 entry_id = 0
             linked = by_misc.get(entry_id) if entry_id else None
+            item["money_out_in_accounts"] = (
+                money_out_in_accounts.get(int(linked.InvoiceID), "") if linked is not None else ""
+            )
             if linked is None:
                 if item.get("ledger_kind") == self.LEDGER_MISC:
                     paid = bool(item.get("payment_received")) or item.get("account_label") not in (
@@ -1142,10 +1216,22 @@ class OthersIncomeExpenseService:
                 if days is not None:
                     item["overdue_days"] = days
                     item["account_label"] = f"{days} day{'s' if days != 1 else ''} overdue"
+            invoice_amount = Decimal(str(getattr(linked, "InvoiceValue", 0) or 0))
+            received_amount = received_amount_by_invoice.get(int(linked.InvoiceID), Decimal("0"))
+            outstanding_amount = max(Decimal("0"), invoice_amount - received_amount)
+            payment_status = (
+                "Paid" if outstanding_amount <= Decimal("0.005")
+                else "Partially Paid" if received_amount > Decimal("0.005")
+                else "Unpaid"
+            )
             item["sale_invoice"] = {
                 **invoice_svc.invoice_action_snapshot(linked),
+                "invoice_amount": float(invoice_amount),
+                "received_amount": float(received_amount),
+                "outstanding_amount": float(outstanding_amount),
+                "payment_status": payment_status,
                 "bill_status": "Approved" if bool(getattr(linked, "BillApproved", False)) else "Approve pending",
-                "payment_received": "Yes" if invoice_svc._saved_payment_received(linked) else "No",
+                "payment_received": "Yes" if payment_status == "Paid" else "No",
             }
         return entries
 

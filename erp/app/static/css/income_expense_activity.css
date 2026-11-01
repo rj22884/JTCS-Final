@@ -144,6 +144,24 @@
   overflow: auto;
 }
 
+#oieDataGrid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #f8fafc;
+}
+
+.oie-money-out-in-col,
+.oie-money-out-in-cell {
+  min-width: 180px;
+  max-width: 240px;
+  white-space: normal;
+}
+
+.oie-money-out-in-cell {
+  font-size: 11px;
+}
+
 .oie-sortable {
   cursor: pointer;
   user-select: none;

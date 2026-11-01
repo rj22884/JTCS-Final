@@ -1,5 +1,5 @@
 /**
- * Shared ledger preview grid: From/To dates, filter, sort, edit/delete.
+ * Shared ledger preview grid: From/To dates, filter, sort, and edit.
  * Used by Dashboard "Search Ledger Here" and Reports → Ledger Report.
  */
 (function () {
@@ -12,10 +12,14 @@
   const dashCfg = window.DASHBOARD || {};
 
   let sortKey = "date";
-  let sortDir = 1;
+  let sortDir = -1;
   let reloadPreview = null;
   let groupBy = null;
   let mutationActive = false;
+  let returnToPreviewAfterMutation = false;
+  let ecourtEntryOpenTimer = null;
+  let previewPage = 1;
+  let previewPageSize = 20;
 
   function escapeHtml(value) {
     return String(value == null ? "" : value)
@@ -34,6 +38,10 @@
       groupBtn: document.getElementById("ledgerPreviewGroupByBtn"),
       removeGroup: document.getElementById("ledgerPreviewRemoveGroup"),
       grid: document.getElementById("ledgerPreviewGrid"),
+      pageSize: document.getElementById("ledgerPreviewPageSize"),
+      pageInfo: document.getElementById("ledgerPreviewPageInfo"),
+      prev: document.getElementById("ledgerPreviewPrev"),
+      next: document.getElementById("ledgerPreviewNext"),
     };
   }
 
@@ -129,7 +137,7 @@
   }
 
   function isDataRow(tr) {
-    return !!(tr && tr.querySelector("td") && !isChromeRow(tr));
+    return !!(tr && tr.querySelector("td") && !isChromeRow(tr) && !tr.classList.contains("ledger-preview-empty-row"));
   }
 
   function markOriginalOrder(tbody) {
@@ -282,7 +290,10 @@
     if (!tbody) return;
     clearGroupRows(tbody);
     updateGroupButtons();
-    if (!groupBy) return;
+    if (!groupBy) {
+      applyPreviewPagination();
+      return;
+    }
 
     const opening = [];
     const rest = [];
@@ -366,8 +377,56 @@
     hidden.forEach(function (tr) {
       tbody.appendChild(tr);
     });
+    applyPreviewPagination();
   }
 
+  function applyPreviewPagination() {
+    const els = toolbar();
+    if (!els.grid || !els.grid.tBodies[0]) return;
+    if (els.pageSize) {
+      const requestedSize = Number(els.pageSize.value);
+      previewPageSize = [20, 25, 50, 100, 500].includes(requestedSize) ? requestedSize : 20;
+      els.pageSize.value = String(previewPageSize);
+    }
+    const tbody = els.grid.tBodies[0];
+    const eligible = Array.prototype.filter.call(tbody.rows, function (tr) {
+      return isDataRow(tr) && !tr.hidden;
+    });
+    const total = eligible.length;
+    const pages = Math.max(1, Math.ceil(total / previewPageSize));
+    previewPage = Math.min(Math.max(1, previewPage), pages);
+    const startIndex = (previewPage - 1) * previewPageSize;
+    const pageRows = new Set(eligible.slice(startIndex, startIndex + previewPageSize));
+    let groupHeader = null;
+    let groupHasVisibleRow = false;
+    Array.prototype.forEach.call(tbody.rows, function (tr) {
+      if (tr.classList.contains("ledger-group-header")) {
+        groupHeader = tr;
+        groupHasVisibleRow = false;
+        tr.style.display = "none";
+        return;
+      }
+      if (tr.classList.contains("ledger-group-total")) {
+        tr.style.display = groupHasVisibleRow ? "" : "none";
+        if (groupHeader) groupHeader.style.display = groupHasVisibleRow ? "" : "none";
+        groupHeader = null;
+        groupHasVisibleRow = false;
+        return;
+      }
+      if (!isDataRow(tr)) return;
+      const show = !tr.hidden && pageRows.has(tr);
+      tr.style.display = show ? "" : "none";
+      if (show && groupHeader) groupHasVisibleRow = true;
+    });
+    if (groupHeader) groupHeader.style.display = groupHasVisibleRow ? "" : "none";
+    const first = total ? startIndex + 1 : 0;
+    const last = Math.min(startIndex + previewPageSize, total);
+    if (els.pageInfo) {
+      els.pageInfo.textContent = "Showing " + first + "–" + last + " of " + total + " records · Page " + previewPage + " of " + pages;
+    }
+    if (els.prev) els.prev.disabled = previewPage <= 1;
+    if (els.next) els.next.disabled = previewPage >= pages;
+  }
   function setGroupBy(mode) {
     groupBy = mode || null;
     applyGroup();
@@ -389,6 +448,7 @@
   function applyFilter() {
     const els = toolbar();
     if (!els.grid) return;
+    previewPage = 1;
     const needle = String(els.filter?.value || "")
       .trim()
       .toLowerCase();
@@ -452,55 +512,111 @@
       source_url: tr.getAttribute("data-source-url") || "",
       source_module: tr.getAttribute("data-source-module") || "",
       source_module_id: tr.getAttribute("data-source-module-id") || "",
+      source_reference: tr.getAttribute("data-source-reference") || "",
+      source_group: tr.getAttribute("data-source-group") || "",
       work_type: tr.getAttribute("data-work-type") || "",
       can_edit: tr.getAttribute("data-can-edit") === "1",
-      can_delete: tr.getAttribute("data-can-delete") === "1",
       source_lock_message: tr.getAttribute("data-source-lock") || "",
       description: (tr.querySelector('[data-col="description"]')?.textContent || "").trim(),
     };
   }
 
-  function apiUrl(template, id) {
-    if (!template) return "";
-    return String(template).replace(/\/0(?=\/|$)/, "/" + encodeURIComponent(id));
+  function onSourceEntryModalHidden() {
+    window.dispatchEvent(new CustomEvent("jtcs:ledger-mutated"));
+    if (returnToPreviewAfterMutation && typeof reloadPreview === "function") {
+      returnToPreviewAfterMutation = false;
+      Promise.resolve(reloadPreview()).finally(function () {
+        mutationActive = false;
+      });
+    } else {
+      mutationActive = false;
+    }
   }
 
-  function resolveDeleteUrl(row) {
-    if (!row || !row.can_delete) return null;
-    const id = row.source_module_id;
-    const mod = String(row.source_module || "");
-    const urls = Object.assign({}, dashCfg.deleteUrls || {}, cfg.deleteUrls || {});
-    if (!id || !mod) return null;
-    if (mod === "stamp" && urls.stamp) return apiUrl(urls.stamp, id);
-    if (mod === "ecourt" && urls.ecourt) return apiUrl(urls.ecourt, id);
-    if (mod === "income_expense" && urls.income_expense) {
-      return apiUrl(urls.income_expense, id);
-    }
-    if (mod === "bank_cash" && urls.bank_cash) return apiUrl(urls.bank_cash, id);
-    if ((mod === "invoice" || mod === "gst_invoice") && urls.invoice) {
-      return apiUrl(urls.invoice, id);
-    }
-    if (mod === "printing_scanning") {
-      const src = String(row.source_url || "");
-      const tpl =
-        src.indexOf("/others/expense/") >= 0
-          ? urls.printing_expense
-          : urls.printing_income;
-      return tpl ? apiUrl(tpl, id) : null;
-    }
-    if (mod === "followup") {
-      const wt = String(row.work_type || "").toUpperCase();
-      const map = { ITR: "itr", DSC: "dsc", TDS: "tds", GST: "gst" };
-      const key = map[wt];
-      if (key && urls[key]) return apiUrl(urls[key], id);
-    }
-    return null;
+  function bindSourceEntryModal(modalEl) {
+    if (!modalEl || modalEl.dataset.ledgerPreviewBound === "1") return;
+    modalEl.dataset.ledgerPreviewBound = "1";
+    modalEl.addEventListener("hidden.bs.modal", onSourceEntryModalHidden);
   }
 
-  function csrfToken() {
-    return cfg.csrfToken || dashCfg.csrfToken || "";
+  function ensureSourceEntryModal() {
+    let modalEl = document.getElementById("dashSourceEntryModal");
+    let frame = document.getElementById("dashSourceEntryFrame");
+    if (!modalEl || !frame) {
+      modalEl = document.createElement("div");
+      modalEl.className = "modal fade";
+      modalEl.id = "dashSourceEntryModal";
+      modalEl.tabIndex = -1;
+      modalEl.setAttribute("aria-hidden", "true");
+      modalEl.innerHTML =
+        '<div class="modal-dialog modal-xl modal-dialog-scrollable">' +
+          '<div class="modal-content">' +
+            '<div class="modal-header py-2">' +
+              '<h5 class="modal-title" id="dashSourceEntryModalTitle">Edit Entry</h5>' +
+              '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
+            '</div>' +
+            '<div class="modal-body p-0" style="min-height:70vh">' +
+              '<iframe id="dashSourceEntryFrame" title="Source entry" style="width:100%;height:70vh;border:0"></iframe>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(modalEl);
+      frame = modalEl.querySelector("#dashSourceEntryFrame");
+    }
+    bindSourceEntryModal(modalEl);
+    return { modalEl: modalEl, frame: frame };
   }
 
+  function openEcourtEntryInFrame(frame, receiptNo, stationeryNo) {
+    if (ecourtEntryOpenTimer) clearInterval(ecourtEntryOpenTimer);
+    const startedAt = Date.now();
+    const receiptKey = String(receiptNo || "").trim().toUpperCase();
+    const stationeryKey = String(stationeryNo || "").trim();
+    ecourtEntryOpenTimer = setInterval(function () {
+      let doc;
+      try {
+        doc = frame.contentDocument;
+      } catch (err) {
+        return;
+      }
+      const body = doc && doc.querySelector("#ecourtGridBody");
+      if (body) {
+        let parent = null;
+        body.querySelectorAll("tr.ecourt-tree-parent").forEach(function (tr) {
+          if (!parent && tr.dataset.stationery === stationeryKey) parent = tr;
+        });
+        if (parent) {
+          const rows = body.querySelectorAll("tr.ecourt-tree-child");
+          let editButton = null;
+          rows.forEach(function (tr) {
+            if (!editButton && String(tr.dataset.receiptNo || "").trim().toUpperCase() === receiptKey) {
+              editButton = tr.querySelector(".ecourt-edit-btn");
+            }
+          });
+          if (!editButton) {
+            const toggle = parent.querySelector(".ecourt-tree-toggle");
+            if (toggle && toggle.textContent.trim() === "+") toggle.click();
+            body.querySelectorAll("tr.ecourt-tree-child").forEach(function (tr) {
+              if (!editButton && String(tr.dataset.receiptNo || "").trim().toUpperCase() === receiptKey) {
+                editButton = tr.querySelector(".ecourt-edit-btn");
+              }
+            });
+          }
+          if (editButton) {
+            clearInterval(ecourtEntryOpenTimer);
+            ecourtEntryOpenTimer = null;
+            editButton.click();
+            return;
+          }
+        }
+      }
+      if (Date.now() - startedAt >= 15000) {
+        clearInterval(ecourtEntryOpenTimer);
+        ecourtEntryOpenTimer = null;
+        alert("The e-Court page opened, but the selected entry could not be opened automatically.");
+      }
+    }, 250);
+  }
   function openEdit(row) {
     if (row && row.source_lock_message) {
       alert(row.source_lock_message);
@@ -510,77 +626,54 @@
       alert("Edit is not available for this row. Source entry could not be resolved.");
       return;
     }
-    const frame = document.getElementById("dashSourceEntryFrame");
-    const modalEl = document.getElementById("dashSourceEntryModal");
-    if (frame && modalEl && window.bootstrap) {
-      const sourceModal = bootstrap.Modal.getOrCreateInstance(modalEl);
-      mutationActive = true;
-      const title = document.getElementById("dashSourceEntryModalTitle");
-      if (title) title.textContent = "Edit Entry";
-      frame.src = row.source_url;
-      // Stack above ledger preview modal when both are open.
-      modalEl.style.zIndex = "1065";
-      sourceModal.show();
-      return;
-    }
-    window.open(row.source_url, "_blank");
-  }
-
-  async function deleteRow(row) {
-    if (row && row.source_lock_message) {
-      alert(row.source_lock_message);
-      return;
-    }
-    const url = resolveDeleteUrl(row);
-    if (!url) {
-      alert("Delete is not available for this row.");
-      return;
-    }
-    const label = row.description || "this entry";
-    let creds = null;
-    mutationActive = true;
+    let sourceUrl;
     try {
-      if (!window.JTCSDeleteConfirm?.ask) {
-        if (!(await JTCSDialog.confirm("This will permanently delete from your database.\n\nClick OK for Yes, or Cancel for No."))) {
-          return;
-        }
-      } else {
-        creds = await window.JTCSDeleteConfirm.ask({
-          title: "Confirm Delete",
-          message: "This will permanently delete from your database.\n\nEnter your User ID and password.",
-          confirmLabel: "Yes",
-          cancelLabel: "No",
-        });
-        if (!creds) return;
-      }
-      const res = await fetch(url, {
-        method: "POST",
-        headers: Object.assign(
-          { Accept: "application/json", "X-CSRFToken": csrfToken() },
-          creds ? { "Content-Type": "application/json" } : {}
-        ),
-        ...(creds
-          ? { body: JSON.stringify({ user_id: creds.user_id, password: creds.password }) }
-          : {}),
-      });
-      const data = await res.json().catch(function () {
-        return {};
-      });
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || data.message || "Delete failed.");
-      }
-      if (typeof reloadPreview === "function") await reloadPreview();
+      sourceUrl = new URL(row.source_url, window.location.origin);
     } catch (err) {
-      alert(err.message || "Delete failed.");
-    } finally {
-      if (!modal.classList.contains("show") && typeof reloadPreview === "function") {
-        await reloadPreview();
-      }
-      mutationActive = false;
+      alert("The source entry link is invalid.");
+      return;
     }
+    if (row.source_module === "stamp") {
+      sourceUrl.searchParams.set("ledger_edit", "1");
+    }
+    if (sourceUrl.origin !== window.location.origin) {
+      alert("The source entry link is not on this site.");
+      return;
+    }
+    const source = ensureSourceEntryModal();
+    if (!source.frame || !window.bootstrap) {
+      window.location.assign(sourceUrl.href);
+      return;
+    }
+    const sourceModal = bootstrap.Modal.getOrCreateInstance(source.modalEl);
+    mutationActive = true;
+    returnToPreviewAfterMutation = true;
+    const title = document.getElementById("dashSourceEntryModalTitle");
+    if (title) title.textContent = "Edit Entry";
+    source.frame.onload = null;
+    if (row.source_module === "ecourt" && row.source_reference) {
+      source.frame.onload = function () {
+        source.frame.onload = null;
+        openEcourtEntryInFrame(source.frame, row.source_reference, row.source_group);
+      };
+    }
+    source.frame.src = sourceUrl.href;
+    source.modalEl.style.zIndex = "1065";
+    sourceModal.show();
   }
-
   modal.addEventListener("click", function (event) {
+    if (event.target.closest("#ledgerPreviewPrev")) {
+      event.preventDefault();
+      previewPage = Math.max(1, previewPage - 1);
+      applyPreviewPagination();
+      return;
+    }
+    if (event.target.closest("#ledgerPreviewNext")) {
+      event.preventDefault();
+      previewPage += 1;
+      applyPreviewPagination();
+      return;
+    }
     if (event.target.closest("#ledgerPreviewApplyDates")) {
       event.preventDefault();
       applyPreviewDates();
@@ -599,6 +692,7 @@
     }
     const sortTh = event.target.closest("th.ledger-sort");
     if (sortTh && modal.contains(sortTh)) {
+      previewPage = 1;
       const key = sortTh.getAttribute("data-sort") || "date";
       if (sortKey === key) sortDir *= -1;
       else {
@@ -615,15 +709,15 @@
       openEdit(rowFromTr(editBtn.closest("tr")));
       return;
     }
-    const delBtn = event.target.closest(".ledger-row-delete");
-    if (delBtn && !delBtn.disabled) {
-      event.preventDefault();
-      deleteRow(rowFromTr(delBtn.closest("tr")));
-    }
   });
 
   modal.addEventListener("input", function (event) {
     if (event.target && event.target.id === "ledgerPreviewFilter") applyFilter();
+  });
+  modal.addEventListener("change", function (event) {
+    if (!event.target || event.target.id !== "ledgerPreviewPageSize") return;
+    previewPage = 1;
+    applyFilter();
   });
   modal.addEventListener("keydown", function (event) {
     if (event.key !== "Enter") return;
@@ -641,20 +735,7 @@
     if (!mutationActive) groupBy = null;
   });
 
-  document.getElementById("dashSourceEntryModal")?.addEventListener(
-    "hidden.bs.modal",
-    function () {
-      if (
-        (modal.classList.contains("show") || mutationActive) &&
-        typeof reloadPreview === "function"
-      ) {
-        Promise.resolve(reloadPreview()).finally(function () {
-          mutationActive = false;
-        });
-      }
-    }
-  );
-
+  bindSourceEntryModal(document.getElementById("dashSourceEntryModal"));
   window.JTCSLedgerPreview = {
     dateQuery: dateQuery,
     viewQuery: function () {

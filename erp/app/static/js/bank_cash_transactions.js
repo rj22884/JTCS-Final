@@ -5,6 +5,8 @@
     gridBody: document.getElementById("obcDataGridBody"),
     empty: document.getElementById("obcGridEmpty"),
     count: document.getElementById("obcGridCount"),
+    deleteBtn: document.getElementById("obcDeleteEntryBtn"),
+    customerInvoiceSection: document.getElementById("obcCustomerInvoiceSection"),
     modalEl: document.getElementById("obcEntryModal"),
     modalDialog: document.getElementById("obcEntryModalDialog"),
     modalTitle: document.getElementById("obcEntryModalTitle"),
@@ -261,9 +263,6 @@
           '<button type="button" class="btn btn-sm btn-outline-primary me-1 obc-edit-btn" data-id="' +
           row.entry_id +
           '" title="Edit"><i class="bi bi-pencil"></i></button>' +
-          '<button type="button" class="btn btn-sm btn-outline-danger obc-delete-btn" data-id="' +
-          row.entry_id +
-          '" title="Delete"><i class="bi bi-trash"></i></button>' +
         "</td>";
       els.gridBody.appendChild(tr);
     });
@@ -407,15 +406,39 @@
     return !!(option && option.value && option.getAttribute("data-bank-cash") === "true");
   }
 
+  function isBankMasterLedger(selectEl) {
+    const option = selectEl && selectEl.selectedOptions ? selectEl.selectedOptions[0] : null;
+    return !!(option && String(option.value || "").startsWith("bank-"));
+  }
+
   function syncCustomerRequirement() {
     if (!els.customerSearch) return false;
     const bothSelected = !!(els.creditAccount?.value && els.debitAccount?.value);
     const bothBankCash = bothSelected && isBankCashLedger(els.creditAccount) && isBankCashLedger(els.debitAccount);
+    const bothBankMaster = bothSelected && isBankMasterLedger(els.creditAccount) && isBankMasterLedger(els.debitAccount);
+    if (els.customerInvoiceSection) els.customerInvoiceSection.classList.toggle("d-none", bothBankMaster);
+    if (bothBankMaster) {
+      invoiceRows = [];
+      reservedAdvances = [];
+      customerLedgerKey = "";
+      customerFromCredit = false;
+      if (els.customerId) els.customerId.value = "";
+      if (els.customerSearch) els.customerSearch.value = "";
+      if (els.customerSuggest) els.customerSuggest.classList.add("d-none");
+      if (els.invoiceMode) els.invoiceMode.value = "none";
+      if (els.invoiceModeValue) els.invoiceModeValue.value = "none";
+      if (els.invoiceList) els.invoiceList.innerHTML = "";
+      if (els.invoiceListWrap) els.invoiceListWrap.classList.add("d-none");
+      if (els.allocationPreview) els.allocationPreview.innerHTML = "";
+      if (els.invoicePickerMenu) els.invoicePickerMenu.classList.add("d-none");
+      if (els.invoicePickerLabel) els.invoicePickerLabel.innerHTML = '<span class="obc-inv-line1">No Invoice</span>';
+      clearCategoryFields();
+    }
     const invoiceLinked = !!(
-      (els.invoiceModeValue && els.invoiceModeValue.value !== "none") ||
-      (els.invoiceMode && els.invoiceMode.value !== "none")
+      !bothBankMaster && ((els.invoiceModeValue && els.invoiceModeValue.value !== "none") ||
+      (els.invoiceMode && els.invoiceMode.value !== "none"))
     );
-    const required = invoiceLinked || (bothSelected && !bothBankCash);
+    const required = invoiceLinked || (bothSelected && !bothBankCash && !bothBankMaster);
     els.customerSearch.required = required;
     els.customerSearch.setAttribute("aria-required", required ? "true" : "false");
     els.customerLabel?.classList.toggle("obc-required", required);
@@ -622,6 +645,7 @@
     invoiceReceiptLaunch = null;
     els.form.reset();
     if (els.entryId) els.entryId.value = "";
+    if (els.deleteBtn) els.deleteBtn.classList.add("d-none");
     if (els.workDate) els.workDate.value = window.OBC_API.defaultDate || "";
     if (els.voucherNo) els.voucherNo.readOnly = false;
     if (els.modalTitle) {
@@ -647,6 +671,7 @@
     const row = data.record;
     els.form.reset();
     if (els.entryId) els.entryId.value = String(row.entry_id);
+    if (els.deleteBtn) els.deleteBtn.classList.remove("d-none");
     if (els.workDate) els.workDate.value = row.work_date || "";
     if (els.voucherNo) {
       els.voucherNo.value = row.voucher_no || "";
@@ -772,12 +797,12 @@
     };
   }
 
-  function applyCreditParty(party) {
+  function applyCreditParty(party, includeInvoiceId) {
     customerFromCredit = true;
     if (els.customerId) els.customerId.value = party.id;
     if (els.customerSearch) els.customerSearch.value = party.name || "";
     if (els.customerSuggest) els.customerSuggest.classList.add("d-none");
-    return loadCustomerInvoices(party.id);
+    return loadCustomerInvoices(party.id, null, includeInvoiceId);
   }
 
   function oldestFirst(list) {
@@ -1003,7 +1028,7 @@
     els.allocationPreview.innerHTML = html;
   }
 
-  async function loadCustomerInvoices(customerId, restore) {
+  async function loadCustomerInvoices(customerId, restore, includeInvoiceId) {
     invoiceRows = [];
     customerLedgerKey = "";
     if (!customerId) {
@@ -1014,6 +1039,7 @@
     const url = new URL(window.OBC_API.customerInvoices, window.location.origin);
     url.searchParams.set("customer_id", String(customerId));
     if (els.entryId && els.entryId.value) url.searchParams.set("entry_id", els.entryId.value);
+    if (includeInvoiceId) url.searchParams.set("invoice_id", String(includeInvoiceId));
     const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin" });
     const data = await parseJsonResponse(res);
     invoiceRows = data.invoices || [];
@@ -1026,6 +1052,10 @@
 
   async function restoreInvoiceLink(row) {
     clearInvoiceLink();
+    if (isBankMasterLedger(els.creditAccount) && isBankMasterLedger(els.debitAccount)) {
+      syncCustomerRequirement();
+      return;
+    }
     const party = creditParty();
     const savedId = row && row.customer_id ? String(row.customer_id) : "";
     const customerId = party ? party.id : savedId;
@@ -1046,7 +1076,7 @@
       mode: sameCustomer ? (row.invoice_mode || (ids.length ? "selected" : "none")) : "none",
       ids: ids,
       advances: sameCustomer ? (row.advance_allocations || []) : [],
-    });
+    }, sameCustomer && ids.length ? ids.join(",") : "");
   }
 
   async function saveEntry() {
@@ -1114,6 +1144,7 @@
     });
     const data = await parseJsonResponse(res);
     alert(data.message || "Deleted.");
+    if (modal) modal.hide();
     await loadGrid();
   }
 
@@ -1334,18 +1365,18 @@
 
   els.gridBody.addEventListener("click", function (ev) {
     const editBtn = ev.target.closest(".obc-edit-btn");
-    const deleteBtn = ev.target.closest(".obc-delete-btn");
-    if (editBtn) {
-      openEdit(editBtn.dataset.id).catch(function (err) {
-        alert(err.message || "Unable to load entry.");
-      });
-      return;
-    }
-    if (deleteBtn) {
-      deleteEntry(deleteBtn.dataset.id).catch(function (err) {
-        alert(err.message || "Unable to delete.");
-      });
-    }
+    if (!editBtn) return;
+    openEdit(editBtn.dataset.id).catch(function (err) {
+      alert(err.message || "Unable to load entry.");
+    });
+  });
+
+  els.deleteBtn?.addEventListener("click", function () {
+    const entryId = String(els.entryId?.value || "").trim();
+    if (!entryId) return;
+    deleteEntry(entryId).catch(function (err) {
+      alert(err.message || "Unable to delete.");
+    });
   });
 
   function receiptLaunchParams() {
@@ -1402,7 +1433,7 @@
     await applyCreditParty({
       id: String(row.customer_id || launch.customerId),
       name: partyName,
-    });
+    }, launch.invoiceId);
     const current = (invoiceRows || []).find(function (inv) {
       return String(inv.invoice_id) === String(launch.invoiceId);
     });

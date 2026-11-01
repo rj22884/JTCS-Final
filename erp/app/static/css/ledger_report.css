@@ -464,3 +464,17 @@
     flex-wrap: wrap;
   }
 }
+
+.ledger-report-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.55rem 0.25rem;
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  z-index: 2;
+  border-top: 1px solid #e5e7e9;
+}

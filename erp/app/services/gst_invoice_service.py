@@ -714,6 +714,7 @@ class GstInvoiceService:
             OthersBankCashInvoiceAllocation,
             OthersBankCashTransaction,
         )
+        from app.models.gst_billing import GstInvoice
         from app.repositories.bank_cash_repository import OthersBankCashRepository
 
         keys: list[int] = []
@@ -730,6 +731,14 @@ class GstInvoiceService:
         if not keys:
             return totals
         OthersBankCashRepository().ensure_schema()
+        misc_invoice_ids = {
+            int(row.InvoiceID)
+            for row in db.session.scalars(
+                select(GstInvoice).where(GstInvoice.InvoiceID.in_(keys))
+            ).all()
+            if self.normalize_bill_source(getattr(row, "BillSource", None))
+            == self.BILL_SOURCE_MISCELLANEOUS
+        }
         skip = int(exclude_entry_id) if exclude_entry_id else None
         allocated_entries: set[int] = set()
         alloc_rows = []
@@ -741,6 +750,7 @@ class GstInvoiceService:
                         OthersBankCashInvoiceAllocation.InvoiceID,
                         OthersBankCashInvoiceAllocation.EntryID,
                         OthersBankCashInvoiceAllocation.AllocatedAmount,
+                        OthersBankCashInvoiceAllocation.AllocationSource,
                     )
                     .join(
                         OthersBankCashTransaction,
@@ -761,11 +771,16 @@ class GstInvoiceService:
                     )
                 ).all()
             )
-        for invoice_id, entry_id, amount in alloc_rows:
+        for invoice_id, entry_id, amount, allocation_source in alloc_rows:
             allocated_entries.add(int(entry_id))
             if skip and int(entry_id) == skip:
                 continue
             invoice_key = int(invoice_id)
+            if (
+                invoice_key in misc_invoice_ids
+                and (allocation_source or "receipt").strip().lower() == "advance"
+            ):
+                continue
             if invoice_key in totals:
                 totals[invoice_key] += _q(Decimal(str(amount or 0)))
         for row in legacy_rows:
@@ -782,6 +797,12 @@ class GstInvoiceService:
     def payment_position(self, inv: GstInvoice, *, exclude_entry_id: int | None = None) -> dict:
         """Paid / Partially Paid / Unpaid from Money In and existing receipt transactions."""
         value = _q(Decimal(str(getattr(inv, "InvoiceValue", None) or 0)))
+        if getattr(inv, "VoucherType", None) == self.VOUCHER_SALE:
+            # Sales invoice balances and Money In/Out allocations use the
+            # rounded rupee total shown on the invoice.
+            value = value.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(
+                Decimal("0.01")
+            )
         received = self.money_in_total(inv.InvoiceID, exclude_entry_id=exclude_entry_id)
         from app.services.payment_accounting_service import PaymentAccountingService
 
@@ -2486,11 +2507,11 @@ class GstInvoiceService:
 
         invoice_value = _q(taxable_total + cgst_amt + sgst_amt + igst_amt)
         if rate_includes_gst and gst_rate_used > 0:
-            round_off = _q(gross_total - invoice_value)
             invoice_value = _q(gross_total)
         else:
-            round_off = self._parse_round_off(payload)
-            invoice_value = _q(invoice_value + round_off)
+            # Round off is calculated automatically from the complete invoice
+            # total below, after inclusive-gross lines have also been added.
+            invoice_value = _q(invoice_value)
         if saw_inclusive:
             list_price += inclusive_list
             discount_total += inclusive_discount
@@ -2507,6 +2528,10 @@ class GstInvoiceService:
                 else:
                     igst_rate = gst_rate_used
             invoice_value = _q(invoice_value + inclusive_gross_total)
+        invoice_value = _q(invoice_value)
+        rounded_invoice_value = invoice_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        round_off = _q(rounded_invoice_value - invoice_value)
+        invoice_value = rounded_invoice_value.quantize(Decimal("0.01"))
         if invoice_value < 0:
             raise ValueError("Invoice Value cannot be negative after round off.")
         words = amount_in_words_inr(invoice_value)
@@ -3297,7 +3322,15 @@ class GstInvoiceService:
             if self.normalize_voucher_type(getattr(inv, "VoucherType", None)) == self.VOUCHER_SALE:
                 from app.services.others_bank_cash_service import OthersBankCashService
 
-                OthersBankCashService().apply_unallocated_to_invoice(inv)
+                bank_cash_service = OthersBankCashService()
+                if (
+                    self.normalize_bill_source(getattr(inv, "BillSource", None))
+                    == self.BILL_SOURCE_MISCELLANEOUS
+                ):
+                    if not bool(getattr(inv, "InvoicePaymentReceived", False)):
+                        bank_cash_service.release_misc_advance_allocations(inv.InvoiceID, commit=False)
+                else:
+                    bank_cash_service.apply_unallocated_to_invoice(inv)
             return self._serialize(inv)
 
         if (
@@ -3342,6 +3375,24 @@ class GstInvoiceService:
         )
         payload = {**payload, "invoice_no": inv.InvoiceNo, "bill_source": bill_source}
         self._guard_tally_status_change(inv, payload)
+        remove_linked_receipts = self._form_flag(payload, "delete_linked_money_inout")
+        if remove_linked_receipts:
+            if (
+                existing_source != self.BILL_SOURCE_MISCELLANEOUS
+                or self.normalize_voucher_type(getattr(inv, "VoucherType", None))
+                != self.VOUCHER_SALE
+            ):
+                raise ValueError("Linked Money In-Out receipts can only be removed from a Miscellaneous sale invoice.")
+            if self._form_flag(payload, "payment_received"):
+                raise ValueError("Payment Received must be cleared before removing its Money In-Out receipt.")
+            if not (payload.get("payment_remove_reason") or "").strip():
+                raise ValueError("Enter the reason for removing Payment Received.")
+            from app.utils.delete_auth import verify_delete_credentials
+
+            verify_delete_credentials(
+                str(payload.get("user_id") or payload.get("userid") or ""),
+                str(payload.get("password") or ""),
+            )
         header, lines, _ = self._build_header_and_lines(
             payload, persist_no=False, require_payment_bank=require_payment_bank
         )
@@ -3362,7 +3413,22 @@ class GstInvoiceService:
         header.pop("CreatedBy", None)
 
         def _write() -> dict:
+            if remove_linked_receipts:
+                from app.services.others_bank_cash_service import OthersBankCashService
+
+                OthersBankCashService().delete_invoice_receipts(invoice_id, commit=False)
             updated = self.repo.update(inv, header, lines)
+            if (
+                self.normalize_voucher_type(getattr(updated, "VoucherType", None)) == self.VOUCHER_SALE
+                and self.normalize_bill_source(getattr(updated, "BillSource", None))
+                == self.BILL_SOURCE_MISCELLANEOUS
+                and not self._form_flag(payload, "payment_received")
+            ):
+                from app.services.others_bank_cash_service import OthersBankCashService
+
+                OthersBankCashService().release_misc_advance_allocations(
+                    updated.InvoiceID, commit=False
+                )
             self._sync_sale_daily(updated)
             self._sync_purchase_payment_bank(updated)
             self._sync_misc_payment_received(updated)

@@ -90,9 +90,10 @@
             data-source-url="{{ line.source_url or '' }}"
             data-source-module="{{ line.source_module or '' }}"
             data-source-module-id="{{ line.source_module_id or '' }}"
+            data-source-reference="{{ line.source_reference or '' }}"
+            data-source-group="{{ line.source_group or '' }}"
             data-work-type="{{ line.work_type or '' }}"
             data-can-edit="{{ '1' if line.can_edit else '0' }}"
-            data-can-delete="{{ '1' if line.can_delete else '0' }}"
             data-source-lock="{{ line.source_lock_message or '' }}">
           <td data-col="date" data-sort-value="{{ line.sort_date or '' }}">{{ line.date | display_value if line.date else dash }}</td>
           <td data-col="description">{{ line.description or dash }}</td>
@@ -106,18 +107,13 @@
                     title="{{ line.source_lock_message or 'Edit' }}">
               <i class="bi bi-pencil"></i>
             </button>
-            <button type="button" class="btn btn-outline-danger btn-sm ledger-row-delete"
-                    {% if line.source_lock_message %}{% elif not line.can_delete %}disabled{% endif %}
-                    title="{{ line.source_lock_message or 'Delete' }}">
-              <i class="bi bi-trash"></i>
-            </button>
             {% else %}
             —
             {% endif %}
           </td>
         </tr>
         {% else %}
-        <tr>
+        <tr class="ledger-preview-empty-row">
           <td colspan="6" class="text-center text-muted">No ledger rows for this period.</td>
         </tr>
         {% endfor %}
@@ -125,6 +121,17 @@
     </table>
   </div>
 
+  <div class="ledger-report-pagination" id="ledgerPreviewPagination" aria-label="Ledger preview pages">
+    <label class="small text-muted" for="ledgerPreviewPageSize">Rows per page</label>
+    <select class="form-select form-select-sm" id="ledgerPreviewPageSize" aria-label="Rows per page" style="width:auto">
+      {% for size in [20, 25, 50, 100, 500] %}
+      <option value="{{ size }}"{% if size == 20 %} selected{% endif %}>{{ size }}</option>
+      {% endfor %}
+    </select>
+    <span class="small text-muted" id="ledgerPreviewPageInfo" aria-live="polite"></span>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="ledgerPreviewPrev" disabled>Previous</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" id="ledgerPreviewNext" disabled>Next</button>
+  </div>
   <div class="ledger-html-foot">
     Generated for preview · Joshi Tax Consultancy &amp; Services (JTCS)
   </div>

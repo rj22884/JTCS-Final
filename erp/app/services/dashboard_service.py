@@ -1553,6 +1553,8 @@ class DashboardService:
             "source_module": None,
             "source_module_id": None,
             "source_url": None,
+            "source_reference": None,
+            "source_group": None,
             "can_open": False,
         }
 
@@ -1575,6 +1577,8 @@ class DashboardService:
             "source_module": None,
             "source_module_id": None,
             "source_url": None,
+            "source_reference": None,
+            "source_group": None,
             "can_open": False,
         }
         wt = (work_type or "").strip()
@@ -1600,7 +1604,7 @@ class DashboardService:
                 sale = db.session.execute(
                     text(
                         """
-                        SELECT TOP 1 SaleID
+                        SELECT TOP 1 SaleID, ReceiptNo, StationeryNumber
                         FROM ECourtSale
                         WHERE DailyTransactionID = :tid
                         ORDER BY SaleID DESC
@@ -1614,6 +1618,8 @@ class DashboardService:
                             "source_module": "ecourt",
                             "source_module_id": int(sale[0]),
                             "source_url": url_for("ecourt.ecourt_activity"),
+                            "source_reference": (sale[1] or "").strip(),
+                            "source_group": (sale[2] or "").strip(),
                             "can_open": True,
                         }
                     )

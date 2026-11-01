@@ -3,11 +3,11 @@
 {% block ribbon_toolbar %}{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20260928cols1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stamp_activity.css') }}?v=20261028ledgereditui">
 {% endblock %}
 
 {% block content %}
-<div class="stamp-erp-page">
+<div class="stamp-erp-page{% if request.args.get('ledger_edit') == '1' %} stamp-ledger-edit-mode{% endif %}">
   <div class="stamp-dash-top">
     <div class="stamp-dash-left">
     <div class="jtcs-card stamp-period-panel">
@@ -584,6 +584,7 @@
   window.STAMP_DEFAULT_DATE_TO = {{ default_date_to | tojson }};
   {% set auto_load_stamp = load_stamp_id or (duplicate_existing.stamp_id if duplicate_existing else none) %}
   window.STAMP_AUTO_LOAD_STAMP_ID = {{ auto_load_stamp | tojson }};
+  window.STAMP_LEDGER_EDIT_MODE = {{ (request.args.get('ledger_edit') == '1') | tojson }};
   window.STAMP_REPOST_MOBILE = {{ repost_mobile | tojson }};
   window.STAMP_CONTINUE_MOBILE = {{ continue_mobile | tojson }};
   window.STAMP_WEBSITE_PREFILL = {{ (website_prefill or {}) | tojson }};
@@ -593,5 +594,5 @@
   window.STAMP_SHCIL_CLIENT_LOGIN = {{ is_vps | tojson }};
   window.STAMP_SALE_QR_URL = {{ url_for('sale_upi_qr.sale_upi_qr') | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20260928cols1"></script>
+<script src="{{ url_for('static', filename='js/stamp_activity.js') }}?v=20261028ledgereditui"></script>
 {% endblock %}

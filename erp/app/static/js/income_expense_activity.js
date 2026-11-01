@@ -2045,6 +2045,9 @@
           "<td>" +
           escapeHtml(row.remarks || "") +
           "</td>" +
+          (window.OIE_FORCE_LEDGER_KIND === "Misc."
+            ? "<td class=\"oie-money-out-in-cell\" title=\"" + escapeHtml(row.money_out_in_accounts || "") + "\">" + escapeHtml(row.money_out_in_accounts || "—") + "</td>"
+            : "") +
           "<td>" +
           escapeHtml(formatDisplayDate(row.created_date)) +
           "</td>" +
@@ -2919,7 +2922,18 @@
       alert("Invoice window could not be opened in this page. Refresh and try again.");
       return false;
     }
-    host.jtcsOpenPageWindow("/accounting/invoice/sale?" + params.toString(), "Sale / Service Invoice");
+    const invoiceHref = "/accounting/invoice/sale?" + params.toString();
+    const openInvoice = function () {
+      host.jtcsOpenPageWindow(invoiceHref, "Sale / Service Invoice");
+    };
+    // Wait for Bootstrap to remove its backdrop: it sits above page windows
+    // and otherwise briefly keeps the invoice behind the entry editor.
+    if (els.entryModalEl?.classList.contains("show")) {
+      els.entryModalEl.addEventListener("hidden.bs.modal", openInvoice, { once: true });
+      entryModal?.hide();
+    } else {
+      openInvoice();
+    }
     return true;
   }
 
@@ -3122,10 +3136,11 @@
         });
         miscCreatingInvoice = false;
         loadGrid();
-        if (miscInvoiceEditorOpen) setTimeout(hideMiscInvoiceEditor, 0);
+        if (miscInvoiceEditorOpen && !data.keep_open) setTimeout(hideMiscInvoiceEditor, 0);
       }
       if (data.type === "jtcs-invoice-cancelled") {
         miscCreatingInvoice = false;
+        if (miscInvoiceEditorOpen) hideMiscInvoiceEditor();
       }
       if (data.type === "jtcs-invoice-deleted") {
         paintMiscInvoice(null);

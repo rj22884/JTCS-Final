@@ -863,3 +863,8 @@ body.stamp-col-resizing iframe {
   border: 1px solid #d7dce3;
   padding: 4px;
 }
+
+
+.stamp-erp-page.stamp-ledger-edit-mode > .stamp-dash-top {
+  display: none !important;
+}

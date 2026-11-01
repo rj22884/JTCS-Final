@@ -1,7 +1,7 @@
 {% extends 'layouts/base.html' %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20260906sum1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/ledger_report.css') }}?v=20261028no-preview-delete2">
 {% endblock %}
 
 {% block content %}
@@ -17,11 +17,11 @@
   <div class="row g-3 align-items-end mb-3">
     <div class="col-md-3">
       <label class="form-label" for="ledgerDateFrom">From Date</label>
-      <input type="date" class="form-control form-control-sm" id="ledgerDateFrom" value="">
+      <input type="date" class="form-control form-control-sm" id="ledgerDateFrom" value="{{ today }}">
     </div>
     <div class="col-md-3">
       <label class="form-label" for="ledgerDateTo">To Date</label>
-      <input type="date" class="form-control form-control-sm" id="ledgerDateTo" value="">
+      <input type="date" class="form-control form-control-sm" id="ledgerDateTo" value="{{ today }}">
     </div>
     <div class="col-md-3">
       <label class="form-label" for="ledgerKind">Ledger Type</label>
@@ -81,6 +81,7 @@
           </tr>
         </tbody>
       </table>
+      <nav class="ledger-report-pagination" id="ledgerReportPagination" aria-label="Ledger pages"></nav>
     </div>
     <aside class="ledger-report-summaries" aria-label="Financial summaries">
       <section class="lr-summary-box lr-summary-bs" id="ledgerSummaryBs">
@@ -203,6 +204,6 @@
     }
   };
 </script>
-<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261027deletekeep2"></script>
-<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20261027deletekeep2"></script>
+<script src="{{ url_for('static', filename='js/ledger_preview.js') }}?v=20261028preview-pages20"></script>
+<script src="{{ url_for('static', filename='js/ledger_report.js') }}?v=20261028pagesize20"></script>
 {% endblock %}

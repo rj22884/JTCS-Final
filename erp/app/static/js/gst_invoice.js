@@ -102,6 +102,7 @@
   let savedPaymentReceived = false;
   let statusAuth = null;
   let applyingTallyStatus = false;
+  let miscPaymentNoAcknowledged = false;
 
   function apiUrl(template, id) {
     return String(template || "").replace(/\/0(?=$|\/)/, "/" + String(id));
@@ -648,7 +649,9 @@
     }
     const standardTax = intra ? cgst + sgst - inclusiveCgst - inclusiveSgst : igst - inclusiveIgst;
     const baseValue = taxable + standardTax;
-    const roundOff = roundOffSigned();
+    const rawInvoiceValue = Math.max(0, baseValue + inclusiveGross);
+    const roundedInvoiceValue = Math.round(rawInvoiceValue + Number.EPSILON);
+    const roundOff = roundedInvoiceValue - rawInvoiceValue;
     return {
       list_price: listPrice + inclusiveTaxable,
       discount_amount: disc,
@@ -660,7 +663,7 @@
       igst_rate: igstRate,
       igst_amount: igst,
       round_off: roundOff,
-      invoice_value: Math.max(0, baseValue + inclusiveGross + roundOff),
+      invoice_value: roundedInvoiceValue,
       amount_in_words: (els.words && els.words.textContent) || "",
       tax_type: intra ? "CGST_SGST" : "IGST",
     };
@@ -1107,6 +1110,7 @@
         misc_entry_id: miscId,
         record: record || null,
         created: !!(extra && extra.created),
+        keep_open: !!(extra && extra.keep_open),
       },
       window.location.origin
     );
@@ -1126,20 +1130,96 @@
     return Promise.resolve(window.confirm(message));
   }
 
+  async function confirmPaidMiscInvoiceUpdate(payload) {
+    const source = String(currentBillSource || "").trim().toLowerCase();
+    if (!editingId || !["miscellaneous", "misc"].includes(source)) {
+      return { proceed: true, paymentCleared: false };
+    }
+
+    const res = await fetch("/accounting/api/invoices/" + encodeURIComponent(editingId) + "/payment-adjustment", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok || !data.adjustment) {
+      throw new Error(data.error || "Unable to verify the invoice payment before updating.");
+    }
+    const adjustment = data.adjustment;
+    const receipts = Array.isArray(adjustment.entries) ? adjustment.entries : [];
+    const paymentReceived =
+      savedPaymentReceived || paymentReceivedYes() || Number(adjustment.allocated_amount || 0) > 0;
+    if (!paymentReceived) return { proceed: true, paymentCleared: false };
+
+    const linkedToOtherInvoice = receipts.some(function (receipt) {
+      const ids = (receipt.linked_invoice_ids || []).map(String);
+      return (
+        ids.some(function (id) { return id !== String(editingId); }) ||
+        Number(receipt.remaining_money_inout_amount || 0) > 0
+      );
+    });
+    if (linkedToOtherInvoice) {
+      const message =
+        "A Money In-Out receipt is also linked to another invoice or has an unallocated balance. Resolve that receipt first; this invoice was not updated.";
+      if (window.JTCSDialog?.alert) await window.JTCSDialog.alert(message, "warning");
+      else window.alert(message);
+      return { proceed: false, paymentCleared: false };
+    }
+
+    const message = receipts.length
+      ? "Payment already received. Do you want to update this invoice and delete its linked Money In-Out receipt(s)?"
+      : "Payment already received. Do you want to update this invoice and clear its Payment Received status?";
+    const yes = window.JTCSDialog?.confirm
+      ? await window.JTCSDialog.confirm(message, {
+          title: "Payment already received",
+          okLabel: "Yes",
+          cancelLabel: "No",
+          type: "warning",
+        })
+      : window.confirm(message);
+    if (!yes) return { proceed: false, paymentCleared: false };
+
+    const creds = await window.JTCSDeleteConfirm?.ask?.({
+      message: "Confirm your User ID and password to remove the linked receipt and update this invoice.",
+      title: "Confirm invoice update",
+      confirmLabel: "Confirm",
+      confirmIcon: "bi-shield-lock",
+      variant: "warning",
+    });
+    if (!creds || !creds.user_id || !creds.password) {
+      return { proceed: false, paymentCleared: false };
+    }
+
+    payload.delete_linked_money_inout = true;
+    payload.payment_received = false;
+    payload.payment_remove_reason = "Linked Money In-Out receipt removed for Misc invoice update.";
+    payload.user_id = creds.user_id;
+    payload.password = creds.password;
+    statusAuth = { user_id: creds.user_id, password: creds.password };
+    if (els.payReceivedYes) els.payReceivedYes.checked = false;
+    if (els.payReceivedNo) els.payReceivedNo.checked = true;
+    if (els.payRemoveReason) els.payRemoveReason.value = payload.payment_remove_reason;
+    return { proceed: true, paymentCleared: true };
+  }
+
   function receiptFormUrl(record) {
     const params = new URLSearchParams();
     params.set("receipt", "1");
     params.set("customer_id", String(record.customer_id || ""));
     params.set("customer_name", record.customer_name || "");
     params.set("invoice_id", String(record.invoice_id || ""));
-    if (record.invoice_value != null && record.invoice_value !== "") {
-      params.set("amount", String(record.invoice_value));
+    const due = record.outstanding_amount;
+    const invoiceAmount = record.invoice_value;
+    const receiptAmount = due != null && Number(due) > 0 ? due : invoiceAmount;
+    if (receiptAmount != null && receiptAmount !== "") {
+      params.set("amount", String(receiptAmount));
     }
     if (window.JtcsInvoiceReceiptReturn) {
+      const receiptOrigin = (launchParams.get("receipt_origin") || "INVOICE").trim().toUpperCase();
+      const returnTo = launchParams.get("return_to") || "/accounting/invoice/sale";
       window.JtcsInvoiceReceiptReturn.appendModuleReturn(
         params,
-        "INVOICE",
-        "/accounting/invoice/sale"
+        receiptOrigin,
+        returnTo
       );
     } else {
       params.set("receipt_origin", "INVOICE");
@@ -1148,11 +1228,15 @@
     return "/others/bank-cash-transactions?" + params.toString();
   }
 
-  function openReceiptWindow(record) {
+  function openReceiptWindow(record, replaceCurrentWindow) {
     const url = receiptFormUrl(record);
     try {
       const host = window.top;
       if (host && typeof host.jtcsOpenPageWindow === "function") {
+        if (replaceCurrentWindow && window.frameElement && typeof host.jtcsClosePageWindow === "function") {
+          const currentPageWindow = window.frameElement.closest(".jtcs-page-win");
+          if (currentPageWindow) host.jtcsClosePageWindow(currentPageWindow, true);
+        }
         host.jtcsOpenPageWindow(url, "Money In-Out Receipt");
         return true;
       }
@@ -1230,6 +1314,13 @@
 
   function applyTotals(t) {
     if (!t) return;
+    const signedRoundOff = Number(t.round_off || 0);
+    if (els.roundOffAmt) {
+      els.roundOffAmt.value = Math.abs(signedRoundOff) >= 0.005
+        ? Math.abs(signedRoundOff).toFixed(2)
+        : "";
+    }
+    setRoundOffSign(signedRoundOff > 0 ? "add" : signedRoundOff < 0 ? "sub" : "");
     document.getElementById("totList").textContent = Number(t.list_price || 0).toFixed(2);
     document.getElementById("totDisc").textContent = Number(t.discount_amount || 0).toFixed(2);
     document.getElementById("totTaxable").textContent = Number(t.taxable_value || 0).toFixed(2);
@@ -1485,6 +1576,8 @@
       showStatus("Save cancelled. Select Tax Year / Quarter / Month for service item review.", "warning");
       return;
     }
+    const paidUpdate = await confirmPaidMiscInvoiceUpdate(payload);
+    if (!paidUpdate.proceed) return;
     if (tallyStatusVisible()) {
       const removingApproval = savedBillApproved && !payload.bill_approved;
       const removingPayment = savedPaymentReceived && !payload.payment_received;
@@ -1525,22 +1618,50 @@
     const linkedFollowup = (els.followupEntryId?.value || "").trim();
     const linkedMisc = (launchParams.get("misc_entry_id") || "").trim();
     const justCreated = !editingId;
-    if (linkedFollowup || linkedMisc) {
+    const recordSource = String((data.record && data.record.bill_source) || currentBillSource || "")
+      .trim()
+      .toLowerCase();
+    const isMiscInvoice =
+      !!linkedMisc || recordSource === "miscellaneous" || recordSource === "misc";
+    const outstanding = Number((data.record && data.record.outstanding_amount) || 0);
+    const shouldAskForPayment =
+      justCreated ||
+      (!miscPaymentNoAcknowledged && !paidUpdate.paymentCleared && editingId && isMiscInvoice && outstanding > 0);
+    if (!isMiscInvoice && (linkedFollowup || linkedMisc)) {
       notifyInvoiceOpener("jtcs-invoice-saved", data.record, { created: justCreated });
     }
     if (
-      justCreated &&
+      shouldAskForPayment &&
       voucherType !== "PURCHASE" &&
       data.record &&
       data.record.customer_id
     ) {
       const receive = await askReceivePayment();
       if (receive) {
+        if (isMiscInvoice && (linkedFollowup || linkedMisc)) {
+          notifyInvoiceOpener("jtcs-invoice-saved", data.record, { created: justCreated });
+        }
         fillRecord(data.record);
-        openReceiptWindow(data.record);
+        openReceiptWindow(data.record, isMiscInvoice && !isFollowupModalEmbed());
+        return true;
+      }
+      if (isMiscInvoice) {
+        if (linkedFollowup || linkedMisc) {
+          notifyInvoiceOpener("jtcs-invoice-saved", data.record, {
+            created: justCreated,
+            keep_open: true,
+          });
+          followupNotified = false;
+        }
+        fillRecord(data.record);
+        miscPaymentNoAcknowledged = true;
         return true;
       }
     }
+    if (isMiscInvoice && (linkedFollowup || linkedMisc)) {
+      notifyInvoiceOpener("jtcs-invoice-saved", data.record, { created: justCreated });
+    }
+    miscPaymentNoAcknowledged = false;
     if (isFollowupModalEmbed()) return true;
     if ((linkedFollowup || linkedMisc) && closeEmbeddedInvoice()) return true;
     closeInvoiceForm();
@@ -2614,12 +2735,15 @@
     confirmDiscardInvoice().then(function (allow) {
       if (!allow) return;
       const entryId = (els.followupEntryId?.value || "").trim();
+      const miscEntryId = (launchParams.get("misc_entry_id") || "").trim();
       const wasNew = !editingId;
       invoiceFormDirty = false;
-      if (wasNew && entryId && !followupNotified) {
+      if ((wasNew || miscEntryId) && (entryId || miscEntryId) && !followupNotified) {
         notifyInvoiceOpener("jtcs-invoice-cancelled", null);
       }
       if (entryId && closeEmbeddedInvoice()) return;
+      if (miscEntryId && isFollowupModalEmbed()) return;
+      if (miscEntryId && closeEmbeddedInvoice()) return;
       closeInvoiceForm();
       showStatus("Invoice form closed.", "info");
     });

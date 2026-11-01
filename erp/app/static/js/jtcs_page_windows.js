@@ -29,8 +29,14 @@
     window.fetch = function (input, init) {
       var method = (init && init.method) || (input && input.method) || "GET";
       var url = typeof input === "string" ? input : (input && input.url) || "";
-      return origFetch.apply(this, arguments).then(function (resp) {
-        if (resp && resp.ok && shouldRefreshAfterMutation(url, method)) {
+      var skipPageRefresh = !!(init && init.__jtcsSkipPageRefresh);
+      var fetchInit = init;
+      if (skipPageRefresh) {
+        fetchInit = Object.assign({}, init);
+        delete fetchInit.__jtcsSkipPageRefresh;
+      }
+      return origFetch.call(this, input, fetchInit).then(function (resp) {
+        if (!skipPageRefresh && resp && resp.ok && shouldRefreshAfterMutation(url, method)) {
           var copy = resp.clone();
           copy.json().then(function (data) {
             if (data && data.ok === false) return;

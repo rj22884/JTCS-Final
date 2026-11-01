@@ -13,6 +13,7 @@
     refreshBtn: document.getElementById("ledgerRefreshBtn"),
     body: document.getElementById("ledgerGridBody"),
     count: document.getElementById("ledgerCount"),
+    pagination: document.getElementById("ledgerReportPagination"),
     previewModalEl: document.getElementById("ledgerPreviewModal"),
     previewDialog: document.getElementById("ledgerPreviewDialog"),
     previewTitle: document.getElementById("ledgerPreviewModalTitle"),
@@ -38,6 +39,8 @@
   let currentId = "";
   let isMaximized = false;
   let currentRows = [];
+  let currentPage = 1;
+  let pageSize = 20;
   let lastKind = "all";
   let lastSearch = "";
   let sortState = { key: "label", dir: "asc" };
@@ -233,6 +236,7 @@
     params.set("date_to", to);
     const empty = '<div class="lr-summary-empty text-muted">Unable to load summary.</div>';
     return fetch(cfg.summaryUrl + "?" + params.toString(), {
+      cache: "no-store",
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
       .then(function (res) {
@@ -288,6 +292,26 @@
     });
   }
 
+  function renderPagination(total) {
+    if (!els.pagination) return;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    currentPage = Math.max(1, Math.min(currentPage, pages));
+    const start = Math.max(1, Math.min(currentPage - 2, pages - 4));
+    const end = Math.min(pages, start + 4);
+    let html = '<label class="small text-muted d-flex align-items-center gap-1 me-auto">Rows per page' +
+      '<select class="form-select form-select-sm ledger-page-size" aria-label="Rows per page">';
+    [20, 25, 50, 100, 500].forEach(function (size) {
+      html += '<option value="' + size + '"' + (size === pageSize ? ' selected' : '') + '>' + size + '</option>';
+    });
+    html += '</select></label>';
+    html += `<span class="small text-muted me-2">Page ${currentPage} of ${pages}</span>`;
+    html += `<button type="button" class="btn btn-outline-secondary btn-sm" data-ledger-page="${currentPage - 1}" ${currentPage <= 1 ? "disabled" : ""}>Previous</button>`;
+    for (let page = start; page <= end; page += 1) {
+      html += `<button type="button" class="btn btn-sm ${page === currentPage ? "btn-primary" : "btn-outline-secondary"}" data-ledger-page="${page}" aria-current="${page === currentPage ? "page" : "false"}">${page}</button>`;
+    }
+    html += `<button type="button" class="btn btn-outline-secondary btn-sm" data-ledger-page="${currentPage + 1}" ${currentPage >= pages ? "disabled" : ""}>Next</button>`;
+    els.pagination.innerHTML = html;
+  }
   function renderRows(rows, kind, search) {
     if (!els.body) return;
     lastKind = kind;
@@ -296,53 +320,41 @@
     if (!currentRows.length) {
       els.body.innerHTML = emptyRow(escapeHtml(emptyMessage(kind, search)));
       if (els.count) els.count.textContent = "0 ledgers";
+      if (els.pagination) els.pagination.innerHTML = "";
       syncSortHeaders();
       return;
     }
+    renderPagination(currentRows.length);
+    const first = (currentPage - 1) * pageSize + 1;
+    const last = Math.min(first + pageSize - 1, currentRows.length);
     if (els.count) {
-      let label =
-        currentRows.length + " ledger" + (currentRows.length === 1 ? "" : "s");
-      if (openingOnly) {
-        label += " · Enter From and To dates to load period transactions in Preview";
-      }
+      let label = "Showing " + first + "–" + last + " of " + currentRows.length + " ledgers";
+      if (openingOnly) label += " · Enter From and To dates to load period transactions in Preview";
       els.count.textContent = label;
     }
-    els.body.innerHTML = sortRows(currentRows)
-      .map(function (row) {
-        const typeLabel = KIND_LABELS[row.kind] || row.kind || "—";
-        return (
-          "<tr>" +
-          '<td class="lr-col-fit"><span class="badge text-bg-light border ledger-kind-badge">' +
-          escapeHtml(typeLabel) +
-          "</span></td>" +
-          '<td class="lr-col-ledger"><strong>' +
-          escapeHtml(row.label || "—") +
-          "</strong>" +
-          (row.active === false
-            ? ' <span class="badge text-bg-secondary ms-1">Inactive</span>'
-            : "") +
-          "</td>" +
-          '<td class="lr-col-fit">' +
-          escapeHtml(row.subtitle || "—") +
-          "</td>" +
-          '<td class="lr-col-fit text-end">' +
-          escapeHtml(row.txn_count == null ? "—" : row.txn_count) +
-          "</td>" +
-          '<td class="lr-col-fit text-end">' +
-          '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
-          escapeHtml(row.kind) +
-          '" data-id="' +
-          escapeHtml(row.id) +
-          '"><i class="bi bi-eye"></i> Preview</button>' +
-          "</td>" +
-          "</tr>"
-        );
-      })
-      .join("");
+    const pageRows = sortRows(currentRows).slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    els.body.innerHTML = pageRows.map(function (row) {
+      const typeLabel = KIND_LABELS[row.kind] || row.kind || "—";
+      return (
+        "<tr>" +
+        '<td class="lr-col-fit"><span class="badge text-bg-light border ledger-kind-badge">' +
+        escapeHtml(typeLabel) +
+        "</span></td>" +
+        '<td class="lr-col-ledger"><strong>' + escapeHtml(row.label || "—") + "</strong>" +
+        (row.active === false ? ' <span class="badge text-bg-secondary ms-1">Inactive</span>' : "") +
+        "</td>" +
+        '<td class="lr-col-fit">' + escapeHtml(row.subtitle || "—") + "</td>" +
+        '<td class="lr-col-fit text-end">' + escapeHtml(row.txn_count == null ? "—" : row.txn_count) + "</td>" +
+        '<td class="lr-col-fit text-end">' +
+        '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
+        escapeHtml(row.kind) + '" data-id="' + escapeHtml(row.id) + '"><i class="bi bi-eye"></i> Preview</button>' +
+        "</td></tr>"
+      );
+    }).join("");
     syncSortHeaders();
   }
-
   function loadLedgers() {
+    currentPage = 1;
     const kind = (els.kind?.value || "all").trim().toLowerCase();
     const search = (els.search?.value || "").trim();
     const requestId = ++searchRequestId;
@@ -358,6 +370,7 @@
 
     if (els.count) els.count.textContent = "Searching…";
     return fetch(url, {
+      cache: "no-store",
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
       .then(function (res) {
@@ -412,6 +425,7 @@
     previewModal.show();
     try {
       const res = await fetch(url + qs, {
+        cache: "no-store",
         headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
       });
       const data = await res.json();
@@ -466,6 +480,7 @@
       sortState.key = key;
       sortState.dir = key === "txn_count" ? "desc" : "asc";
     }
+    currentPage = 1;
     renderRows(currentRows, lastKind, lastSearch);
   }
 
@@ -536,11 +551,13 @@
   });
   els.dateFrom?.addEventListener("change", function () {
     openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    currentPage = 1;
     renderRows(currentRows, lastKind, lastSearch);
     loadSummaries();
   });
   els.dateTo?.addEventListener("change", function () {
     openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    currentPage = 1;
     renderRows(currentRows, lastKind, lastSearch);
     loadSummaries();
   });
@@ -553,6 +570,27 @@
     onSortHeader(event);
   });
   els.body?.addEventListener("click", onGridClick);
+  els.pagination?.addEventListener("change", function (event) {
+    if (!event.target.matches(".ledger-page-size")) return;
+    const nextSize = parseInt(event.target.value, 10);
+    if (![20, 25, 50, 100, 500].includes(nextSize)) return;
+    pageSize = nextSize;
+    currentPage = 1;
+    renderRows(currentRows, lastKind, lastSearch);
+  });
+  els.pagination?.addEventListener("click", function (event) {
+    const button = event.target.closest("[data-ledger-page]");
+    if (!button || button.disabled) return;
+    const page = parseInt(button.getAttribute("data-ledger-page"), 10);
+    if (!Number.isFinite(page)) return;
+    currentPage = page;
+    renderRows(currentRows, lastKind, lastSearch);
+  });
+  window.addEventListener("jtcs:ledger-mutated", function () {
+    catalogRows = null;
+    loadLedgers();
+    loadSummaries();
+  });
   els.maximizeBtn?.addEventListener("click", function () {
     setMaximized(!isMaximized);
   });

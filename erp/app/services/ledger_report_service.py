@@ -86,6 +86,8 @@ class LedgerReportService:
             line["source_url"] = ""
             line["source_module"] = ""
             line["source_module_id"] = ""
+            line["source_reference"] = ""
+            line["source_group"] = ""
             line["work_type"] = ""
             return line
         link = link or {}
@@ -97,6 +99,8 @@ class LedgerReportService:
         line["source_url"] = link.get("source_url") or ""
         line["source_module"] = module
         line["source_module_id"] = mid or ""
+        line["source_reference"] = (link.get("source_reference") or "").strip()
+        line["source_group"] = (link.get("source_group") or "").strip()
         line["work_type"] = (link.get("work_type") or "").strip()
         return line
 

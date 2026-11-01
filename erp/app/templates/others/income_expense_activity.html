@@ -108,6 +108,7 @@
             <th class="oie-sortable" data-sort-key="customer_name">Name <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="mobile_number">Mobile <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             <th class="oie-sortable" data-sort-key="remarks">Remarks <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
+            {% if force_kind == 'Misc.' %}<th class="oie-money-out-in-col">Money Out In</th>{% endif %}
             <th class="oie-sortable" data-sort-key="created_date">Created <i class="bi bi-arrow-down-up oie-sort-icon"></i></th>
             {% if force_kind == 'Misc.' %}
             <th>Invoice</th>
@@ -442,5 +443,5 @@
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20261018scopeaddrlock"></script>
 <script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261027miscmsg2"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261101miscinvoicecancelreturn1"></script>
 {% endblock %}

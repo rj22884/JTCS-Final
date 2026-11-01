@@ -107,6 +107,7 @@
   async function fetchPreview(kind, id, allDates) {
     const url = previewUrl(kind, id);
     const res = await fetch(url + dateQuery(allDates), {
+      cache: "no-store",
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     });
     const data = await res.json();

@@ -3412,9 +3412,16 @@
   refreshOcrStatus();
   resetPaymentLines();
   const autoStampId = parseInt(window.STAMP_AUTO_LOAD_STAMP_ID, 10) || 0;
+  const ledgerEditMode = !!window.STAMP_LEDGER_EDIT_MODE && !!autoStampId;
   const continueMobile = normalizeMobile(window.STAMP_CONTINUE_MOBILE || "");
   const openedFromRepost = initMobileFromRepost();
-  if (continueMobile) {
+  if (ledgerEditMode) {
+    loadStampRecord(autoStampId).then(function () {
+      if (String(els.stampIdInput?.value || "") !== String(autoStampId)) return;
+      openEntryModal();
+      els.certNumber?.focus();
+    });
+  } else if (continueMobile) {
     offerContinueSameMobile(continueMobile);
   } else if (openedFromRepost) {
     if (autoStampId) {
@@ -3441,7 +3448,9 @@
     applyDefaultGridDates();
   }
   initColumnResize();
-  if (autoStampId && openedFromRepost) {
+  if (ledgerEditMode) {
+    /* Ledger edit opens the selected entry form directly, without loading the Stamp dashboard grid. */
+  } else if (autoStampId && openedFromRepost) {
     /* Grid is loaded by revealStampInGrid after the record fetch. */
   } else if (autoStampId) {
     revealSavedStampInGrid(autoStampId);

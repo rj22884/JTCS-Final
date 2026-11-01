@@ -148,9 +148,13 @@ def accounts():
 def customer_invoices():
     raw = (request.args.get("customer_id") or "").strip()
     entry_raw = (request.args.get("entry_id") or "").strip()
+    invoice_raw = (request.args.get("invoice_id") or "").strip()
     entry_id = int(entry_raw) if entry_raw.isdigit() else None
+    invoice_ids = {int(value) for value in invoice_raw.split(",") if value.isdigit()}
     try:
-        payload = OthersBankCashService().customer_open_invoices(int(raw), entry_id=entry_id)
+        payload = OthersBankCashService().customer_open_invoices(
+            int(raw), entry_id=entry_id, include_invoice_ids=invoice_ids
+        )
         return jsonify({"ok": True, **payload})
     except (TypeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc) or "Customer is required."}), 400
