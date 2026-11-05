@@ -77,9 +77,12 @@ class OthersIncomeExpenseService:
     @staticmethod
     def _decimal(value) -> Decimal:
         try:
-            return Decimal(str(value))
+            amount = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             raise ValueError("Invalid amount.") from None
+        if not amount.is_finite() or amount.as_tuple().exponent < -2 or abs(amount) >= Decimal("1000000000000000000"):
+            raise ValueError("Amount must fit N(20,2) (maximum 18 digits before the decimal and 2 after it).")
+        return amount
 
     @staticmethod
     def _date(value) -> date | None:
@@ -755,6 +758,8 @@ class OthersIncomeExpenseService:
                 OthersBankCashInvoiceAllocation.EntryID,
                 OthersBankCashTransaction.DebitBankAccountID,
                 OthersBankCashTransaction.DebitLedgerKey,
+                OthersBankCashInvoiceAllocation.AllocationSource,
+                OthersBankCashTransaction.Purpose,
             )
             .join(
                 OthersBankCashTransaction,
@@ -780,7 +785,13 @@ class OthersIncomeExpenseService:
             if resolved_id > 0:
                 account_ids_by_invoice.setdefault(int(invoice_id), []).append(resolved_id)
 
-        for invoice_id, entry_id, account_id, ledger_key in allocated_rows:
+        for invoice_id, entry_id, account_id, ledger_key, allocation_source, purpose in allocated_rows:
+            allocated_entry_ids.add(int(entry_id))
+            if (
+                (allocation_source or "receipt").strip().lower() == "advance"
+                and (purpose or "").strip().casefold() != "customer paid"
+            ):
+                continue
             add_account(invoice_id, entry_id, account_id, ledger_key)
 
         legacy_rows = db.session.execute(
@@ -841,6 +852,7 @@ class OthersIncomeExpenseService:
             select(
                 OthersBankCashInvoiceAllocation.InvoiceID,
                 OthersBankCashTransaction,
+                OthersBankCashInvoiceAllocation.AllocationSource,
             )
             .join(
                 OthersBankCashTransaction,
@@ -854,10 +866,16 @@ class OthersIncomeExpenseService:
         ).all()
         rows_by_invoice: dict[int, list] = {}
         allocated_entry_ids: set[int] = set()
-        for invoice_id, transaction in allocated_rows:
+        for invoice_id, transaction, allocation_source in allocated_rows:
             invoice_key = int(invoice_id)
             entry_id = int(transaction.EntryID)
             allocated_entry_ids.add(entry_id)
+            if (
+                (allocation_source or "receipt").strip().lower() == "advance"
+                and (getattr(transaction, "Purpose", None) or "").strip().casefold()
+                != "customer paid"
+            ):
+                continue
             rows_by_invoice.setdefault(invoice_key, []).append(transaction)
 
         legacy_rows = db.session.scalars(
@@ -1716,6 +1734,8 @@ class OthersIncomeExpenseService:
                 "Customer select karna zaroori hai. Naam pata na ho to Daily Customer chunen."
             )
         remarks = (form.get("Remarks") or form.get("remarks") or "").strip() or None
+        if remarks and len(remarks) > 50:
+            raise ValueError("Remarks cannot exceed 50 characters.")
         if tally_bill and not customer_name:
             raise ValueError("Customer name is required when Tally Bill Generated is checked.")
 
@@ -1868,7 +1888,13 @@ class OthersIncomeExpenseService:
                 raise ValueError(f"Bill number {bill_no} already exists.") from exc
             raise
 
-    def delete_entry(self, entry_id: int, *, allow_print_source: bool = False) -> str:
+    def delete_entry(
+        self,
+        entry_id: int,
+        *,
+        allow_print_source: bool = False,
+        delete_linked_money_inout: bool = False,
+    ) -> str:
         self.entry_repo.ensure_schema()
         row = self.entry_repo.get_by_id(entry_id)
         if row is None:
@@ -1898,7 +1924,10 @@ class OthersIncomeExpenseService:
             ).all()
             if invoice_id
         )
-        invoices.assert_invoices_deletable(invoice_ids)
+        if delete_linked_money_inout:
+            invoices.delete_linked_money_inout_for_invoices(invoice_ids)
+        else:
+            invoices.assert_invoices_deletable(invoice_ids)
         invoices.delete_invoices_for_bill_if_any(bill_no, allow_print_source=allow_print_source)
         if tally_no and tally_no != (bill_no or "").strip():
             invoices.delete_invoices_for_bill_if_any(tally_no, allow_print_source=allow_print_source)
@@ -1948,6 +1977,8 @@ class OthersIncomeExpenseService:
             payload.get("mobile_number") or payload.get("MobileNumber")
         )
         remarks = (payload.get("remarks") or payload.get("Remarks") or "").strip() or None
+        if remarks and len(remarks) > 50:
+            raise ValueError("Remarks cannot exceed 50 characters.")
         is_other = customer_type.casefold() == OTHER_CUSTOMER_TYPE.casefold()
 
         active_codes = {item["code"] for item in self.list_customer_groups()}

@@ -248,7 +248,10 @@ def delete_generated_bill_invoices():
     if not bill_no:
         return jsonify({"ok": False, "error": "Bill number is required."}), 400
     try:
-        count = GstInvoiceService().delete_invoices_for_bill(bill_no)
+        count = GstInvoiceService().delete_invoices_for_bill(
+            bill_no,
+            delete_linked_money_inout=bool(payload.get("delete_linked_money_inout")),
+        )
         noun = "invoice" if count == 1 else "invoices"
         return jsonify(
             {
@@ -411,7 +414,13 @@ def delete_record(entry_id: int):
         existing = service._entry_dict(row)
         if (existing.get("ledger_kind") or "") != FORCE_KIND:
             return jsonify({"ok": False, "error": "Record is not a Miscellaneous entry."}), 404
-        message = service.delete_entry(entry_id)
+        payload = request.get_json(silent=True) or request.form
+        message = service.delete_entry(
+            entry_id,
+            delete_linked_money_inout=str(
+                payload.get("delete_linked_money_inout") or ""
+            ).strip().lower() in {"1", "true", "yes", "on"},
+        )
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

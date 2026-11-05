@@ -3,6 +3,14 @@
   font-size: 14px;
 }
 
+#fuEntryModal .modal-dialog:not(.jtcs-win-maximized) {
+  width: min(720px, calc(100vw - 1rem));
+  max-width: min(720px, calc(100vw - 1rem));
+}
+.fu-date-field { max-width: 165px; }
+.fu-amount-field { max-width: 230px; }
+#fuEntryModal input[type="date"] { max-width: 165px; }
+
 .fu-generate-bill-wrap {
   padding: 0.55rem 0.75rem;
   background: #f8fafc;

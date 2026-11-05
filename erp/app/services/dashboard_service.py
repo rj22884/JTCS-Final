@@ -683,54 +683,20 @@ class DashboardService:
         }
         billed: dict[str, int] = {code: 0 for code in followup_order}
         paid: dict[str, int] = {code: 0 for code in followup_order}
-        if self._table_exists("FollowupEntryMaster") and self._table_exists("FollowupEntryStage"):
+        if self._table_exists("FollowupEntryMaster"):
             try:
+                from app.repositories.followup_repository import FollowupRepository
+
+                FollowupRepository().ensure_manual_tick_columns()
                 rows = db.session.execute(
                     text(
                         """
                         SELECT f.ModuleCode,
-                               SUM(CASE WHEN t.EntryID IS NOT NULL
-                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.InvoiceCount, 0) > 0)
-                                        THEN 1 ELSE 0 END) AS Billed,
-                               SUM(CASE WHEN (t.EntryID IS NOT NULL AND p.EntryID IS NOT NULL)
-                                          OR (f.ModuleCode = N'DSC' AND ISNULL(gi.IsPaid, 0) = 1)
+                               SUM(CASE WHEN f.TickInvoice = 1 THEN 1 ELSE 0 END) AS Billed,
+                               SUM(CASE WHEN f.TickInvoice = 1
+                                              AND f.TickPaymentReceived = 1
                                         THEN 1 ELSE 0 END) AS Paid
                         FROM dbo.FollowupEntryMaster f
-                        LEFT JOIN (
-                            SELECT DISTINCT es.EntryID
-                            FROM dbo.FollowupEntryStage es
-                            INNER JOIN dbo.FollowupEntryMaster fe ON fe.EntryID = es.EntryID
-                            WHERE (
-                                fe.ModuleCode IN (N'ITR', N'GST', N'TDS')
-                                AND es.StageCode IN (
-                                    N'invoice', N'Invoice',
-                                    N'tally_bill_generated', N'Tally Bill Generated'
-                                )
-                            ) OR (
-                                fe.ModuleCode = N'DSC'
-                                AND es.StageCode IN (
-                                    N'invoice', N'Invoice',
-                                    N'tally_bill_generated', N'Tally Bill Generated'
-                                )
-                            )
-                        ) t ON t.EntryID = f.EntryID
-                        LEFT JOIN (
-                            SELECT DISTINCT EntryID
-                            FROM dbo.FollowupEntryStage
-                            WHERE StageCode IN (N'payment_received', N'Payment Received')
-                        ) p ON p.EntryID = f.EntryID
-                        LEFT JOIN (
-                            SELECT FollowupEntryID,
-                                   COUNT(1) AS InvoiceCount,
-                                   MAX(CASE WHEN ISNULL(InvoicePaymentReceived, 0) = 1
-                                                  OR (ISNULL(InvoiceValue, 0) > 0
-                                                      AND ISNULL(AmountPaid, 0) >= InvoiceValue)
-                                            THEN 1 ELSE 0 END) AS IsPaid
-                            FROM dbo.GstInvoice
-                            WHERE FollowupEntryID IS NOT NULL
-                              AND VoucherType = N'SALE'
-                            GROUP BY FollowupEntryID
-                        ) gi ON gi.FollowupEntryID = f.EntryID
                         WHERE ISNULL(f.IsActive, 1) = 1
                         GROUP BY f.ModuleCode
                         """
@@ -741,7 +707,6 @@ class DashboardService:
                     if code in billed:
                         billed[code] = int(bill_cnt or 0)
                         paid[code] = int(paid_cnt or 0)
-                self._apply_itr_screen_payment(billed, paid)
             except Exception:
                 db.session.rollback()
 
@@ -894,49 +859,6 @@ class DashboardService:
             "court_fee_percent": self._share_percent(sold, receipt_total),
             "court_fee_url": _follow_url("ecourt.ecourt_activity"),
         }
-
-    def _apply_itr_screen_payment(self, billed: dict[str, int], paid: dict[str, int]) -> None:
-        """Match the ITR screen: a posted receipt counts as Payment Received.
-
-        The ITR list heals a missing payment tick when cash/bank is already
-        posted. The dashboard uses that same rule so the card equals the
-        ITR Payment Pending total.
-        """
-        open_bills = db.session.execute(
-            text(
-                """
-                SELECT DISTINCT LTRIM(RTRIM(f.BillNo))
-                FROM dbo.FollowupEntryMaster f
-                INNER JOIN (
-                    SELECT DISTINCT EntryID
-                    FROM dbo.FollowupEntryStage
-                    WHERE StageCode IN (
-                        N'invoice', N'Invoice',
-                        N'tally_bill_generated', N'Tally Bill Generated'
-                    )
-                ) t ON t.EntryID = f.EntryID
-                LEFT JOIN (
-                    SELECT DISTINCT EntryID
-                    FROM dbo.FollowupEntryStage
-                    WHERE StageCode IN (N'payment_received', N'Payment Received')
-                ) p ON p.EntryID = f.EntryID
-                WHERE f.ModuleCode = N'ITR'
-                  AND ISNULL(f.IsActive, 1) = 1
-                  AND p.EntryID IS NULL
-                  AND LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
-                """
-            )
-        ).all()
-        bill_nos = {(row[0] or "").strip() for row in open_bills if (row[0] or "").strip()}
-        if not bill_nos:
-            return
-        from app.services.followup_payment_service import FollowupPaymentService
-
-        posted = FollowupPaymentService("ITR").bills_with_posted_payment(bill_nos)
-        extra_paid = len(posted)
-        if extra_paid <= 0:
-            return
-        paid["ITR"] = min(billed.get("ITR", 0), paid.get("ITR", 0) + extra_paid)
 
     @staticmethod
     def _share_percent(part: int, whole: int) -> str:

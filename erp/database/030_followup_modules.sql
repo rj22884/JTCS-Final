@@ -44,18 +44,22 @@ BEGIN
 END;
 GO
 
-IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.FollowupEntryStage (
-        EntryStageID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
-        EntryID INT NOT NULL,
-        StageID INT NOT NULL,
-        CompletedDate DATETIME2 NOT NULL CONSTRAINT DF_FollowupEntryStage_CompletedDate DEFAULT (SYSUTCDATETIME()),
-        CONSTRAINT FK_FollowupEntryStage_Entry FOREIGN KEY (EntryID) REFERENCES dbo.FollowupEntryMaster (EntryID),
-        CONSTRAINT FK_FollowupEntryStage_Stage FOREIGN KEY (StageID) REFERENCES dbo.FollowupWorkflowStage (StageID),
-        CONSTRAINT UX_FollowupEntryStage UNIQUE (EntryID, StageID)
-    );
-END;
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickDocumentsReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickDocumentsReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickDocumentsReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickReturnFiled') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickReturnFiled BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickReturnFiled DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickInvoice') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickInvoice BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickInvoice DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickPaymentReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickPaymentReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickPaymentReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickApplicationReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickApplicationReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickApplicationReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickKYC') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickKYC BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickKYC DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickDownloadStatus') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickDownloadStatus BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickDownloadStatus DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickUnverified') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickUnverified BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickUnverified DEFAULT (0);
 GO
 
 /* ---- Seed workflow stages (idempotent) ---- */

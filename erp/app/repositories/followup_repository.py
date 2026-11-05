@@ -2,18 +2,27 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import and_, delete, func, or_, select, text
-from sqlalchemy.orm import Session, joinedload, load_only
+from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.orm import Session, load_only
 
 from app.extensions import db
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+from app.models.followup import FollowupEntryMaster
 
 
 _DSC_SETTING_SCHEMA_READY = False
 _FOLLOWUP_MASTER_RETIRED = False
-_STAGE_CODE_UNIQUE_READY = False
-_MANUAL_STAGE_READY = False
+_MANUAL_TICKS_READY = False
 _GST_CASE_INDEX_READY = False
+MANUAL_TICK_COLUMNS = {
+    "documents_received": "TickDocumentsReceived",
+    "return_filed": "TickReturnFiled",
+    "invoice": "TickInvoice",
+    "payment_received": "TickPaymentReceived",
+    "application_received": "TickApplicationReceived",
+    "kyc": "TickKYC",
+    "download_status": "TickDownloadStatus",
+    "unverified": "TickUnverified",
+}
 
 
 class FollowupRepository:
@@ -21,80 +30,131 @@ class FollowupRepository:
         self.session = session or db.session
         self._entry_master_columns: set[str] | None = None
 
-    def retire_followup_master(self) -> None:
-        """Copy stage codes onto entry ticks, then drop FollowupWorkflowStage.
-
-        Stage names live in FIXED_WORKFLOW_STAGES. The master table is not recreated.
-        """
-        global _FOLLOWUP_MASTER_RETIRED
-        if _FOLLOWUP_MASTER_RETIRED:
+    def ensure_manual_tick_columns(self) -> None:
+        """Migrate existing ticks to individual manual flags and drop their old table."""
+        global _MANUAL_TICKS_READY
+        if _MANUAL_TICKS_READY:
             return
+        tick_columns = MANUAL_TICK_COLUMNS
+        add_columns_sql = "\n".join(
+            f"IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'{column}') IS NULL "
+            f"ALTER TABLE dbo.FollowupEntryMaster ADD {column} BIT NOT NULL "
+            f"CONSTRAINT DF_FollowupEntryMaster_{column} DEFAULT (0);"
+            for column in tick_columns.values()
+        )
+        self.session.execute(text(add_columns_sql))
         self.session.execute(
             text(
                 """
                 IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NOT NULL
                    AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NULL
                     ALTER TABLE dbo.FollowupEntryStage ADD StageCode NVARCHAR(50) NULL;
-                """
-            )
-        )
-        self.session.commit()
-        self.session.execute(
-            text(
-                """
-                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
-                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageCode') IS NOT NULL
+
+                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NOT NULL
+                   AND OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                   AND COL_LENGTH(N'dbo.FollowupEntryStage', N'StageID') IS NOT NULL
                 BEGIN
                     UPDATE es
-                    SET es.StageCode = s.StageCode
+                    SET es.StageCode = ws.StageCode
                     FROM dbo.FollowupEntryStage es
-                    INNER JOIN dbo.FollowupWorkflowStage s ON s.StageID = es.StageID
+                    INNER JOIN dbo.FollowupWorkflowStage ws ON ws.StageID = es.StageID
                     WHERE es.StageCode IS NULL OR LTRIM(RTRIM(es.StageCode)) = N'';
+                END;
+                """
+            )
+        )
+        self.session.commit()
+        self._entry_master_columns = None
 
-                    UPDATE dbo.FollowupEntryStage
-                    SET StageCode = N'return_filed'
-                    WHERE StageCode IN (N'gstr1_filed', N'gstr3b_filed');
-                END
-                """
+        def set_ticks(entry_id: int, values) -> None:
+            aliases = {
+                "gstr1_filed": "return_filed",
+                "gstr3b_filed": "return_filed",
+                "gstr-1_filed": "return_filed",
+                "itr_filed": "return_filed",
+                "application_no": "application_received",
+                "tally_bill_generated": "invoice",
+            }
+            codes = set()
+            for value in values if isinstance(values, list) else []:
+                code = str(value or "").strip().lower().replace(" ", "_")
+                code = aliases.get(code, code)
+                if code in tick_columns:
+                    codes.add(code)
+            if not codes:
+                return
+            assignments = ", ".join(
+                f"{tick_columns[code]} = 1" for code in sorted(codes)
             )
-        )
-        self.session.commit()
+            self.session.execute(
+                text(f"UPDATE dbo.FollowupEntryMaster SET {assignments} WHERE EntryID = :id"),
+                {"id": int(entry_id)},
+            )
+
+        if self.session.execute(
+            text("SELECT OBJECT_ID(N'dbo.FollowupEntryStage', N'U')")
+        ).scalar():
+            old_rows = self.session.execute(
+                text(
+                    """
+                    SELECT EntryID, StageCode
+                    FROM dbo.FollowupEntryStage
+                    WHERE StageCode IS NOT NULL AND LTRIM(RTRIM(StageCode)) <> N''
+                    ORDER BY EntryID, EntryStageID
+                    """
+                )
+            ).mappings().all()
+            grouped: dict[int, list[str]] = {}
+            for old in old_rows:
+                grouped.setdefault(int(old["EntryID"]), []).append(str(old["StageCode"]))
+            for entry_id, codes in grouped.items():
+                set_ticks(entry_id, codes)
+
         self.session.execute(
             text(
                 """
-                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
+                DECLARE @stageTable INT = OBJECT_ID(N'dbo.FollowupEntryStage', N'U');
+                IF @stageTable IS NOT NULL
                 BEGIN
-                    DECLARE @dropFk NVARCHAR(MAX) = N'';
-                    SELECT @dropFk = @dropFk
-                        + N'ALTER TABLE dbo.FollowupEntryStage DROP CONSTRAINT '
-                        + QUOTENAME(fk.name) + N';'
-                    FROM sys.foreign_keys fk
-                    WHERE fk.parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                      AND fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
-                    IF @dropFk <> N''
-                        EXEC sp_executesql @dropFk;
-                END
-                """
-            )
-        )
-        self.session.commit()
-        self.session.execute(
-            text(
-                """
-                IF OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U') IS NOT NULL
-                BEGIN
-                    DECLARE @dropRef NVARCHAR(MAX) = N'';
-                    SELECT @dropRef = @dropRef
+                    DECLARE @dropStageFks NVARCHAR(MAX) = N'';
+                    SELECT @dropStageFks = @dropStageFks
                         + N'ALTER TABLE '
                         + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
                         + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
                         + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
                     FROM sys.foreign_keys fk
-                    WHERE fk.referenced_object_id = OBJECT_ID(N'dbo.FollowupWorkflowStage');
-                    IF @dropRef <> N''
-                        EXEC sp_executesql @dropRef;
-                    IF COL_LENGTH(N'dbo.FollowupEntryStage', N'StageID') IS NOT NULL
-                        ALTER TABLE dbo.FollowupEntryStage ALTER COLUMN StageID INT NULL;
+                    WHERE fk.parent_object_id = @stageTable OR fk.referenced_object_id = @stageTable;
+                    IF @dropStageFks <> N'' EXEC sp_executesql @dropStageFks;
+                    DROP TABLE dbo.FollowupEntryStage;
+                END;
+                """
+            )
+        )
+        self.session.commit()
+        self._entry_master_columns = None
+        _MANUAL_TICKS_READY = True
+
+    def retire_followup_master(self) -> None:
+        """Retire old follow-up masters after ticks are moved onto each entry."""
+        global _FOLLOWUP_MASTER_RETIRED
+        if _FOLLOWUP_MASTER_RETIRED:
+            return
+        self.ensure_manual_tick_columns()
+        self.session.execute(
+            text(
+                """
+                DECLARE @workflowTable INT = OBJECT_ID(N'dbo.FollowupWorkflowStage', N'U');
+                IF @workflowTable IS NOT NULL
+                BEGIN
+                    DECLARE @dropWorkflowFks NVARCHAR(MAX) = N'';
+                    SELECT @dropWorkflowFks = @dropWorkflowFks
+                        + N'ALTER TABLE '
+                        + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + N'.'
+                        + QUOTENAME(OBJECT_NAME(fk.parent_object_id))
+                        + N' DROP CONSTRAINT ' + QUOTENAME(fk.name) + N';'
+                    FROM sys.foreign_keys fk
+                    WHERE fk.parent_object_id = @workflowTable OR fk.referenced_object_id = @workflowTable;
+                    IF @dropWorkflowFks <> N'' EXEC sp_executesql @dropWorkflowFks;
                     DROP TABLE dbo.FollowupWorkflowStage;
                 END;
 
@@ -143,168 +203,7 @@ class FollowupRepository:
             )
         )
         self.session.commit()
-        self.ensure_stage_code_unique()
         _FOLLOWUP_MASTER_RETIRED = True
-
-    def ensure_stage_code_unique(self) -> None:
-        """Allow several ticks on one entry.
-
-        UX_FollowupEntryStage is UNIQUE (EntryID, StageID). New ticks store the
-        stage code and leave StageID empty. SQL Server treats those empty ids as
-        the same key, so the second tick cannot be saved. Uniqueness is the
-        stage code instead. Existing rows are kept.
-        """
-        global _STAGE_CODE_UNIQUE_READY
-        if _STAGE_CODE_UNIQUE_READY:
-            self.ensure_manual_stage_descriptions()
-            return
-        self.session.execute(
-            text(
-                """
-                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
-                    RETURN;
-
-                ;WITH ranked AS (
-                    SELECT
-                        EntryStageID,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY EntryID, StageCode
-                            ORDER BY EntryStageID
-                        ) AS rn
-                    FROM dbo.FollowupEntryStage
-                    WHERE StageCode IS NOT NULL
-                      AND LTRIM(RTRIM(StageCode)) <> N''
-                )
-                DELETE FROM dbo.FollowupEntryStage
-                WHERE EntryStageID IN (SELECT EntryStageID FROM ranked WHERE rn > 1);
-
-                IF EXISTS (
-                    SELECT 1
-                    FROM sys.key_constraints
-                    WHERE name = N'UX_FollowupEntryStage'
-                      AND parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                )
-                    ALTER TABLE dbo.FollowupEntryStage DROP CONSTRAINT UX_FollowupEntryStage;
-
-                IF EXISTS (
-                    SELECT 1
-                    FROM sys.indexes
-                    WHERE name = N'UX_FollowupEntryStage'
-                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                      AND is_unique = 1
-                )
-                   AND NOT EXISTS (
-                    SELECT 1
-                    FROM sys.key_constraints
-                    WHERE name = N'UX_FollowupEntryStage'
-                      AND parent_object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                   )
-                    DROP INDEX UX_FollowupEntryStage ON dbo.FollowupEntryStage;
-
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM sys.indexes
-                    WHERE name = N'UX_FollowupEntryStage_Code'
-                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                )
-                    CREATE UNIQUE INDEX UX_FollowupEntryStage_Code
-                        ON dbo.FollowupEntryStage (EntryID, StageCode)
-                        WHERE StageCode IS NOT NULL;
-                """
-            )
-        )
-        self.session.commit()
-        self.ensure_manual_stage_descriptions()
-        _STAGE_CODE_UNIQUE_READY = True
-
-    def ensure_manual_stage_descriptions(self) -> None:
-        """Store the stage name on ITR, GST, TDS and DSC ticks.
-
-        The stage-code master is not used. Existing codes such as
-        documents_received become Documents Received, and StageID is cleared.
-        """
-        global _MANUAL_STAGE_READY
-        if _MANUAL_STAGE_READY:
-            return
-        self.session.execute(
-            text(
-                """
-                IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
-                    RETURN;
-
-                IF EXISTS (
-                    SELECT 1
-                    FROM sys.indexes
-                    WHERE name = N'UX_FollowupEntryStage_Code'
-                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                )
-                    DROP INDEX UX_FollowupEntryStage_Code ON dbo.FollowupEntryStage;
-
-                UPDATE es
-                SET es.StageID = NULL,
-                    es.StageCode = CASE LOWER(LTRIM(RTRIM(es.StageCode)))
-                        WHEN N'documents_received' THEN N'Documents Received'
-                        WHEN N'return_filed' THEN N'Return Filed'
-                        WHEN N'gstr1_filed' THEN N'Return Filed'
-                        WHEN N'gstr3b_filed' THEN N'Return Filed'
-                        WHEN N'payment_received' THEN N'Payment Received'
-                        WHEN N'itr_filed' THEN N'Return Filed'
-                        WHEN N'invoice' THEN N'Invoice'
-                        WHEN N'tally_bill_generated' THEN N'Tally Bill Generated'
-                        WHEN N'unverified' THEN N'Unverified'
-                        WHEN N'application_received' THEN N'Application Received'
-                        WHEN N'application_no' THEN N'Application Received'
-                        WHEN N'kyc' THEN N'KYC'
-                        WHEN N'download_status' THEN N'Download Status'
-                        ELSE es.StageCode
-                    END
-                FROM dbo.FollowupEntryStage es
-                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
-                WHERE e.ModuleCode IN (N'ITR', N'GST', N'TDS', N'DSC')
-                  AND es.StageCode IS NOT NULL;
-
-                UPDATE es
-                SET es.StageCode = N'Return Filed'
-                FROM dbo.FollowupEntryStage es
-                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
-                WHERE e.ModuleCode = N'TDS'
-                  AND es.StageCode IN (N'kyc', N'KYC');
-
-                UPDATE es
-                SET es.StageCode = N'Invoice'
-                FROM dbo.FollowupEntryStage es
-                INNER JOIN dbo.FollowupEntryMaster e ON e.EntryID = es.EntryID
-                WHERE e.ModuleCode IN (N'ITR', N'GST', N'TDS')
-                  AND es.StageCode IN (N'tally_bill_generated', N'Tally Bill Generated');
-
-                ;WITH ranked AS (
-                    SELECT
-                        EntryStageID,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY EntryID, StageCode
-                            ORDER BY EntryStageID
-                        ) AS rn
-                    FROM dbo.FollowupEntryStage
-                    WHERE StageCode IS NOT NULL
-                      AND LTRIM(RTRIM(StageCode)) <> N''
-                )
-                DELETE FROM dbo.FollowupEntryStage
-                WHERE EntryStageID IN (SELECT EntryStageID FROM ranked WHERE rn > 1);
-
-                IF NOT EXISTS (
-                    SELECT 1
-                    FROM sys.indexes
-                    WHERE name = N'UX_FollowupEntryStage_Code'
-                      AND object_id = OBJECT_ID(N'dbo.FollowupEntryStage')
-                )
-                    CREATE UNIQUE INDEX UX_FollowupEntryStage_Code
-                        ON dbo.FollowupEntryStage (EntryID, StageCode)
-                        WHERE StageCode IS NOT NULL;
-                """
-            )
-        )
-        self.session.commit()
-        _MANUAL_STAGE_READY = True
 
     def ensure_dsc_setting_schema(self) -> None:
         global _DSC_SETTING_SCHEMA_READY
@@ -442,6 +341,10 @@ class FollowupRepository:
             columns.append("e.BillingType")
         if "BillingCustomerID" in available:
             columns.append("e.BillingCustomerID")
+        columns.extend("e." + column for column in (
+            "TickDocumentsReceived", "TickReturnFiled", "TickInvoice", "TickPaymentReceived",
+            "TickApplicationReceived", "TickKYC", "TickDownloadStatus", "TickUnverified",
+        ) if column in available)
         columns.extend(
             [
                 "e.PANNumber",
@@ -485,6 +388,7 @@ class FollowupRepository:
         return ",\n                ".join(columns)
 
     def entry_master_columns(self) -> set[str]:
+        self.ensure_manual_tick_columns()
         return self._entry_master_columns_set()
 
     def _orm_loadable_columns(self) -> list:
@@ -521,6 +425,14 @@ class FollowupRepository:
             "CreatedDate",
             "ModifiedDate",
             "IsActive",
+            "TickDocumentsReceived",
+            "TickReturnFiled",
+            "TickInvoice",
+            "TickPaymentReceived",
+            "TickApplicationReceived",
+            "TickKYC",
+            "TickDownloadStatus",
+            "TickUnverified",
         ):
             if name in available:
                 attrs.append(getattr(FollowupEntryMaster, name))
@@ -718,6 +630,7 @@ class FollowupRepository:
 
     def ensure_billing_customer_columns(self) -> None:
         """Invoice billing customer is stored by id and never replaces the follow-up customer."""
+        self.ensure_manual_tick_columns()
         available = set(self._entry_master_columns_set())
         changed = False
         if "BillingType" not in available:
@@ -739,100 +652,6 @@ class FollowupRepository:
     def ensure_dsc_extra_columns(self) -> None:
         """Ensure Location, Introduced by, and DSC type/class/year exist."""
         self.ensure_application_number_column()
-
-    def ensure_gst_return_filed_stage(self) -> None:
-        """
-        GST only: merge gstr1_filed + gstr3b_filed into return_filed (idempotent).
-        Does not touch ITR / DSC / TDS stages.
-        """
-        self.session.execute(
-            text(
-                """
-                DECLARE @ReturnFiledID INT;
-                DECLARE @OldGstr1ID INT;
-                DECLARE @OldGstr3bID INT;
-
-                SELECT TOP 1 @ReturnFiledID = StageID
-                FROM dbo.FollowupWorkflowStage
-                WHERE ModuleCode = N'GST' AND StageCode = N'return_filed'
-                ORDER BY StageID;
-
-                SELECT TOP 1 @OldGstr1ID = StageID
-                FROM dbo.FollowupWorkflowStage
-                WHERE ModuleCode = N'GST' AND StageCode = N'gstr1_filed'
-                ORDER BY StageID;
-
-                SELECT TOP 1 @OldGstr3bID = StageID
-                FROM dbo.FollowupWorkflowStage
-                WHERE ModuleCode = N'GST' AND StageCode = N'gstr3b_filed'
-                ORDER BY StageID;
-
-                IF @ReturnFiledID IS NULL
-                BEGIN
-                    INSERT INTO dbo.FollowupWorkflowStage (
-                        ModuleCode, StageCode, StageName, DisplayOrder, ActiveStatus
-                    )
-                    VALUES (N'GST', N'return_filed', N'Return Filed', 2, 1);
-                    SET @ReturnFiledID = SCOPE_IDENTITY();
-                END
-                ELSE
-                BEGIN
-                    UPDATE dbo.FollowupWorkflowStage
-                    SET StageName = N'Return Filed',
-                        DisplayOrder = 2,
-                        ActiveStatus = 1
-                    WHERE StageID = @ReturnFiledID;
-                END;
-
-                IF @ReturnFiledID IS NOT NULL AND (@OldGstr1ID IS NOT NULL OR @OldGstr3bID IS NOT NULL)
-                BEGIN
-                    ;WITH migrated AS (
-                        SELECT
-                            es.EntryID,
-                            MAX(es.CompletedDate) AS CompletedDate
-                        FROM dbo.FollowupEntryStage es
-                        WHERE es.StageID IN (@OldGstr1ID, @OldGstr3bID)
-                        GROUP BY es.EntryID
-                    )
-                    INSERT INTO dbo.FollowupEntryStage (EntryID, StageID, CompletedDate)
-                    SELECT m.EntryID, @ReturnFiledID, m.CompletedDate
-                    FROM migrated m
-                    WHERE NOT EXISTS (
-                        SELECT 1
-                        FROM dbo.FollowupEntryStage x
-                        WHERE x.EntryID = m.EntryID
-                          AND x.StageID = @ReturnFiledID
-                    );
-
-                    DELETE FROM dbo.FollowupEntryStage
-                    WHERE StageID IN (@OldGstr1ID, @OldGstr3bID);
-                END;
-
-                UPDATE dbo.FollowupWorkflowStage
-                SET ActiveStatus = 0,
-                    StageName = CASE StageCode
-                        WHEN N'gstr1_filed' THEN N'GSTR-1 Filed (merged)'
-                        WHEN N'gstr3b_filed' THEN N'GSTR-3B Filed (merged)'
-                        ELSE StageName
-                    END
-                WHERE ModuleCode = N'GST'
-                  AND StageCode IN (N'gstr1_filed', N'gstr3b_filed');
-
-                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 1, ActiveStatus = 1
-                WHERE ModuleCode = N'GST' AND StageCode = N'documents_received';
-
-                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 2, ActiveStatus = 1
-                WHERE ModuleCode = N'GST' AND StageCode = N'return_filed';
-
-                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 3, ActiveStatus = 1
-                WHERE ModuleCode = N'GST' AND StageCode = N'tally_bill_generated';
-
-                UPDATE dbo.FollowupWorkflowStage SET DisplayOrder = 4, ActiveStatus = 1
-                WHERE ModuleCode = N'GST' AND StageCode = N'payment_received';
-                """
-            )
-        )
-        self.session.commit()
 
     def list_stages(self, module_code: str, *, active_only: bool = True) -> list[FollowupWorkflowStage]:
         stmt = select(FollowupWorkflowStage).where(FollowupWorkflowStage.ModuleCode == module_code)
@@ -873,6 +692,7 @@ class FollowupRepository:
         self.session.flush()
 
     def create_entry(self, data: dict) -> FollowupEntryMaster:
+        self.ensure_manual_tick_columns()
         row = FollowupEntryMaster(**self._filter_entry_data(data))
         self.session.add(row)
         self.session.flush()
@@ -883,10 +703,7 @@ class FollowupRepository:
         load_cols = self._orm_loadable_columns()
         stmt = (
             select(FollowupEntryMaster)
-            .options(
-                load_only(*load_cols),
-                joinedload(FollowupEntryMaster.stages),
-            )
+            .options(load_only(*load_cols))
             .where(FollowupEntryMaster.EntryID == entry_id)
         )
         return self.session.scalars(stmt).unique().first()
@@ -1011,6 +828,7 @@ class FollowupRepository:
         return self.session.scalars(stmt).first()
 
     def update_entry(self, row: FollowupEntryMaster, data: dict) -> FollowupEntryMaster:
+        self.ensure_manual_tick_columns()
         for key, value in self._filter_entry_data(data).items():
             setattr(row, key, value)
         self.session.flush()
@@ -1026,51 +844,24 @@ class FollowupRepository:
         self.session.flush()
 
     def replace_entry_stages(self, entry_id: int, stage_codes: list[str]) -> None:
-        """Replace completed stages for an entry.
+        """Persist manually selected workflow ticks on the follow-up entry itself."""
+        self.ensure_manual_tick_columns()
+        from app.services.followup_service import canonical_stage_code
 
-        Must go through the ORM relationship when the entry is already loaded.
-        A bulk DELETE + session.add bypasses delete-orphan on FollowupEntryMaster.stages
-        and can drop newly added stages (e.g. payment_received) on the final flush.
-        """
-        self.ensure_stage_code_unique()
-        from app.services.followup_service import stage_description
-
-        now = datetime.utcnow()
         unique_codes: list[str] = []
         seen: set[str] = set()
         for raw in stage_codes:
-            code = (str(raw) if raw is not None else "").strip().lower()
+            code = canonical_stage_code(str(raw) if raw is not None else "")
             if not code or code in seen:
                 continue
             seen.add(code)
             unique_codes.append(code)
-
         entry = self.session.get(FollowupEntryMaster, entry_id)
-        if entry is not None:
-            entry.stages.clear()
-            self.session.flush()
-            for code in unique_codes:
-                entry.stages.append(
-                    FollowupEntryStage(
-                        EntryID=entry_id,
-                        StageID=None,
-                        StageCode=stage_description(code),
-                        CompletedDate=now,
-                    )
-                )
-            self.session.flush()
-            return
-
-        self.session.execute(delete(FollowupEntryStage).where(FollowupEntryStage.EntryID == entry_id))
-        for code in unique_codes:
-            self.session.add(
-                FollowupEntryStage(
-                    EntryID=entry_id,
-                    StageID=None,
-                    StageCode=stage_description(code),
-                    CompletedDate=now,
-                )
-            )
+        if entry is None:
+            raise ValueError("Follow-up entry not found.")
+        selected = set(unique_codes)
+        for code, column in MANUAL_TICK_COLUMNS.items():
+            setattr(entry, column, code in selected)
         self.session.flush()
 
     def list_entries(
@@ -1086,6 +877,7 @@ class FollowupRepository:
         limit: int = 500,
     ) -> list[dict]:
         self.ensure_billing_customer_columns()
+        self.retire_followup_master()
         sql = f"""
             SELECT
                 {self._entry_select_columns()}
@@ -1129,7 +921,6 @@ class FollowupRepository:
             params["date_to"] = dt
 
         sql += " ORDER BY e.WorkDate DESC, e.EntryID DESC"
-        self.retire_followup_master()
         rows = list(self.session.execute(text(sql), params).mappings().all())
         results = [dict(row) for row in rows[:limit]]
 
@@ -1143,30 +934,20 @@ class FollowupRepository:
             code: (name, order)
             for code, name, order in FIXED_WORKFLOW_STAGES.get(module_code, ())
         }
-        completed = self.session.execute(
-            text(
-                """
-                SELECT es.EntryID, es.StageCode
-                FROM FollowupEntryStage es
-                INNER JOIN FollowupEntryMaster e ON e.EntryID = es.EntryID
-                WHERE e.ModuleCode = :module AND e.IsActive = 1
-                  AND es.StageCode IS NOT NULL
-                """
-            ),
-            {"module": module_code},
-        ).mappings().all()
         by_entry: dict[int, list] = {}
-        for row in completed:
-            code = canonical_stage_code(row["StageCode"])
-            name, order = stage_meta.get(code, (stage_description(code), 0))
-            by_entry.setdefault(row["EntryID"], []).append(
-                {
-                    "StageID": code,
-                    "StageCode": code,
-                    "StageName": name,
-                    "DisplayOrder": order,
-                }
-            )
+        for item in results:
+            for code, column in MANUAL_TICK_COLUMNS.items():
+                if not item.get(column):
+                    continue
+                name, order = stage_meta.get(code, (stage_description(code), 0))
+                by_entry.setdefault(int(item["EntryID"]), []).append(
+                    {
+                        "StageID": code,
+                        "StageCode": code,
+                        "StageName": name,
+                        "DisplayOrder": order,
+                    }
+                )
 
         for item in results:
             entry_stages = sorted(

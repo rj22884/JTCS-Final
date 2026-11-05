@@ -142,7 +142,7 @@
 
 <div class="modal fade" id="oieEntryModal" tabindex="-1" aria-labelledby="oieEntryModalTitle" aria-hidden="true"
      data-bs-backdrop="static" data-bs-keyboard="false">
-  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable oie-entry-dialog">
     <div class="modal-content oie-entry-modal">
       <div class="modal-header py-2">
         <h5 class="modal-title" id="oieEntryModalTitle">New Entry</h5>
@@ -160,7 +160,7 @@
           <div class="row g-3 mb-2">
             <div class="col-md-4">
               <label class="form-label oie-required" for="WorkDate">Work Date</label>
-              <input type="date" class="form-control" id="WorkDate" name="WorkDate" value="{{ default_date }}" required>
+              <input type="date" class="form-control oie-date-field" id="WorkDate" name="WorkDate" value="{{ default_date }}" required>
             </div>
             <div class="col-md-4">
               <label class="form-label oie-required" for="BillNo">Bill Number</label>
@@ -372,7 +372,7 @@
             <div class="row g-3">
               <div class="col-12">
                 <label class="form-label" for="Remarks">Remarks</label>
-                <textarea class="form-control" id="Remarks" name="Remarks" rows="2" maxlength="500"
+                <textarea class="form-control" id="Remarks" name="Remarks" rows="2" maxlength="50"
                           placeholder="Optional remarks"></textarea>
               </div>
             </div>
@@ -438,10 +438,10 @@
   window.OIE_FORCE_LEDGER_KIND = {{ force_kind | tojson }};
   window.OIE_HIDE_MISC = {{ hide_misc | tojson }};
 </script>
-<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261023invstatus2"></script>
-<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261018invoiceguard"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261104invoicepaymentlink"></script>
+<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261104invoicepaymentguard"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
 <script src="{{ url_for('static', filename='js/customer_pincode_autofill.js') }}?v=20261018scopeaddrlock"></script>
 <script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
-<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261101miscinvoicecancelreturn1"></script>
+<script src="{{ url_for('static', filename='js/income_expense_activity.js') }}?v=20261104invoicepaymentlink"></script>
 {% endblock %}

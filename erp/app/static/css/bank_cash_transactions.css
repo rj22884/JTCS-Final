@@ -59,6 +59,17 @@
   overflow: hidden;
 }
 
+#obcEntryModal:not(.obc-modal-maximized) .modal-dialog {
+  width: min(760px, calc(100vw - 1rem));
+  max-width: min(760px, calc(100vw - 1rem));
+}
+#obcEntryModal input[type="date"] { max-width: 165px; }
+
+.obc-date-field { max-width: 165px; }
+.obc-amount-field { max-width: 220px; }
+.obc-credit-title { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.obc-credit-invoice-summary { color: #087443; font-size: .76rem; font-weight: 600; text-align: right; }
+
 .obc-entry-modal .modal-header {
   background: linear-gradient(90deg, #0b2545, #153a63);
   color: #fff;

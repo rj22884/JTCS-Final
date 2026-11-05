@@ -140,7 +140,12 @@ class FollowupPaymentService:
             if bank_account_id <= 0:
                 raise ValueError("Each payment mode must be selected.")
             amount = self._decimal(amount_raw)
-            if amount <= 0:
+            if (
+                not amount.is_finite()
+                or amount <= 0
+                or amount.as_tuple().exponent < -2
+                or amount >= Decimal("1000000000000000000")
+            ):
                 raise ValueError("Each payment amount must be greater than zero.")
             payment_mode_id = self.master_repo.resolve_payment_mode_for_bank_account(bank_account_id)
             payment_date = self._parse_date(payment_dates[index]) or fallback_date

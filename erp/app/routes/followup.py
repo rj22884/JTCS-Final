@@ -302,8 +302,12 @@ def _make_activity_blueprint(
     @require_delete_reauth
     def delete_record(entry_id: int):
         service = FollowupService(module_code)
+        payload = request.get_json(silent=True) or {}
         try:
-            message = service.delete_entry(entry_id)
+            message = service.delete_entry(
+                entry_id,
+                delete_linked_money_inout=bool(payload.get("delete_linked_money_inout")),
+            )
             return jsonify({"ok": True, "message": message})
         except ValueError as exc:
             return jsonify({"ok": False, "error": str(exc)}), 404

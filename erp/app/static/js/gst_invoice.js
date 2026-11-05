@@ -527,6 +527,31 @@
     schedulePreview();
   }
 
+  function applyFollowupAmountSeed(params) {
+    const amount = Number(params && params.get("followup_amount"));
+    if (!Number.isFinite(amount) || amount <= 0 || !els.body) return;
+    const item = defaultItemForGroup(params.get("item_group"));
+    clearLines();
+    addLine({
+      item_id: item ? item.item_id : "",
+      particulars: item ? item.item_name : "Professional Service",
+      hsn_sac: item ? item.hsn_sac : "",
+      unit: item ? item.unit : "NOS",
+      qty: "1",
+      rate: "0",
+      discount_amount: "0",
+      gst_rate_percent: item ? item.gst_rate_percent : "18",
+    });
+    applyMiscInclusiveLine(els.body.lastElementChild, {
+      item_id: item ? item.item_id : "",
+      particulars: item ? item.item_name : "Professional Service",
+      hsn_sac: item ? item.hsn_sac : "",
+      unit: item ? item.unit : "NOS",
+      amount: amount,
+    });
+    schedulePreview();
+  }
+
   function bindLine(tr) {
     const itemSel = tr.querySelector(".inv-item");
     itemSel?.addEventListener("change", function () {
@@ -1937,6 +1962,7 @@
       if (!creds) return;
     }
     const body = creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {};
+    window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.(body);
     const launchedFollowup = (launchParams.get("followup_entry_id") || "").trim();
     const launchedMisc = (launchParams.get("misc_entry_id") || "").trim();
     if (!accountingOwned && !miscDeletableFromList && launchedMisc) {
@@ -2725,6 +2751,7 @@
       })
       .then(function () {
         applyItemGroupDefault(params.get("item_group"));
+        applyFollowupAmountSeed(params);
       })
       .catch(function (err) {
         showStatus(err.message || String(err), "danger");
@@ -3090,6 +3117,7 @@
       await applyFollowupLaunch(params);
       applyItemGroupDefault(params.get("item_group"));
       applyMiscInclusiveSeeds(params);
+      applyFollowupAmountSeed(params);
     }
   })().catch(function (err) {
     showStatus(err.message || String(err), "danger");

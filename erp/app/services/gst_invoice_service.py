@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
@@ -127,6 +128,26 @@ class GstInvoiceService:
     ):
         self.repo = repository or GstInvoiceRepository()
         self.item_repo = item_repo or ItemMasterRepository()
+
+    @staticmethod
+    def _followup_has_manual_tick(entry, tick_code: str) -> bool:
+        field = {
+            "documents_received": "TickDocumentsReceived",
+            "return_filed": "TickReturnFiled",
+            "invoice": "TickInvoice",
+            "payment_received": "TickPaymentReceived",
+            "application_received": "TickApplicationReceived",
+            "kyc": "TickKYC",
+            "download_status": "TickDownloadStatus",
+            "unverified": "TickUnverified",
+        }.get(tick_code)
+        return bool(field and getattr(entry, field, False))
+
+    @staticmethod
+    def _ensure_followup_tick_storage() -> None:
+        from app.repositories.followup_repository import FollowupRepository
+
+        FollowupRepository().ensure_manual_tick_columns()
 
     @staticmethod
     def _money(value, default: str = "0") -> Decimal:
@@ -641,7 +662,8 @@ class GstInvoiceService:
         )
 
     def _linked_followup_paid(self, inv: GstInvoice) -> bool | None:
-        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+        self._ensure_followup_tick_storage()
+        from app.models.followup import FollowupEntryMaster
 
         keys = {
             (inv.TallyBillNo or "").strip().upper(),
@@ -662,16 +684,7 @@ class GstInvoiceService:
         )
         if not entries:
             return None
-        entry_ids = [entry.EntryID for entry in entries]
-        paid = db.session.scalar(
-            select(FollowupEntryStage.EntryStageID)
-            .where(
-                FollowupEntryStage.EntryID.in_(entry_ids),
-                FollowupEntryStage.StageCode.in_(("payment_received", "Payment Received")),
-            )
-            .limit(1)
-        )
-        return paid is not None
+        return any(self._followup_has_manual_tick(entry, "payment_received") for entry in entries)
 
     def _source_payment_received(self, inv: GstInvoice) -> bool | None:
         """Payment Received on the screen that created this bill. None if no source row."""
@@ -751,6 +764,7 @@ class GstInvoiceService:
                         OthersBankCashInvoiceAllocation.EntryID,
                         OthersBankCashInvoiceAllocation.AllocatedAmount,
                         OthersBankCashInvoiceAllocation.AllocationSource,
+                        OthersBankCashTransaction.Purpose,
                     )
                     .join(
                         OthersBankCashTransaction,
@@ -771,7 +785,7 @@ class GstInvoiceService:
                     )
                 ).all()
             )
-        for invoice_id, entry_id, amount, allocation_source in alloc_rows:
+        for invoice_id, entry_id, amount, allocation_source, purpose in alloc_rows:
             allocated_entries.add(int(entry_id))
             if skip and int(entry_id) == skip:
                 continue
@@ -779,6 +793,11 @@ class GstInvoiceService:
             if (
                 invoice_key in misc_invoice_ids
                 and (allocation_source or "receipt").strip().lower() == "advance"
+            ):
+                continue
+            if (
+                (allocation_source or "receipt").strip().lower() == "advance"
+                and (purpose or "").strip().casefold() != "customer paid"
             ):
                 continue
             if invoice_key in totals:
@@ -1128,21 +1147,14 @@ class GstInvoiceService:
                 getattr(misc_row, "PaymentReceived", False) if misc_row else False
             )
         elif owner.get("kind") == "FOLLOWUP":
-            from app.models.followup import FollowupEntryStage
+            self._ensure_followup_tick_storage()
+            from app.models.followup import FollowupEntryMaster
 
             followup_id = self._positive_id(getattr(inv, "FollowupEntryID", None))
             if followup_id:
+                entry = db.session.get(FollowupEntryMaster, followup_id)
                 status_paid = status_paid or bool(
-                    db.session.scalar(
-                        select(FollowupEntryStage.EntryStageID)
-                        .where(
-                            FollowupEntryStage.EntryID == followup_id,
-                            FollowupEntryStage.StageCode.in_(
-                                ("payment_received", "Payment Received")
-                            ),
-                        )
-                        .limit(1)
-                    )
+                    entry and self._followup_has_manual_tick(entry, "payment_received")
                 )
 
         from app.services.others_bank_cash_service import OthersBankCashService
@@ -1177,6 +1189,108 @@ class GstInvoiceService:
             )
         return " ".join(details)
 
+    def invoice_delete_precheck(self, invoice_ids) -> dict:
+        """Return linked Money In-Out vouchers that must be deleted before invoices."""
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        ids = {
+            key
+            for value in invoice_ids or []
+            if (key := self._positive_id(value)) is not None
+        }
+        if not ids:
+            return {"can_delete": True, "requires_linked_receipt_delete": False, "entries": []}
+
+        bank_cash = OthersBankCashService()
+        linked: dict[int, dict] = {}
+        linked_by_invoice: set[int] = set()
+        invoice_by_id: dict[int, GstInvoice] = {}
+        for invoice_id in sorted(ids):
+            invoice = self.repo.get_by_id(invoice_id)
+            if invoice is None:
+                return {
+                    "can_delete": False,
+                    "error": "Invoice not found.",
+                    "requires_linked_receipt_delete": False,
+                    "entries": [],
+                }
+            invoice_by_id[invoice_id] = invoice
+            adjustment = bank_cash.invoice_payment_adjustment(invoice_id)
+            for row in adjustment.get("entries") or []:
+                entry_id = self._positive_id(row.get("money_inout_entry_id"))
+                linked_ids = {
+                    value
+                    for raw in (row.get("linked_invoice_ids") or [])
+                    if (value := self._positive_id(raw)) is not None
+                }
+                allocated = self._money(row.get("allocated_amount"))
+                if not entry_id or (allocated <= Decimal("0.005") and invoice_id not in linked_ids):
+                    continue
+                outside = linked_ids - ids
+                if outside:
+                    return {
+                        "can_delete": False,
+                        "error": (
+                            f'Money In-Out voucher {row.get("voucher_no") or entry_id} is also '
+                            "linked to another invoice. Remove that allocation first."
+                        ),
+                        "requires_linked_receipt_delete": False,
+                        "entries": [],
+                    }
+                item = dict(row)
+                item["invoice_id"] = invoice_id
+                item["invoice_no"] = invoice.InvoiceNo or str(invoice_id)
+                linked.setdefault(entry_id, item)
+                linked_by_invoice.add(invoice_id)
+
+        if linked:
+            for invoice_id, invoice in invoice_by_id.items():
+                block = self.invoice_delete_payment_block(invoice)
+                if invoice_id not in linked_by_invoice and block:
+                    return {
+                        "can_delete": False,
+                        "error": block,
+                        "requires_linked_receipt_delete": False,
+                        "entries": [],
+                    }
+            return {
+                "can_delete": True,
+                "requires_linked_receipt_delete": True,
+                "entries": list(linked.values()),
+            }
+        try:
+            self.assert_invoices_deletable(ids)
+        except ValueError as exc:
+            return {
+                "can_delete": False,
+                "error": str(exc),
+                "requires_linked_receipt_delete": False,
+                "entries": [],
+            }
+        return {"can_delete": True, "requires_linked_receipt_delete": False, "entries": []}
+
+    def _clear_source_payment_received(self, inv: GstInvoice) -> None:
+        """Clear the source workflow tick when its linked receipt is deleted."""
+        inv.InvoicePaymentReceived = False
+        inv.UpdatedAt = datetime.utcnow()
+        owner = self.source_owner(inv)
+        if owner.get("kind") == "FOLLOWUP":
+            self._ensure_followup_tick_storage()
+            from app.models.followup import FollowupEntryMaster
+
+            entry_id = self._positive_id(getattr(inv, "FollowupEntryID", None))
+            entry = db.session.get(FollowupEntryMaster, entry_id) if entry_id else None
+            if entry is not None:
+                entry.TickPaymentReceived = False
+        elif owner.get("kind") == "MISC":
+            from app.models.others import OthersIncomeExpenseMaster
+
+            misc_id = self._positive_id(getattr(inv, "MiscEntryID", None))
+            entry = db.session.get(OthersIncomeExpenseMaster, misc_id) if misc_id else None
+            if entry is not None:
+                entry.PaymentReceived = False
+        db.session.flush()
+
     def assert_invoice_deletable(self, invoice_id: int) -> None:
         try:
             key = int(invoice_id)
@@ -1197,6 +1311,31 @@ class GstInvoiceService:
                 keys.add(key)
         for invoice_id in sorted(keys):
             self.assert_invoice_deletable(invoice_id)
+
+    def delete_linked_money_inout_for_invoices(self, invoice_ids) -> int:
+        """Delete confirmed linked vouchers, then clear their source payment ticks."""
+        ids = {
+            key
+            for value in invoice_ids or []
+            if (key := self._positive_id(value)) is not None
+        }
+        if not ids:
+            return 0
+        precheck = self.invoice_delete_precheck(ids)
+        if not precheck.get("can_delete"):
+            raise ValueError(precheck.get("error") or "Unable to delete linked Money In-Out entries.")
+        if not precheck.get("requires_linked_receipt_delete"):
+            return 0
+        from app.services.others_bank_cash_service import OthersBankCashService
+
+        deleted = OthersBankCashService().delete_invoice_receipts_for_invoices(
+            ids, commit=False, allow_unallocated=True
+        )
+        for invoice_id in ids:
+            invoice = self.repo.get_by_id(invoice_id)
+            if invoice is not None:
+                self._clear_source_payment_received(invoice)
+        return deleted
 
     def sync_payment_received_for_bill(self, bill_no: str, paid: bool) -> None:
         """Keep converted sale invoices ticked from the source payment variable."""
@@ -1768,7 +1907,8 @@ class GstInvoiceService:
         found: dict[int, bool] = {}
         if not misc:
             return found
-        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+        self._ensure_followup_tick_storage()
+        from app.models.followup import FollowupEntryMaster
         from app.models.others import OthersIncomeExpenseMaster
 
         exact_keys: set[str] = set()
@@ -1795,7 +1935,7 @@ class GstInvoiceService:
                     if key:
                         misc_by_key.setdefault(key, []).append(entry)
         followup_by_key: dict[str, list] = {}
-        entry_ids: set[int] = set()
+        paid_ids: set[int] = set()
         bill_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.BillNo)))
         app_key = func.upper(func.ltrim(func.rtrim(FollowupEntryMaster.ApplicationNumber)))
         for chunk in self._id_chunks(upper_keys):
@@ -1806,20 +1946,12 @@ class GstInvoiceService:
                 )
             ).all()
             for entry in entries:
-                entry_ids.add(int(entry.EntryID))
+                if self._followup_has_manual_tick(entry, "payment_received"):
+                    paid_ids.add(int(entry.EntryID))
                 for raw in (entry.BillNo, entry.ApplicationNumber):
                     key = (raw or "").strip().upper()
                     if key:
                         followup_by_key.setdefault(key, []).append(entry)
-        paid_ids: set[int] = set()
-        for chunk in self._id_chunks(entry_ids):
-            stage_ids = db.session.scalars(
-                select(FollowupEntryStage.EntryID).where(
-                    FollowupEntryStage.EntryID.in_(chunk),
-                    FollowupEntryStage.StageCode.in_(("payment_received", "Payment Received")),
-                )
-            ).all()
-            paid_ids.update(int(entry_id) for entry_id in stage_ids if entry_id)
         for inv in misc:
             keys = {
                 (getattr(inv, "TallyBillNo", None) or "").strip(),
@@ -2128,12 +2260,24 @@ class GstInvoiceService:
         keys.discard("")
         if not keys:
             return {}
-        rows = db.session.scalars(
-            select(GstInvoice).where(
-                GstInvoice.VoucherType == self.VOUCHER_SALE,
-                GstInvoice.TallyBillNo.in_(keys) | GstInvoice.InvoiceNo.in_(keys),
-            )
-        ).all()
+        # SQL Server supports at most 2,100 parameters per request. Each key
+        # is bound twice by the OR filter below, so keep each batch well under
+        # half that limit (plus the VoucherType parameter).
+        rows_by_id: dict[int, GstInvoice] = {}
+        ordered_keys = sorted(keys)
+        chunk_size = 900
+        for offset in range(0, len(ordered_keys), chunk_size):
+            key_chunk = ordered_keys[offset : offset + chunk_size]
+            chunk_rows = db.session.scalars(
+                select(GstInvoice).where(
+                    GstInvoice.VoucherType == self.VOUCHER_SALE,
+                    GstInvoice.TallyBillNo.in_(key_chunk)
+                    | GstInvoice.InvoiceNo.in_(key_chunk),
+                )
+            ).all()
+            for invoice in chunk_rows:
+                rows_by_id[int(invoice.InvoiceID)] = invoice
+        rows = list(rows_by_id.values())
         payment_by_invoice = {
             int(row["invoice_id"]): row
             for row in self._grid_rows(rows)
@@ -2380,15 +2524,19 @@ class GstInvoiceService:
                 str(item.GstRatePercent if item else "18"),
             )
             inclusive_gross_raw = raw.get("inclusive_gross", raw.get("InclusiveGross"))
-            misc_linked = str(
-                payload.get("misc_entry_id") or payload.get("MiscEntryID") or ""
-            ).strip() not in ("", "None")
+            source_linked = any(
+                str(payload.get(key) or "").strip() not in ("", "None")
+                for key in (
+                    "misc_entry_id", "MiscEntryID",
+                    "followup_entry_id", "FollowupEntryID",
+                )
+            )
             if (
-                misc_linked
+                source_linked
                 and voucher_type == self.VOUCHER_SALE
                 and inclusive_gross_raw not in (None, "")
             ):
-                # Amount typed on Miscellaneous Activity is the GST-inclusive total.
+                # Amount typed on Miscellaneous / Follow-up is the GST-inclusive total.
                 # Rate = amount / (1 + item GST / 100). GST = amount − rate.
                 if item is not None and not bool(getattr(item, "GstApplicable", True)):
                     gst_rate = Decimal("0.00")
@@ -3205,40 +3353,6 @@ class GstInvoiceService:
             self._sync_sale_daily(inv)
         db.session.flush()
 
-    def _ensure_followup_invoice_stage(self, entry_id: int) -> None:
-        from app.models.followup import FollowupEntryMaster, FollowupEntryStage
-        from app.services.followup_service import canonical_stage_code, stage_description
-
-        entry = db.session.get(FollowupEntryMaster, entry_id)
-        if entry is None or not getattr(entry, "IsActive", True):
-            return
-        if (entry.ModuleCode or "").strip().upper() not in {"ITR", "GST", "TDS", "DSC"}:
-            return
-        for stage in entry.stages or []:
-            if canonical_stage_code(stage.StageCode) == "invoice":
-                return
-        entry.stages.append(
-            FollowupEntryStage(
-                EntryID=entry.EntryID,
-                StageID=None,
-                StageCode=stage_description("invoice"),
-                CompletedDate=datetime.utcnow(),
-            )
-        )
-        db.session.flush()
-
-    def _clear_followup_invoice_stage(self, entry_id: int) -> None:
-        from app.models.followup import FollowupEntryMaster
-        from app.services.followup_service import canonical_stage_code
-
-        entry = db.session.get(FollowupEntryMaster, entry_id)
-        if entry is None:
-            return
-        for stage in list(entry.stages or []):
-            if canonical_stage_code(stage.StageCode) == "invoice":
-                entry.stages.remove(stage)
-        db.session.flush()
-
     def create_record(
         self,
         payload: dict,
@@ -3316,9 +3430,6 @@ class GstInvoiceService:
             inv = self.repo.create(header, lines)
             self._sync_sale_daily(inv)
             self._sync_purchase_payment_bank(inv)
-            entry_id = getattr(inv, "FollowupEntryID", None)
-            if entry_id:
-                self._ensure_followup_invoice_stage(int(entry_id))
             if self.normalize_voucher_type(getattr(inv, "VoucherType", None)) == self.VOUCHER_SALE:
                 from app.services.others_bank_cash_service import OthersBankCashService
 
@@ -3513,11 +3624,18 @@ class GstInvoiceService:
         }
 
     def delete_invoices_for_bill_if_any(
-        self, bill_no: str, *, allow_print_source: bool = False
+        self,
+        bill_no: str,
+        *,
+        allow_print_source: bool = False,
+        delete_linked_money_inout: bool = False,
     ) -> int:
         """Delete linked sale invoices. Returns 0 when this bill has none."""
         ids = self.repo.list_ids_for_bill_no(bill_no)
-        self.assert_invoices_deletable(ids)
+        if delete_linked_money_inout:
+            self.delete_linked_money_inout_for_invoices(ids)
+        else:
+            self.assert_invoices_deletable(ids)
         for invoice_id in ids:
             self.delete_record(
                 invoice_id,
@@ -3526,9 +3644,13 @@ class GstInvoiceService:
             )
         return len(ids)
 
-    def delete_invoices_for_bill(self, bill_no: str) -> int:
+    def delete_invoices_for_bill(
+        self, bill_no: str, *, delete_linked_money_inout: bool = False
+    ) -> int:
         """Permanently delete every sale invoice linked to this bill number."""
-        count = self.delete_invoices_for_bill_if_any(bill_no)
+        count = self.delete_invoices_for_bill_if_any(
+            bill_no, delete_linked_money_inout=delete_linked_money_inout
+        )
         if not count:
             raise ValueError("No invoice is linked to this bill.")
         return count
@@ -3552,9 +3674,19 @@ class GstInvoiceService:
         inv = self.repo.get_by_id(invoice_id)
         if inv is None:
             raise ValueError("Invoice not found.")
-        payment_block = self.invoice_delete_payment_block(inv)
-        if payment_block:
-            raise ValueError(payment_block)
+        delete_linked_money_inout = self._form_flag(
+            payload or {}, "delete_linked_money_inout"
+        )
+        if delete_linked_money_inout:
+            precheck = self.invoice_delete_precheck([invoice_id])
+            if not precheck.get("can_delete"):
+                raise ValueError(precheck.get("error") or "Unable to delete linked Money In-Out entry.")
+            if not precheck.get("requires_linked_receipt_delete"):
+                raise ValueError("No linked Money In-Out entry is available to delete.")
+        else:
+            payment_block = self.invoice_delete_payment_block(inv)
+            if payment_block:
+                raise ValueError(payment_block)
         if not allow_print_source:
             from app.services.print_job_billing_service import PrintJobBillingService
 
@@ -3586,11 +3718,17 @@ class GstInvoiceService:
             bill_source = self.normalize_bill_source(getattr(inv, "BillSource", None))
             self._remove_sale_daily(inv)
             self._remove_purchase_payment_bank(inv)
-            if entry_id:
-                self._clear_followup_invoice_stage(int(entry_id))
             from app.services.others_bank_cash_service import OthersBankCashService
 
-            OthersBankCashService().release_invoice_allocations(inv.InvoiceID)
+            bank_cash = OthersBankCashService()
+            if delete_linked_money_inout:
+                bank_cash.delete_invoice_receipts(
+                    inv.InvoiceID,
+                    commit=False,
+                    allow_unallocated=True,
+                )
+                self._clear_source_payment_received(inv)
+            bank_cash.release_invoice_allocations(inv.InvoiceID)
             self.repo.delete(inv)
             if misc_id or bill_source == self.BILL_SOURCE_MISCELLANEOUS:
                 self._hard_delete_misc_source_after_invoice_delete(misc_id, inv)

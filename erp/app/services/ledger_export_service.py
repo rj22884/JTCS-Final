@@ -1597,7 +1597,13 @@ class LedgerExportService:
     def _is_individual_client(self, customer_id: int) -> bool:
         return customer_id in self.individual_client_ids([customer_id])
 
-    def _individual_client_movement_sql(self, *, customer_pred: str) -> str:
+    def _individual_client_movement_sql(
+        self,
+        *,
+        customer_pred: str,
+        range_from: date | None = None,
+        range_to: date | None = None,
+    ) -> str:
         """Misc sale + misc payment, follow-up bills, and sale invoices.
 
         A sale invoice is the receivable. The matching follow-up bill amount
@@ -1616,6 +1622,14 @@ class LedgerExportService:
             )
         """
         misc_invoiced_exclusion = sql_unpaid_misc_exclusion_for_customer_ledger()
+        def date_filter(expression: str) -> str:
+            parts = []
+            if range_from is not None:
+                parts.append(f"AND {expression} >= :movement_from")
+            if range_to is not None:
+                parts.append(f"AND {expression} < :movement_to")
+            return "\n              " + "\n              ".join(parts) if parts else ""
+
         return f"""
             SELECT
                 e.CustomerID,
@@ -1633,6 +1647,7 @@ class LedgerExportService:
               AND ISNULL(e.IsActive, 1) = 1
               AND ISNULL(e.Amount, 0) > 0
               AND {misc_kind}
+              {date_filter('e.WorkDate')}
               {misc_invoiced_exclusion}
 
             UNION ALL
@@ -1667,6 +1682,7 @@ class LedgerExportService:
               AND {misc_kind}
               AND ISNULL(p.Amount, 0) > 0
               AND {not_udhaar}
+              {date_filter('ISNULL(bt.TransactionDate, d.TransactionDate)')}
 
             UNION ALL
 
@@ -1686,6 +1702,7 @@ class LedgerExportService:
               AND f.BillNo IS NOT NULL
               AND LTRIM(RTRIM(f.BillNo)) <> N''
               AND ISNULL(f.BillAmount, 0) > 0
+              {date_filter('ISNULL(f.BillDate, f.WorkDate)')}
               {sql_unpaid_followup_exclusion_for_customer_ledger()}
 
             UNION ALL
@@ -1714,6 +1731,7 @@ class LedgerExportService:
               AND d.WorkType IN ({modules})
               AND ISNULL(p.Amount, 0) > 0
               AND {not_udhaar}
+              {date_filter('ISNULL(bt.TransactionDate, d.TransactionDate)')}
 
             UNION ALL
 
@@ -1733,6 +1751,7 @@ class LedgerExportService:
               AND UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
               AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
               AND ISNULL(d.SaleAmount, 0) <> 0
+              {date_filter('d.TransactionDate')}
         """
 
     def _individual_client_activity_parts(
@@ -1744,18 +1763,54 @@ class LedgerExportService:
         ob_date: date | None,
     ) -> tuple[Decimal, Decimal, list[dict[str, Any]]]:
         """Period lines plus prior billed/received for one Individual Client."""
-        sql = self._individual_client_movement_sql(customer_pred="e.CustomerID = :customer_id")
+        sql = self._individual_client_movement_sql(
+            customer_pred="e.CustomerID = :customer_id",
+            range_from=date_from,
+            range_to=date_to + timedelta(days=1),
+        )
         try:
             raw_rows = db.session.execute(
                 text(sql),
-                {"customer_id": customer_id},
+                {
+                    "customer_id": customer_id,
+                    "movement_from": date_from,
+                    "movement_to": date_to + timedelta(days=1),
+                },
             ).mappings().all()
         except Exception:
             db.session.rollback()
             return Decimal("0.00"), Decimal("0.00"), []
 
-        prior_billed = Decimal("0.00")
-        prior_received = Decimal("0.00")
+        prior_sql = self._individual_client_movement_sql(
+            customer_pred="e.CustomerID = :customer_id",
+            range_from=ob_date,
+            range_to=date_from,
+        )
+        prior_params = {"customer_id": customer_id, "movement_to": date_from}
+        opening_date_filter = ""
+        if ob_date is not None:
+            prior_params["movement_from"] = ob_date
+            prior_params["ob_date"] = ob_date
+            opening_date_filter = "AND m.TransactionDate > :ob_date"
+        try:
+            prior_row = db.session.execute(
+                text(
+                    f"""
+                    SELECT ISNULL(SUM(m.SaleAmount), 0) AS billed,
+                           ISNULL(SUM(m.ReceiptAmount), 0) AS received
+                    FROM ({prior_sql}) m
+                    WHERE m.TransactionDate < :date_from
+                      {opening_date_filter}
+                    """
+                ),
+                {**prior_params, "date_from": date_from},
+            ).mappings().first()
+            prior_billed = self._money(prior_row["billed"] if prior_row else 0)
+            prior_received = self._money(prior_row["received"] if prior_row else 0)
+        except Exception:
+            db.session.rollback()
+            prior_billed = Decimal("0.00")
+            prior_received = Decimal("0.00")
         period: list[dict[str, Any]] = []
         for row in raw_rows:
             txn_date = row["TransactionDate"]

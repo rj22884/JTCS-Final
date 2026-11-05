@@ -241,7 +241,13 @@ def delete_record(entry_id: int):
                     "error": "Miscellaneous entries can only be deleted from Activities → Miscellaneous.",
                 }
             ), 400
-        message = service.delete_entry(entry_id)
+        payload = request.get_json(silent=True) or request.form
+        message = service.delete_entry(
+            entry_id,
+            delete_linked_money_inout=str(
+                payload.get("delete_linked_money_inout") or ""
+            ).strip().lower() in {"1", "true", "yes", "on"},
+        )
         return jsonify({"ok": True, "message": message})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

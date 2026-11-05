@@ -333,6 +333,32 @@ class OthersIncomeExpenseRepository:
                 """
             )
         )
+        # Work/category ledger previews filter detail rows by WorkID and then
+        # join their parent entry by EntryID within a selected date range.
+        self.session.execute(
+            text(
+                """
+                IF OBJECT_ID(N'dbo.OthersIncomeExpenseDetail', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.indexes
+                       WHERE object_id = OBJECT_ID(N'dbo.OthersIncomeExpenseDetail')
+                         AND name = N'IX_OIEDetail_WorkID_EntryID'
+                   )
+                    CREATE INDEX IX_OIEDetail_WorkID_EntryID
+                    ON dbo.OthersIncomeExpenseDetail (WorkID, EntryID)
+                    INCLUDE (Amount, LineSequence, WorkTypeID);
+                IF OBJECT_ID(N'dbo.OthersIncomeExpenseMaster', N'U') IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1 FROM sys.indexes
+                       WHERE object_id = OBJECT_ID(N'dbo.OthersIncomeExpenseMaster')
+                         AND name = N'IX_OIEMaster_WorkDate_EntryID'
+                   )
+                    CREATE INDEX IX_OIEMaster_WorkDate_EntryID
+                    ON dbo.OthersIncomeExpenseMaster (WorkDate, EntryID)
+                    INCLUDE (IsActive, BillNo, CustomerName);
+                """
+            )
+        )
         self.session.execute(
             text(
                 """

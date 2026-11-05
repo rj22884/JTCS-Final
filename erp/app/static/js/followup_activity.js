@@ -533,6 +533,14 @@
     if ((isStageChecked("return_filed") || isStageChecked("itr_filed")) && els.itrFiledDate) {
       payload.itr_filed_date = els.itrFiledDate.value || "";
     }
+    if (
+      (isTaxFollowup && (isStageChecked("return_filed") || isStageChecked("itr_filed"))) ||
+      (isDscModule && isStageChecked("download_status"))
+    ) {
+      if (els.billAmount && String(els.billAmount.value || "").trim() !== "") {
+        payload.bill_amount = els.billAmount.value;
+      }
+    }
     if (isTaxFollowup) return;
     const tallyChecked = isStageChecked("tally_bill_generated");
     const paymentChecked = isStageChecked("payment_received");
@@ -641,6 +649,7 @@
     const amount = document.createElement("input");
     amount.type = "number";
     amount.step = "0.01";
+    amount.max = "999999999999999999.99";
     amount.min = "0";
     amount.className = "form-control form-control-sm fu-payment-amount";
     amount.value = options.amount != null && options.amount !== "" && parseFloat(options.amount) > 0
@@ -1295,6 +1304,15 @@
         )
       : window.confirm("This will permanently delete all invoices related to this bill.");
     if (!permanent) return;
+    const deletePayload = window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.({
+      bill_no: billNo,
+      user_id: creds.user_id,
+      password: creds.password,
+    }) || {
+      bill_no: billNo,
+      user_id: creds.user_id,
+      password: creds.password,
+    };
     const res = await fetch(window.FU_INVOICE_DELETE_URL, {
       method: "POST",
       credentials: "same-origin",
@@ -1303,11 +1321,7 @@
         Accept: "application/json",
         "X-CSRFToken": window.FU_CSRF || csrfToken(),
       },
-      body: JSON.stringify({
-        bill_no: billNo,
-        user_id: creds.user_id,
-        password: creds.password,
-      }),
+      body: JSON.stringify(deletePayload),
     });
     const data = await res.json().catch(function () {
       return {};
@@ -1479,9 +1493,13 @@
 
   function syncWorkflowPanels() {
     const returnChecked = isStageChecked("return_filed") || isStageChecked("itr_filed");
+    const invoiceTriggerChecked = isDscModule
+      ? isStageChecked("download_status")
+      : returnChecked;
     const tallyChecked = isStageChecked("tally_bill_generated");
     const paymentChecked = isStageChecked("payment_received");
     els.itrFiledWrap?.classList.toggle("d-none", !returnChecked);
+    document.getElementById("fuInvoiceAmountWrap")?.classList.toggle("d-none", !invoiceTriggerChecked);
     if (!isTaxFollowup && !isDscModule) {
       els.tallyBillWrap?.classList.remove("d-none");
       refreshInvoiceStatus();
@@ -2081,7 +2099,7 @@
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
     const url = window.FU_API.grid + (params.toString() ? "?" + params.toString() : "");
-    return fetch(url, { headers: { Accept: "application/json" } })
+    return fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" })
       .then(function (res) {
         const contentType = res.headers.get("content-type") || "";
         if (!res.ok || !contentType.includes("application/json")) {
@@ -2472,6 +2490,10 @@
     if (followupCustomerId) params.set("contact_customer_id", followupCustomerId);
     if (entryId) params.set("followup_entry_id", entryId);
     params.set("item_group", workTypeLabel);
+    const followupAmount = Number(els.billAmount?.value || 0);
+    if (mode !== "edit" && followupAmount > 0) {
+      params.set("followup_amount", followupAmount.toFixed(2));
+    }
     if (!billingIsOther()) {
       const customerName = (els.customerSearch?.value || "").trim();
       if (customerName) params.set("customer_name", customerName);
@@ -2680,6 +2702,17 @@
       reason_for_unverified: els.reasonUnverified?.value || "",
       stage_ids: selectedStageIds(),
     };
+    const invoiceTriggerChecked = isDscModule
+      ? isStageChecked("download_status")
+      : (isStageChecked("return_filed") || isStageChecked("itr_filed"));
+    if (invoiceTriggerChecked) {
+      const invoiceAmount = Number(els.billAmount?.value || 0);
+      if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+        alert("Please enter a valid invoice amount.");
+        els.billAmount?.focus();
+        return;
+      }
+    }
     if (isGstModule && els.gstMonth) {
       const month = (els.gstMonth.value || "").trim();
       if (!month) {
@@ -2786,7 +2819,10 @@
           paintInvoiceSummary(data.record.linked_invoice || null);
         }
         savedPaymentReceived = isStageChecked("payment_received");
-        if (options.keepOpen) return data && data.record;
+        if (options.keepOpen) {
+          loadGrid();
+          return data && data.record;
+        }
         entryModal?.hide();
         return loadGrid().then(function () { return data && data.record; });
       })
@@ -2810,6 +2846,8 @@
       creds = await window.JTCSDeleteConfirm.ask({ message: "Delete this followup entry?" });
       if (!creds) return;
     }
+    const deletePayload = creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {};
+    window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.(deletePayload);
     fetch(apiUrl(window.FU_API.delete, entryId), {
       method: "POST",
       headers: {
@@ -2817,7 +2855,7 @@
         "Content-Type": "application/json",
         "X-CSRFToken": csrfToken(),
       },
-      body: JSON.stringify(creds ? window.JTCSDeleteConfirm.withCreds({}, creds) : {}),
+      body: JSON.stringify(deletePayload),
     })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
@@ -3312,6 +3350,7 @@
       );
     }
     const body = { from_source: true };
+    window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.(body);
     const followupId = parseInt(entryId, 10);
     if (followupId > 0) body.followup_entry_id = followupId;
     return fetch("/accounting/api/invoices/" + id + "/delete", {
@@ -3364,7 +3403,7 @@
 
   function ensureFollowupSaved() {
     const existing = (els.entryId?.value || "").trim();
-    if (existing) return Promise.resolve(existing);
+    if (existing && entryFieldsLocked) return Promise.resolve(existing);
     return Promise.resolve(saveEntry({ keepOpen: true })).then(function (record) {
       if (!record || !record.entry_id) return "";
       return String(record.entry_id);
@@ -3421,6 +3460,13 @@
       event.target.checked = false;
       return;
     }
+    if ((code === "return_filed" || code === "itr_filed" || (isDscModule && code === "download_status")) && event.target.checked) {
+      syncWorkflowPanels();
+      if (!linkedInvoice && els.billAmount && !(els.billAmount.value || "").trim()) {
+        window.setTimeout(function () { els.billAmount?.focus(); }, 0);
+      }
+      return;
+    }
     if ((code === "return_filed" || code === "itr_filed") && !event.target.checked && isStageChecked("invoice")) {
       event.target.checked = true;
       syncWorkflowPanels();
@@ -3428,6 +3474,16 @@
         JTCSDialog.alert(RETURN_FILED_MESSAGE, "warning");
       } else {
         alert(RETURN_FILED_MESSAGE);
+      }
+      return;
+    }
+    if (isDscModule && code === "download_status" && !event.target.checked && linkedInvoice) {
+      event.target.checked = true;
+      syncWorkflowPanels();
+      if (window.JTCSDialog && JTCSDialog.alert) {
+        JTCSDialog.alert("Delete the linked invoice before unchecking Download.", "warning");
+      } else {
+        alert("Delete the linked invoice before unchecking Download.");
       }
       return;
     }
@@ -3460,6 +3516,19 @@
     const customerId = (els.customerId?.value || "").trim();
     if (!customerId) {
       alert("Please select a customer before opening the Invoice module.");
+      return;
+    }
+    const invoiceTriggerChecked = isDscModule
+      ? isStageChecked("download_status")
+      : (isStageChecked("return_filed") || isStageChecked("itr_filed"));
+    if (!invoiceTriggerChecked) {
+      alert(isDscModule ? "Please mark Download before creating the invoice." : "Please mark Return Filed before creating the invoice.");
+      return;
+    }
+    const invoiceAmount = Number(els.billAmount?.value || 0);
+    if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+      alert("Please enter a valid invoice amount.");
+      els.billAmount?.focus();
       return;
     }
     const cb = invoiceStageCheckbox();

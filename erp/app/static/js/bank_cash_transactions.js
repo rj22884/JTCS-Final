@@ -295,6 +295,7 @@
     const res = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
       credentials: "same-origin",
+      cache: "no-store",
     });
     const data = await parseJsonResponse(res);
     if (requestId !== gridRequestId) return;
@@ -549,11 +550,16 @@
           );
         })
         .join("");
-    if (selectedPurpose) els.purpose.value = selectedPurpose;
+    const defaultPurpose = purposes.find(function (item) {
+      return String(item.purpose_name || "").trim().toLowerCase() === "customer paid";
+    });
+    els.purpose.value = selectedPurpose || (defaultPurpose ? defaultPurpose.purpose_name : "");
     syncOtherRemarksUi();
   }
 
   let invoiceReceiptLaunch = null;
+  let invoiceAccountSummary = null;
+  let invoiceAmountAutofilled = false;
 
   function invoicePageWindowEl() {
     try {
@@ -643,6 +649,7 @@
 
   async function openNew() {
     invoiceReceiptLaunch = null;
+    invoiceAmountAutofilled = false;
     els.form.reset();
     if (els.entryId) els.entryId.value = "";
     if (els.deleteBtn) els.deleteBtn.classList.add("d-none");
@@ -754,6 +761,8 @@
 
   function clearInvoiceLink() {
     invoiceRows = [];
+    invoiceAccountSummary = null;
+    paintCreditInvoiceSummary();
     customerLedgerKey = "";
     reservedAdvances = [];
     customerFromCredit = false;
@@ -765,6 +774,41 @@
     }
     clearCategoryFields();
     renderInvoiceChoices("none", []);
+  }
+
+  function paintCreditInvoiceSummary() {
+    const target = document.getElementById("obcCreditInvoiceSummary");
+    const summary = invoiceAccountSummary;
+    if (!target) return;
+    if (!summary || !Number(summary.bill_count || 0)) {
+      target.classList.add("d-none");
+      target.textContent = "";
+      return;
+    }
+    target.classList.remove("d-none");
+    target.textContent = "Bills (" + Number(summary.bill_count || 0) + ") · Invoice " +
+      moneyLabel(summary.invoice_total) + " · Received " + moneyLabel(summary.received_total) +
+      " · Balance " + moneyLabel(summary.outstanding_total);
+  }
+
+  function syncAmountFromInvoiceSelection() {
+    const mode = syncInvoiceModeField();
+    let selected = [];
+    if (mode === "all") selected = invoiceRows;
+    else if (mode === "selected") {
+      const ids = new Set(checkedInvoiceIds());
+      selected = invoiceRows.filter(function (inv) { return ids.has(String(inv.invoice_id)); });
+    }
+    if (!selected.length) {
+      if (invoiceAmountAutofilled && els.amount) els.amount.value = "";
+      invoiceAmountAutofilled = false;
+      return;
+    }
+    const total = selected.reduce(function (sum, inv) {
+      return sum + Number(inv.invoice_amount || 0);
+    }, 0);
+    if (els.amount) els.amount.value = total.toFixed(2);
+    invoiceAmountAutofilled = true;
   }
 
   function checkedInvoiceIds() {
@@ -1031,6 +1075,8 @@
   async function loadCustomerInvoices(customerId, restore, includeInvoiceId) {
     invoiceRows = [];
     customerLedgerKey = "";
+    invoiceAccountSummary = null;
+    paintCreditInvoiceSummary();
     if (!customerId) {
       reservedAdvances = [];
       renderInvoiceChoices("none", []);
@@ -1043,11 +1089,14 @@
     const res = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin" });
     const data = await parseJsonResponse(res);
     invoiceRows = data.invoices || [];
+    invoiceAccountSummary = data.invoice_summary || null;
+    paintCreditInvoiceSummary();
     customerLedgerKey = data.customer_ledger_key || "";
     reservedAdvances = restore && restore.advances ? restore.advances : [];
     const mode = restore && restore.mode ? restore.mode : "none";
     const ids = restore && restore.ids ? restore.ids : [];
     renderInvoiceChoices(mode, ids);
+    if (restore) invoiceAmountAutofilled = false;
   }
 
   async function restoreInvoiceLink(row) {
@@ -1158,6 +1207,8 @@
       });
       return;
     }
+    invoiceAccountSummary = null;
+    paintCreditInvoiceSummary();
     if (!customerFromCredit) return;
     customerFromCredit = false;
     if (els.customerId) els.customerId.value = "";
@@ -1273,6 +1324,7 @@
     } else if (value !== "selected") {
       boxes.forEach(function (box) { box.checked = String(box.value) === String(value); });
     }
+    syncAmountFromInvoiceSelection();
     paintAllocation();
   });
   els.invoiceList?.addEventListener("change", function (ev) {
@@ -1295,9 +1347,13 @@
         "Selected invoices (" + ids.length + ")";
       els.invoiceMode.value = "selected";
     }
+    syncAmountFromInvoiceSelection();
     paintAllocation();
   });
-  els.amount?.addEventListener("input", paintAllocation);
+  els.amount?.addEventListener("input", function () {
+    invoiceAmountAutofilled = false;
+    paintAllocation();
+  });
 
   if (els.newBtn) {
     els.newBtn.addEventListener("click", function () {

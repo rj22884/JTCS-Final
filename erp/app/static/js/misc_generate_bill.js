@@ -1270,6 +1270,17 @@
     if (!userId) return;
     const password = window.prompt("Password");
     if (!password) return;
+    const deletePayload = window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.({
+      user_id: userId,
+      password: password,
+      from_source: true,
+      misc_entry_id: (els.miscEntryId?.value || "").trim(),
+    }) || {
+      user_id: userId,
+      password: password,
+      from_source: true,
+      misc_entry_id: (els.miscEntryId?.value || "").trim(),
+    };
     const res = await fetch(apiUrl(cfg.deleteUrl, invoiceId), {
       method: "POST",
       credentials: "same-origin",
@@ -1278,12 +1289,7 @@
         Accept: "application/json",
         "X-CSRFToken": cfg.csrf || "",
       },
-      body: JSON.stringify({
-        user_id: userId,
-        password: password,
-        from_source: true,
-        misc_entry_id: (els.miscEntryId?.value || "").trim(),
-      }),
+      body: JSON.stringify(deletePayload),
     });
     const data = await res.json().catch(function () {
       return {};

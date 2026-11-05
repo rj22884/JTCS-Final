@@ -289,6 +289,7 @@
       if (!creds) return false;
     }
     const body = { from_source: true };
+    window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.(body);
     const followupId = parseInt(options && options.followupEntryId, 10);
     if (followupId > 0) body.followup_entry_id = followupId;
     const miscId = parseInt(options && options.miscEntryId, 10);

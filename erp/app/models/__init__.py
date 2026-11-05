@@ -4,7 +4,7 @@ from app.models.auth import AuthToken, CompanyProfile, User
 from app.models.menu_master import MenuMaster
 from app.models.menu_user_allow import MenuUserAllow
 from app.models.ecourt import ECourtReceiptBatch, ECourtReceiptLine, ECourtSale
-from app.models.followup import FollowupEntryMaster, FollowupEntryStage
+from app.models.followup import FollowupEntryMaster
 from app.models.stamp import StampMaster, StampOcrImage
 from app.models.exceptional_stamp_upload import (
     ExceptionalStampImport,
@@ -106,5 +106,4 @@ __all__ = [
     "AppVersionHistory",
     "RdAccountMaster",
     "FollowupEntryMaster",
-    "FollowupEntryStage",
 ]

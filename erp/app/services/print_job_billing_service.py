@@ -273,14 +273,27 @@ class PrintJobBillingService:
         return self.gst.repo.find_by_misc_entries([int(entry.EntryID)]).get(int(entry.EntryID))
 
     def _money_allocation_exists(self, invoice_id: int) -> bool:
-        from app.models.bank_cash import OthersBankCashInvoiceAllocation
+        from app.models.bank_cash import (
+            OthersBankCashInvoiceAllocation,
+            OthersBankCashTransaction,
+        )
 
-        row = db.session.scalars(
-            select(OthersBankCashInvoiceAllocation)
+        rows = db.session.execute(
+            select(
+                OthersBankCashInvoiceAllocation.AllocationSource,
+                OthersBankCashTransaction.Purpose,
+            )
+            .join(
+                OthersBankCashTransaction,
+                OthersBankCashTransaction.EntryID == OthersBankCashInvoiceAllocation.EntryID,
+            )
             .where(OthersBankCashInvoiceAllocation.InvoiceID == int(invoice_id))
-            .limit(1)
-        ).first()
-        return row is not None
+        ).all()
+        return any(
+            (source or "receipt").strip().lower() != "advance"
+            or (purpose or "").strip().casefold() == "customer paid"
+            for source, purpose in rows
+        )
 
     def _ensure_money_for_existing(
         self,
@@ -420,11 +433,24 @@ class PrintJobBillingService:
         obc = OthersBankCashService()
         entry_ids: set[int] = set()
         if inv is not None:
-            for eid in db.session.scalars(
-                select(OthersBankCashInvoiceAllocation.EntryID).where(
-                    OthersBankCashInvoiceAllocation.InvoiceID == int(inv.InvoiceID)
+            allocation_rows = db.session.execute(
+                select(
+                    OthersBankCashInvoiceAllocation.EntryID,
+                    OthersBankCashInvoiceAllocation.AllocationSource,
+                    OthersBankCashTransaction.Purpose,
                 )
-            ).all():
+                .join(
+                    OthersBankCashTransaction,
+                    OthersBankCashTransaction.EntryID == OthersBankCashInvoiceAllocation.EntryID,
+                )
+                .where(OthersBankCashInvoiceAllocation.InvoiceID == int(inv.InvoiceID))
+            ).all()
+            for eid, source, purpose in allocation_rows:
+                if (
+                    (source or "receipt").strip().lower() == "advance"
+                    and (purpose or "").strip().casefold() != "customer paid"
+                ):
+                    continue
                 entry_ids.add(int(eid))
         tag = self._tag(public_id)
         for row in db.session.scalars(

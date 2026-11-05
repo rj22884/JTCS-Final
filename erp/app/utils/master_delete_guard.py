@@ -22,7 +22,6 @@ _TABLE_LABELS = {
     "JtcsBankTransaction": "Bank Transaction",
     "JtcsBankAccountMaster": "Bank Master",
     "FollowupEntryMaster": "Follow-up Work",
-    "FollowupEntryStage": "Follow-up Stage",
     "FollowupWorkflowStage": "Follow-up Stage Master",
     "GstInvoice": "GST Invoice",
     "GstInvoiceLine": "GST Invoice Line",

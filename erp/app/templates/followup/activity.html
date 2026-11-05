@@ -337,7 +337,7 @@
 
 <div class="modal fade" id="fuEntryModal" tabindex="-1" aria-labelledby="fuEntryModalTitle" aria-hidden="true"
      data-bs-backdrop="static" data-bs-keyboard="false">
-  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+  <div class="modal-dialog modal-dialog-scrollable fu-entry-dialog">
     <div class="modal-content fu-entry-modal">
       <div class="modal-header py-2">
         <div>
@@ -355,7 +355,7 @@
           <div class="row g-3 mb-2">
             <div class="col-md-4">
               <label class="form-label fu-required" for="fuWorkDate">Work Date</label>
-              <input type="date" class="form-control" id="fuWorkDate" name="work_date"
+              <input type="date" class="form-control fu-date-field" id="fuWorkDate" name="work_date"
                      value="{{ default_date }}" required>
             </div>
             {% if module_code == 'GST' %}
@@ -520,7 +520,7 @@
                 <input class="form-check-input fu-stage-check" type="checkbox"
                        name="stage_ids" value="{{ stage.stage_id }}" id="fuStage{{ stage.stage_id }}"
                        data-stage-code="{{ stage.stage_code }}">
-                <label class="form-check-label" for="fuStage{{ stage.stage_id }}">{{ stage.stage_name }}</label>
+                <label class="form-check-label" for="fuStage{{ stage.stage_id }}">{{ 'Download' if module_code == 'DSC' and stage.stage_code == 'download_status' else stage.stage_name }}</label>
               </div>
               {% if module_code in ['ITR', 'GST', 'TDS'] and stage.stage_code == 'documents_received' %}
               <div id="fuInvoiceSummary" class="fu-invoice-summary d-none" aria-live="polite">
@@ -622,6 +622,15 @@
           </div>
           {% endif %}
 
+          {% if module_code in ['ITR', 'GST', 'TDS', 'DSC'] %}
+          <div class="fu-workflow-panel d-none mb-3" id="fuInvoiceAmountWrap">
+            <label class="form-label fu-required" for="fuBillAmount">Invoice Amount</label>
+            <input type="number" min="0.01" max="999999999999999999.99" step="0.01" class="form-control fu-amount-field" id="fuBillAmount"
+                   name="bill_amount" inputmode="decimal" placeholder="Enter invoice amount">
+            <div class="form-text">यह कुल बिल राशि invoice में GST सहित लागू होगी।</div>
+          </div>
+          {% endif %}
+
           <div class="mb-3 d-none" id="fuUnverifiedWrap">
             <label class="form-label" for="fuReasonUnverified">Reason for Unverified</label>
             <textarea class="form-control" id="fuReasonUnverified" name="reason_for_unverified" rows="2"></textarea>
@@ -629,7 +638,7 @@
 
           <div class="mb-2">
             <label class="form-label" for="fuRemarks">Remarks</label>
-            <textarea class="form-control" id="fuRemarks" name="remarks" rows="3"></textarea>
+            <textarea class="form-control" id="fuRemarks" name="remarks" rows="2" maxlength="50"></textarea>
           </div>
         </form>
         <div id="fuInvoiceEditor" class="fu-invoice-editor">
@@ -776,8 +785,8 @@
 </script>
 <script src="{{ url_for('static', filename='js/scoped_customer_modal.js') }}?v=20261018scopeaddrlock"></script>
 {% endif %}
-<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261023invstatus2"></script>
-<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261018invoiceguard"></script>
+<script src="{{ url_for('static', filename='js/jtcs_invoice_actions.js') }}?v=20261104invoicepaymentlink"></script>
+<script src="{{ url_for('static', filename='js/invoice_delete_guard.js') }}?v=20261104invoicepaymentguard"></script>
 <script src="{{ url_for('static', filename='js/invoice_receipt_return.js') }}?v=20261007receiptclose"></script>
-<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261023dscinvoice2"></script>
+<script src="{{ url_for('static', filename='js/followup_activity.js') }}?v=20261104invoicepaymentlink"></script>
 {% endblock %}

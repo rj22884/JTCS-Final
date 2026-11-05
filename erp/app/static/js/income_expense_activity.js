@@ -522,6 +522,15 @@
         )
       : window.confirm("This will permanently delete all invoices related to this bill.");
     if (!permanent) return;
+    const deletePayload = window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.({
+      bill_no: billNo,
+      user_id: creds.user_id,
+      password: creds.password,
+    }) || {
+      bill_no: billNo,
+      user_id: creds.user_id,
+      password: creds.password,
+    };
     const res = await fetch(window.OIE_INVOICE_DELETE_URL, {
       method: "POST",
       credentials: "same-origin",
@@ -530,11 +539,7 @@
         Accept: "application/json",
         "X-CSRFToken": window.OIE_CSRF || csrfToken(),
       },
-      body: JSON.stringify({
-        bill_no: billNo,
-        user_id: creds.user_id,
-        password: creds.password,
-      }),
+      body: JSON.stringify(deletePayload),
     });
     const data = await res.json().catch(function () {
       return {};
@@ -952,7 +957,7 @@
       window.OIE_SUB_WORKS_URL +
       "?work_name=" +
       encodeURIComponent(workName);
-    return fetch(url, { headers: { Accept: "application/json" } })
+    return fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" })
       .then(function (res) {
         return res.json();
       })
@@ -1033,6 +1038,8 @@
     const amount = document.createElement("input");
     amount.type = "number";
     amount.step = "0.01";
+    amount.max = "999999999999999999.99";
+    amount.inputMode = "decimal";
     amount.min = "0";
     amount.className = "form-control oie-category-amount";
     amount.required = true;
@@ -1376,6 +1383,8 @@
     const amount = document.createElement("input");
     amount.type = "number";
     amount.step = "0.01";
+    amount.max = "999999999999999999.99";
+    amount.inputMode = "decimal";
     amount.min = "0";
     amount.className = "form-control oie-payment-amount";
     amount.required = true;
@@ -2091,7 +2100,7 @@
   function loadGrid() {
     const url = window.OIE_GRID_URL;
     if (!url) return Promise.resolve();
-    return fetch(url, { headers: { Accept: "application/json" } })
+    return fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" })
       .then(function (res) { return parseJsonResponse(res); })
       .then(function (data) {
         let rows = data.rows || [];
@@ -2231,6 +2240,10 @@
     const body = new FormData();
     if (csrf) body.append("csrf_token", csrf.value);
     if (creds) window.JTCSDeleteConfirm.appendCreds(body, creds);
+    const deleteOptions = window.JtcsInvoiceDeleteGuard?.applyDeleteOptions?.({}) || {};
+    if (deleteOptions.delete_linked_money_inout) {
+      body.append("delete_linked_money_inout", "true");
+    }
     fetch(url, { method: "POST", body: body, headers: { Accept: "application/json" } })
       .then(function (res) {
         return res.json();
@@ -2252,8 +2265,14 @@
     const contentType = res.headers.get("content-type") || "";
     if (!contentType.includes("application/json")) {
       return res.text().then(function (body) {
-        if (res.status === 401 || res.status === 403 || /sign in|login/i.test(body || "")) {
+        const finalPath = new URL(res.url || window.location.href, window.location.href).pathname;
+        const redirectedToLogin =
+          res.redirected && /\/(?:auth\/)?login(?:\/|$)/i.test(finalPath);
+        if (res.status === 401 || redirectedToLogin) {
           throw new Error("Session expired. Please sign in again and retry save.");
+        }
+        if (res.status === 403) {
+          throw new Error("You do not have permission to complete this request.");
         }
         if (/csrf/i.test(body || "")) {
           throw new Error("Security token expired. Refresh the page (Ctrl+F5) and try again.");

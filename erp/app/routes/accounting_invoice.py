@@ -649,11 +649,8 @@ def api_check_invoice_delete():
             if value
         )
 
-    try:
-        svc.assert_invoices_deletable(invoice_ids)
-        return jsonify({"ok": True, "can_delete": True})
-    except ValueError as exc:
-        return jsonify({"ok": True, "can_delete": False, "error": str(exc)})
+    precheck = svc.invoice_delete_precheck(invoice_ids)
+    return jsonify({"ok": True, **precheck, "invoice_ids": sorted(invoice_ids)})
 
 
 @bp.route("/invoice/<int:invoice_id>/preview-html", methods=["GET"], strict_slashes=False)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from sqlalchemy import delete, func, select, text, update
 
@@ -66,8 +66,10 @@ class OthersBankCashService:
             amount = Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             raise ValueError("Invalid amount.") from None
-        if amount <= 0:
+        if not amount.is_finite() or amount <= 0:
             raise ValueError("Amount must be greater than zero.")
+        if amount.as_tuple().exponent < -2 or amount >= Decimal("1000000000000000000"):
+            raise ValueError("Amount must fit N(20,2) (maximum 18 digits before the decimal and 2 after it).")
         return amount
 
     @staticmethod
@@ -946,7 +948,14 @@ class OthersBankCashService:
             )
         )
 
-    def _replace_allocations(self, entry_id: int, pairs: list[tuple[int, Decimal]], payment_amount: Decimal) -> None:
+    def _replace_allocations(
+        self,
+        entry_id: int,
+        pairs: list[tuple[int, Decimal]],
+        payment_amount: Decimal,
+        *,
+        preserve_advances: bool = False,
+    ) -> None:
         """Rewrite this voucher's invoice links without posting any ledger rows.
 
         The payment is applied to the selected invoices first. Any advance already
@@ -968,7 +977,11 @@ class OthersBankCashService:
         invoice_service = GstInvoiceService()
         for item in allocation_rows:
             source = (getattr(item, "AllocationSource", None) or "receipt").strip().lower()
-            if source == "advance" and self._money(item.AllocatedAmount) > 0:
+            if (
+                source == "advance"
+                and preserve_advances
+                and self._money(item.AllocatedAmount) > 0
+            ):
                 linked_invoice = invoices.get(int(item.InvoiceID))
                 if linked_invoice is not None and invoice_service.normalize_bill_source(
                     getattr(linked_invoice, "BillSource", None)
@@ -1035,6 +1048,8 @@ class OthersBankCashService:
                 select(OthersBankCashTransaction).where(
                     OthersBankCashTransaction.IsActive == True,  # noqa: E712
                     OthersBankCashTransaction.CustomerID == int(customer_id),
+                    func.upper(func.ltrim(func.rtrim(OthersBankCashTransaction.Purpose)))
+                    == "CUSTOMER PAID",
                 )
             ).all()
         }
@@ -1053,6 +1068,8 @@ class OthersBankCashService:
                 select(OthersBankCashTransaction).where(
                     OthersBankCashTransaction.EntryID.in_(missing),
                     OthersBankCashTransaction.IsActive == True,  # noqa: E712
+                    func.upper(func.ltrim(func.rtrim(OthersBankCashTransaction.Purpose)))
+                    == "CUSTOMER PAID",
                 )
             ).all():
                 entries[int(row.EntryID)] = row
@@ -1165,7 +1182,12 @@ class OthersBankCashService:
             )
         ).all()
         for txn, allocated, allocation_source in alloc_rows:
-            if ignore_advance and (allocation_source or "receipt").strip().lower() == "advance":
+            is_advance = (allocation_source or "receipt").strip().lower() == "advance"
+            if is_advance and (
+                ignore_advance
+                or (getattr(txn, "Purpose", None) or "").strip().casefold()
+                != "customer paid"
+            ):
                 continue
             entry_id = int(txn.EntryID)
             bucket = grouped.get(entry_id)
@@ -1381,6 +1403,8 @@ class OthersBankCashService:
         return self._invoice_customer_id(getattr(row, "InvoiceID", None))
 
     def _advance_allocation_rows(self, row) -> list[dict]:
+        if (getattr(row, "Purpose", None) or "").strip().casefold() != "customer paid":
+            return []
         rows = []
         for item in self._allocation_rows(row.EntryID):
             source = (getattr(item, "AllocationSource", None) or "receipt").strip().lower()
@@ -1426,6 +1450,7 @@ class OthersBankCashService:
         *,
         entry_id: int | None = None,
         include_invoice_ids: set[int] | None = None,
+        summary_out: dict | None = None,
     ) -> list[dict]:
         """Outstanding sale invoices for one customer, newest invoice date first.
 
@@ -1449,13 +1474,120 @@ class OthersBankCashService:
                 .order_by(GstInvoice.InvoiceDate.desc(), GstInvoice.InvoiceID.desc())
             ).all()
         )
+        # Resolve invoice balances in batches. Calling payment_position() in the
+        # loop performs separate allocation and receipt lookups for every invoice;
+        # customers with a long history therefore waited on dozens of serial DB
+        # round trips before an amount such as ₹470 appeared in the picker.
+        invoice_ids = [int(inv.InvoiceID) for inv in rows]
+        received_by_invoice = svc.money_in_totals(
+            invoice_ids, exclude_entry_id=entry_id
+        )
+        actual_received_by_invoice = (
+            svc.money_in_totals(invoice_ids) if summary_out is not None else received_by_invoice
+        )
+        refs: set[str] = set()
+        for inv in rows:
+            refs.update(
+                ref.strip().upper()
+                for ref in (getattr(inv, "TallyBillNo", None), inv.InvoiceNo)
+                if ref and ref.strip()
+            )
+        receipts_by_ref = svc._batch_receipt_amounts(refs)
+        receipt_totals: dict[int, Decimal] = {}
+        actual_receipt_totals: dict[int, Decimal] = {}
+        category_by_invoice: dict[int, dict] = {}
+        for offset in range(0, len(invoice_ids), 400):
+            chunk = invoice_ids[offset : offset + 400]
+            id_list = ", ".join(str(value) for value in chunk)
+            category_rows = db.session.execute(
+                text(
+                    f"""
+                    SELECT i.InvoiceID, m.WorkID, d.WorkTypeID,
+                           w.WorkName, wt.SubWorkType
+                    FROM dbo.GstInvoice i
+                    LEFT JOIN dbo.OthersIncomeExpenseMaster m ON m.EntryID = i.MiscEntryID
+                    OUTER APPLY (
+                        SELECT TOP (1) x.WorkTypeID
+                        FROM dbo.OthersIncomeExpenseDetail x
+                        WHERE x.EntryID = m.EntryID
+                          AND x.WorkTypeID IS NOT NULL
+                        ORDER BY x.LineSequence
+                    ) d
+                    LEFT JOIN dbo.WorkMaster w ON w.WorkID = m.WorkID
+                    LEFT JOIN dbo.WorkTypeMaster wt ON wt.WorkTypeID = d.WorkTypeID
+                    WHERE i.InvoiceID IN ({id_list})
+                    """
+                )
+            ).mappings().all()
+            for category_row in category_rows:
+                category_by_invoice[int(category_row["InvoiceID"])] = {
+                    "work_id": int(category_row["WorkID"]) if category_row["WorkID"] else None,
+                    "work_type_id": int(category_row["WorkTypeID"]) if category_row["WorkTypeID"] else None,
+                    "category_name": (category_row["WorkName"] or "").strip(),
+                    "sub_work_name": (category_row["SubWorkType"] or "").strip(),
+                }
+        for inv in rows:
+            invoice_id = int(inv.InvoiceID)
+            seen_daily_ids: set[int] = set()
+            total = Decimal(str(received_by_invoice.get(invoice_id, 0) or 0))
+            actual_total = Decimal(str(actual_received_by_invoice.get(invoice_id, 0) or 0))
+            for raw in (getattr(inv, "TallyBillNo", None), inv.InvoiceNo):
+                ref = (raw or "").strip().upper()
+                if not ref:
+                    continue
+                for daily_id, amount in receipts_by_ref.get(ref, ()):
+                    if daily_id in seen_daily_ids:
+                        continue
+                    seen_daily_ids.add(daily_id)
+                    total += amount
+                    actual_total += amount
+            receipt_totals[invoice_id] = total
+            actual_receipt_totals[invoice_id] = actual_total
+        if summary_out is not None:
+            invoice_total = Decimal("0.00")
+            received_total = Decimal("0.00")
+            outstanding_total = Decimal("0.00")
+            for inv in rows:
+                value = Decimal(str(getattr(inv, "InvoiceValue", None) or 0))
+                if getattr(inv, "VoucherType", None) == svc.VOUCHER_SALE:
+                    value = value.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
+                received = actual_receipt_totals.get(int(inv.InvoiceID), Decimal("0.00")).quantize(Decimal("0.01"))
+                invoice_total += value
+                received_total += received
+                outstanding_total += max(Decimal("0.00"), value - received)
+            summary_out.update({
+                "bill_count": len(rows),
+                "invoice_total": float(invoice_total.quantize(Decimal("0.01"))),
+                "received_total": float(received_total.quantize(Decimal("0.01"))),
+                "outstanding_total": float(outstanding_total.quantize(Decimal("0.01"))),
+            })
         invoices = []
         for inv in rows:
-            position = svc.payment_position(inv, exclude_entry_id=entry_id)
+            invoice_id = int(inv.InvoiceID)
+            invoice_amount = Decimal(str(getattr(inv, "InvoiceValue", None) or 0))
+            if getattr(inv, "VoucherType", None) == svc.VOUCHER_SALE:
+                invoice_amount = invoice_amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(Decimal("0.01"))
+            received_amount = receipt_totals.get(invoice_id, Decimal("0.00")).quantize(Decimal("0.01"))
+            outstanding_amount = max(Decimal("0.00"), invoice_amount - received_amount)
+            position = {
+                "invoice_amount": float(invoice_amount),
+                "received_amount": float(received_amount),
+                "outstanding_amount": float(outstanding_amount),
+                "payment_status": (
+                    "Paid" if outstanding_amount <= Decimal("0.005")
+                    else "Partially Paid" if received_amount > Decimal("0.005")
+                    else "Unpaid"
+                ),
+            }
             outstanding = Decimal(str(position["outstanding_amount"])).quantize(Decimal("0.01"))
             if outstanding <= 0 and int(inv.InvoiceID) not in (include_invoice_ids or set()):
                 continue
-            category = self._invoice_category(int(inv.InvoiceID))
+            category = category_by_invoice.get(invoice_id) or {
+                "work_id": None,
+                "work_type_id": None,
+                "category_name": "",
+                "sub_work_name": "",
+            }
             invoices.append(
                 {
                     "invoice_id": int(inv.InvoiceID),
@@ -1590,8 +1722,10 @@ class OthersBankCashService:
             raise ValueError("Customer is required.")
         self.entry_repo.ensure_schema()
         invoices = []
+        invoice_summary = {}
         for row in self._customer_sale_invoices(
-            cid, entry_id=entry_id, include_invoice_ids=include_invoice_ids
+            cid, entry_id=entry_id, include_invoice_ids=include_invoice_ids,
+            summary_out=invoice_summary,
         ):
             invoices.append(
                 {
@@ -1613,6 +1747,7 @@ class OthersBankCashService:
             "customer_id": cid,
             "customer_ledger_key": self._customer_ledger_key(cid),
             "invoices": invoices,
+            "invoice_summary": invoice_summary,
         }
 
     def save_entry(self, form: dict, *, created_by: str) -> BankCashSaveResult:
@@ -1640,7 +1775,10 @@ class OthersBankCashService:
             raise ValueError("Credit and Debit accounts must be different.")
 
         amount = self._decimal(form.get("Amount"))
-        remarks = self._clean(form.get("Remarks"), 500)
+        raw_remarks = self._clean(form.get("Remarks"))
+        if raw_remarks and len(raw_remarks) > 50:
+            raise ValueError("Remarks cannot exceed 50 characters.")
+        remarks = raw_remarks
         if purpose.casefold() == "other" and len(remarks or "") < 10:
             raise ValueError("If you select Other, the Remarks field is required.")
         entry_id_raw = form.get("EntryID") or form.get("entry_id")
@@ -1675,10 +1813,16 @@ class OthersBankCashService:
 
         def _write() -> BankCashSaveResult:
             existing = None
+            preserve_advances = False
             if entry_id:
                 existing = self.entry_repo.get_by_id(entry_id)
                 if existing is None or not existing.IsActive:
                     raise ValueError("Transaction not found.")
+                preserve_advances = (
+                    (getattr(existing, "Purpose", None) or "").strip().casefold()
+                    == "customer paid"
+                    and purpose.casefold() == "customer paid"
+                )
                 voucher_no = existing.VoucherNo
                 daily = self._find_daily(voucher_no)
                 self._remove_bank_legs(existing, daily)
@@ -1785,7 +1929,12 @@ class OthersBankCashService:
                     }
                 )
                 message = "Other Bank/Cash transaction saved successfully."
-            self._replace_allocations(entry.EntryID, allocation_pairs, amount)
+            self._replace_allocations(
+                entry.EntryID,
+                allocation_pairs,
+                amount,
+                preserve_advances=preserve_advances,
+            )
 
             return BankCashSaveResult(
                 entry_id=entry.EntryID,
@@ -1825,26 +1974,53 @@ class OthersBankCashService:
 
         return persist(_write)
 
-    def delete_invoice_receipts(self, invoice_id: int, *, commit: bool = True) -> int:
-        """Delete linked Money In-Out receipts for one invoice as one transaction.
+    def delete_invoice_receipts(
+        self,
+        invoice_id: int,
+        *,
+        commit: bool = True,
+        allow_unallocated: bool = False,
+    ) -> int:
+        """Delete linked Money In-Out vouchers for one invoice atomically."""
+        return self.delete_invoice_receipts_for_invoices(
+            [invoice_id], commit=commit, allow_unallocated=allow_unallocated
+        )
 
-        A receipt shared with another invoice is rejected so updating one Misc
-        invoice cannot remove payment from a different invoice.
-        """
+    def delete_invoice_receipts_for_invoices(
+        self,
+        invoice_ids,
+        *,
+        commit: bool = True,
+        allow_unallocated: bool = False,
+    ) -> int:
+        """Delete every voucher linked to the requested invoices, once each."""
         self.entry_repo.ensure_schema()
+        invoice_keys = {
+            int(value)
+            for value in (invoice_ids or [])
+            if str(value or "").strip().isdigit() and int(value) > 0
+        }
+        if not invoice_keys:
+            return 0
 
         def _write() -> int:
-            adjustment = self.invoice_payment_adjustment(invoice_id)
-            rows = adjustment.get("entries") or []
-            if any(self._money(row.get("remaining_money_inout_amount")) > 0 for row in rows):
+            row_by_entry: dict[int, dict] = {}
+            for invoice_key in sorted(invoice_keys):
+                adjustment = self.invoice_payment_adjustment(invoice_key)
+                for row in adjustment.get("entries") or []:
+                    entry_id = int(row.get("money_inout_entry_id") or 0)
+                    if entry_id:
+                        row_by_entry.setdefault(entry_id, row)
+            if not allow_unallocated and any(
+                self._money(row.get("remaining_money_inout_amount")) > 0
+                for row in row_by_entry.values()
+            ):
                 raise ValueError(
                     "A linked Money In-Out receipt has an unallocated balance. "
                     "Allocate or unlink that balance before updating this invoice."
                 )
-            entry_ids = [int(row["money_inout_entry_id"]) for row in rows]
             entries = []
-            invoice_key = int(invoice_id)
-            for entry_id in entry_ids:
+            for entry_id in sorted(row_by_entry):
                 entry = self.entry_repo.get_by_id(entry_id)
                 if entry is None or not entry.IsActive:
                     continue
@@ -1856,10 +2032,10 @@ class OthersBankCashService:
                 }
                 if not linked_invoice_ids and getattr(entry, "InvoiceID", None):
                     linked_invoice_ids.add(int(entry.InvoiceID))
-                if linked_invoice_ids - {invoice_key}:
+                if linked_invoice_ids - invoice_keys:
                     raise ValueError(
                         "A linked Money In-Out receipt is also allocated to another invoice. "
-                        "Unlink it from the other invoice before updating this invoice."
+                        "Unlink it from the other invoice before deleting this invoice."
                     )
                 from app.services.print_job_billing_service import PrintJobBillingService
 

@@ -3,6 +3,13 @@
   font-size: 14px;
 }
 
+#oieEntryModal .oie-entry-dialog:not(.jtcs-win-maximized) {
+  width: min(820px, calc(100vw - 1rem));
+  max-width: min(820px, calc(100vw - 1rem));
+}
+.oie-date-field { max-width: 165px; }
+#oieEntryModal input[type="date"] { max-width: 165px; }
+
 .oie-form-card .card-header {
   font-weight: 600;
   font-size: 15px;
