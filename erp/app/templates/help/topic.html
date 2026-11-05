@@ -1,0 +1,100 @@
+{% extends 'layouts/base.html' %}
+{% from 'help/_shot.html' import help_shot %}
+
+{% block extra_css %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/help.css') }}?v=20260909help1">
+{% endblock %}
+
+{% block page_heading_tools %}
+<div class="help-heading-tools">
+  {% if open_url %}
+  <a class="btn btn-sm btn-primary" href="{{ open_url }}">
+    <i class="bi bi-box-arrow-up-right"></i> Open this screen
+  </a>
+  {% endif %}
+  <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('help.index') }}">
+    <i class="bi bi-grid"></i> All topics
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/help.js') }}?v=20260909help1"></script>
+{% endblock %}
+
+{% block content %}
+<div class="help-shell">
+  {% include 'help/_sidebar.html' %}
+  <article class="help-main jtcs-card help-article">
+    <header class="help-hero">
+      <p class="help-kicker">{{ topic.menu_path }}</p>
+      <h1 class="help-title"><i class="bi {{ topic.icon }}"></i> {{ topic.title }}</h1>
+      <p class="help-lead">{{ topic.summary }}</p>
+      <p class="help-audience"><span>Who can use this</span> {{ topic.audience }}</p>
+    </header>
+
+    {% if topic.steps %}
+    <section class="help-section">
+      <h2>How to work this screen</h2>
+      <ol class="help-steps">
+        {% for step in topic.steps %}
+        <li>
+          <strong>{{ step.title }}</strong>
+          <p>{{ step.body }}</p>
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endif %}
+
+    {% if shots %}
+    <section class="help-section">
+      <h2>Screens</h2>
+      {% for item in shots %}
+        {{ help_shot(item.shot, item.image_url, item.index) }}
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if topic.formulas %}
+    <section class="help-section">
+      <h2>Calculations</h2>
+      <div class="help-formulas">
+        {% for formula in topic.formulas %}
+        <div class="help-formula">
+          <div class="help-formula-name">{{ formula.name }}</div>
+          <code>{{ formula.expression }}</code>
+          {% if formula.note %}<p>{{ formula.note }}</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if topic.tips %}
+    <section class="help-section">
+      <h2>Notes</h2>
+      <ul class="help-tips">
+        {% for tip in topic.tips %}
+        <li>{{ tip }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if related_topics %}
+    <section class="help-section">
+      <h2>Related topics</h2>
+      <ul class="help-related">
+        {% for item in related_topics %}
+        <li><a href="{{ url_for('help.topic', slug=item.slug) }}">{{ item.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </article>
+</div>
+{% endblock %}

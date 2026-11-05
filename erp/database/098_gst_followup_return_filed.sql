@@ -41,35 +41,6 @@ BEGIN
     WHERE StageID = @ReturnFiledID;
 END;
 
--- Entries that had either old filed stage → ensure Return Filed is linked.
-IF @ReturnFiledID IS NOT NULL AND (@OldGstr1ID IS NOT NULL OR @OldGstr3bID IS NOT NULL)
-BEGIN
-    ;WITH migrated AS (
-        SELECT
-            es.EntryID,
-            MAX(es.CompletedDate) AS CompletedDate
-        FROM dbo.FollowupEntryStage es
-        WHERE es.StageID IN (@OldGstr1ID, @OldGstr3bID)
-        GROUP BY es.EntryID
-    )
-    INSERT INTO dbo.FollowupEntryStage (EntryID, StageID, CompletedDate)
-    SELECT m.EntryID, @ReturnFiledID, m.CompletedDate
-    FROM migrated m
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM dbo.FollowupEntryStage x
-        WHERE x.EntryID = m.EntryID
-          AND x.StageID = @ReturnFiledID
-    );
-END;
-
--- Drop old stage links from entries.
-IF @OldGstr1ID IS NOT NULL OR @OldGstr3bID IS NOT NULL
-BEGIN
-    DELETE FROM dbo.FollowupEntryStage
-    WHERE StageID IN (@OldGstr1ID, @OldGstr3bID);
-END;
-
 -- Deactivate legacy stages (keep rows for history / safety).
 UPDATE dbo.FollowupWorkflowStage
 SET ActiveStatus = 0,

@@ -5,6 +5,9 @@ from __future__ import annotations
 from flask import current_app, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
+from sqlalchemy import text
+
+from app.extensions import db
 from app.services import dsc_documents
 from app.services.customer_portal_service import CustomerPortalService
 
@@ -17,6 +20,60 @@ DOC_KINDS = (
     ("org_id", "Organization ID"),
     ("auth_letter", "Authorization Letter"),
 )
+
+
+def _join_address(row: dict) -> str:
+    parts = [
+        row.get("AddressLine1") or "",
+        row.get("AddressLine2") or "",
+        row.get("City") or "",
+        row.get("District") or "",
+        row.get("State") or "",
+        row.get("Pincode") or "",
+    ]
+    return ", ".join(str(p).strip() for p in parts if p and str(p).strip())
+
+
+def customer_profile(customer_id: int) -> dict:
+    """Authenticated Customer Master fields for DSC form autofill."""
+    row = (
+        db.session.execute(
+            text(
+                """
+                SELECT TOP 1
+                    CustomerName, MobileNumber, EmailID, PANNumber, AadhaarNumber,
+                    AddressLine1, AddressLine2, City, District, State, Pincode
+                FROM dbo.CustomerMaster
+                WHERE CustomerID = :id
+                """
+            ),
+            {"id": int(customer_id)},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        return {
+            "full_name": "",
+            "mobile": "",
+            "email": "",
+            "pan": "",
+            "aadhaar": "",
+            "address": "",
+        }
+    aadhaar = "".join(ch for ch in str(row.get("AadhaarNumber") or "") if ch.isdigit())
+    pan = str(row.get("PANNumber") or "").strip().upper().replace(" ", "")
+    mobile = "".join(ch for ch in str(row.get("MobileNumber") or "") if ch.isdigit())
+    if len(mobile) > 10:
+        mobile = mobile[-10:]
+    return {
+        "full_name": str(row.get("CustomerName") or "").strip(),
+        "mobile": mobile,
+        "email": str(row.get("EmailID") or "").strip(),
+        "pan": pan,
+        "aadhaar": aadhaar,
+        "address": _join_address(dict(row)),
+    }
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -151,23 +208,27 @@ class WebsiteDscPortalService:
         return self.login_start(user_id, for_reset=True)
 
     def _session_ok(self, result: dict) -> dict:
+        cid = int(result["customer_id"])
+        profile = customer_profile(cid)
         token = issue_token(
             {
                 "stage": "session",
-                "cid": result["customer_id"],
-                "name": result.get("customer_name") or "",
+                "cid": cid,
+                "name": result.get("customer_name") or profile.get("full_name") or "",
             }
         )
         return {
             "ok": True,
             "token": token,
-            "customer_id": result["customer_id"],
-            "customer_name": result.get("customer_name") or "",
+            "customer_id": cid,
+            "customer_name": result.get("customer_name") or profile.get("full_name") or "",
+            "profile": profile,
             "message": result.get("message") or "Login successful.",
         }
 
     def docs(self, session: dict) -> dict:
         cid = int(session["cid"])
+        profile = customer_profile(cid)
         rows = dsc_documents.customer_doc_status(cid)
         token = token_from_request()
         if token.lower().startswith("bearer "):
@@ -190,7 +251,8 @@ class WebsiteDscPortalService:
             docs.append(item)
         return {
             "ok": True,
-            "customer_name": session.get("name") or "",
+            "customer_name": session.get("name") or profile.get("full_name") or "",
+            "profile": profile,
             "docs": docs,
         }
 

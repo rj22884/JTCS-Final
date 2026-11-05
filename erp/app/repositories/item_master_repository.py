@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models.gst_billing import ItemMaster
+from app.utils.db_session import commit_schema
 
 
 class ItemMasterRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if ItemMasterRepository._schema_ready:
             return
         self.session.execute(
             text(
@@ -38,20 +40,63 @@ class ItemMasterRepository:
                         OrderNo INT NOT NULL CONSTRAINT DF_ItemMaster_OrderNo DEFAULT (100),
                         IsActive BIT NOT NULL CONSTRAINT DF_ItemMaster_IsActive DEFAULT (1),
                         CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_ItemMaster_CreatedAt DEFAULT (SYSUTCDATETIME()),
-                        UpdatedAt DATETIME2 NULL,
-                        CONSTRAINT UX_ItemMaster_Code UNIQUE (ItemCode)
+                        UpdatedAt DATETIME2 NULL
                     );
                 END
+
+                -- Item codes are labels and may repeat. Item names are unique
+                -- after trimming and case normalization.
+                IF EXISTS (
+                    SELECT 1 FROM sys.key_constraints
+                    WHERE parent_object_id = OBJECT_ID(N'dbo.ItemMaster')
+                      AND name = N'UX_ItemMaster_Code'
+                )
+                    ALTER TABLE dbo.ItemMaster DROP CONSTRAINT UX_ItemMaster_Code;
+
+                IF EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE object_id = OBJECT_ID(N'dbo.ItemMaster')
+                      AND name = N'UX_ItemMaster_Code'
+                      AND is_unique_constraint = 0
+                )
+                    DROP INDEX UX_ItemMaster_Code ON dbo.ItemMaster;
+
+                IF COL_LENGTH(N'dbo.ItemMaster', N'ItemNameNormalized') IS NULL
+                    ALTER TABLE dbo.ItemMaster
+                    ADD ItemNameNormalized AS LOWER(LTRIM(RTRIM(ItemName))) PERSISTED;
                 """
             )
         )
-        self.session.commit()
+        commit_schema(self.session)
+        self.session.execute(
+            text(
+                """
+                IF NOT EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE object_id = OBJECT_ID(N'dbo.ItemMaster')
+                      AND name = N'UX_ItemMaster_Name'
+                )
+                   AND NOT EXISTS (
+                    SELECT ItemNameNormalized
+                    FROM dbo.ItemMaster
+                    GROUP BY ItemNameNormalized
+                    HAVING COUNT(*) > 1
+                )
+                    CREATE UNIQUE INDEX UX_ItemMaster_Name
+                    ON dbo.ItemMaster (ItemNameNormalized);
+                """
+            )
+        )
+        commit_schema(self.session)
         for col, ddl in (
             ("GstApplicable", "BIT NOT NULL CONSTRAINT DF_ItemMaster_GstApplicable DEFAULT (1)"),
             ("OpeningQty", "DECIMAL(18, 3) NOT NULL CONSTRAINT DF_ItemMaster_OpeningQty DEFAULT (0)"),
             ("OpeningRate", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningRate DEFAULT (0)"),
             ("OpeningBalance", "DECIMAL(18, 2) NOT NULL CONSTRAINT DF_ItemMaster_OpeningBalance DEFAULT (0)"),
             ("OpeningBalanceDate", "DATE NULL"),
+            ("PurchaseDate", "DATE NULL"),
+            ("DepreciationRate", "DECIMAL(9, 4) NOT NULL CONSTRAINT DF_ItemMaster_DepreciationRate DEFAULT (0)"),
+            ("AppreciationRate", "DECIMAL(9, 4) NOT NULL CONSTRAINT DF_ItemMaster_AppreciationRate DEFAULT (0)"),
             ("ChartGroupID", "INT NULL"),
         ):
             self.session.execute(
@@ -62,7 +107,7 @@ class ItemMasterRepository:
                     """
                 )
             )
-            self.session.commit()
+            commit_schema(self.session)
         # Optional FK to Chart of Group Master (same pattern as WorkMaster / Bank).
         self.session.execute(
             text(
@@ -83,8 +128,8 @@ class ItemMasterRepository:
                 """
             )
         )
-        self.session.commit()
-        self._schema_ready = True
+        commit_schema(self.session)
+        ItemMasterRepository._schema_ready = True
 
     def list_all(self, *, search: str | None = None, active_only: bool = False) -> list[ItemMaster]:
         self.ensure_schema()
@@ -111,6 +156,16 @@ class ItemMasterRepository:
     def find_by_code(self, code: str) -> ItemMaster | None:
         self.ensure_schema()
         stmt = select(ItemMaster).where(ItemMaster.ItemCode == code.strip())
+        return self.session.scalars(stmt).first()
+
+    def find_by_name(self, name: str, *, exclude_id: int | None = None) -> ItemMaster | None:
+        self.ensure_schema()
+        normalized = name.strip().lower()
+        stmt = select(ItemMaster).where(
+            func.lower(func.ltrim(func.rtrim(ItemMaster.ItemName))) == normalized
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ItemMaster.ItemID != exclude_id)
         return self.session.scalars(stmt).first()
 
     def create(self, data: dict) -> ItemMaster:

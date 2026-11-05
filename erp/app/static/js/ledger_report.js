@@ -13,6 +13,7 @@
     refreshBtn: document.getElementById("ledgerRefreshBtn"),
     body: document.getElementById("ledgerGridBody"),
     count: document.getElementById("ledgerCount"),
+    pagination: document.getElementById("ledgerReportPagination"),
     previewModalEl: document.getElementById("ledgerPreviewModal"),
     previewDialog: document.getElementById("ledgerPreviewDialog"),
     previewTitle: document.getElementById("ledgerPreviewModalTitle"),
@@ -20,6 +21,10 @@
     maximizeBtn: document.getElementById("ledgerMaximizeBtn"),
     maximizeIcon: document.getElementById("ledgerMaximizeIcon"),
     exportBtn: document.getElementById("ledgerExportBtn"),
+    summaryBsBody: document.getElementById("ledgerSummaryBsBody"),
+    summaryPlBody: document.getElementById("ledgerSummaryPlBody"),
+    summaryBsPeriod: document.getElementById("ledgerSummaryBsPeriod"),
+    summaryPlPeriod: document.getElementById("ledgerSummaryPlPeriod"),
   };
 
   const previewModal =
@@ -28,9 +33,19 @@
       : null;
 
   let searchTimer = null;
+  let searchRequestId = 0;
+  let catalogRows = null;
   let currentKind = "";
   let currentId = "";
   let isMaximized = false;
+  let currentRows = [];
+  let currentPage = 1;
+  let pageSize = 20;
+  let lastKind = "all";
+  let lastSearch = "";
+  let sortState = { key: "label", dir: "asc" };
+  let openingOnly = false;
+  const GRID_COLSPAN = 5;
 
   const KIND_LABELS = {
     bank: "Bank",
@@ -103,104 +118,289 @@
   }
 
   function emptyMessage(kind, search) {
-    if (kind === "customer" && search.length < 2) {
-      return "Type at least 2 characters to search customers.";
-    }
-    if (!search && kind === "all") {
-      return "Select a ledger type or type a search term.";
-    }
     return "No ledgers found.";
   }
 
-  function renderRows(rows, kind, search) {
-    if (!els.body) return;
-    if (!rows.length) {
-      els.body.innerHTML =
-        '<tr><td colspan="5" class="text-center text-muted py-4">' +
-        escapeHtml(emptyMessage(kind, search)) +
-        "</td></tr>";
-      if (els.count) els.count.textContent = "0 ledgers";
-      return;
-    }
-    if (els.count) {
-      els.count.textContent = rows.length + " ledger" + (rows.length === 1 ? "" : "s");
-    }
-    els.body.innerHTML = rows
-      .map(function (row) {
-        const typeLabel = KIND_LABELS[row.kind] || row.kind || "—";
-        return (
-          "<tr>" +
-          "<td><span class=\"badge text-bg-light border ledger-kind-badge\">" +
-          escapeHtml(typeLabel) +
-          "</span></td>" +
-          "<td><strong>" +
-          escapeHtml(row.label || "—") +
-          "</strong>" +
-          (row.active === false
-            ? ' <span class="badge text-bg-secondary ms-1">Inactive</span>'
-            : "") +
-          "</td>" +
-          "<td>" +
-          escapeHtml(row.subtitle || "—") +
-          "</td>" +
-          '<td class="text-end">' +
-          escapeHtml(row.txn_count == null ? "—" : row.txn_count) +
-          "</td>" +
-          '<td class="text-end">' +
-          '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
-          escapeHtml(row.kind) +
-          '" data-id="' +
-          escapeHtml(row.id) +
-          '"><i class="bi bi-eye"></i> Preview</button>' +
-          "</td>" +
-          "</tr>"
-        );
-      })
-      .join("");
+  function emptyRow(message, danger) {
+    return (
+      '<tr><td colspan="' +
+      GRID_COLSPAN +
+      '" class="text-center ' +
+      (danger ? "text-danger" : "text-muted") +
+      ' py-4">' +
+      message +
+      "</td></tr>"
+    );
   }
 
-  function loadLedgers() {
-    const kind = (els.kind?.value || "all").trim().toLowerCase();
-    const search = (els.search?.value || "").trim();
+  function formatMoney(value) {
+    const num = parseFloat(value);
+    if (Number.isNaN(num)) return "₹ 0.00";
+    const abs = Math.abs(num).toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return (num < 0 ? "-₹ " : "₹ ") + abs;
+  }
 
-    if (kind === "customer" && search.length < 2) {
-      renderRows([], kind, search);
-      return Promise.resolve();
-    }
-    if (kind === "all" && search.length < 2) {
-      if (els.body) {
-        els.body.innerHTML =
-          '<tr><td colspan="5" class="text-center text-muted py-4">' +
-          "Select a ledger type, or type at least 2 characters to search all.</td></tr>";
-      }
-      if (els.count) els.count.textContent = "Search to list ledgers";
-      return Promise.resolve();
-    }
+  function formatDisplayDate(value) {
+    if (!value) return "";
+    if (window.formatDisplaySmart) return window.formatDisplaySmart(value);
+    if (window.formatDisplayDate) return window.formatDisplayDate(value);
+    return String(value);
+  }
 
+  function summaryRow(label, amount, extraClass) {
+    const num = parseFloat(amount);
+    const cls = extraClass ? " lr-summary-row " + extraClass : " lr-summary-row";
+    const valueHtml =
+      amount === "" || amount == null
+        ? ""
+        : escapeHtml(formatMoney(Number.isNaN(num) ? 0 : num));
+    return (
+      '<div class="' +
+      cls.trim() +
+      '"><span>' +
+      escapeHtml(label) +
+      "</span><span>" +
+      valueHtml +
+      "</span></div>"
+    );
+  }
+
+  function renderSummaries(data) {
+    const bs = (data && data.balance_sheet) || {};
+    const pl = (data && data.profit_loss) || {};
+    const period =
+      formatDisplayDate(data && data.date_from) +
+      " to " +
+      formatDisplayDate(data && data.date_to);
+    if (els.summaryBsPeriod) els.summaryBsPeriod.textContent = "As of " + formatDisplayDate(data && data.date_to);
+    if (els.summaryPlPeriod) els.summaryPlPeriod.textContent = period;
+
+    let bsHtml = summaryRow("Liabilities", "", "is-section");
+    (bs.liabilities || []).forEach(function (line) {
+      bsHtml += summaryRow(line.name || "—", line.amount);
+    });
+    bsHtml += summaryRow("Total Liabilities", bs.liabilities_total, "is-total");
+    bsHtml += summaryRow("Assets", "", "is-section");
+    (bs.assets || []).forEach(function (line) {
+      bsHtml += summaryRow(line.name || "—", line.amount);
+    });
+    bsHtml += summaryRow("Total Assets", bs.assets_total, "is-total");
+    const diff = parseFloat(bs.difference);
+    bsHtml += summaryRow(
+      "Difference",
+      bs.difference,
+      bs.balanced || Math.abs(diff) < 0.005 ? "is-total" : "is-total is-unbalanced"
+    );
+    if (els.summaryBsBody) els.summaryBsBody.innerHTML = bsHtml;
+
+    const gross = parseFloat(pl.gross_profit);
+    const net = parseFloat(pl.net_profit);
+    let plHtml = "";
+    plHtml += summaryRow("Direct Income", pl.direct_income);
+    plHtml += summaryRow("Direct Expenses", pl.direct_expenses);
+    plHtml += summaryRow(
+      gross < 0 ? "Gross Loss" : "Gross Profit",
+      Number.isNaN(gross) ? 0 : Math.abs(gross),
+      gross < 0 ? "is-total is-loss" : "is-total is-profit"
+    );
+    plHtml += summaryRow("Indirect Income", pl.indirect_income);
+    plHtml += summaryRow("Indirect Expenses", pl.indirect_expenses);
+    plHtml += summaryRow(
+      net < 0 ? "Net Loss" : "Net Profit",
+      Number.isNaN(net) ? 0 : Math.abs(net),
+      net < 0 ? "is-total is-loss" : "is-total is-profit"
+    );
+    if (els.summaryPlBody) els.summaryPlBody.innerHTML = plHtml;
+  }
+
+  function summaryPlaceholder() {
+    return '<div class="text-muted small px-3 py-3">Enter From and To dates to load this summary.</div>';
+  }
+
+  function loadSummaries() {
+    if (!cfg.summaryUrl || !els.summaryBsBody) return;
+    const from = (els.dateFrom?.value || "").trim();
+    const to = (els.dateTo?.value || "").trim();
+    if (!from || !to) {
+      if (els.summaryBsPeriod) els.summaryBsPeriod.textContent = "";
+      if (els.summaryPlPeriod) els.summaryPlPeriod.textContent = "";
+      if (els.summaryBsBody) els.summaryBsBody.innerHTML = summaryPlaceholder();
+      if (els.summaryPlBody) els.summaryPlBody.innerHTML = summaryPlaceholder();
+      return;
+    }
     const params = new URLSearchParams();
-    params.set("kind", kind);
-    if (search) params.set("search", search);
-    const url = cfg.searchUrl + "?" + params.toString();
-
-    if (els.count) els.count.textContent = "Searching…";
-    return fetch(url, {
+    params.set("date_from", from);
+    params.set("date_to", to);
+    const empty = '<div class="lr-summary-empty text-muted">Unable to load summary.</div>';
+    return fetch(cfg.summaryUrl + "?" + params.toString(), {
+      cache: "no-store",
       headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
     })
       .then(function (res) {
         return res.json().then(function (data) {
+          if (!res.ok || !data.ok) throw new Error(data.error || "Unable to load summaries.");
+          if (!data.summaries) {
+            if (els.summaryBsBody) els.summaryBsBody.innerHTML = summaryPlaceholder();
+            if (els.summaryPlBody) els.summaryPlBody.innerHTML = summaryPlaceholder();
+            return;
+          }
+          renderSummaries(data.summaries || {});
+        });
+      })
+      .catch(function () {
+        if (els.summaryBsBody) els.summaryBsBody.innerHTML = empty;
+        if (els.summaryPlBody) els.summaryPlBody.innerHTML = empty;
+      });
+  }
+
+  function sortRows(rows) {
+    if (!sortState.key) return rows.slice();
+    const key = sortState.key;
+    const dir = sortState.dir === "asc" ? 1 : -1;
+    const numeric = key === "txn_count";
+    return rows.slice().sort(function (a, b) {
+      let av = a[key];
+      let bv = b[key];
+      if (numeric) {
+        av = parseFloat(av);
+        bv = parseFloat(bv);
+        if (Number.isNaN(av)) av = 0;
+        if (Number.isNaN(bv)) bv = 0;
+        if (av === bv) return String(a.label || "").localeCompare(String(b.label || ""));
+        return (av - bv) * dir;
+      }
+      av = String(av == null ? "" : av).toLowerCase();
+      bv = String(bv == null ? "" : bv).toLowerCase();
+      if (av === bv) return String(a.label || "").localeCompare(String(b.label || ""));
+      return av < bv ? -1 * dir : 1 * dir;
+    });
+  }
+
+  function syncSortHeaders() {
+    document.querySelectorAll("#ledgerReportGrid th.lr-sortable").forEach(function (th) {
+      const key = th.getAttribute("data-sort-key") || "";
+      const active = key === sortState.key;
+      th.classList.toggle("is-sorted", active);
+      const icon = th.querySelector(".lr-sort-icon");
+      if (!icon) return;
+      icon.className =
+        "bi lr-sort-icon " +
+        (active ? (sortState.dir === "asc" ? "bi-sort-up" : "bi-sort-down") : "bi-arrow-down-up");
+    });
+  }
+
+  function renderPagination(total) {
+    if (!els.pagination) return;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    currentPage = Math.max(1, Math.min(currentPage, pages));
+    const start = Math.max(1, Math.min(currentPage - 2, pages - 4));
+    const end = Math.min(pages, start + 4);
+    let html = '<label class="small text-muted d-flex align-items-center gap-1 me-auto">Rows per page' +
+      '<select class="form-select form-select-sm ledger-page-size" aria-label="Rows per page">';
+    [20, 25, 50, 100, 500].forEach(function (size) {
+      html += '<option value="' + size + '"' + (size === pageSize ? ' selected' : '') + '>' + size + '</option>';
+    });
+    html += '</select></label>';
+    html += `<span class="small text-muted me-2">Page ${currentPage} of ${pages}</span>`;
+    html += `<button type="button" class="btn btn-outline-secondary btn-sm" data-ledger-page="${currentPage - 1}" ${currentPage <= 1 ? "disabled" : ""}>Previous</button>`;
+    for (let page = start; page <= end; page += 1) {
+      html += `<button type="button" class="btn btn-sm ${page === currentPage ? "btn-primary" : "btn-outline-secondary"}" data-ledger-page="${page}" aria-current="${page === currentPage ? "page" : "false"}">${page}</button>`;
+    }
+    html += `<button type="button" class="btn btn-outline-secondary btn-sm" data-ledger-page="${currentPage + 1}" ${currentPage >= pages ? "disabled" : ""}>Next</button>`;
+    els.pagination.innerHTML = html;
+  }
+  function renderRows(rows, kind, search) {
+    if (!els.body) return;
+    lastKind = kind;
+    lastSearch = search;
+    currentRows = rows || [];
+    if (!currentRows.length) {
+      els.body.innerHTML = emptyRow(escapeHtml(emptyMessage(kind, search)));
+      if (els.count) els.count.textContent = "0 ledgers";
+      if (els.pagination) els.pagination.innerHTML = "";
+      syncSortHeaders();
+      return;
+    }
+    renderPagination(currentRows.length);
+    const first = (currentPage - 1) * pageSize + 1;
+    const last = Math.min(first + pageSize - 1, currentRows.length);
+    if (els.count) {
+      let label = "Showing " + first + "–" + last + " of " + currentRows.length + " ledgers";
+      if (openingOnly) label += " · Enter From and To dates to load period transactions in Preview";
+      els.count.textContent = label;
+    }
+    const pageRows = sortRows(currentRows).slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    els.body.innerHTML = pageRows.map(function (row) {
+      const typeLabel = KIND_LABELS[row.kind] || row.kind || "—";
+      return (
+        "<tr>" +
+        '<td class="lr-col-fit"><span class="badge text-bg-light border ledger-kind-badge">' +
+        escapeHtml(typeLabel) +
+        "</span></td>" +
+        '<td class="lr-col-ledger"><strong>' + escapeHtml(row.label || "—") + "</strong>" +
+        (row.active === false ? ' <span class="badge text-bg-secondary ms-1">Inactive</span>' : "") +
+        "</td>" +
+        '<td class="lr-col-fit">' + escapeHtml(row.subtitle || "—") + "</td>" +
+        '<td class="lr-col-fit text-end">' + escapeHtml(row.txn_count == null ? "—" : row.txn_count) + "</td>" +
+        '<td class="lr-col-fit text-end">' +
+        '<button type="button" class="btn btn-outline-info btn-sm ledger-preview-btn" data-kind="' +
+        escapeHtml(row.kind) + '" data-id="' + escapeHtml(row.id) + '"><i class="bi bi-eye"></i> Preview</button>' +
+        "</td></tr>"
+      );
+    }).join("");
+    syncSortHeaders();
+  }
+  function loadLedgers() {
+    currentPage = 1;
+    const kind = (els.kind?.value || "all").trim().toLowerCase();
+    const search = (els.search?.value || "").trim();
+    const requestId = ++searchRequestId;
+
+    const params = new URLSearchParams();
+    params.set("kind", kind);
+    if (search) params.set("search", search);
+    const from = (els.dateFrom?.value || "").trim();
+    const to = (els.dateTo?.value || "").trim();
+    if (from) params.set("date_from", from);
+    if (to) params.set("date_to", to);
+    const url = cfg.searchUrl + "?" + params.toString();
+
+    if (els.count) els.count.textContent = "Searching…";
+    return fetch(url, {
+      cache: "no-store",
+      headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (requestId !== searchRequestId) return;
           if (!res.ok || !data.ok) throw new Error(data.error || "Unable to search ledgers.");
+          openingOnly = !!data.preview_needs_dates;
+          if (!search) catalogRows = data.rows || [];
           renderRows(data.rows || [], kind, search);
         });
       })
       .catch(function (err) {
+        if (requestId !== searchRequestId) return;
+        currentRows = [];
         if (els.body) {
-          els.body.innerHTML =
-            '<tr><td colspan="5" class="text-center text-danger py-4">' +
-            escapeHtml(err.message || "Unable to search ledgers.") +
-            "</td></tr>";
+          els.body.innerHTML = emptyRow(
+            escapeHtml(err.message || "Unable to search ledgers."),
+            true
+          );
         }
         if (els.count) els.count.textContent = "Error";
       });
+  }
+
+  function bindPreviewReloader() {
+    if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
+      window.JTCSLedgerPreview.setReloader(function () {
+        if (currentKind && currentId) return openPreview(currentKind, currentId);
+      });
+    }
   }
 
   async function openPreview(kind, id) {
@@ -215,6 +415,7 @@
     }
     currentKind = kind;
     currentId = String(id);
+    bindPreviewReloader();
     setExportEnabled(false);
     setMaximized(false);
     if (els.previewTitle) els.previewTitle.textContent = "Ledger Preview";
@@ -224,6 +425,7 @@
     previewModal.show();
     try {
       const res = await fetch(url + qs, {
+        cache: "no-store",
         headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
       });
       const data = await res.json();
@@ -259,7 +461,27 @@
       alert("Export URL is not configured.");
       return;
     }
-    window.location.href = url + dateQuery();
+    const full = url + dateQuery();
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
+  }
+
+  function onSortHeader(event) {
+    const th = event.target.closest("th.lr-sortable");
+    if (!th) return;
+    event.preventDefault();
+    const key = th.getAttribute("data-sort-key") || "";
+    if (!key) return;
+    if (sortState.key === key) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState.key = key;
+      sortState.dir = key === "txn_count" ? "desc" : "asc";
+    }
+    currentPage = 1;
+    renderRows(currentRows, lastKind, lastSearch);
   }
 
   function onGridClick(event) {
@@ -281,9 +503,30 @@
     downloadExport(fmt);
   }
 
+  function rowMatchesSearch(row, needle) {
+    const haystack = [row.label, row.subtitle, row.kind, KIND_LABELS[row.kind]]
+      .join(" ")
+      .toLowerCase();
+    return haystack.indexOf(needle) >= 0;
+  }
+
+  function showCachedSearch() {
+    if (!catalogRows) return false;
+    const kind = (els.kind?.value || "all").trim().toLowerCase();
+    const search = (els.search?.value || "").trim().toLowerCase();
+    const rows = catalogRows.filter(function (row) {
+      if (kind !== "all" && String(row.kind || "").toLowerCase() !== kind) return false;
+      if (!search) return true;
+      return rowMatchesSearch(row, search);
+    });
+    renderRows(rows, kind, search);
+    return true;
+  }
+
   function scheduleSearch() {
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadLedgers, 280);
+    showCachedSearch();
+    searchTimer = setTimeout(loadLedgers, 180);
   }
 
   els.search?.addEventListener("input", scheduleSearch);
@@ -298,12 +541,56 @@
     clearTimeout(searchTimer);
     loadLedgers();
   });
-  els.refreshBtn?.addEventListener("click", loadLedgers);
+  els.refreshBtn?.addEventListener("click", function () {
+    loadLedgers();
+    loadSummaries();
+  });
   els.kind?.addEventListener("change", function () {
     clearTimeout(searchTimer);
     loadLedgers();
   });
+  els.dateFrom?.addEventListener("change", function () {
+    openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    currentPage = 1;
+    renderRows(currentRows, lastKind, lastSearch);
+    loadSummaries();
+  });
+  els.dateTo?.addEventListener("change", function () {
+    openingOnly = !(els.dateFrom?.value || "").trim() || !(els.dateTo?.value || "").trim();
+    currentPage = 1;
+    renderRows(currentRows, lastKind, lastSearch);
+    loadSummaries();
+  });
+  document.getElementById("ledgerReportGrid")?.addEventListener("click", onSortHeader);
+  document.getElementById("ledgerReportGrid")?.addEventListener("keydown", function (event) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const th = event.target.closest("th.lr-sortable");
+    if (!th) return;
+    event.preventDefault();
+    onSortHeader(event);
+  });
   els.body?.addEventListener("click", onGridClick);
+  els.pagination?.addEventListener("change", function (event) {
+    if (!event.target.matches(".ledger-page-size")) return;
+    const nextSize = parseInt(event.target.value, 10);
+    if (![20, 25, 50, 100, 500].includes(nextSize)) return;
+    pageSize = nextSize;
+    currentPage = 1;
+    renderRows(currentRows, lastKind, lastSearch);
+  });
+  els.pagination?.addEventListener("click", function (event) {
+    const button = event.target.closest("[data-ledger-page]");
+    if (!button || button.disabled) return;
+    const page = parseInt(button.getAttribute("data-ledger-page"), 10);
+    if (!Number.isFinite(page)) return;
+    currentPage = page;
+    renderRows(currentRows, lastKind, lastSearch);
+  });
+  window.addEventListener("jtcs:ledger-mutated", function () {
+    catalogRows = null;
+    loadLedgers();
+    loadSummaries();
+  });
   els.maximizeBtn?.addEventListener("click", function () {
     setMaximized(!isMaximized);
   });
@@ -311,15 +598,13 @@
   els.previewModalEl?.addEventListener("hidden.bs.modal", function () {
     setMaximized(false);
     setExportEnabled(false);
+    if (window.JTCSLedgerPreview?.isMutationActive()) return;
     currentKind = "";
     currentId = "";
   });
 
   loadLedgers();
+  loadSummaries();
 
-  if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
-    window.JTCSLedgerPreview.setReloader(function () {
-      if (currentKind && currentId) openPreview(currentKind, currentId);
-    });
-  }
+  bindPreviewReloader();
 })();

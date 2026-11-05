@@ -18,12 +18,20 @@
   --jtcs-font-size: 14.5px;
   --jtcs-header-h: 76px;
   --jtcs-menu-h: 42px;
+  /* Default work-area top: below sticky header + menu (JS may refine). */
+  --jtcs-sticky-offset: calc(var(--jtcs-header-h) + var(--jtcs-menu-h));
   --jtcs-ribbon-h: 72px;
   --jtcs-status-h: 28px;
   --jtcs-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.08);
   --jtcs-shadow-md: 0 2px 6px rgba(15, 23, 42, 0.08), 0 10px 24px rgba(15, 23, 42, 0.1);
   --jtcs-shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.35), 0 28px 64px rgba(0, 0, 0, 0.45),
     0 0 0 1px rgba(255, 255, 255, 0.16), 0 0 48px rgba(70, 110, 255, 0.18);
+}
+
+.scoped-required::after {
+  content: " *";
+  color: #dc3545;
+  font-weight: 700;
 }
 
 * {
@@ -63,6 +71,11 @@ body.jtcs-body .navbar {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* WhatsApp-only host strip; hide on normal ERP pages (CSS lives here so it always loads). */
+.wa-host-bar {
+  display: none;
 }
 
 /* ========== TOP HEADER ========== */
@@ -230,9 +243,16 @@ body.jtcs-body .navbar {
 .jtcs-header-meta {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.jtcs-header-meta .jtcs-header-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .jtcs-header-pill {
@@ -284,12 +304,22 @@ body.jtcs-body .navbar {
 }
 
 .jtcs-notify-menu {
-  min-width: 18rem;
-  max-width: 22rem;
+  min-width: 20rem;
+  max-width: 24rem;
+  max-height: min(22rem, calc(100vh - 7.5rem));
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 0.35rem 0;
+  background: #fff;
+  z-index: 8;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.22);
 }
 
 .jtcs-notify-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
   padding: 0.45rem 0.9rem 0.35rem;
   font-size: 0.75rem;
   font-weight: 700;
@@ -298,30 +328,90 @@ body.jtcs-body .navbar {
   color: #64748b;
 }
 
-.jtcs-notify-item {
+.jtcs-notify-menu .dropdown-item.jtcs-notify-item {
+  display: block;
+  position: relative;
+  height: auto;
+  clear: both;
   white-space: normal;
+  line-height: 1.35;
+  overflow: hidden;
+  background: #fff;
   padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid #e8edf5;
 }
 
 .jtcs-notify-title {
   font-weight: 600;
   color: #0f172a;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  display: block;
+  position: static;
+  white-space: normal;
+}
+
+.jtcs-notify-title i {
+  margin-right: 0.35rem;
 }
 
 .jtcs-notify-meta {
+  display: block;
+  position: static;
   font-size: 0.75rem;
   color: #64748b;
   margin-top: 0.15rem;
   padding-left: 1.25rem;
+  white-space: normal;
 }
 
 .jtcs-notify-empty {
   padding: 0.75rem 0.9rem;
   font-size: 0.85rem;
   color: #64748b;
+}
+
+button.dropdown-item.jtcs-wn-open {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #fff;
+}
+
+button.dropdown-item.jtcs-wn-open.is-unread {
+  background: #fff7ed;
+}
+
+.jtcs-wn-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.jtcs-wn-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.jtcs-wn-steps li + li {
+  margin-top: 0.35rem;
+}
+
+.jtcs-wn-stage {
+  background: #0f172a;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.jtcs-wn-video {
+  display: block;
+  width: 100%;
+  max-height: 22rem;
+  background: #0f172a;
 }
 
 .jtcs-header-btn {
@@ -799,6 +889,117 @@ body.jtcs-body .modal .modal-footer {
   padding: 0.5rem 0.9rem;
 }
 
+.modal-header.jtcs-win-drag {
+  cursor: move;
+  user-select: none;
+}
+
+.jtcs-dialog-header.jtcs-win-drag {
+  cursor: move;
+  user-select: none;
+}
+
+.modal-dialog.jtcs-win-dragged {
+  position: fixed;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+.jtcs-dialog.jtcs-win-dragged {
+  position: fixed;
+  margin: 0 !important;
+}
+
+.modal.jtcs-win-maximized .modal-dialog,
+.modal-dialog.jtcs-win-maximized {
+  position: fixed !important;
+  left: 8px !important;
+  right: 8px !important;
+  top: var(--jtcs-sticky-offset) !important;
+  bottom: 8px !important;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+.modal.jtcs-win-maximized .modal-content,
+.modal-dialog.jtcs-win-maximized > .modal-content {
+  height: 100%;
+  max-height: none !important;
+  border-radius: 8px;
+}
+
+.modal.jtcs-win-maximized .modal-body,
+.modal-dialog.jtcs-win-maximized .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.jtcs-dialog.jtcs-win-maximized,
+.jtcs-dialog-overlay.jtcs-win-maximized .jtcs-dialog {
+  position: fixed !important;
+  left: 0.75rem !important;
+  right: 0.75rem !important;
+  top: max(0.75rem, var(--jtcs-sticky-offset)) !important;
+  bottom: 0.75rem !important;
+  width: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+}
+
+.jtcs-win-max-btn {
+  flex-shrink: 0;
+}
+
+/* Modal / dialog title-bar window controls: one horizontal tools row */
+body.jtcs-body .modal-header,
+.jtcs-dialog-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+body.jtcs-body .modal-header .modal-title,
+body.jtcs-body .modal-header > :first-child:not(.jtcs-win-tools):not(.jtcs-win-tools-host):not(.dash-modal-header-actions):not(.obc-modal-header-actions):not(.btn-close),
+.jtcs-dialog-header .jtcs-dialog-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+body.jtcs-body .modal-header .jtcs-win-tools,
+body.jtcs-body .modal-header .jtcs-win-tools-host,
+body.jtcs-body .modal-header .dash-modal-header-actions,
+body.jtcs-body .modal-header .obc-modal-header-actions,
+.jtcs-dialog-header .jtcs-win-tools,
+.jtcs-dialog-header .jtcs-win-tools-host {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: auto;
+  max-width: 100%;
+}
+
+body.jtcs-body .modal-header .jtcs-win-tools .btn,
+body.jtcs-body .modal-header .jtcs-win-tools-host .btn,
+body.jtcs-body .modal-header .dash-modal-header-actions .btn,
+.jtcs-dialog-header .jtcs-win-tools .btn {
+  flex-shrink: 0;
+}
+
+body.jtcs-body .modal-header .btn-close {
+  flex-shrink: 0;
+  margin: 0;
+}
+
 body.jtcs-body .modal .modal-body {
   padding: 0.7rem 0.9rem;
 }
@@ -1038,7 +1239,28 @@ body.jtcs-body .modal textarea.form-control {
   color: #334155;
 }
 
-/* ========== MOBILE MENU ========== */
+.jtcs-menu-link.disabled,
+.jtcs-top-link.disabled,
+span.jtcs-menu-link.disabled,
+span.jtcs-top-link.disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  pointer-events: none;
+  color: #94a3b8 !important;
+}
+
+.jtcs-menu-item.is-disabled .jtcs-menu-lock,
+.jtcs-top-item.is-disabled .jtcs-menu-lock {
+  font-size: 0.72rem;
+  margin-left: auto;
+  opacity: 0.8;
+}
+
+.jtcs-menu-item.is-disabled .jtcs-menu-link {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
 .jtcs-mobile-menu-toggle {
   display: none;
   color: #fff;
@@ -1266,6 +1488,8 @@ body.jtcs-dialog-open {
 
 .jtcs-dialog-prompt {
   margin-top: 0.7rem;
+  border-radius: 8px;
+  min-height: 2.25rem;
 }
 
 .jtcs-dialog[data-type="warning"] .jtcs-dialog-ok,
@@ -1307,6 +1531,12 @@ body.jtcs-touch .jtcs-header-btn,
 body.jtcs-touch .page-link,
 body.jtcs-touch .form-check-input {
   touch-action: manipulation;
+}
+
+@media (max-width: 1199.98px) {
+  .jtcs-header-meta {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 991.98px) {
@@ -1466,6 +1696,64 @@ html.jtcs-os-ios .jtcs-status-bar {
 
 html.jtcs-form-phone .jtcs-market-ticker {
   display: none !important;
+}
+
+html.jtcs-form-phone .jtcs-app-shell,
+html.jtcs-os-android .jtcs-app-shell,
+html.jtcs-os-ios .jtcs-app-shell {
+  min-width: 0;
+}
+
+html.jtcs-os-android.jtcs-form-phone .jtcs-auth-card,
+html.jtcs-os-ios.jtcs-form-phone .jtcs-auth-card {
+  width: min(100%, 430px);
+  padding: 1.15rem 1rem 1.25rem;
+}
+
+html.jtcs-os-ios .jtcs-auth-card,
+html.jtcs-os-ios .ol-card,
+html.jtcs-os-ios .ol-fps-item,
+html.jtcs-os-ios .ol-selected,
+html.jtcs-os-ios .pds-master-card,
+html.jtcs-os-ios .rc-panel {
+  border-radius: 18px;
+}
+
+html.jtcs-os-android .jtcs-auth-card,
+html.jtcs-os-android .ol-card,
+html.jtcs-os-android .ol-fps-item,
+html.jtcs-os-android .ol-selected {
+  border-radius: 12px;
+}
+
+html.jtcs-form-phone .jtcs-menu-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+html.jtcs-form-phone .jtcs-mobile-menu-toggle {
+  min-height: 44px;
+  padding: 0.45rem 0.85rem;
+}
+
+html.jtcs-form-phone .jtcs-header-btn,
+html.jtcs-os-android .jtcs-header-btn,
+html.jtcs-os-ios .jtcs-header-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Number fields: typed entry only. Spinners are hidden so the mouse cannot step the value. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 @media print {

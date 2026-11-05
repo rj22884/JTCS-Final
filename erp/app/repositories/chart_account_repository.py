@@ -9,12 +9,13 @@ from app.models.chart_group import ChartOfGroupMaster
 
 
 class ChartAccountRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if ChartAccountRepository._schema_ready:
             return
         from app.repositories.chart_group_repository import ChartGroupRepository
 
@@ -170,7 +171,7 @@ class ChartAccountRepository:
             )
         )
         self.session.commit()
-        self._schema_ready = True
+        ChartAccountRepository._schema_ready = True
 
     def list_customer_ledger_rows(self, *, search: str | None = None) -> list[dict]:
         """Active CustomerMaster rows LEFT JOIN chart-account group mapping (read-only on customers)."""
@@ -404,6 +405,57 @@ class ChartAccountRepository:
     def delete(self, row: ChartOfAccountMaster) -> None:
         self.session.delete(row)
         self.session.flush()
+
+    def map_customer_chart_groups(self, customer_ids: list[int]) -> dict[int, dict]:
+        """CustomerID → chart group ids/names in one query."""
+        self.ensure_schema()
+        ids = sorted({int(i) for i in customer_ids if i})
+        if not ids:
+            return {}
+        id_sql = ",".join(str(i) for i in ids)
+        rows = self.session.execute(
+            text(
+                f"""
+                SELECT
+                    a.CustomerID,
+                    COALESCE(
+                        gx.GroupIDs,
+                        CASE WHEN a.GroupID IS NULL THEN N'' ELSE CAST(a.GroupID AS NVARCHAR(20)) END
+                    ) AS GroupIDs,
+                    COALESCE(gx.GroupNames, ISNULL(g.GroupName, N'')) AS GroupNames
+                FROM dbo.ChartOfAccountMaster a
+                LEFT JOIN dbo.ChartOfGroupMaster g ON g.GroupID = a.GroupID
+                OUTER APPLY (
+                    SELECT
+                        STRING_AGG(CAST(l.GroupID AS NVARCHAR(20)), N',')
+                            WITHIN GROUP (ORDER BY l.DisplayOrder, l.GroupID) AS GroupIDs,
+                        STRING_AGG(gm.GroupName, N', ')
+                            WITHIN GROUP (ORDER BY l.DisplayOrder, l.GroupID) AS GroupNames
+                    FROM dbo.ChartOfAccountGroupLink l
+                    INNER JOIN dbo.ChartOfGroupMaster gm ON gm.GroupID = l.GroupID
+                    WHERE l.AccountID = a.AccountID
+                ) gx
+                WHERE a.CustomerID IN ({id_sql})
+                """
+            )
+        ).mappings().all()
+        out: dict[int, dict] = {}
+        for row in rows:
+            cid = int(row["CustomerID"])
+            gids: list[int] = []
+            for part in str(row.get("GroupIDs") or "").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    gids.append(int(part))
+                except ValueError:
+                    continue
+            out[cid] = {
+                "chart_group_ids": gids,
+                "chart_group_names": (row.get("GroupNames") or "").strip(),
+            }
+        return out
 
     def list_group_links(self, account_id: int) -> list[dict]:
         """Ordered group links for one account."""

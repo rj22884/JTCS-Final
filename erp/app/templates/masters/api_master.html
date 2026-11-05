@@ -1,0 +1,118 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <a href="{{ inbox_url }}" class="jtcs-ribbon-btn" title="Inbox">
+    <i class="bi bi-inbox"></i>
+    <span>Inbox</span>
+  </a>
+  <a href="{{ url_for('dashboard.index') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/api_master.css') }}?v=20261004api1">
+{% endblock %}
+
+{% block content %}
+<div class="api-master" id="apiMaster"
+     data-save-url="{{ save_url }}"
+     data-test-url="{{ test_url }}"
+     data-token-url="{{ token_url }}">
+  <aside class="jtcs-card api-master-nav">
+    {% for group in nav_groups %}
+      <div class="api-master-nav-label">{{ group.category }}</div>
+      {% for item in group["items"] %}
+        <button type="button" data-nav="{{ item.id }}" class="{% if loop.first and group.category == 'Messaging' %}is-active{% endif %}">
+          <i class="bi {{ item.icon }}"></i>
+          <span>{{ item.label }}</span>
+        </button>
+      {% endfor %}
+    {% endfor %}
+  </aside>
+
+  <div>
+    {% for panel in panels %}
+    <section class="jtcs-card api-panel" data-panel="{{ panel.id }}" {% if not loop.first %}hidden{% endif %}>
+      <h3 class="h5 mb-1">{{ panel.label }}</h3>
+      <p class="text-muted small mb-3">{{ panel.hint }}</p>
+      {% if panel.webhook_url %}
+      <div class="mb-3">
+        <label class="form-label" for="apiWebhookUrl">Webhook URL</label>
+        <div class="input-group">
+          <input type="text" class="form-control" id="apiWebhookUrl" value="{{ panel.webhook_url }}" readonly>
+          <button type="button" class="btn btn-outline-secondary" data-copy="apiWebhookUrl">Copy</button>
+        </div>
+        <div class="form-text">Meta Developer → WhatsApp → Configuration → Callback URL.</div>
+      </div>
+      {% endif %}
+
+      {% for section in panel.sections %}
+      <div class="api-section" data-provider="{{ section.code }}">
+        <div class="api-section-head">
+          <h4 class="h6 mb-0">{{ section.title }}</h4>
+          <span class="badge {{ section.status_class }}" data-status>{{ section.status }}</span>
+        </div>
+        <p class="text-muted small mb-3">{{ section.hint }}</p>
+        <div class="row g-3">
+          {% for field in section.fields %}
+          <div class="{{ 'col-12' if field.input == 'textarea' else 'col-md-6' }}">
+            {% if field.input == 'checkbox' %}
+            <div class="form-check mt-4">
+              <input class="form-check-input" type="checkbox" id="{{ section.code }}_{{ field.key }}" data-key="{{ field.key }}" {% if field.checked %}checked{% endif %}>
+              <label class="form-check-label" for="{{ section.code }}_{{ field.key }}">{{ field.label }}</label>
+            </div>
+            {% elif field.input == 'textarea' %}
+            <label class="form-label" for="{{ section.code }}_{{ field.key }}">{{ field.label }}</label>
+            <textarea class="form-control" id="{{ section.code }}_{{ field.key }}" data-key="{{ field.key }}" rows="3">{{ field.value }}</textarea>
+            {% else %}
+            <label class="form-label" for="{{ section.code }}_{{ field.key }}">
+              {{ field.label }}
+              {% if field.configured %}<span class="text-success small">saved</span>{% endif %}
+            </label>
+            <input
+              class="form-control"
+              id="{{ section.code }}_{{ field.key }}"
+              data-key="{{ field.key }}"
+              type="{{ 'password' if field.secret else field.input }}"
+              value="{{ field.value }}"
+              placeholder="{{ field.placeholder }}"
+              {% if field.secret %}autocomplete="new-password"{% endif %}
+              {% if field.input == 'number' %}min="1" max="65535"{% endif %}>
+            {% if field.secret and field.configured %}
+            <div class="form-text">Leave the dots as they are to keep the saved password.</div>
+            {% endif %}
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="api-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-save>
+            <i class="bi bi-save"></i> Save
+          </button>
+          {% if section.can_test %}
+          <button type="button" class="btn btn-outline-success btn-sm" data-test>
+            <i class="bi bi-plug"></i> Test connection
+          </button>
+          {% endif %}
+          {% if section.can_generate_token %}
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-token>
+            <i class="bi bi-key"></i> Generate verify token
+          </button>
+          {% endif %}
+        </div>
+        <div class="api-note small mt-2"></div>
+      </div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/api_master.js') }}?v=20261004api1"></script>
+{% endblock %}

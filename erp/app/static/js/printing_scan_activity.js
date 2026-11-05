@@ -97,11 +97,18 @@
     return String(item.bank_account_id || "");
   }
 
+  function paymentReceivedAccounts() {
+    return (window.PSCAN_BANK_ACCOUNTS || []).filter(function (item) {
+      const flag = item && item.qr_bill_received;
+      return flag === true || flag === 1 || flag === "1";
+    });
+  }
+
   function buildPaymentSelect(selectedValue) {
     const select = document.createElement("select");
     select.className = "form-select pscan-payment-bank";
     select.required = true;
-    const accounts = window.PSCAN_BANK_ACCOUNTS || [];
+    const accounts = paymentReceivedAccounts();
     if (!accounts.length) {
       const opt = document.createElement("option");
       opt.value = "";
@@ -179,10 +186,9 @@
 
   function updatePaymentRemoveButtons() {
     const lines = els.paymentLines?.querySelectorAll(".pscan-payment-line") || [];
-    const hideRemove = lines.length <= 1;
     lines.forEach(function (line) {
       const btn = line.querySelector(".pscan-payment-remove");
-      if (btn) btn.disabled = hideRemove;
+      if (btn) btn.disabled = false;
     });
   }
 
@@ -223,7 +229,15 @@
     removeBtn.innerHTML = "<i class=\"bi bi-trash\"></i>";
     removeBtn.title = "Remove";
     removeBtn.addEventListener("click", function () {
-      if ((els.paymentLines?.querySelectorAll(".pscan-payment-line") || []).length <= 1) return;
+      const lines = els.paymentLines?.querySelectorAll(".pscan-payment-line") || [];
+      if (lines.length <= 1) {
+        const select = line.querySelector("select");
+        const amount = line.querySelector(".pscan-payment-amount");
+        if (select) select.value = "";
+        if (amount) amount.value = "";
+        updatePaymentSummary();
+        return;
+      }
       line.remove();
       updatePaymentRemoveButtons();
       updatePaymentSummary();

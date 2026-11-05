@@ -255,6 +255,11 @@ class AuthService:
         if user is None:
             return _fail("Invalid email or password.")
 
+        from app.utils.roles import has_admin_role, has_fps_user_role
+
+        if has_fps_user_role(user.Role):
+            return _fail("Use Other Login → Uttarakhand FPS Login.")
+
         # First-time password not set yet — force emailed set-password flow.
         if not bool(getattr(user, "IsPasswordSet", True)):
             return _fail(
@@ -264,8 +269,6 @@ class AuthService:
 
         if not verify_password(user.PasswordHash, password):
             return _fail("Invalid email or password.")
-
-        from app.utils.roles import has_admin_role
 
         if not has_admin_role(user.Role):
             if not user.EmailVerified:

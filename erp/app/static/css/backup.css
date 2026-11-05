@@ -23,6 +23,15 @@
   margin-left: 0.25rem;
 }
 
+.backup-card .backup-actions {
+  min-width: 16rem;
+  white-space: normal;
+}
+
+.backup-card .backup-drive-status {
+  line-height: 1.2;
+}
+
 .backup-card .backup-upload-row {
   padding: 0.75rem 1rem;
   border: 1px solid var(--jtcs-border, #e5e7eb);

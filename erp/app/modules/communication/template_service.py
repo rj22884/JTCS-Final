@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from sqlalchemy import text
 
 from app.extensions import db
+from app.modules.communication.whatsapp_template_catalog import (
+    merge_template_rows,
+    public_meta_error,
+    select_inbox_templates,
+)
 from app.modules.shared.schema import ensure_crm_schema
+
+logger = logging.getLogger(__name__)
 
 
 class TemplateService:
@@ -102,6 +110,53 @@ class TemplateService:
             params,
         ).mappings().all()
         return [dict(r) for r in rows]
+
+    def list_inbox_templates(self, *, channel: str | None = None) -> dict:
+        """Inbox dropdown rows.
+
+        WhatsApp (and the All tab) include usable templates from the connected
+        WABA. Other channels stay on the local template table.
+        """
+        local_rows = self.list_templates(channel=channel or None)
+        if channel and channel.strip().lower() != "whatsapp":
+            return {"ok": True, "rows": local_rows, "meta_error": None, "defaults": {}}
+        meta_rows, meta_error, defaults = self._fetch_meta_template_rows()
+        return {
+            "ok": True,
+            "rows": merge_template_rows(meta_rows, local_rows),
+            "meta_error": meta_error,
+            "defaults": defaults,
+        }
+
+    def _fetch_meta_template_rows(self) -> tuple[list[dict], str | None, dict]:
+        from app.modules.settings.services import IntegrationSettingsService
+        from app.modules.settings.whatsapp_meta_client import WhatsAppMetaClient
+
+        cfg = IntegrationSettingsService().get_provider_config_decrypted("whatsapp_meta") or {}
+        waba_id = (cfg.get("waba_id") or "").strip()
+        token = (cfg.get("access_token") or "").strip()
+        phone_id = (cfg.get("phone_number_id") or "").strip()
+        if not waba_id or not token:
+            return [], "WhatsApp Business Account is not connected, so Meta templates could not be loaded.", {}
+        client = WhatsAppMetaClient(
+            access_token=token,
+            graph_api_version=cfg.get("graph_api_version"),
+        )
+        try:
+            raw_rows = client.list_message_templates(waba_id)
+        except Exception as exc:
+            logger.warning("WhatsApp template catalog fetch failed: %s", type(exc).__name__)
+            return [], public_meta_error(exc), {}
+        defaults: dict[str, str] = {}
+        if phone_id:
+            try:
+                phone = client.get_phone(phone_id)
+                display = str(phone.get("display_phone_number") or "").strip()
+                if display:
+                    defaults["business_whatsapp_number"] = display
+            except Exception as exc:
+                logger.warning("WhatsApp business number lookup failed: %s", type(exc).__name__)
+        return select_inbox_templates(raw_rows), None, defaults
 
     @staticmethod
     def interpolate(body: str, values: dict | None = None) -> str:

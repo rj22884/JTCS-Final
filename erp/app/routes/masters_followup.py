@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, redirect, request, url_for
 
 from app.decorators import login_required, require_delete_reauth
 from app.services.followup_service import MODULE_META, FollowupService
-from app.services.menu_service import MenuService
 from app.utils.master_delete_guard import MasterInUseError, json_in_use_response
 
 MASTER_MODULES = {
@@ -28,23 +27,7 @@ def _resolve_module(slug: str) -> tuple[str, dict]:
 @bp.route("/<slug>/", strict_slashes=False)
 @login_required
 def index(slug: str):
-    try:
-        module_code, meta = _resolve_module(slug)
-    except ValueError:
-        return redirect(url_for("dashboard.index"))
-
-    service = FollowupService(module_code)
-    menu_service = MenuService()
-    menu_path = f"/masters/followup/{slug.lower()}"
-    return render_template(
-        "masters/followup_workflow.html",
-        page_title=f"{meta['title']} Followup Master",
-        breadcrumb=menu_service.get_breadcrumb(menu_path, session.get("role")),
-        module_code=module_code,
-        module_slug=slug.lower(),
-        module_meta=meta,
-        initial_rows=service.list_master_stages(),
-    )
+    return redirect(url_for("dashboard.index"))
 
 
 @bp.route("/<slug>/api/records", strict_slashes=False)

@@ -53,12 +53,13 @@ SEED_GROUPS = (
 
 
 class ChartGroupRepository:
+    _schema_ready = False
+
     def __init__(self, session: Session | None = None):
         self.session = session or db.session
-        self._schema_ready = False
 
     def ensure_schema(self) -> None:
-        if self._schema_ready:
+        if ChartGroupRepository._schema_ready:
             return
         self.session.execute(
             text(
@@ -101,7 +102,7 @@ class ChartGroupRepository:
                 {"name": name, "under": under},
             )
         self.session.commit()
-        self._schema_ready = True
+        ChartGroupRepository._schema_ready = True
 
     def list_all(self, *, search: str | None = None, active_only: bool = False):
         self.ensure_schema()

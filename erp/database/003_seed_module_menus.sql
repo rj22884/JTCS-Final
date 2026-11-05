@@ -31,6 +31,7 @@ VALUES
     (N'Transactions', N'Contra Entry',      N'bi-arrow-left-right', N'/transactions/contra',                           2,  N'Cash / bank contra transfer', NULL),
 
     /* Reports shortcuts (parent Reports already seeded in 001) */
+    (N'Reports',     N'Summary',            N'bi-search',           N'/reports/summary',                               0,  N'Search ledgers and view date-wise linked details', NULL),
     (N'Reports',     N'Daily Collection',   N'bi-calendar-day',     N'/reports/daily-collection',                      1,  N'Daily collection summary', NULL),
     (N'Reports',     N'Cash Book',          N'bi-cash',             N'/reports/cash-book',                             2,  N'Cash book from bank transactions', NULL),
     (N'Reports',     N'Bank Book',          N'bi-bank',             N'/reports/bank-book',                             3,  N'Bank book from bank transactions', NULL),

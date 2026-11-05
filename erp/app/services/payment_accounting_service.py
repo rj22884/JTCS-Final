@@ -33,6 +33,28 @@ GST_SALE_SUB_WORK_TYPE = "Sale / Service Invoice"
 RECEIPT_SUB_SUFFIX = "Followup Receipt"
 
 
+def sql_not_udhaar_payment(bank_alias: str = "ba", mode_alias: str = "pm") -> str:
+    """Payment line is real money received, not credit / udhaar."""
+    return f"""
+        NOT (
+            {bank_alias}.BankName LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.BankName, N'')) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+            OR {bank_alias}.MaskedAccountNumber LIKE N'%उधार%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.MaskedAccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhaar%'
+            OR LOWER(ISNULL({bank_alias}.AccountNumber, N'')) LIKE N'%udhar%'
+            OR LOWER(LTRIM(RTRIM(ISNULL({mode_alias}.PaymentModeName, N'')))) IN (
+                N'credit', N'on credit', N'credit sale', N'receivable'
+            )
+        )
+    """
+
+
 def sql_not_udhaar_bank(alias: str = "b") -> str:
     """SQL predicate: bank row is a real cash/bank receipt, not credit/udhaar."""
     return f"""
@@ -116,6 +138,108 @@ def sql_unpaid_followup_exclusion() -> str:
               AND ISNULL(i.VoucherType, N'SALE') = N'SALE'
               AND UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
                   = UPPER(LTRIM(RTRIM(f.BillNo)))
+        )
+    """
+
+
+def sql_customer_ledger_exclude_obc(alias: str = "d") -> str:
+    """Money In/Out is one voucher on OthersBankCashTransaction.
+
+    The customer ledger reads that voucher once, for the full amount.
+    The matching daily must not also appear as Payment Received, or invoice
+    allocation would look like extra accounting entries.
+    """
+    return f"""
+        AND NOT (
+            {alias}.WorkType = N'Others'
+            AND {alias}.SubWorkType LIKE N'Other Bank/Cash Transactions%'
+        )
+    """
+
+
+def sql_unpaid_followup_exclusion_for_customer_ledger() -> str:
+    """Hide a follow-up bill when that same bill already has a sale invoice.
+
+    The customer ledger shows the Accounting Sale / Service Invoice for the
+    invoice amount. The follow-up row would be a second receivable. A follow-up
+    bill that never became an invoice stays on the ledger.
+    """
+    return """
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.GstInvoice i
+            WHERE i.FollowupEntryID = f.EntryID
+               OR (
+                    LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(i.InvoiceNo, N''))))
+                            = UPPER(LTRIM(RTRIM(f.BillNo)))
+                        OR UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                            = UPPER(LTRIM(RTRIM(f.BillNo)))
+                    )
+               )
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.JTCSDailyTransaction d
+            WHERE d.Status = N'Posted'
+              AND LTRIM(RTRIM(ISNULL(f.BillNo, N''))) <> N''
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                  = UPPER(LTRIM(RTRIM(f.BillNo)))
+              AND ISNULL(d.SaleAmount, 0) + ISNULL(d.IncomeAmount, 0) <> 0
+        )
+    """
+
+
+def sql_unpaid_misc_exclusion_for_customer_ledger() -> str:
+    """Hide a Misc Activity amount when that entry already has a sale invoice.
+
+    Create Invoice posts the receivable as Accounting / Sale / Service Invoice.
+    Showing OthersIncomeExpenseMaster.Amount as well would double the customer debit.
+    Misc rows that never became an invoice stay on the Individual Client ledger.
+    """
+    return """
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.GstInvoice i
+            WHERE i.MiscEntryID = e.EntryID
+               OR (
+                    LTRIM(RTRIM(ISNULL(e.BillNo, N''))) <> N''
+                    AND (
+                        UPPER(LTRIM(RTRIM(ISNULL(i.InvoiceNo, N''))))
+                            = UPPER(LTRIM(RTRIM(e.BillNo)))
+                        OR UPPER(LTRIM(RTRIM(ISNULL(i.TallyBillNo, N''))))
+                            = UPPER(LTRIM(RTRIM(e.BillNo)))
+                    )
+               )
+        )
+        AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.JTCSDailyTransaction d
+            WHERE d.Status = N'Posted'
+              AND UPPER(LTRIM(RTRIM(ISNULL(d.WorkType, N'')))) = N'ACCOUNTING'
+              AND LTRIM(RTRIM(ISNULL(d.SubWorkType, N''))) = N'Sale / Service Invoice'
+              AND ISNULL(d.SaleAmount, 0) <> 0
+              AND (
+                    (
+                        LTRIM(RTRIM(ISNULL(e.BillNo, N''))) <> N''
+                        AND (
+                            UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.BillNo)))
+                            OR UPPER(LTRIM(RTRIM(ISNULL(d.Remarks, N''))))
+                                = UPPER(LTRIM(RTRIM(e.BillNo)))
+                        )
+                    )
+                    OR (
+                        LTRIM(RTRIM(ISNULL(e.TallyBillNo, N''))) <> N''
+                        AND (
+                            UPPER(LTRIM(RTRIM(ISNULL(d.ReferenceNo, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                            OR UPPER(LTRIM(RTRIM(ISNULL(d.Remarks, N''))))
+                                = UPPER(LTRIM(RTRIM(e.TallyBillNo)))
+                        )
+                    )
+              )
         )
     """
 

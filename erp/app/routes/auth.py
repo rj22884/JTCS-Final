@@ -6,6 +6,7 @@ from sqlalchemy import text
 from app.decorators import admin_required, login_required, require_delete_reauth, server_auth_exempt
 from app.extensions import db
 from app.services.auth_service import AuthService
+from app.utils.fps_access import is_fps_session
 from app.utils.roles import has_admin_role
 
 logger = logging.getLogger(__name__)
@@ -132,8 +133,12 @@ def _client_ip() -> str | None:
 def login():
     auth = AuthService()
     if session.get("user_id"):
+        if is_fps_session():
+            return redirect(url_for("public_report.fps_detail"))
         if session.get("server_user_id"):
-            return redirect(url_for("dashboard.index"))
+            from app.whatsapp_site import home_path
+
+            return redirect(home_path(request.host))
         return redirect(url_for("server_auth.gate"))
 
     if not auth.administrator_exists():
@@ -249,6 +254,8 @@ def login():
 def register():
     auth = AuthService()
     if session.get("user_id"):
+        if is_fps_session():
+            return redirect(url_for("public_report.fps_detail"))
         return redirect(url_for("dashboard.index"))
     if not auth.administrator_exists():
         return redirect(url_for("setup.index"))
@@ -374,9 +381,13 @@ def forgot_user_id():
 def logout():
     login_session_id = session.get("login_session_id")
     try:
+        from app.services.server_audit_service import ServerAuditService
         from app.services.server_auth_service import ServerAuthService
 
-        ServerAuthService().log_logout()
+        if is_fps_session():
+            ServerAuditService().log(action="FPS logout", module="FPSLogin")
+        else:
+            ServerAuthService().log_logout()
     except Exception:
         logger.exception("Server logout audit skipped")
     try:
@@ -473,6 +484,27 @@ def deactivate_user(user_id: int):
     success, message, _ = auth.deactivate_user(user_id)
     flash(message or ("User deactivated." if success else "Deactivation failed."), "info" if success else "danger")
     return redirect(url_for("auth.users_index"))
+
+
+@bp.route("/profile", methods=["GET", "POST"])
+@login_required
+def company_profile_page():
+    from app.services.company_profile_service import STATES, form_values, save_profile
+
+    can_edit_name = has_admin_role(session.get("role"))
+    values = form_values()
+    if request.method == "POST":
+        ok, message, values = save_profile(request.form, session.get("role"))
+        flash(message, "success" if ok else "danger")
+        if ok:
+            return redirect(url_for("auth.company_profile_page"))
+    return render_template(
+        "auth/company_profile.html",
+        page_title="Company Profile",
+        can_edit_name=can_edit_name,
+        values=values,
+        states=STATES,
+    )
 
 
 @bp.route("/admin/users/<int:user_id>/delete", methods=["POST"])

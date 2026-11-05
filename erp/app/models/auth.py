@@ -27,6 +27,7 @@ class User(db.Model):
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     ModifiedDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     LastLoginDate: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    FpsRowID: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class CompanyProfile(db.Model):
@@ -35,6 +36,17 @@ class CompanyProfile(db.Model):
     CompanyID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     CompanyName: Mapped[str] = mapped_column(Unicode(200), nullable=False)
     OwnerName: Mapped[str] = mapped_column(Unicode(200), nullable=False)
+    AddressLine: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
+    City: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    Pincode: Mapped[str | None] = mapped_column(Unicode(10), nullable=True)
+    State: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
+    StateCode: Mapped[str | None] = mapped_column(Unicode(2), nullable=True)
+    GSTIN: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    PAN: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    CIN: Mapped[str | None] = mapped_column(Unicode(30), nullable=True)
+    Phone: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    Email: Mapped[str | None] = mapped_column(Unicode(254), nullable=True)
+    Website: Mapped[str | None] = mapped_column(Unicode(200), nullable=True)
     LogoPath: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     SetupCompleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False)

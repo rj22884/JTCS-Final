@@ -14,7 +14,9 @@ def _safe_next(raw: str | None) -> str:
     target = (raw or "").strip()
     if target.startswith("/") and not target.startswith("//") and not target.startswith("/boot"):
         return target
-    return url_for("dashboard.index")
+    from app.whatsapp_site import home_path
+
+    return home_path(request.host)
 
 
 @bp.route("/boot", methods=["GET"], strict_slashes=False)

@@ -3,6 +3,20 @@
 
   var STORAGE_KEY = "JTCS_RUNTIME";
 
+  function preferredUi() {
+    try {
+      var params = new URLSearchParams(window.location.search || "");
+      var queryUi = String(params.get("ui") || "").toLowerCase();
+      if (queryUi === "android" || queryUi === "ios" || queryUi === "desktop") {
+        try { localStorage.setItem("jtcs_ui_version", queryUi); } catch (err) {}
+        return queryUi;
+      }
+      var saved = localStorage.getItem("jtcs_ui_version");
+      if (saved === "android" || saved === "ios" || saved === "desktop") return saved;
+    } catch (err) {}
+    return null;
+  }
+
   function detect() {
     var ua = navigator.userAgent || "";
     var touch = (navigator.maxTouchPoints || 0) > 0 || "ontouchstart" in window;
@@ -23,6 +37,15 @@
     else if (width < 992) form = "tablet";
     if (os === "android" || os === "ios") {
       form = minSide >= 600 ? "tablet" : "phone";
+    }
+
+    var pref = preferredUi();
+    if (pref === "android" || pref === "ios") {
+      os = pref;
+      form = minSide >= 600 ? "tablet" : "phone";
+      if (width >= 992) form = "phone";
+    } else if (pref === "desktop") {
+      form = "desktop";
     }
 
     var osNames = {

@@ -62,6 +62,9 @@
    * @param {string|HTMLElement} [opts.district]
    * @param {string|HTMLElement} [opts.city]
    * @param {string|HTMLElement} [opts.stateGstCode]
+   * @param {string|HTMLElement} [opts.postOffice]
+   * @param {boolean} [opts.fillCountry=false]
+   * @param {boolean} [opts.lockAddressFields=false] Keep API-derived address fields read-only, even before/if lookup fails.
    * @param {string} opts.apiUrl
    * @param {boolean} [opts.lookupOnBind=true]
    */
@@ -80,7 +83,15 @@
     const districtEl = resolve(opts.district);
     const cityEl = resolve(opts.city);
     const gstEl = resolve(opts.stateGstCode);
-    const integrated = [stateEl, districtEl, cityEl, gstEl].filter(Boolean);
+    const postOfficeEl = resolve(opts.postOffice);
+    const integrated = [stateEl, districtEl, cityEl, gstEl, postOfficeEl].filter(Boolean);
+    const lockedAddressFields = opts.lockAddressFields === true
+      ? [stateEl, districtEl, postOfficeEl].filter(Boolean)
+      : [];
+
+    function shouldStayLocked(el) {
+      return lockedAddressFields.indexOf(el) !== -1;
+    }
 
     let timer = null;
     let lastKey = "";
@@ -88,7 +99,7 @@
 
     function unlockIntegrated() {
       integrated.forEach(function (el) {
-        setLocked(el, false);
+        setLocked(el, shouldStayLocked(el));
       });
     }
 
@@ -100,7 +111,7 @@
 
     function clearIntegrated() {
       integrated.forEach(function (el) {
-        setLocked(el, false);
+        setLocked(el, shouldStayLocked(el));
         if (el.tagName !== "SELECT") el.value = "";
       });
     }
@@ -143,11 +154,17 @@
           }
           if (!isIndia(countryEl)) return;
           lastKey = key;
-          // Keep selected country (user chose it); fill address parts from postal API.
+          // Keep the selected country unless this form explicitly requests the postal API value.
+          if (opts.fillCountry && countryEl) {
+            const country = payload.data.country || "India";
+            if (countryEl.tagName === "SELECT") ensureSelectValue(countryEl, country);
+            else countryEl.value = country;
+          }
           setValue(stateEl, payload.data.state || "");
           setValue(districtEl, payload.data.district || "");
           setValue(cityEl, payload.data.city || payload.data.district || "");
           setValue(gstEl, payload.data.state_gst_code || "");
+          setValue(postOfficeEl, payload.data.post_office || "");
           lockIntegrated();
         })
         .catch(function () {
@@ -188,6 +205,7 @@
     pinField.setAttribute("inputmode", "numeric");
     pinField.setAttribute("autocomplete", "postal-code");
     pinField.setAttribute("maxlength", "6");
+    if (opts.lockAddressFields === true && countryEl) setLocked(countryEl, true);
     pinField.addEventListener("input", onPinInput);
     pinField.addEventListener("blur", function () {
       lookup(false);

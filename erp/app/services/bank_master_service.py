@@ -16,7 +16,12 @@ from app.utils.master_delete_guard import (
     assert_master_unused,
     raise_if_integrity_in_use,
 )
-from app.utils.master_ledger_delete import ledger_payload, raise_if_ledger_in_use
+from app.utils.master_ledger_delete import (
+    is_ledger_clear,
+    ledger_payload,
+    purge_clear_ledger_refs,
+    raise_if_ledger_in_use,
+)
 
 # Fallback labels only if AccountTypeMaster is empty (should be rare).
 BANK_ACCOUNT_TYPES = (
@@ -47,7 +52,11 @@ class BankMasterService:
         try:
             from app.services.chart_group_service import ChartGroupService
 
-            return ChartGroupService().list_active_for_dropdown()
+            from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+            return DynamicMasterFieldService().annotate_groups(
+                ChartGroupService().list_active_for_dropdown()
+            )
         except Exception:
             return []
 
@@ -189,6 +198,16 @@ class BankMasterService:
             under = (allowed_groups.get(chart_group_id) or {}).get("under_type") or ""
             ob_fields["OpeningBalanceDrCr"] = default_dr_cr_for_under_type(under)
 
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        dyn = DynamicMasterFieldService()
+        dyn.validate_required(form, chart_group_id)
+        extras = dyn.extra_db_values(
+            form,
+            chart_group_id,
+            opening_date=ob_fields.get("OpeningBalanceDate"),
+        )
+
         return {
             "BankName": bank_name,
             "AccountNumber": account_number,
@@ -206,6 +225,7 @@ class BankMasterService:
             "DisplayOrder": display_order,
             "UpiId": upi_id,
             "ChartGroupID": chart_group_id,
+            **extras,
         }
 
     def _serialize(self, row) -> dict:
@@ -222,6 +242,8 @@ class BankMasterService:
                     group_name = item.get("group_name") or ""
                     under_type = item.get("under_type") or ""
                     break
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
         return {
             "account_id": row.JtcsBankAccountID,
             "bank_name": row.BankName or "",
@@ -248,16 +270,54 @@ class BankMasterService:
             "chart_group_id": int(chart_group_id) if chart_group_id else None,
             "under_group": group_name,
             "under_type": under_type,
+            **DynamicMasterFieldService().extra_serialize(row),
             "is_cash": is_cash,
             "created_date": row.CreatedDate.isoformat() if isinstance(row.CreatedDate, datetime) else "",
             "modified_date": row.ModifiedDate.isoformat() if isinstance(row.ModifiedDate, datetime) else "",
         }
 
-    def list_payment_accounts(self) -> list[dict]:
-        """Active bank accounts for sale invoice Payment Bank (QR/Bill Received only).
+    def _account_type_line(self, raw: str | None) -> str:
+        """Show the stored Bank Master type on one line, for example CA - Current Account."""
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        if "-" in text and " " not in text.split("-", 1)[0]:
+            code, _, name = text.partition("-")
+            code = code.strip()
+            name = name.strip()
+            if code and name:
+                return f"{code} - {name}"
+        for item in self.list_account_types_for_form():
+            code = (item.get("code") or "").strip()
+            name = (item.get("name") or "").strip()
+            if code.casefold() != text.casefold():
+                continue
+            if name and name.casefold() != code.casefold():
+                return f"{code} - {name}"
+            return code
+        return text
 
-        Cash is excluded (invoice QR). Accounts without QR/Bill Received stay off this list.
-        UPI ID is optional — invoice PDF shows a fallback when it is blank.
+    def _payment_account_line(self, data: dict) -> str:
+        """Bank name, account number, type, and UPI on a single line."""
+        bank_name = (data.get("bank_name") or "").strip() or "Bank"
+        number = (data.get("account_number") or "").strip()
+        line = bank_name
+        if number:
+            line += f" - {number}"
+        type_label = self._account_type_line(data.get("account_type"))
+        if type_label:
+            line += f" [{type_label}]"
+        upi = (data.get("upi_id") or "").strip()
+        if upi:
+            line += f" - UPI: {upi}"
+        return line
+
+    def list_payment_accounts(self, *, qr_bill_received_only: bool = True) -> list[dict]:
+        """Active non-cash bank accounts for sale invoice Payment Bank.
+
+        Account type is not a filter: CA, SB, CC, OD, and every other active
+        Bank Master type are included. Cash stays off this list because a sale
+        invoice cannot use cash for the payment QR.
         """
         self.repo.ensure_schema()
         rows = []
@@ -267,12 +327,10 @@ class BankMasterService:
             if self._is_cash_account(row.BankName, row.AccountNumber):
                 continue
             data = self._serialize(row)
-            if not data.get("qr_bill_received"):
+            if qr_bill_received_only and not data.get("qr_bill_received"):
                 continue
-            data["label"] = (
-                f"{data['bank_name']} · {data['account_number']}"
-                + (f" [{data['account_type']}]" if data["account_type"] else "")
-            )
+            data["label"] = self._payment_account_line(data)
+            data["payment_line"] = data["label"]
             rows.append(data)
         rows.sort(
             key=lambda r: (
@@ -290,10 +348,8 @@ class BankMasterService:
             if not row.ActiveStatus:
                 continue
             data = self._serialize(row)
-            data["label"] = (
-                f"{data['bank_name']} · {data['account_number']}"
-                + (f" [{data['account_type']}]" if data["account_type"] else "")
-            )
+            data["label"] = self._payment_account_line(data)
+            data["payment_line"] = data["label"]
             rows.append(data)
         rows.sort(key=lambda r: (0 if r.get("is_cash") else 1, (r.get("label") or "").lower()))
         return rows
@@ -406,6 +462,17 @@ class BankMasterService:
                 raise ValueError("Bank account not found.")
             label = (row.BankName or "").strip() or "Bank account"
             ledger = ledger_payload("bank", account_id)
+            if is_ledger_clear("bank", account_id):
+                self._unlink_unused_payment_modes(account_id)
+                self._detach_inactive_bank_cash(account_id)
+                purge_clear_ledger_refs("bank", account_id)
+                try:
+                    self.repo.delete(row)
+                except IntegrityError as exc:
+                    raise_if_integrity_in_use(exc, label, ledger=ledger)
+                    raise
+                return "Bank account permanently deleted from the database."
+
             raise_if_ledger_in_use("bank", account_id, label)
             self._unlink_unused_payment_modes(account_id)
             self._detach_inactive_bank_cash(account_id)

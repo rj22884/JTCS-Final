@@ -72,11 +72,22 @@ def index():
         db.session.rollback()
     service = ChartGroupService()
     rows = service.list_records()
+    try:
+        from app.repositories.dynamic_master_fields_repository import (
+            DynamicMasterFieldsRepository,
+        )
+        from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+        DynamicMasterFieldsRepository().ensure_schema()
+        dyn_catalog = DynamicMasterFieldService().catalog_for_editor()
+    except Exception:
+        dyn_catalog = {"sections": []}
     return render_template(
         "masters/chart_group.html",
         page_title="Chart of Group Master",
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
+        dyn_catalog=dyn_catalog,
     )
 
 

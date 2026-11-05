@@ -309,50 +309,22 @@ class IntegrationSettingsRepository:
         ).mappings().all()
         return [dict(r) for r in rows]
 
-    def ensure_menu(self) -> None:
-        """Insert Admin Role → Integration Settings if missing (does not alter other menus)."""
-        row = db.session.execute(
-            text(
-                """
-                SELECT TOP 1 MenuID
-                FROM dbo.MenuMaster
-                WHERE MenuName = N'Admin Role' AND ParentMenuID IS NULL
-                ORDER BY MenuID
-                """
-            )
-        ).first()
-        if not row:
-            return
-        parent_id = int(row[0])
-        exists = db.session.execute(
-            text(
-                """
-                SELECT TOP 1 MenuID
-                FROM dbo.MenuMaster
-                WHERE ParentMenuID = :parent AND MenuName = N'Integration Settings'
-                """
-            ),
-            {"parent": parent_id},
-        ).first()
-        if exists:
-            return
+    def deactivate_menu(self) -> None:
+        """Permanently hide Integration Settings from every menu."""
         db.session.execute(
             text(
                 """
-                INSERT INTO dbo.MenuMaster (
-                    ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder,
-                    Description, IsActive, RoleName
-                )
-                VALUES (
-                    :parent, N'Integration Settings', N'bi-plugin', N'/admin/integrations', 4,
-                    N'External API credentials and integration configuration',
-                    1, N'Administrator,Admin'
-                )
+                UPDATE dbo.MenuMaster
+                SET IsActive = 0
+                WHERE MenuURL LIKE N'/admin/integrations%'
+                   OR MenuName = N'Integration Settings'
                 """
-            ),
-            {"parent": parent_id},
+            )
         )
         db.session.commit()
+
+    def ensure_menu(self) -> None:
+        self.deactivate_menu()
 
     def list_by_provider(self, provider: str) -> list[dict]:
         self.ensure_schema()

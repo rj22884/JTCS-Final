@@ -733,11 +733,21 @@ class WhatsAppOAuthService:
                 live_token = (live_cfg.get("access_token") or session.get(SESSION_OAUTH_TOKEN) or "").strip()
                 if live_token:
                     live_client = WhatsAppMetaClient(access_token=live_token, graph_api_version=version)
-                    live_client.subscribe_app_to_waba(waba_id)
-                    self._upsert_plain(
-                        "webhook_subscribed_fields",
-                        "messages, message_deliveries, message_reads, message_template_status_update",
+                    callback = (live_cfg.get("webhook_url") or "").strip() or self.default_webhook_url()
+                    verify = (live_cfg.get("webhook_verify_token") or "").strip()
+                    if (live_cfg.get("app_id") or "").strip() and (live_cfg.get("app_secret") or "").strip() and verify:
+                        live_client.register_messages_webhook(
+                            app_id=(live_cfg.get("app_id") or "").strip(),
+                            app_secret=(live_cfg.get("app_secret") or "").strip(),
+                            callback_url=callback,
+                            verify_token=verify,
+                        )
+                    live_client.subscribe_app_to_waba(
+                        waba_id,
+                        override_callback_uri=callback if verify else None,
+                        verify_token=verify or None,
                     )
+                    self._upsert_plain("webhook_subscribed_fields", "messages")
                     subscribe_note = " Webhook app subscription requested on WABA."
             except Exception as exc:
                 logger.warning("WABA subscribed_apps failed: %s", exc)

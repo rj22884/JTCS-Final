@@ -5,7 +5,8 @@ from __future__ import annotations
 # code, label, bootstrap icon, category
 PROVIDER_CATALOG: tuple[dict[str, str], ...] = (
     {"code": "whatsapp_meta", "label": "Meta WhatsApp Cloud API", "icon": "bi-whatsapp", "category": "Messaging"},
-    {"code": "smtp", "label": "SMTP Email", "icon": "bi-envelope", "category": "Messaging"},
+    {"code": "smtp", "label": "SMTP Email", "icon": "bi-envelope-arrow-up", "category": "Messaging"},
+    {"code": "imap", "label": "IMAP Email", "icon": "bi-envelope-arrow-down", "category": "Messaging"},
     {"code": "google", "label": "Google OAuth", "icon": "bi-google", "category": "Google"},
     {"code": "google_drive", "label": "Google Drive", "icon": "bi-google", "category": "Google"},
     {"code": "google_calendar", "label": "Google Calendar", "icon": "bi-calendar3", "category": "Google"},

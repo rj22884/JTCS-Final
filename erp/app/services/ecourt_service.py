@@ -639,13 +639,33 @@ class ECourtService:
         return total
 
     @staticmethod
+    def _sell_total_from_lookup(sold_receipt_numbers: list[str], lookup: dict) -> Decimal:
+        """Sum each daily sale once, using the preloaded grid lookup."""
+        seen: set[int] = set()
+        total = Decimal("0")
+        for raw in sold_receipt_numbers:
+            info = lookup.get((raw or "").strip().upper())
+            if not info:
+                continue
+            daily_id = info.get("daily_id")
+            if not daily_id or int(daily_id) in seen:
+                continue
+            seen.add(int(daily_id))
+            amount = info.get("sale_amount")
+            if amount is not None:
+                total += amount
+        return total
+
+    @staticmethod
     def _money_text(value: Decimal) -> str:
         quantized = value.quantize(Decimal("0.01"))
         if quantized == quantized.to_integral_value():
             return str(int(quantized))
         return format(quantized, "f")
 
-    def _attach_group_sale_values(self, group: dict, receipts: list[dict]) -> None:
+    def _attach_group_sale_values(
+        self, group: dict, receipts: list[dict], lookup: dict | None = None
+    ) -> None:
         sold_receipts = [row for row in receipts if row["sale_status"] == self.SOLD]
         sold_numbers = [row["receipt_no"] for row in sold_receipts if row.get("receipt_no")]
         summary = group.get("summary_status")
@@ -677,13 +697,21 @@ class ECourtService:
         group["total_buy_value"] = self._money_text(buy_total)
 
         if summary == self.SOLD:
-            sell_total = self._group_sell_amount(sold_numbers)
+            sell_total = (
+                self._sell_total_from_lookup(sold_numbers, lookup)
+                if lookup is not None
+                else self._group_sell_amount(sold_numbers)
+            )
             group["total_sell_value"] = self._money_text(sell_total)
             return
 
         if summary == self.PARTIALLY_SOLD:
             sold_buy = sum(self._decimal(row.get("amount") or "0") for row in sold_receipts)
-            sell_total = self._group_sell_amount(sold_numbers)
+            sell_total = (
+                self._sell_total_from_lookup(sold_numbers, lookup)
+                if lookup is not None
+                else self._group_sell_amount(sold_numbers)
+            )
             group["sold_buy_value"] = self._money_text(sold_buy)
             group["sold_sell_value"] = self._money_text(sell_total)
             group["remaining_receipts"] = group.get("not_sold_count", 0)
@@ -696,19 +724,17 @@ class ECourtService:
         if not lines:
             return [], 0
 
-        receipt_numbers = [line.ReceiptNo for line in lines]
-        sold_set = {(value or "").strip().upper() for value in self.repo.sold_receipt_numbers(receipt_numbers)}
-        txn_dates = self.repo.transaction_dates_by_receipt(receipt_numbers)
-        account_map = self.repo.account_numbers_by_receipt(receipt_numbers)
+        lookup = self.repo.grid_sale_lookup()
         grouped: dict[str, list[dict]] = {}
 
         for line in lines:
             stationery = (line.StationeryNumber or "").strip() or "(blank)"
             receipt_key = (line.ReceiptNo or "").strip().upper()
-            is_sold = receipt_key in sold_set
+            sale_info = lookup.get(receipt_key)
+            is_sold = sale_info is not None
             receipt_date = line.ReceiptDate.isoformat() if line.ReceiptDate else ""
-            transaction_date = txn_dates.get(receipt_key, "") if is_sold else ""
-            account_number = account_map.get(receipt_key, "") if is_sold else ""
+            transaction_date = (sale_info or {}).get("transaction_date") or "" if is_sold else ""
+            account_number = (sale_info or {}).get("account_number") or "" if is_sold else ""
             grouped.setdefault(stationery, []).append(
                 {
                     "receipt_no": line.ReceiptNo,
@@ -738,7 +764,7 @@ class ECourtService:
                 "summary_status": self._summary_status(sold_count, total),
                 "receipts": receipts,
             }
-            self._attach_group_sale_values(group, receipts)
+            self._attach_group_sale_values(group, receipts, lookup)
             groups.append(group)
 
         return groups, len(lines)
@@ -1021,6 +1047,57 @@ class ECourtService:
             f"Import Successfully — {receipt_no} under stationery {stationery}."
         )
         return result
+
+    def update_entry(self, form: dict) -> dict:
+        """Update one receipt's purchase fields and, when sold, its sale date and amount."""
+        receipt_no = (form.get("ReceiptNo") or "").strip().upper()
+        if not receipt_no:
+            raise ValueError("Receipt number is required.")
+        lines = self.repo.get_lines_by_receipts([receipt_no])
+        if not lines:
+            raise ValueError(f"Receipt number '{receipt_no}' was not found.")
+        line = lines[0]
+        stationery = (form.get("StationeryNumber") or "").strip()
+        if stationery:
+            if len(stationery) > 20:
+                raise ValueError("Stationery number must be at most 20 characters.")
+            line.StationeryNumber = stationery
+        amount_raw = (form.get("Amount") or "").strip()
+        if amount_raw:
+            amount = self._decimal(amount_raw)
+            if amount < self.MIN_IMPORT_AMOUNT:
+                raise ValueError(f"Amount must be at least {self.MIN_IMPORT_AMOUNT}.")
+            line.Amount = amount
+        receipt_date = self._date(form.get("ReceiptDate"))
+        if receipt_date:
+            line.ReceiptDate = receipt_date
+        if "Remarks" in form:
+            line.Remarks = (form.get("Remarks") or "").strip() or None
+
+        sales = self.repo.list_sales_for_receipts([receipt_no])
+        sale = sales[0] if sales else None
+        if sale is not None:
+            if stationery:
+                sale.StationeryNumber = stationery
+            if receipt_date:
+                sale.ReceiptDate = receipt_date
+            if amount_raw:
+                sale.Amount = line.Amount
+            daily = self.daily_repo.get_by_id(sale.DailyTransactionID) if sale.DailyTransactionID else None
+            if daily is not None:
+                sold_date = self._date(form.get("SoldDate"))
+                if sold_date:
+                    daily.TransactionDate = sold_date
+                sale_raw = (form.get("SaleAmount") or "").strip()
+                if sale_raw:
+                    sale_amount = self._decimal(sale_raw)
+                    if sale_amount <= 0:
+                        raise ValueError("Sale amount must be greater than 0.")
+                    daily.SaleAmount = sale_amount
+                    daily.TotalAmount = sale_amount
+                daily.ModifiedDate = datetime.utcnow()
+        db.session.flush()
+        return {"receipt_no": receipt_no, "message": f"Updated {receipt_no}."}
 
     def save_manual_sale(self, form: dict, *, created_by: str) -> dict:
         """Legacy CLI helper: import if missing, then sell. Prefer save_manual_import for UI."""

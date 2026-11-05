@@ -258,8 +258,13 @@ fi
 # ---------------------------------------------------------------------------
 # 5) Hard reset to origin/$BRANCH
 # ---------------------------------------------------------------------------
+# Discard any VPS-local edits (e.g. scp'd scripts) so checkout cannot abort.
+log_info "Discarding local VPS working-tree changes before checkout…"
+git reset --hard HEAD >/dev/null 2>&1 || true
+git clean -fd >/dev/null 2>&1 || true
+
 log_info "Hard reset to ${REMOTE}/${BRANCH}…"
-if ! git checkout -B "${BRANCH}" "${REMOTE}/${BRANCH}"; then
+if ! git checkout -f -B "${BRANCH}" "${REMOTE}/${BRANCH}"; then
   abort_deploy "git checkout ${BRANCH} failed"
 fi
 if ! git reset --hard "${REMOTE}/${BRANCH}"; then

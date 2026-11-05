@@ -62,6 +62,25 @@ class OthersBankCashTransaction(db.Model):
     Remarks: Mapped[str | None] = mapped_column(Unicode(500), nullable=True)
     OutBankTransactionID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     InBankTransactionID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    InvoiceID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    InvoiceLinkMode: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)
+    CustomerID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    WorkID: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    WorkTypeID: Mapped[int | None] = mapped_column(Integer, nullable=True)
     CreatedBy: Mapped[str | None] = mapped_column(Unicode(100), nullable=True)
     CreatedDate: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     IsActive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class OthersBankCashInvoiceAllocation(db.Model):
+    """One Money In/Out voucher allocated across one or more sale invoices."""
+
+    __tablename__ = "OthersBankCashInvoiceAllocation"
+
+    AllocationID: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    EntryID: Mapped[int] = mapped_column(
+        Integer, db.ForeignKey("OthersBankCashTransaction.EntryID"), nullable=False
+    )
+    InvoiceID: Mapped[int] = mapped_column(Integer, nullable=False)
+    AllocatedAmount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    AllocationSource: Mapped[str | None] = mapped_column(Unicode(20), nullable=True)

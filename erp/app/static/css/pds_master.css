@@ -1,0 +1,58 @@
+.pds-master-card {
+  background: #fff;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.pds-master-grid-wrap {
+  max-height: calc(100vh - 340px);
+  overflow: auto;
+}
+
+#pdsGrid tbody tr {
+  cursor: pointer;
+}
+
+#pdsGrid tbody tr.table-active {
+  --bs-table-bg: rgba(14, 116, 144, 0.12);
+}
+
+#pdsModal .modal-header {
+  background: linear-gradient(90deg, #0e7490, #155e75);
+  color: #fff;
+}
+
+#pdsModal .btn-close {
+  filter: invert(1);
+}
+
+.pds-readonly #pdsGrid tbody tr {
+  cursor: pointer;
+}
+
+@media (max-width: 767.98px) {
+  .pds-master-card {
+    padding: 0.75rem;
+  }
+
+  .pds-master-grid-wrap {
+    max-height: none;
+  }
+
+  #pdsGrid th,
+  #pdsGrid td {
+    white-space: nowrap;
+  }
+
+  .pds-master-card .btn {
+    min-height: 40px;
+  }
+}
+
+html.jtcs-form-phone .pds-master-grid-wrap,
+html.jtcs-os-android .pds-master-grid-wrap,
+html.jtcs-os-ios .pds-master-grid-wrap {
+  max-height: none;
+  -webkit-overflow-scrolling: touch;
+}

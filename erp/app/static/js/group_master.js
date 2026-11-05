@@ -27,7 +27,6 @@
     codeWrap: document.getElementById("gmCodeWrap"),
     statusWrap: document.getElementById("gmStatusWrap"),
     activeStatus: document.getElementById("gmActiveStatus"),
-    tabChecks: document.querySelectorAll(".gm-tab-check"),
     saveBtn: document.getElementById("gmSaveBtn"),
   };
 
@@ -85,12 +84,6 @@
     });
   }
 
-  function formatTabs(row) {
-    const tabs = row.tab_codes || [];
-    if (!tabs.length) return "—";
-    return tabs.map(function (t) { return "<code>" + escapeHtml(t) + "</code>"; }).join(", ");
-  }
-
   function renderGrid(data) {
     rows = data || [];
     if (!rows.length) {
@@ -111,7 +104,6 @@
         "<td>" + row.group_id + "</td>" +
         "<td><strong>" + escapeHtml(row.group_code) + "</strong></td>" +
         "<td>" + escapeHtml(row.group_name) + "</td>" +
-        "<td class=\"gm-tabs-cell\">" + formatTabs(row) + "</td>" +
         "<td>" + row.display_order + "</td>" +
         "<td>" + (active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>') + "</td>" +
         "</tr>"
@@ -136,21 +128,6 @@
       });
   }
 
-  function setTabChecks(selected) {
-    const set = new Set(selected || []);
-    els.tabChecks.forEach(function (cb) {
-      cb.checked = set.has(cb.value);
-    });
-  }
-
-  function getSelectedTabs() {
-    const tabs = [];
-    els.tabChecks.forEach(function (cb) {
-      if (cb.checked) tabs.push(cb.value);
-    });
-    return tabs;
-  }
-
   function openModal(mode, record) {
     formMode = mode;
     if (els.modalTitle) {
@@ -165,14 +142,12 @@
     if (els.activeStatus) {
       els.activeStatus.value = record && !isActive(record) ? "0" : "1";
     }
-    setTabChecks(record ? record.tab_codes : ["basic", "contact", "address"]);
     modal?.show();
   }
 
   function saveGroup() {
     const code = (els.groupCode?.value || "").trim().toUpperCase();
     const name = (els.groupName?.value || "").trim();
-    const tabs = getSelectedTabs();
     if (!name) {
       showStatus("Group name is required.", "warning");
       return;
@@ -181,13 +156,8 @@
       showStatus("Group code is required.", "warning");
       return;
     }
-    if (!tabs.length) {
-      showStatus("Select at least one tab.", "warning");
-      return;
-    }
     const payload = {
       group_name: name,
-      tab_codes: tabs,
       display_order: parseInt(els.displayOrder?.value || "1", 10) || 1,
     };
     let url = window.GM_API.create;

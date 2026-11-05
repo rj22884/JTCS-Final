@@ -44,18 +44,22 @@ BEGIN
 END;
 GO
 
-IF OBJECT_ID(N'dbo.FollowupEntryStage', N'U') IS NULL
-BEGIN
-    CREATE TABLE dbo.FollowupEntryStage (
-        EntryStageID INT IDENTITY(1, 1) NOT NULL PRIMARY KEY,
-        EntryID INT NOT NULL,
-        StageID INT NOT NULL,
-        CompletedDate DATETIME2 NOT NULL CONSTRAINT DF_FollowupEntryStage_CompletedDate DEFAULT (SYSUTCDATETIME()),
-        CONSTRAINT FK_FollowupEntryStage_Entry FOREIGN KEY (EntryID) REFERENCES dbo.FollowupEntryMaster (EntryID),
-        CONSTRAINT FK_FollowupEntryStage_Stage FOREIGN KEY (StageID) REFERENCES dbo.FollowupWorkflowStage (StageID),
-        CONSTRAINT UX_FollowupEntryStage UNIQUE (EntryID, StageID)
-    );
-END;
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickDocumentsReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickDocumentsReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickDocumentsReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickReturnFiled') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickReturnFiled BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickReturnFiled DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickInvoice') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickInvoice BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickInvoice DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickPaymentReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickPaymentReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickPaymentReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickApplicationReceived') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickApplicationReceived BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickApplicationReceived DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickKYC') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickKYC BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickKYC DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickDownloadStatus') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickDownloadStatus BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickDownloadStatus DEFAULT (0);
+IF COL_LENGTH(N'dbo.FollowupEntryMaster', N'TickUnverified') IS NULL
+    ALTER TABLE dbo.FollowupEntryMaster ADD TickUnverified BIT NOT NULL CONSTRAINT DF_FollowupEntryMaster_TickUnverified DEFAULT (0);
 GO
 
 /* ---- Seed workflow stages (idempotent) ---- */
@@ -135,31 +139,13 @@ DECLARE @MastersID INT = (SELECT TOP 1 MenuID FROM dbo.MenuMaster WHERE MenuName
 
 IF @MastersID IS NOT NULL
 BEGIN
-    /* ITR Followup Master lives under Masters → Followup Master only (no direct Masters child). */
+    /* Stages are fixed on the followup screens. Do not recreate Followup Master menus. */
     DELETE FROM dbo.MenuMaster
-    WHERE ParentMenuID = @MastersID
-      AND MenuName = N'ITR Followup Master';
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'DSC Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'DSC Followup Master', N'bi-diagram-3', N'/masters/followup/dsc', 21, N'DSC workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/dsc', IsActive = 1
-        WHERE MenuName = N'DSC Followup Master' AND ParentMenuID = @MastersID;
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'TDS Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'TDS Followup Master', N'bi-diagram-3', N'/masters/followup/tds', 22, N'TDS workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/tds', IsActive = 1
-        WHERE MenuName = N'TDS Followup Master' AND ParentMenuID = @MastersID;
-
-    IF NOT EXISTS (SELECT 1 FROM dbo.MenuMaster WHERE MenuName = N'GST Followup Master' AND ParentMenuID = @MastersID)
-        INSERT INTO dbo.MenuMaster (ParentMenuID, MenuName, MenuIcon, MenuURL, DisplayOrder, Description, IsActive)
-        VALUES (@MastersID, N'GST Followup Master', N'bi-diagram-3', N'/masters/followup/gst', 23, N'GST workflow stages master', 1);
-    ELSE
-        UPDATE dbo.MenuMaster SET MenuURL = N'/masters/followup/gst', IsActive = 1
-        WHERE MenuName = N'GST Followup Master' AND ParentMenuID = @MastersID;
+    WHERE MenuName IN (
+            N'ITR Followup Master', N'DSC Followup Master',
+            N'TDS Followup Master', N'GST Followup Master'
+          )
+       OR ISNULL(MenuURL, N'') LIKE N'/masters/followup%';
 END;
 GO
 

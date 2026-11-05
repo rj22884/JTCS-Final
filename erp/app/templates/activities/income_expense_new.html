@@ -1,0 +1,121 @@
+{% extends 'layouts/base.html' %}
+
+{% block ribbon_toolbar %}
+<div class="jtcs-ribbon-group">
+  <button type="button" class="jtcs-ribbon-btn" id="ienRefreshBtn" title="Refresh">
+    <i class="bi bi-arrow-clockwise"></i>
+    <span>Refresh</span>
+  </button>
+  <a href="{{ url_for('income_expense_new.exit_module') }}" class="jtcs-ribbon-btn" title="Exit">
+    <i class="bi bi-box-arrow-right"></i>
+    <span>Exit</span>
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/income_expense_activity.css') }}?v=20260827misc1">
+{% endblock %}
+
+{% block content %}
+<div class="oie-activity-page">
+  <div class="oie-stats-row mb-2" id="ienStatsRow">
+    <button type="button" class="oie-stat-card oie-stat-income" data-kind-filter="Income" title="Filter Income">
+      <div class="oie-stat-label">Income</div>
+      <div class="oie-stat-value" id="ienStatIncomeAmount">0.00</div>
+      <div class="oie-stat-meta"><span id="ienStatIncomeCount">0</span> record(s)</div>
+    </button>
+    <button type="button" class="oie-stat-card oie-stat-expense" data-kind-filter="Expense" title="Filter Expense">
+      <div class="oie-stat-label">Expense</div>
+      <div class="oie-stat-value" id="ienStatExpenseAmount">0.00</div>
+      <div class="oie-stat-meta"><span id="ienStatExpenseCount">0</span> record(s)</div>
+    </button>
+  </div>
+
+  <div class="jtcs-card oie-filter-card mb-2 p-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label mb-1" for="ienGridSearch">Search</label>
+        <input type="search" class="form-control form-control-sm" id="ienGridSearch"
+               placeholder="Bill no, name, mobile, category...">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="ienGridFilterKind">Type</label>
+        <select class="form-select form-select-sm" id="ienGridFilterKind">
+          <option value="">All</option>
+          <option value="Income">Income</option>
+          <option value="Expense">Expense</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="ienGridDateFrom">Date From</label>
+        <input type="date" class="form-control form-control-sm" id="ienGridDateFrom">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label mb-1" for="ienGridDateTo">Date To</label>
+        <input type="date" class="form-control form-control-sm" id="ienGridDateTo">
+      </div>
+      <div class="col-md-3">
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-primary btn-sm" id="ienApplyFilterBtn">Apply</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" id="ienClearFilterBtn">Clear</button>
+          <span class="small text-muted align-self-center ms-auto" id="ienGridCount"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="jtcs-card oie-grid-panel mb-2">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+      <div class="oie-section-head mb-0">Income Expense New (moved records)</div>
+    </div>
+    <p class="small text-muted px-1 mb-2">
+      Income / Expense records moved from Income - Expense. Category from Masters → Category Master.
+    </p>
+    <div class="table-responsive oie-grid-wrap">
+      <table class="table table-sm table-hover table-striped align-middle mb-0" id="ienDataGrid">
+        <thead>
+          <tr>
+            <th class="ien-sortable" data-sort-key="bill_no">Bill No.</th>
+            <th class="ien-sortable" data-sort-key="ledger_kind">Type</th>
+            <th class="ien-sortable" data-sort-key="work_date">Work Date</th>
+            <th class="ien-sortable" data-sort-key="work_name">Category</th>
+            <th class="ien-sortable" data-sort-key="account_label">Account</th>
+            <th class="ien-sortable text-end" data-sort-key="amount">Amount</th>
+            <th class="ien-sortable" data-sort-key="customer_name">Name</th>
+            <th class="ien-sortable" data-sort-key="mobile_number">Mobile</th>
+            <th class="ien-sortable" data-sort-key="remarks">Remarks</th>
+            <th class="ien-sortable" data-sort-key="created_date">Created</th>
+          </tr>
+        </thead>
+        <tbody id="ienDataGridBody"></tbody>
+      </table>
+    </div>
+    <div id="ienGridEmpty" class="small text-muted py-3 d-none px-2">
+      No moved Income / Expense records yet. Run <code>C:\temp\move.bat</code> first if needed.
+    </div>
+    <div class="oie-pager d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2 px-1">
+      <div class="d-flex align-items-center gap-2">
+        <label class="form-label mb-0 small text-muted" for="ienPageSize">Rows</label>
+        <select class="form-select form-select-sm" id="ienPageSize" aria-label="Rows per page">
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+        </select>
+      </div>
+      <div class="small text-muted" id="ienPageInfo"></div>
+      <nav id="ienPagerNav" aria-label="Grid pages"></nav>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.IEN_API = {
+    grid: {{ url_for('income_expense_new.grid') | tojson }}
+  };
+  window.IEN_INITIAL_ROWS = {{ initial_rows | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/income_expense_new.js') }}?v=20260915noxfer1"></script>
+{% endblock %}

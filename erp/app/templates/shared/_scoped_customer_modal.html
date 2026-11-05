@@ -1,0 +1,125 @@
+<div class="modal fade scoped-customer-modal" id="scopedCustomerModal" tabindex="-1"
+     aria-labelledby="scopedCustomerModalTitle" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="scopedCustomerModalTitle">Add Customer</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="scopedCustomerForm" novalidate>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label scoped-required" for="scopedCustChartGroup">Chart of Account Group</label>
+              <select class="form-select" id="scopedCustChartGroup" name="group_id" required>
+                <option value="">-- Select --</option>
+                {% for group in (chart_of_groups or []) %}
+                <option value="{{ group.group_id }}">{{ group.label or group.group_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label scoped-required" for="scopedCustGroup">Customer Group</label>
+              <select class="form-select" id="scopedCustGroup" name="customer_group" required>
+                <option value="">-- Select --</option>
+                {% for group in (customer_groups or []) %}
+                <option value="{{ group.code }}">{{ group.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label scoped-required" for="scopedCustName">Name</label>
+            <input type="text" class="form-control" id="scopedCustName" name="customer_name"
+                   maxlength="255" autocomplete="name" required>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label scoped-required" for="scopedCustType">Customer Type</label>
+              <select class="form-select" id="scopedCustType" name="customer_type" required>
+                <option value="">-- Select --</option>
+                {% for item in (customer_types or []) %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label scoped-required" for="scopedCustGender">Gender</label>
+              <select class="form-select" id="scopedCustGender" name="gender" required>
+                <option value="">-- Select --</option>
+                {% for item in (genders or []) %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustMobile">Mobile</label>
+              <input type="tel" class="form-control" id="scopedCustMobile" name="mobile_number"
+                     maxlength="15" inputmode="numeric" autocomplete="tel">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustEmail">Email</label>
+              <input type="email" class="form-control" id="scopedCustEmail" name="email_id"
+                     maxlength="255" autocomplete="email" placeholder="customer@example.com">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustAadhaar">Aadhaar</label>
+              <input type="text" class="form-control" id="scopedCustAadhaar" name="aadhaar_number"
+                     maxlength="12" inputmode="numeric">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustGst">GST Number</label>
+              <input type="text" class="form-control text-uppercase" id="scopedCustGst" name="gst_number"
+                     maxlength="15" autocomplete="off">
+            </div>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustIntroducedBy">Customer Introduced By</label>
+              <input type="text" class="form-control" id="scopedCustIntroducedBy"
+                     name="customer_introduced_by" maxlength="200">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label" for="scopedCustSinceDate">Customer Since Date</label>
+              <input type="date" class="form-control" id="scopedCustSinceDate" name="customer_since_date">
+            </div>
+          </div>
+          <div class="scoped-customer-address border-top pt-2 mt-3">
+            <div class="small fw-semibold mb-2">Address from Pincode</div>
+            <div class="row g-2 mb-2">
+              <div class="col-md-6">
+                <label class="form-label" for="scopedCustPincode">Pincode</label>
+                <input type="text" class="form-control" id="scopedCustPincode" name="pincode"
+                       maxlength="6" inputmode="numeric" autocomplete="postal-code">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="scopedCustPostOffice">Post Office</label>
+                <input type="text" class="form-control" id="scopedCustPostOffice" name="post_office" readonly>
+              </div>
+            </div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label" for="scopedCustDistrict">District</label>
+                <input type="text" class="form-control" id="scopedCustDistrict" name="district" readonly>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="scopedCustState">State</label>
+                <input type="text" class="form-control" id="scopedCustState" name="state" readonly>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label" for="scopedCustCountry">Country</label>
+                <input type="text" class="form-control" id="scopedCustCountry" name="country" value="India" readonly>
+              </div>
+            </div>
+          </div>
+          <div id="scopedCustomerFormError" class="alert alert-danger py-2 small mt-2 d-none" role="alert"></div>
+        </form>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-primary" id="scopedCustomerSaveBtn">Save Customer</button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>

@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, sessio
 
 from app.decorators import login_required, require_delete_reauth
 from app.services.bank_master_service import BankMasterService
+from app.services.dynamic_master_fields import DynamicMasterFieldService
 from app.services.ledger_report_service import LedgerReportService
 from app.services.menu_service import MenuService
 from app.utils.db_session import map_db_exception
@@ -29,12 +30,17 @@ def index():
     service = BankMasterService()
     rows = service.list_records()
     today = date.today()
+    try:
+        dyn_master_fields = DynamicMasterFieldService().client_config()
+    except Exception:
+        dyn_master_fields = {"fields": {}, "profiles": {}, "group_profiles": {}, "always_required": []}
     return render_template(
         "bank_master/index.html",
         page_title="Bank Master",
         breadcrumb=menu_service.get_breadcrumb("/masters/bank", session.get("role")),
         account_types=service.list_account_types_for_form(),
         chart_groups=service.list_chart_groups_for_form(),
+        dyn_master_fields=dyn_master_fields,
         default_bank_group_id=service._default_chart_group_id(is_cash=False),
         default_cash_group_id=service._default_chart_group_id(is_cash=True),
         initial_rows=rows,

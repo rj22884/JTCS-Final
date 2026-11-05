@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="716" height="716" viewBox="0 0 716 716" role="img" aria-labelledby="title desc">
+  <title id="title">JTCS chat logo</title>
+  <desc id="desc">Bold blue-to-pink JTCS lettering above a blue-to-pink outlined chat bubble containing a gradient B.</desc>
+  <defs>
+    <linearGradient id="gradient" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#61c4f4"/>
+      <stop offset="1" stop-color="#e391ef"/>
+    </linearGradient>
+    <linearGradient id="outline" x1="0" y1="0" x2="0.72" y2="1">
+      <stop offset="0" stop-color="#1769f5"/>
+      <stop offset="0.5" stop-color="#5148fa"/>
+      <stop offset="1" stop-color="#d01bea"/>
+    </linearGradient>
+  </defs>
+  <rect width="716" height="716" fill="#fff"/>
+  <text x="48" y="98" font-family="Arial, Helvetica, sans-serif" font-size="76" font-weight="700" letter-spacing="1" fill="url(#gradient)">JTCS</text>
+  <g transform="translate(70 92) scale(.84)">
+    <path d="M327 38C178 38 57 159 57 308c0 48 13 94 36 133L58 535l96-26c46 42 107 67 173 67 149 0 270-120 270-269S476 38 327 38Z" fill="none" stroke="url(#outline)" stroke-width="20" stroke-linejoin="round"/>
+    <path d="M327 75c-129 0-233 104-233 233 0 46 13 89 37 126l-24 71 75-20c40 35 91 56 145 56 129 0 233-104 233-233S456 75 327 75Z" fill="none" stroke="url(#outline)" stroke-width="17" stroke-linejoin="round"/>
+    <text x="327" y="408" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="265" font-weight="700" fill="url(#gradient)">B</text>
+  </g>
+</svg>

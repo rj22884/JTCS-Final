@@ -11,11 +11,21 @@
   {%- endif -%}
 {%- endmacro %}
 {% set pos = invoice.place_of_supply or dash %}
+{% set round_off_value = (invoice.round_off or 0)|float %}
+{% set show_round_off = round_off_value|abs >= 0.005 %}
+{% set single_item = (invoice.lines or [])|length == 1 %}
 {% if invoice.place_of_supply_code %}
   {% set pos = pos ~ ' (' ~ invoice.place_of_supply_code ~ ')' %}
 {% endif %}
 
 <div class="inv-html-preview">
+  {% if invoice.payment_received or (invoice.payment_status or '')|lower == 'paid' %}
+  <div class="inv-html-paid-stamp" aria-label="Paid">
+    <strong>PAID</strong>
+    <span>DOP: {{ dmy(paid_stamp.date if paid_stamp else '') }}</span>
+    <span>Account No: {{ (paid_stamp.account if paid_stamp else '') or dash }}</span>
+  </div>
+  {% endif %}
   <div class="inv-html-meta">Original for Recipient</div>
 
   <div class="inv-html-top">
@@ -33,6 +43,21 @@
       <div>Invoice Value: <strong>Rs. {{ money(invoice.invoice_value) }}</strong></div>
       <div>Invoice No: <strong>{{ invoice.invoice_no }}</strong></div>
       <div>Invoice Date: <strong>{{ dmy(invoice.invoice_date) }}</strong></div>
+      <div class="inv-html-pay-qr">
+        {% if qr_data_uri %}
+        {% if upi_pay_url %}
+        <a class="inv-html-pay-qr-link" href="{{ upi_pay_url }}">
+          <img src="{{ qr_data_uri }}" alt="UPI payment QR">
+          <div class="small">Tap or scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
+        </a>
+        {% else %}
+        <img src="{{ qr_data_uri }}" alt="Invoice details QR">
+        <div class="small">Invoice details QR · not a payment QR</div>
+        {% endif %}
+        {% else %}
+        <div class="text-muted small">QR code is unavailable in the current app environment.</div>
+        {% endif %}
+      </div>
     </div>
   </div>
 
@@ -40,14 +65,14 @@
 
   <div class="inv-html-cust">
     <div>
-      <div><strong>Customer Name:</strong> {{ invoice.customer_name }}</div>
+      <div><strong>{% if (invoice.voucher_type or '')|upper == 'PURCHASE' %}Supplier{% else %}Customer / Bill To{% endif %}:</strong> {{ invoice.customer_name }}</div>
       <div><strong>Billing / Shipping Address:</strong> {{ invoice.billing_address or dash }}</div>
       <div><strong>Contact Mobile No.:</strong> {{ invoice.contact_mobile or dash }}</div>
       <div><strong>Customer GSTIN:</strong> {{ invoice.customer_gstin or dash }}</div>
       <div><strong>Place of Supply:</strong> {{ pos }}</div>
     </div>
     <div>
-      <div><strong>Contact Person:</strong> {{ invoice.contact_person or dash }}</div>
+      <div><strong>Contact Person:</strong> {{ invoice.contact_person or invoice.customer_name or dash }}</div>
       <div><strong>Contact Email:</strong> {{ invoice.contact_email or dash }}</div>
       <div><strong>Customer ID:</strong> {{ invoice.customer_id or dash }}</div>
       <div><strong>Reverse Charge:</strong> {{ 'Yes' if invoice.reverse_charge else 'No' }}</div>
@@ -90,6 +115,26 @@
 
   <div class="inv-html-words"><strong>Amount (In Words):</strong> {{ invoice.amount_in_words or dash }}</div>
 
+  {% if single_item %}
+  <table class="inv-html-totals inv-html-totals-single">
+    <tbody>
+      <tr>
+        <td><strong>Discount</strong><br>{{ money(invoice.discount_amount) }}</td>
+        <td><strong>Taxable Value</strong><br>{{ money(invoice.taxable_value) }}</td>
+        {% if invoice.tax_type == 'CGST_SGST' %}
+        <td><strong>CGST @ {{ money(invoice.cgst_rate) }}%</strong><br>{{ money(invoice.cgst_amount) }}</td>
+        <td><strong>SGST @ {{ money(invoice.sgst_rate) }}%</strong><br>{{ money(invoice.sgst_amount) }}</td>
+        {% else %}
+        <td><strong>IGST @ {{ money(invoice.igst_rate) }}%</strong><br>{{ money(invoice.igst_amount) }}</td>
+        {% endif %}
+        {% if show_round_off %}
+        <td><strong>Round off</strong><br>{% if round_off_value >= 0 %}+{% endif %}{{ money(round_off_value) }}</td>
+        {% endif %}
+        <td class="inv-html-total-cell"><strong>Invoice Value</strong><br>{{ money(invoice.invoice_value) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
   <table class="inv-html-totals">
     <thead>
       <tr>
@@ -102,9 +147,7 @@
         {% else %}
         <th>IGST @ {{ money(invoice.igst_rate) }}%</th>
         {% endif %}
-        {% if invoice.round_off and invoice.round_off != 0 %}
-        <th>Round off</th>
-        {% endif %}
+        {% if show_round_off %}<th>Round off</th>{% endif %}
         <th>Invoice Value</th>
       </tr>
     </thead>
@@ -119,17 +162,26 @@
         {% else %}
         <td>{{ money(invoice.igst_amount) }}</td>
         {% endif %}
-        {% if invoice.round_off and invoice.round_off != 0 %}
-        <td>{% if invoice.round_off > 0 %}+{% endif %}{{ money(invoice.round_off) }}</td>
-        {% endif %}
+        {% if show_round_off %}<td>{% if round_off_value >= 0 %}+{% endif %}{{ money(round_off_value) }}</td>{% endif %}
         <td class="inv-html-total-cell">{{ money(invoice.invoice_value) }}</td>
       </tr>
     </tbody>
   </table>
+  {% endif %}
 
-  {% if invoice.pay_account_number or invoice.pay_bank_name or invoice.pay_upi_id %}
+  {% set pay_banks = invoice.pay_banks or [] %}
+  {% if pay_banks or invoice.pay_account_number or invoice.pay_bank_name or invoice.pay_upi_id %}
   <div class="inv-html-pay">
     <div class="inv-html-pay-left">
+      {% if pay_banks|length > 1 %}
+      <div class="fw-semibold mb-1">Bank Details</div>
+      <div><strong>Bank:</strong> {{ pay_banks[1].bank_name or dash }}</div>
+      <div><strong>A/c No:</strong> {{ pay_banks[1].account_number or dash }}</div>
+      <div><strong>IFSC:</strong> {{ pay_banks[1].ifsc_code or dash }}</div>
+      <div><strong>Branch:</strong> {{ pay_banks[1].branch_name or dash }}</div>
+      <div><strong>Holder:</strong> {{ pay_banks[1].account_holder_name or dash }}</div>
+      <div><strong>UPI:</strong> {{ pay_banks[1].upi_id or dash }}</div>
+      {% elif not pay_banks %}
       <div class="fw-semibold mb-1">Payment / Bank Details</div>
       <div><strong>Bank Name:</strong> {{ invoice.pay_bank_name or dash }}</div>
       <div><strong>Account Holder:</strong> {{ invoice.pay_account_holder or dash }}</div>
@@ -138,22 +190,19 @@
       <div><strong>Branch:</strong> {{ invoice.pay_branch or dash }}</div>
       <div><strong>Account Type:</strong> {{ invoice.pay_account_type or dash }}</div>
       <div><strong>UPI ID:</strong> {{ invoice.pay_upi_id or dash }}</div>
-    </div>
-    <div class="inv-html-pay-qr">
-      {% if qr_data_uri %}
-      {% if upi_pay_url %}
-      <a class="inv-html-pay-qr-link" href="{{ upi_pay_url }}">
-        <img src="{{ qr_data_uri }}" alt="UPI QR">
-        <div class="small">Tap or scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
-      </a>
-      {% else %}
-      <img src="{{ qr_data_uri }}" alt="UPI QR">
-      <div class="small">Scan to pay Rs. {{ money(invoice.invoice_value) }}</div>
-      {% endif %}
-      {% else %}
-      <div class="text-muted small">UPI QR not available<br>(set UPI ID on bank master).</div>
       {% endif %}
     </div>
+    {% if pay_banks %}
+    <div class="inv-html-pay-left" style="text-align:right">
+      <div class="fw-semibold mb-1">Bank Details</div>
+      <div><strong>Bank:</strong> {{ pay_banks[0].bank_name or dash }}</div>
+      <div><strong>A/c No:</strong> {{ pay_banks[0].account_number or dash }}</div>
+      <div><strong>IFSC:</strong> {{ pay_banks[0].ifsc_code or dash }}</div>
+      <div><strong>Branch:</strong> {{ pay_banks[0].branch_name or dash }}</div>
+      <div><strong>Holder:</strong> {{ pay_banks[0].account_holder_name or dash }}</div>
+      <div><strong>UPI:</strong> {{ pay_banks[0].upi_id or dash }}</div>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 

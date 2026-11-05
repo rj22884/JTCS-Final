@@ -15,7 +15,7 @@
     </div>
     <div class="ledger-html-right">
       <div class="ledger-html-badge">{{ ledger.title }}</div>
-      <div>Closing: <strong>Rs. {{ money(ledger.closing) }}</strong></div>
+      <div>Closing Balance{% if ledger.date_to %} as of {{ ledger.date_to | display_date }}{% endif %}: <strong>Rs. {{ money(ledger.closing) }}</strong></div>
     </div>
   </div>
 
@@ -23,7 +23,7 @@
 
   <div class="ledger-html-meta-box">
     {% for label, value in ledger.meta %}
-    <div><strong>{{ label }}:</strong> {{ value or dash }}</div>
+    <div{% if label == 'Total Credit' %} class="ledger-html-meta-total is-credit"{% elif label == 'Total Debit' %} class="ledger-html-meta-total is-debit"{% elif label.startswith('Closing Balance') %} class="ledger-html-meta-total is-closing"{% endif %}><strong>{{ label }}:</strong> {{ value or dash }}</div>
     {% endfor %}
   </div>
 

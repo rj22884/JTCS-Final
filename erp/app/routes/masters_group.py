@@ -23,7 +23,6 @@ def index():
         page_title="Customer Group Master",
         breadcrumb=menu_service.get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=service.list_records(),
-        ui_config=service.ui_config(),
     )
 
 

@@ -408,7 +408,9 @@ def main() -> int:
                         f"round {ro_sign} {ro_amt}"
                     )
                     if args.apply:
-                        saved = inv_svc.update_record(int(existing["invoice_id"]), payload)
+                        saved = inv_svc.update_record(
+                        int(existing["invoice_id"]), payload, enforce_owner=False
+                    )
                         created += 1
                         rec["status"] = "FIXED"
                         rec["detail"] = (

@@ -72,7 +72,7 @@ _TESTABLE: dict[str, frozenset[str]] = {
     "sms": frozenset({"api_key", "api_secret", "sender_id"}),
     "payment": frozenset({"merchant_id", "api_key", "api_secret"}),
     "cloud_storage": frozenset({"bucket_name", "access_key", "secret_key", "region"}),
-    "google_drive": frozenset({"api_key", "api_secret", "endpoint_url"}),
+    "google_drive": frozenset({"api_key", "api_secret", "client_id", "client_secret", "endpoint_url"}),
     "google_calendar": frozenset({"api_key", "api_secret", "endpoint_url"}),
     "fyers": frozenset({"api_key", "api_secret", "endpoint_url"}),
     "income_tax": frozenset({"api_key", "api_secret", "endpoint_url"}),
@@ -1169,7 +1169,24 @@ class IntegrationFieldTestService:
         api_key = (cfg.get("api_key") or "").strip()
         secret = (cfg.get("api_secret") or cfg.get("client_secret") or "").strip()
 
+        if provider in {"google_drive", "google_calendar"} and field in {"client_id", "client_secret"}:
+            client_id = (cfg.get("client_id") or cfg.get("api_key") or "").strip()
+            secret = (cfg.get("client_secret") or cfg.get("api_secret") or "").strip()
+            if field == "client_id" and not client_id:
+                return _fail("OAuth Client ID is empty.")
+            if field == "client_secret" and not secret:
+                return _fail("OAuth Client Secret is not configured.")
+            if not client_id or not secret:
+                return _fail("OAuth Client ID and Client Secret are both required.")
+            return self._google_oauth_client(client_id, secret)
+
         if provider in {"google_drive", "google_calendar"} and field == "api_key" and api_key:
+            # Legacy GENERIC field: OAuth Client ID shape → verify as OAuth client.
+            if "apps.googleusercontent.com" in api_key:
+                secret = (cfg.get("api_secret") or cfg.get("client_secret") or "").strip()
+                if not secret:
+                    return _fail("OAuth Client Secret (API Secret) is required to verify Client ID.")
+                return self._google_oauth_client(api_key, secret)
             if provider == "google_calendar":
                 status, payload, raw_err = self._http_json(
                     _SAFE_DEFAULT_GET["google_calendar"] + "&key=" + api_key,

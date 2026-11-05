@@ -316,7 +316,11 @@
     if (!previewKind || !previewId) return;
     const url = exportUrl(previewKind, previewId, fmt);
     if (!url) return;
-    window.location.href = url + previewDateQuery();
+    const full = url + previewDateQuery();
+    window.location.href =
+      window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.appendView === "function"
+        ? window.JTCSLedgerPreview.appendView(full)
+        : full;
   }
 
   function normalizeHeader(h) {
@@ -533,13 +537,14 @@
   els.previewModalEl?.addEventListener("hidden.bs.modal", function () {
     setMaximized(false);
     setExportEnabled(false);
+    if (window.JTCSLedgerPreview?.isMutationActive()) return;
     previewKind = "";
     previewId = "";
   });
 
   if (window.JTCSLedgerPreview && typeof window.JTCSLedgerPreview.setReloader === "function") {
     window.JTCSLedgerPreview.setReloader(function () {
-      if (previewKind && previewId) openLedgerPreview(previewKind, previewId);
+      if (previewKind && previewId) return openLedgerPreview(previewKind, previewId);
     });
   }
 

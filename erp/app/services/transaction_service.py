@@ -13,6 +13,7 @@ from app.repositories.transaction_repository import (
     DailyTransactionRepository,
     MasterRepository,
 )
+from app.utils.timezone import entry_created_at
 
 
 @dataclass
@@ -205,7 +206,7 @@ class TransactionService:
         remarks: str | None,
         daily_id: int | None = None,
     ):
-        now = datetime.utcnow()
+        now = entry_created_at(txn_date)
         debit = money_in if money_in > 0 else None
         credit = money_out if money_out > 0 else None
 
@@ -267,7 +268,7 @@ class TransactionService:
             "PaymentModeID": int(payload["PaymentModeID"]) if payload.get("PaymentModeID") else None,
             "Status": (payload.get("Status") or "Posted").strip(),
             "CreatedBy": created_by,
-            "CreatedDate": datetime.utcnow(),
+            "CreatedDate": entry_created_at(payload.get("TransactionDate")),
             "Remarks": (payload.get("Remarks") or "").strip() or None,
         }
 

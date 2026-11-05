@@ -151,6 +151,10 @@ class Config:
 
     # Website → ERP intake (public API key; website posts Contact/Consultation/Service)
     WEBSITE_INTAKE_API_KEY = (os.getenv("WEBSITE_INTAKE_API_KEY") or "").strip().strip('"').strip("'")
+    # Document Print app → Misc Activity + invoice (falls back to WEBSITE_INTAKE_API_KEY)
+    PRINT_JOB_API_KEY = (
+        os.getenv("PRINT_JOB_API_KEY") or os.getenv("WEBSITE_INTAKE_API_KEY") or ""
+    ).strip().strip('"').strip("'")
     NOTIFICATION_POLL_SECONDS = int(os.getenv("NOTIFICATION_POLL_SECONDS", "15"))
 
     # IMAP inbound for Communication Center Email channel

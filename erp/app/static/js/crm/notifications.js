@@ -62,8 +62,10 @@
 
   document.getElementById("crmNotifMarkAllBtn").addEventListener("click", async function () {
     try {
-      await CrmCommon.apiFetch(api.readAll, { method: "POST", body: {} });
-      loadNotifications();
+        await CrmCommon.apiFetch(api.readAll, { method: "POST", body: {} });
+        const host = window.top || window;
+        if (typeof host.jtcsSetTaskAlerts === "function") host.jtcsSetTaskAlerts([]);
+        loadNotifications();
     } catch (err) {
       CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");
     }
@@ -75,6 +77,8 @@
     if (readBtn) {
       try {
         await CrmCommon.apiFetch(CrmCommon.urlTemplate(api.read, readBtn.dataset.id), { method: "POST", body: {} });
+        const host = window.top || window;
+        if (typeof host.jtcsClearTaskAlert === "function") host.jtcsClearTaskAlert(readBtn.dataset.id);
         loadNotifications();
       } catch (err) {
         CrmCommon.showAlert((err.data && err.data.error) || err.message, "danger");

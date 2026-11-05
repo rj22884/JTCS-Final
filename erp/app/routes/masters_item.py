@@ -78,12 +78,24 @@ def index():
         db.session.rollback()
         chart_groups = []
     today = date.today()
+    from app.services.dynamic_master_fields import DynamicMasterFieldService
+
+    dyn = DynamicMasterFieldService()
+    try:
+        dyn.annotate_groups(chart_groups)
+        dyn_master_fields = dyn.client_config()
+    except Exception:
+        from app.extensions import db
+
+        db.session.rollback()
+        dyn_master_fields = {"fields": {}, "profiles": {}, "group_profiles": {}, "always_required": []}
     return render_template(
         "masters/item.html",
         page_title="Item Master",
         breadcrumb=MenuService().get_breadcrumb(MENU_PATH, session.get("role")),
         initial_rows=rows,
         chart_groups=chart_groups,
+        dyn_master_fields=dyn_master_fields,
         fy_start=LedgerReportService._fy_start(today).isoformat(),
         today=today.isoformat(),
     )
@@ -107,6 +119,35 @@ def list_active():
     try:
         rows = ItemMasterService().list_active_for_dropdown()
         return jsonify({"ok": True, "rows": rows})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/depreciation-rate-sync", methods=["GET"], strict_slashes=False)
+@login_required
+def depreciation_rate_sync():
+    from app.services.depreciation_service import DepreciationService
+
+    purchase_raw = (
+        request.args.get("purchase_date")
+        or request.args.get("date")
+        or request.args.get("date_of_purchase")
+        or ""
+    ).strip()
+    purchase = None
+    if purchase_raw:
+        try:
+            purchase = date.fromisoformat(purchase_raw[:10])
+        except ValueError:
+            return jsonify({"ok": False, "error": "Purchase date is invalid."}), 400
+    try:
+        result = DepreciationService().lookup_public_rate(
+            purchase_date=purchase,
+            item_code=(request.args.get("item_code") or "").strip(),
+            item_name=(request.args.get("item_name") or "").strip(),
+            hsn_sac=(request.args.get("hsn") or request.args.get("hsn_sac") or "").strip(),
+        )
+        return jsonify(result)
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
 
